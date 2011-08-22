@@ -159,13 +159,31 @@ data SMTExpr t where
   BVAdd :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
   BVSub :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
   BVMul :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-  Forall :: SMTType a => (SMTExpr a -> SMTExpr Bool) -> SMTExpr Bool
+  Forall :: Args a => (a -> SMTExpr Bool) -> SMTExpr Bool
 
 -- | Options controling the behaviour of the SMT solver
 data SMTOption
      = PrintSuccess Bool -- ^ Whether or not to print "success" after each operation
      | ProduceModels Bool -- ^ Produce a satisfying assignment after each successful checkSat
      deriving (Show,Eq,Ord)
+
+class Args a where
+  createArgs :: Integer -> (a,[(Text,L.Lisp)],Integer)
+
+instance SMTType a => Args (SMTExpr a) where
+  createArgs c = let n1 = T.pack $ "f"++show c
+                     v1 = Var n1
+                     t1 = getSort $ getUndef v1
+                 in (v1,[(n1,t1)],c+1)
+
+instance (SMTType a,SMTType b) => Args (SMTExpr a,SMTExpr b) where
+  createArgs c = let n1 = T.pack $ "f"++show c
+                     n2 = T.pack $ "f"++show (c+1)
+                     v1 = Var n1
+                     v2 = Var n2
+                     t1 = getSort $ getUndef v1
+                     t2 = getSort $ getUndef v2
+                 in ((v1,v2),[(n1,t1),(n2,t2)],c+2)
 
 instance SMTValue t => Eq (SMTExpr t) where
   (==) x y = (L.toLisp x) == (L.toLisp y)
@@ -254,13 +272,15 @@ exprToLisp (BVSub l r) c = let (l',c') = exprToLisp l c
 exprToLisp (BVMul l r) c = let (l',c') = exprToLisp l c
                                (r',c'') = exprToLisp r c'
                            in (L.List [L.Symbol "bvmul",l',r'],c'')
-exprToLisp (Forall f) c = let varName = T.pack $ "f"++show c
-                              var = Var varName
-                              (expr,c') = exprToLisp (f var) (c+1)
+exprToLisp (Forall f) c = let (arg,tps,nc) = createArgs c
+                              (arg',nc') = exprToLisp (f arg) nc
                           in (L.List [L.Symbol "forall"
-                                     ,L.List [L.List [L.Symbol varName
-                                                     ,getSort (getUndef var)]]
-                                     ,expr],c')
+                                     ,L.List [L.List [L.Symbol name
+                                                     ,tp
+                                                     ]
+                                             | (name,tp) <- tps
+                                             ]
+                                     ,arg'],nc')
 
 instance L.ToLisp (SMTExpr t) where
   toLisp e = fst $ exprToLisp e 0
@@ -345,7 +365,7 @@ bvadd = BVAdd
 bvsub = BVSub
 bvmul = BVMul
 
-forAll :: SMTType a => (SMTExpr a -> SMTExpr Bool) -> SMTExpr Bool
+forAll :: Args a => (a -> SMTExpr Bool) -> SMTExpr Bool
 forAll = Forall
 
 getValue :: SMTValue t => SMTExpr t -> SMT t

@@ -12,7 +12,7 @@ quantifierTest = do
   setOption (ProduceModels True)
   v1 <- var :: SMT (SMTExpr Integer)
   v2 <- var
-  assert $ forAll $ \x -> v1 + x .==. v2 + x + 10
+  assert $ forAll $ \(x,y) -> v1 + x .==. v2 + x + y
   checkSat
   r1 <- getValue v1
   r2 <- getValue v2
