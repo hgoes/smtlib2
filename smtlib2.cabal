@@ -1,0 +1,10 @@
+Name:           smtlib2
+Version:        0.1
+Author:         Henning Günther <h.guenther@tu-bs.de>
+Build-Type:     Simple
+Cabal-Version:  >=1.2
+
+Library
+  Build-Depends:        base,text,mtl,process,blaze-builder,bytestring,attoparsec,atto-lisp
+  Exposed-Modules:
+    Language.SMTLib2
