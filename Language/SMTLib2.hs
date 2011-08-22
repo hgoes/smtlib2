@@ -1,5 +1,29 @@
 {-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances #-}
-module Language.SMTLib2 where
+module Language.SMTLib2 
+       (SMT(),
+        SMTType,
+        SMTValue,
+        SMTArith,
+        SMTExpr,
+        SMTOption(..),
+        withSMTSolver,
+        setOption,setLogic,
+        assert,stack,
+        checkSat,
+        getValue,
+        var,
+        constant,
+        (.==.),
+        (.>=.),(.<.),
+        distinct,
+        plus,minus,mult,
+        ite,
+        and',not',
+        select,store,arrayConst,unmangleArray,
+        bvadd,bvsub,bvmul,
+        forAll
+       )
+       where
 
 import Data.Attoparsec
 import qualified Data.AttoLisp as L
@@ -12,47 +36,141 @@ import Data.Monoid
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Text as T
+import Data.Array
+import Data.Word
+import Numeric
+import Data.Char
+import Data.Bits
 
 type SMT = ReaderT (Handle,Handle) (StateT Integer IO)
 
+-- | Haskell types which can be represented in SMT
 class SMTType t where
   getSort :: t -> L.Lisp
+
+-- | Haskell values which can be represented as SMT constants
+class SMTType t => SMTValue t where
   unmangle :: L.Lisp -> t
   mangle :: t -> L.Lisp
 
+class (SMTValue t,Num t) => SMTArith t
+
+class (SMTValue t,Bits t) => SMTBV t
+
 instance SMTType Integer where
   getSort _ = L.Symbol "Int"
+
+instance SMTValue Integer where
   unmangle (L.Number (L.I v)) = v
   unmangle (L.List [L.Symbol "-"
                    ,L.Number (L.I v)]) = - v
   unmangle e = error $ "can't unmangle "++show e++" to Integer"
   mangle v = L.toLisp v
 
+instance SMTArith Integer
+
 instance SMTType Bool where
   getSort _ = L.Symbol "Bool"
+
+instance SMTValue Bool where
   unmangle (L.Symbol "true") = True
   unmangle (L.Symbol "false") = False
   mangle True = L.Symbol "true"
   mangle False = L.Symbol "false"
 
+instance (SMTType idx,SMTType val) => SMTType (Array idx val) where
+  getSort u = L.List [L.Symbol "Array"
+                     ,getSort (getIdx u)
+                     ,getSort (getVal u)]
+    where
+      getIdx :: Array i v -> i
+      getIdx _ = undefined
+      getVal :: Array i v -> v
+      getVal _ = undefined
+
+bv :: Integer -> L.Lisp
+bv n = L.List [L.Symbol "_"
+              ,L.Symbol "BitVec"
+              ,L.Number $ L.I n]
+
+instance SMTType Word8 where
+  getSort _ = bv 8
+
+getBVValue :: Num a => L.Lisp -> a
+getBVValue (L.Number (L.I v)) = fromInteger v
+getBVValue (L.Symbol s) = case T.unpack s of
+  '#':'b':rest -> let [(v,_)] = readInt 2 (\x -> x=='0' || x=='1') (\x -> if x=='0' then 0 else 1) rest in v
+  '#':'x':rest -> let [(v,_)] = readHex rest in v
+
+putBVValue :: Bits a => a -> L.Lisp
+putBVValue x = L.Symbol (T.pack ('#':'b':[ if testBit x i
+                                           then '1'
+                                           else '0' | i <- Prelude.reverse [0..((bitSize x)-1)] ]))
+
+instance SMTValue Word8 where
+  unmangle = getBVValue
+  mangle = putBVValue
+
+instance SMTBV Word8
+
+instance SMTType Word16 where
+  getSort _ = bv 16
+
+instance SMTValue Word16 where
+  unmangle = getBVValue
+  mangle = putBVValue
+
+instance SMTBV Word16
+
+instance SMTType Word32 where
+  getSort _ = bv 32
+
+instance SMTValue Word32 where
+  unmangle = getBVValue
+  mangle = putBVValue
+
+instance SMTBV Word32
+
+instance SMTType Word64 where
+  getSort _ = bv 64
+
+instance SMTValue Word64 where
+  unmangle = getBVValue
+  mangle = putBVValue
+
+instance SMTBV Word64
+
+-- | An abstract SMT expression
 data SMTExpr t where
-  Var :: Text -> SMTExpr t
-  Const :: t -> SMTExpr t
+  Var :: SMTType t => Text -> SMTExpr t
+  Const :: SMTValue t => t -> SMTExpr t
   Eq :: SMTType a => SMTExpr a -> SMTExpr a -> SMTExpr Bool
   Ge :: (Num a,SMTType a) => SMTExpr a -> SMTExpr a -> SMTExpr Bool
   Lt :: (Num a,SMTType a) => SMTExpr a -> SMTExpr a -> SMTExpr Bool
   Distinct :: SMTType a => [SMTExpr a] -> SMTExpr Bool
-  Plus :: Num t => [SMTExpr t] -> SMTExpr t
-  Minus :: Num t => SMTExpr t -> SMTExpr t -> SMTExpr t
-  Mult :: Num t => [SMTExpr t] -> SMTExpr t
+  Plus :: SMTArith t => [SMTExpr t] -> SMTExpr t
+  Minus :: SMTArith t => SMTExpr t -> SMTExpr t -> SMTExpr t
+  Mult :: SMTArith t => [SMTExpr t] -> SMTExpr t
   ITE :: SMTExpr Bool -> SMTExpr t -> SMTExpr t -> SMTExpr t
   And :: [SMTExpr Bool] -> SMTExpr Bool
   Not :: SMTExpr Bool -> SMTExpr Bool
+  Select :: SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v
+  Store :: SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v -> SMTExpr (Array i v)
+  BVAdd :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
+  BVSub :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
+  BVMul :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
+  Forall :: SMTType a => (SMTExpr a -> SMTExpr Bool) -> SMTExpr Bool
 
-instance SMTType t => Eq (SMTExpr t) where
+-- | Options controling the behaviour of the SMT solver
+data SMTOption
+     = PrintSuccess Bool -- ^ Whether or not to print "success" after each operation
+     | ProduceModels Bool -- ^ Produce a satisfying assignment after each successful checkSat
+     deriving (Show,Eq,Ord)
+
+instance SMTValue t => Eq (SMTExpr t) where
   (==) x y = (L.toLisp x) == (L.toLisp y)
 
-instance SMTType t => Show (SMTExpr t) where
+instance SMTValue t => Show (SMTExpr t) where
   show x = show (L.toLisp x)
 
 instance Num (SMTExpr Integer) where
@@ -61,38 +179,105 @@ instance Num (SMTExpr Integer) where
   (-) = minus
   (*) x y = mult [x,y]
 
-instance SMTType t => L.ToLisp (SMTExpr t) where
-  toLisp (Var name) = L.Symbol name
-  toLisp (Const x) = mangle x
-  toLisp (Eq l r) = L.List [L.Symbol "="
-                           ,L.toLisp l
-                           ,L.toLisp r]
-  toLisp (Distinct lst) = L.List $ [L.Symbol "distinct"]
-                          ++ [L.toLisp x | x <- lst ]
-  toLisp (Plus lst) = L.List $ [L.Symbol "+"]
-                      ++ [L.toLisp x | x <- lst ]
-  toLisp (Mult lst) = L.List $ [L.Symbol "*"]
-                      ++ [L.toLisp x | x <- lst ]
-  toLisp (Minus l r) = L.List $ [L.Symbol "-"
-                                ,L.toLisp l
-                                ,L.toLisp r]
-  toLisp (ITE cond tt ff) = L.List [L.Symbol "ite"
-                                   ,L.toLisp cond
-                                   ,L.toLisp tt
-                                   ,L.toLisp ff]
-  toLisp (Ge l r) = L.List [L.Symbol ">="
-                           ,L.toLisp l
-                           ,L.toLisp r]
-  toLisp (Lt l r) = L.List [L.Symbol "<"
-                           ,L.toLisp l
-                           ,L.toLisp r]
-  toLisp (And lst) = L.List $ [L.Symbol "and"]
-                     ++ [L.toLisp x | x <- lst ]
-  toLisp (Not expr) = L.List $ [L.Symbol "not",L.toLisp expr]
+instance Num (SMTExpr Word8) where
+  fromInteger = constant.fromInteger
+  (+) = bvadd
+  (-) = bvsub
+  (*) = bvmul
+
+instance Num (SMTExpr Word16) where
+  fromInteger = constant.fromInteger
+  (+) = bvadd
+  (-) = bvsub
+  (*) = bvmul
+
+instance Num (SMTExpr Word32) where
+  fromInteger = constant.fromInteger
+  (+) = bvadd
+  (-) = bvsub
+  (*) = bvmul
+
+instance Num (SMTExpr Word64) where
+  fromInteger = constant.fromInteger
+  (+) = bvadd
+  (-) = bvsub
+  (*) = bvmul
+
+exprsToLisp :: [SMTExpr t] -> Integer -> ([L.Lisp],Integer)
+exprsToLisp [] c = ([],c)
+exprsToLisp (e:es) c = let (e',c') = exprToLisp e c
+                           (es',c'') = exprsToLisp es c'
+                       in (e':es',c'')
+
+exprToLisp :: SMTExpr t -> Integer -> (L.Lisp,Integer)
+exprToLisp (Var name) c = (L.Symbol name,c)
+exprToLisp (Const x) c = (mangle x,c)
+exprToLisp (Eq l r) c = let (l',c') = exprToLisp l c
+                            (r',c'') = exprToLisp r c'
+                        in (L.List [L.Symbol "=",l',r'],c'')
+exprToLisp (Distinct lst) c = let (lst',c') = exprsToLisp lst c
+                              in (L.List $ [L.Symbol "distinct"] ++ lst',c')
+exprToLisp (Plus lst) c = let (lst',c') = exprsToLisp lst c
+                          in (L.List $ [L.Symbol "+"] ++ lst',c')
+exprToLisp (Mult lst) c = let (lst',c') = exprsToLisp lst c
+                          in (L.List $ [L.Symbol "*"] ++ lst',c')
+exprToLisp (Minus l r) c = let (l',c') = exprToLisp l c
+                               (r',c'') = exprToLisp r c'
+                           in (L.List [L.Symbol "-",l',r'],c'')
+exprToLisp (ITE cond tt ff) c = let (cond',c') = exprToLisp cond c
+                                    (tt',c'') = exprToLisp tt c'
+                                    (ff',c''') = exprToLisp ff c''
+                                in (L.List [L.Symbol "ite",cond',tt',ff'],c''')
+exprToLisp (Ge l r) c = let (l',c') = exprToLisp l c
+                            (r',c'') = exprToLisp r c'
+                        in (L.List [L.Symbol ">=",l',r'],c'')
+exprToLisp (Lt l r) c = let (l',c') = exprToLisp l c
+                            (r',c'') = exprToLisp r c'
+                        in (L.List [L.Symbol "<",l',r'],c'')
+exprToLisp (And lst) c = let (lst',c') = exprsToLisp lst c
+                         in (L.List $ [L.Symbol "and"] ++ lst',c')
+exprToLisp (Not expr) c = let (expr',c') = exprToLisp expr c
+                          in (L.List [L.Symbol "not",expr'],c')
+exprToLisp (Select arr idx) c = let (arr',c') = exprToLisp arr c
+                                    (idx',c'') = exprToLisp idx c'
+                                in (L.List [L.Symbol "select",arr',idx'],c'')
+exprToLisp (Store arr idx val) c = let (arr',c') = exprToLisp arr c
+                                       (idx',c'') = exprToLisp idx c''
+                                       (val',c''') = exprToLisp val c'''
+                                   in (L.List [L.Symbol "store",arr',idx',val'],c''')
+exprToLisp (BVAdd l r) c = let (l',c') = exprToLisp l c
+                               (r',c'') = exprToLisp r c'
+                           in (L.List [L.Symbol "bvadd",l',r'],c'')
+exprToLisp (BVSub l r) c = let (l',c') = exprToLisp l c
+                               (r',c'') = exprToLisp r c'
+                           in (L.List [L.Symbol "bvsub",l',r'],c'')
+exprToLisp (BVMul l r) c = let (l',c') = exprToLisp l c
+                               (r',c'') = exprToLisp r c'
+                           in (L.List [L.Symbol "bvmul",l',r'],c'')
+exprToLisp (Forall f) c = let varName = T.pack $ "f"++show c
+                              var = Var varName
+                              (expr,c') = exprToLisp (f var) (c+1)
+                          in (L.List [L.Symbol "forall"
+                                     ,L.List [L.List [L.Symbol varName
+                                                     ,getSort (getUndef var)]]
+                                     ,expr],c')
+
+instance L.ToLisp (SMTExpr t) where
+  toLisp e = fst $ exprToLisp e 0
 
 getUndef :: SMTExpr t -> t
 getUndef _ = undefined
 
+-- | Set an option for the underlying SMT solver
+setOption :: SMTOption -> SMT ()
+setOption opt = putRequest $ L.List $ [L.Symbol "set-option"]
+                ++(case opt of
+                      PrintSuccess v -> [L.Symbol ":print-success"                                                                   
+                                        ,mangle v]
+                      ProduceModels v -> [L.Symbol ":produce-models"
+                                         ,mangle v])
+
+-- | Create a fresh new variable
 var :: SMTType t => SMT (SMTExpr t)
 var = do
   c <- get
@@ -103,24 +288,31 @@ var = do
   declareFun name [] sort
   return res
 
-constant :: SMTType t => t -> SMTExpr t
+-- | A constant expression
+constant :: SMTValue t => t -> SMTExpr t
 constant = Const
 
-eq :: SMTType a => SMTExpr a -> SMTExpr a -> SMTExpr Bool
-eq = Eq
+-- | Two expressions shall be equal
+(.==.) :: SMTType a => SMTExpr a -> SMTExpr a -> SMTExpr Bool
+(.==.) = Eq
 
-geq,lt :: (SMTType a,Num a) => SMTExpr a -> SMTExpr a -> SMTExpr Bool
-geq = Ge
-lt = Lt
+infix 4 .==.
+
+(.>=.),(.<.) :: (SMTType a,Num a) => SMTExpr a -> SMTExpr a -> SMTExpr Bool
+(.>=.) = Ge
+(.<.) = Lt
+
+infix 4 .>=.
+infix 4 .<.
 
 distinct :: SMTType a => [SMTExpr a] -> SMTExpr Bool
 distinct = Distinct
 
-plus,mult :: (SMTType a,Num a) => [SMTExpr a] -> SMTExpr a
+plus,mult :: (SMTArith a) => [SMTExpr a] -> SMTExpr a
 plus = Plus
 mult = Mult
 
-minus :: (SMTType a,Num a) => SMTExpr a -> SMTExpr a -> SMTExpr a
+minus :: (SMTArith a) => SMTExpr a -> SMTExpr a -> SMTExpr a
 minus = Minus
 
 ite :: (SMTType a) => SMTExpr Bool -> SMTExpr a -> SMTExpr a -> SMTExpr a
@@ -132,8 +324,33 @@ and' = And
 not' :: SMTExpr Bool -> SMTExpr Bool
 not' = Not
 
-getValue :: SMTType t => SMTExpr t -> SMT t
+select :: SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v
+select = Select
+
+store :: SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v -> SMTExpr (Array i v)
+store = Store
+
+arrayConst :: (SMTValue i,SMTValue v,Ix i) => SMTExpr (Array i v) -> Array i v -> SMTExpr Bool
+arrayConst expr arr = and' [(select expr (constant i)) .==. (constant v)
+                           | (i,v) <- assocs arr ]
+
+unmangleArray :: (Ix i,SMTValue i,SMTValue v) => (i,i) -> SMTExpr (Array i v) -> SMT (Array i v)
+unmangleArray b expr = mapM (\i -> do
+                                v <- getValue (select expr (constant i))
+                                return (i,v)
+                            ) (range b) >>= return.array b
+
+bvadd,bvsub,bvmul :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
+bvadd = BVAdd
+bvsub = BVSub
+bvmul = BVMul
+
+forAll :: SMTType a => (SMTExpr a -> SMTExpr Bool) -> SMTExpr Bool
+forAll = Forall
+
+getValue :: SMTValue t => SMTExpr t -> SMT t
 getValue expr = do
+  clearInput
   putRequest $ L.List [L.Symbol "get-value"
                       ,L.List [L.toLisp expr]]
   val <- parseResponse
@@ -146,54 +363,9 @@ assert expr
   = putRequest $ L.List [L.Symbol "assert"
                         ,L.toLisp expr]
 
-{- SEND
-  +MORE
-  -----
-  MONEY -}
-
-add x y c r rc = assert (ite 
-                         (geq (plus [x,y,c]) 10)
-                         (and'
-                          [eq r ((plus [x,y,c]) - 10)
-                          ,eq rc 1])
-                         (and'
-                          [eq r (plus [x,y,c])
-                          ,eq rc 0]
-                         )
-                        )
-
-test = withSMTSolver "z3" ["-smt2","-in","-m"] $ do
-  [s,e,n,d,m,o,r,y,c0,c1,c2] <- replicateM 11 (var :: SMT (SMTExpr Integer))
-  let alls = [s,e,n,d,m,o,r,y]
-  assert (distinct alls)
-  assert (and' [geq v 0
-               | v <- alls
-               ])
-  assert (and' [lt v 10
-               | v <- alls
-               ])
-  assert (not' (eq m 0))
-  add d e 0 y c0
-  add n r c0 e c1
-  add e o c1 n c2
-  add s m c2 o m
-  res <- checkSat
-  liftIO $ print res
-  vs <- getValue s
-  ve <- getValue e
-  vn <- getValue n
-  vd <- getValue d
-  vm <- getValue m
-  vo <- getValue o
-  vr <- getValue r
-  vy <- getValue y
-  vc0 <- getValue c0
-  vc1 <- getValue c1
-  vc2 <- getValue c2
-  let send = vs*1000 + ve*100 + vn*10 + vd
-      more = vm*1000 + vo*100 + vr*10 + ve
-      money = vm*10000+vo*1000+vn*100+ve*10+vy
-  return (vs,ve,vn,vd,vm,vo,vr,vy,(vc0,vc1,vc2),send,more,money,send+more==money)
+setLogic :: Text -> SMT ()
+setLogic name = putRequest $ L.List [L.Symbol "set-logic"
+                                    ,L.Symbol name]
 
 declareFun :: Text -> [Text] -> L.Lisp -> SMT ()
 declareFun name tps rtp
@@ -253,7 +425,7 @@ clearInput = do
   r <- liftIO $ hReady hout
   if r
     then (do
-             liftIO $ BS.hGetLine hout
+             liftIO $ BS.hGetSome hout 1024
              clearInput)
     else return ()
 
@@ -272,6 +444,5 @@ parseResponse = do
       continue res@(Partial _) = do
         str <- BS.hGetLine hout
         continue (feed res str)
-      continue (Fail _ ctx msg) = error $ "Error parsing response in "++show ctx++": "++msg
+      continue (Fail str ctx msg) = error $ "Error parsing "++show str++" response in "++show ctx++": "++msg
   liftIO $ continue $ parse L.lisp str
-      

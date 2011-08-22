@@ -5,6 +5,8 @@ Build-Type:     Simple
 Cabal-Version:  >=1.2
 
 Library
-  Build-Depends:        base,text,mtl,process,blaze-builder,bytestring,attoparsec,atto-lisp
+  Build-Depends:        base,text,mtl,process,blaze-builder,bytestring,attoparsec,atto-lisp,array
   Exposed-Modules:
     Language.SMTLib2
+    Language.SMTLib2.Solver
+    Language.SMTLib2.Examples
