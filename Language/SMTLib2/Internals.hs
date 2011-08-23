@@ -14,12 +14,15 @@ import Control.Monad.State
 import Data.Text as T
 import Data.Array
 import Data.Bits
+import Data.Typeable
 
-type SMT = ReaderT (Handle,Handle) (StateT Integer IO)
+type SMT = ReaderT (Handle,Handle) (StateT (Integer,[TypeRep]) IO)
 
 -- | Haskell types which can be represented in SMT
-class SMTType t where
+class Typeable t => SMTType t where
   getSort :: t -> L.Lisp
+  declareType :: t -> SMT ()
+  declareType _ = return ()
 
 -- | Haskell values which can be represented as SMT constants
 class SMTType t => SMTValue t where
@@ -195,19 +198,24 @@ setOption opt = putRequest $ L.List $ [L.Symbol "set-option"]
 -- | Create a fresh new variable
 var :: SMTType t => SMT (SMTExpr t)
 var = do
-  c <- get
-  put (c+1)
+  (c,decl) <- get
   let name = T.pack $ "var"++show c
       res = Var name
       sort = getSort $ getUndef res
+      tp = typeOf $ getUndef res
+  if Prelude.elem tp decl
+    then put (c+1,decl)
+    else (do
+             declareType (getUndef res)
+             put (c+1,tp:decl))
   declareFun name [] sort
   return res
 
 -- | Create a new uninterpreted function
 fun :: (Args a b,SMTType r) => SMT (SMTExpr (SMTFun a b r))
 fun = do
-  c <- get
-  put (c+1)
+  (c,decl) <- get
+  put (c+1,decl)
   let name = T.pack $ "fun"++show c
       res = Fun name
       
@@ -224,8 +232,8 @@ fun = do
     
 defFun :: (Args a b,SMTType r) => (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a b r))
 defFun f = do
-  c <- get
-  put (c+1)
+  (c,decl) <- get
+  put (c+1,decl)
   let name = T.pack $ "fun"++show c
       res = Fun name
       
@@ -351,6 +359,19 @@ declareFun name tps rtp
                         ,rtp
                         ]
 
+declareDatatypes :: [Text] -> [(Text,[(Text,[(Text,L.Lisp)])])] -> SMT ()
+declareDatatypes params dts
+  = putRequest $ L.List [L.Symbol "declare-datatypes"
+                        ,args (fmap L.Symbol params)
+                        ,L.List
+                         [ L.List $ [L.Symbol name] 
+                           ++ [ L.List $ [L.Symbol conName] 
+                                ++ [ L.List [L.Symbol fieldName,tp]
+                                   | (fieldName,tp) <- fields ]
+                              | (conName,fields) <- cons ]
+                         | (name,cons) <- dts ]
+                        ]
+
 args :: [L.Lisp] -> L.Lisp
 args [] = L.Symbol "()"
 args xs = L.List xs
@@ -388,7 +409,7 @@ withSMTSolver solver args f = do
                                  res <- f
                                  putRequest (L.List [L.Symbol "exit"])
                                  return res
-                                ) (hin,hout)) 0
+                                ) (hin,hout)) (0,[])
   hClose hin
   hClose hout
   terminateProcess handle
