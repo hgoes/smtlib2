@@ -6,6 +6,7 @@ module Language.SMTLib2
         SMTArith,
         SMTExpr,
         SMTOption(..),
+        SMTFun,
         withSMTSolver,
         setOption,setLogic,
         assert,stack,
@@ -21,7 +22,8 @@ module Language.SMTLib2
         and',not',
         select,store,arrayConst,unmangleArray,
         bvadd,bvsub,bvmul,
-        forAll
+        forAll,
+        fun,app,defFun
        )
        where
 
@@ -140,6 +142,8 @@ instance SMTValue Word64 where
 
 instance SMTBV Word64
 
+data SMTFun a b r = SMTFun
+
 -- | An abstract SMT expression
 data SMTExpr t where
   Var :: SMTType t => Text -> SMTExpr t
@@ -160,8 +164,8 @@ data SMTExpr t where
   BVSub :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
   BVMul :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
   Forall :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
-  Fun :: (Args a b,SMTType r) => Text -> SMTExpr (b -> r)
-  App :: (Args a b,SMTType r) => SMTExpr (b -> r) -> a -> SMTExpr r
+  Fun :: (Args a b,SMTType r) => Text -> SMTExpr (SMTFun a b r)
+  App :: (Args a b,SMTType r) => SMTExpr (SMTFun a b r) -> a -> SMTExpr r
 
 -- | Options controling the behaviour of the SMT solver
 data SMTOption
@@ -171,15 +175,15 @@ data SMTOption
 
 class Args a b | a -> b where
   createArgs :: Integer -> (a,[(Text,L.Lisp)],Integer)
-  unpackArgs :: a -> Integer -> ([L.Lisp],Integer)
+  unpackArgs :: a -> b -> Integer -> ([L.Lisp],Integer)
 
 instance SMTType a => Args (SMTExpr a) a where
   createArgs c = let n1 = T.pack $ "f"++show c
                      v1 = Var n1
                      t1 = getSort $ getUndef v1
                  in (v1,[(n1,t1)],c+1)
-  unpackArgs e c = let (e',c') = exprToLisp e c
-                   in ([e'],c)
+  unpackArgs e _ c = let (e',c') = exprToLisp e c
+                     in ([e'],c)
 
 instance (SMTType a,SMTType b) => Args (SMTExpr a,SMTExpr b) (a,b) where
   createArgs c = let n1 = T.pack $ "f"++show c
@@ -189,9 +193,9 @@ instance (SMTType a,SMTType b) => Args (SMTExpr a,SMTExpr b) (a,b) where
                      t1 = getSort $ getUndef v1
                      t2 = getSort $ getUndef v2
                  in ((v1,v2),[(n1,t1),(n2,t2)],c+2)
-  unpackArgs (e1,e2) c = let (r1,c1) = exprToLisp e1 c
-                             (r2,c2) = exprToLisp e2 c1
-                         in ([r1,r2],c2)
+  unpackArgs (e1,e2) _ c = let (r1,c1) = exprToLisp e1 c
+                               (r2,c2) = exprToLisp e2 c1
+                           in ([r1,r2],c2)
 
 instance SMTValue t => Eq (SMTExpr t) where
   (==) x y = (L.toLisp x) == (L.toLisp y)
@@ -290,8 +294,9 @@ exprToLisp (Forall f) c = let (arg,tps,nc) = createArgs c
                                              ]
                                      ,arg'],nc')
 exprToLisp (Fun name) c = (L.Symbol name,c)
-exprToLisp (App f x) c = let (f',c') = exprToLisp f c
-                             (x',c'') = unpackArgs x c
+exprToLisp (App f x) c = let (_,bu,ru) = getFunUndef f
+                             (f',c') = exprToLisp f c
+                             (x',c'') = unpackArgs x bu c
                          in (L.List $ f':x',c'')
 
 instance L.ToLisp (SMTExpr t) where
@@ -299,6 +304,9 @@ instance L.ToLisp (SMTExpr t) where
 
 getUndef :: SMTExpr t -> t
 getUndef _ = undefined
+
+getFunUndef :: SMTExpr (SMTFun a b r) -> (a,b,r)
+getFunUndef _ = (undefined,undefined,undefined)
 
 -- | Set an option for the underlying SMT solver
 setOption :: SMTOption -> SMT ()
@@ -320,27 +328,48 @@ var = do
   declareFun name [] sort
   return res
 
-{-
-fun :: (Args a b,SMTType r) => SMT (SMTExpr (b -> r))
+-- | Create a new uninterpreted function
+fun :: (Args a b,SMTType r) => SMT (SMTExpr (SMTFun a b r))
 fun = do
   c <- get
   put (c+1)
   let name = T.pack $ "fun"++show c
       res = Fun name
       
-      getFunArgs :: SMTExpr (b -> r) -> (b,r)
-      getFunArgs _ = (undefined,undefined)
+      (au,bu,rtp) = getFunUndef res
       
-      (tp,rtp) = getFunArgs res
+      assertEq :: x -> x -> y -> y
+      assertEq _ _ p = p
       
-      args :: (a,[(Text,L.Lisp)],Integer)
-      args = createArgs 0
-      (_,tp,_) = args
-      rtp :: r
-      rtp = undefined
-  declareFun name [ l | (_,l) <- tp ] (getSort rtp)
+      (au2,tps,_) = createArgs 0
+      
+  assertEq au au2 $ return ()
+  declareFun name [ l | (_,l) <- tps ] (getSort rtp)
   return res
-  -}    
+    
+defFun :: (Args a b,SMTType r) => (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a b r))
+defFun f = do
+  c <- get
+  put (c+1)
+  let name = T.pack $ "fun"++show c
+      res = Fun name
+      
+      (au,bu,rtp) = getFunUndef res
+      
+      (au2,tps,_) = createArgs 0
+      
+      (expr',_) = exprToLisp (f au2) 0
+  putRequest $ L.List [L.Symbol "define-fun"
+                      ,L.Symbol name
+                      ,args [ L.List [ L.Symbol n
+                                     , tp ] 
+                            | (n,tp) <- tps]
+                      ,getSort rtp
+                      ,expr']
+  return res
+
+app :: (Args a b,SMTType r) => SMTExpr (SMTFun a b r) -> a -> SMTExpr r
+app = App
 
 -- | A constant expression
 constant :: SMTValue t => t -> SMTExpr t

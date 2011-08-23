@@ -7,6 +7,16 @@ import Language.SMTLib2
 import Data.Array
 import Data.Word
 
+funTest = do
+  f <- fun :: SMT (SMTExpr (SMTFun (SMTExpr Integer,SMTExpr Integer) (Integer,Integer) Integer))
+  g <- defFun (\x -> f `app` (x,x))
+  q <- var
+  assert $ forAll $ \x -> g `app` x .==. 2
+  assert $ q .==. (f `app` (3,3))
+  checkSat
+  vq <- getValue q
+  return vq
+
 quantifierTest = do
   setOption (PrintSuccess False)
   setOption (ProduceModels True)
