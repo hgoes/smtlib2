@@ -1,29 +1,37 @@
 {-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances,MultiParamTypeClasses,FunctionalDependencies #-}
 module Language.SMTLib2 
-       (SMT(),
-        SMTType,
-        SMTValue,
-        SMTArith,
-        SMTExpr,
-        SMTOption(..),
-        SMTFun,
-        withSMTSolver,
-        setOption,setLogic,
-        assert,stack,
-        checkSat,
-        getValue,
-        var,
-        constant,
-        (.==.),
-        (.>=.),(.<=.),(.>.),(.<.),
-        distinct,
-        plus,minus,mult,div',neg,abs',divide,
-        ite,
-        and',not',
-        select,store,arrayConst,unmangleArray,
-        bvadd,bvsub,bvmul,
-        forAll,
-        fun,app,defFun
+       (-- * Data types
+         SMT(),
+         SMTType,
+         SMTValue,
+         SMTArith,
+         SMTExpr,
+         SMTOption(..),
+         SMTFun,
+         -- * Environment
+         withSMTSolver,
+         setOption,setLogic,
+         assert,stack,
+         checkSat,
+         getValue,
+         -- * Expressions
+         var,
+         constant,
+         -- ** Basic logic
+         (.==.),
+         distinct,
+         ite,
+         and',or',xor,not',(.=>.),
+         forAll,
+         -- ** Arithmetic
+         (.>=.),(.<=.),(.>.),(.<.),
+         plus,minus,mult,div',neg,abs',divide,
+         -- ** Arrays
+         select,store,arrayConst,unmangleArray,
+         -- ** Bitvectors
+         bvadd,bvsub,bvmul,
+         -- ** Functions
+         fun,app,defFun
        )
        where
 

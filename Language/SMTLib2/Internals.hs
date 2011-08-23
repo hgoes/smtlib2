@@ -52,6 +52,9 @@ data SMTExpr t where
   Abs :: SMTArith t => SMTExpr t -> SMTExpr t
   ITE :: SMTExpr Bool -> SMTExpr t -> SMTExpr t -> SMTExpr t
   And :: [SMTExpr Bool] -> SMTExpr Bool
+  Or :: [SMTExpr Bool] -> SMTExpr Bool
+  XOr :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
+  Implies :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
   Not :: SMTExpr Bool -> SMTExpr Bool
   Select :: SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v
   Store :: SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v -> SMTExpr (Array i v)
@@ -130,6 +133,14 @@ exprToLisp (Lt l r) c = let (l',c') = exprToLisp l c
                         in (L.List [L.Symbol "<",l',r'],c'')
 exprToLisp (And lst) c = let (lst',c') = exprsToLisp lst c
                          in (L.List $ [L.Symbol "and"] ++ lst',c')
+exprToLisp (Or lst) c = let (lst',c') = exprsToLisp lst c
+                        in (L.List $ [L.Symbol "or"] ++ lst',c')
+exprToLisp (XOr l r) c = let (l',c') = exprToLisp l c
+                             (r',c'') = exprToLisp r c'
+                         in (L.List [L.Symbol "xor",l',r'],c'')
+exprToLisp (Implies l r) c = let (l',c') = exprToLisp l c
+                                 (r',c'') = exprToLisp r c'
+                             in (L.List [L.Symbol "=>",l',r'],c'')
 exprToLisp (Not expr) c = let (expr',c') = exprToLisp expr c
                           in (L.List [L.Symbol "not",expr'],c')
 exprToLisp (Select arr idx) c = let (arr',c') = exprToLisp arr c
@@ -278,8 +289,13 @@ abs' = Abs
 ite :: (SMTType a) => SMTExpr Bool -> SMTExpr a -> SMTExpr a -> SMTExpr a
 ite = ITE
 
-and' :: [SMTExpr Bool] -> SMTExpr Bool
+and',or' :: [SMTExpr Bool] -> SMTExpr Bool
 and' = And
+or' = Or
+
+xor,(.=>.) :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
+xor = XOr
+(.=>.) = Implies
 
 not' :: SMTExpr Bool -> SMTExpr Bool
 not' = Not
