@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances #-}
+{-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances,MultiParamTypeClasses,FunctionalDependencies #-}
 module Language.SMTLib2 
        (SMT(),
         SMTType,
@@ -159,7 +159,9 @@ data SMTExpr t where
   BVAdd :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
   BVSub :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
   BVMul :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-  Forall :: Args a => (a -> SMTExpr Bool) -> SMTExpr Bool
+  Forall :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
+  Fun :: (Args a b,SMTType r) => Text -> SMTExpr (b -> r)
+  App :: (Args a b,SMTType r) => SMTExpr (b -> r) -> a -> SMTExpr r
 
 -- | Options controling the behaviour of the SMT solver
 data SMTOption
@@ -167,16 +169,19 @@ data SMTOption
      | ProduceModels Bool -- ^ Produce a satisfying assignment after each successful checkSat
      deriving (Show,Eq,Ord)
 
-class Args a where
+class Args a b | a -> b where
   createArgs :: Integer -> (a,[(Text,L.Lisp)],Integer)
+  unpackArgs :: a -> Integer -> ([L.Lisp],Integer)
 
-instance SMTType a => Args (SMTExpr a) where
+instance SMTType a => Args (SMTExpr a) a where
   createArgs c = let n1 = T.pack $ "f"++show c
                      v1 = Var n1
                      t1 = getSort $ getUndef v1
                  in (v1,[(n1,t1)],c+1)
+  unpackArgs e c = let (e',c') = exprToLisp e c
+                   in ([e'],c)
 
-instance (SMTType a,SMTType b) => Args (SMTExpr a,SMTExpr b) where
+instance (SMTType a,SMTType b) => Args (SMTExpr a,SMTExpr b) (a,b) where
   createArgs c = let n1 = T.pack $ "f"++show c
                      n2 = T.pack $ "f"++show (c+1)
                      v1 = Var n1
@@ -184,6 +189,9 @@ instance (SMTType a,SMTType b) => Args (SMTExpr a,SMTExpr b) where
                      t1 = getSort $ getUndef v1
                      t2 = getSort $ getUndef v2
                  in ((v1,v2),[(n1,t1),(n2,t2)],c+2)
+  unpackArgs (e1,e2) c = let (r1,c1) = exprToLisp e1 c
+                             (r2,c2) = exprToLisp e2 c1
+                         in ([r1,r2],c2)
 
 instance SMTValue t => Eq (SMTExpr t) where
   (==) x y = (L.toLisp x) == (L.toLisp y)
@@ -281,6 +289,10 @@ exprToLisp (Forall f) c = let (arg,tps,nc) = createArgs c
                                              | (name,tp) <- tps
                                              ]
                                      ,arg'],nc')
+exprToLisp (Fun name) c = (L.Symbol name,c)
+exprToLisp (App f x) c = let (f',c') = exprToLisp f c
+                             (x',c'') = unpackArgs x c
+                         in (L.List $ f':x',c'')
 
 instance L.ToLisp (SMTExpr t) where
   toLisp e = fst $ exprToLisp e 0
@@ -307,6 +319,28 @@ var = do
       sort = getSort $ getUndef res
   declareFun name [] sort
   return res
+
+{-
+fun :: (Args a b,SMTType r) => SMT (SMTExpr (b -> r))
+fun = do
+  c <- get
+  put (c+1)
+  let name = T.pack $ "fun"++show c
+      res = Fun name
+      
+      getFunArgs :: SMTExpr (b -> r) -> (b,r)
+      getFunArgs _ = (undefined,undefined)
+      
+      (tp,rtp) = getFunArgs res
+      
+      args :: (a,[(Text,L.Lisp)],Integer)
+      args = createArgs 0
+      (_,tp,_) = args
+      rtp :: r
+      rtp = undefined
+  declareFun name [ l | (_,l) <- tp ] (getSort rtp)
+  return res
+  -}    
 
 -- | A constant expression
 constant :: SMTValue t => t -> SMTExpr t
@@ -365,7 +399,7 @@ bvadd = BVAdd
 bvsub = BVSub
 bvmul = BVMul
 
-forAll :: Args a => (a -> SMTExpr Bool) -> SMTExpr Bool
+forAll :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
 forAll = Forall
 
 getValue :: SMTValue t => SMTExpr t -> SMT t
@@ -387,11 +421,11 @@ setLogic :: Text -> SMT ()
 setLogic name = putRequest $ L.List [L.Symbol "set-logic"
                                     ,L.Symbol name]
 
-declareFun :: Text -> [Text] -> L.Lisp -> SMT ()
+declareFun :: Text -> [L.Lisp] -> L.Lisp -> SMT ()
 declareFun name tps rtp
   = putRequest $ L.List [L.Symbol "declare-fun"
                         ,L.Symbol name
-                        ,args [L.Symbol tp | tp <- tps]
+                        ,args tps
                         ,rtp
                         ]
 
