@@ -17,7 +17,7 @@ module Language.SMTLib2
         (.==.),
         (.>=.),(.<=.),(.>.),(.<.),
         distinct,
-        plus,minus,mult,div',neg,abs',
+        plus,minus,mult,div',neg,abs',divide,
         ite,
         and',not',
         select,store,arrayConst,unmangleArray,

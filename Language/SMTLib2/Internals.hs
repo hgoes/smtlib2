@@ -47,6 +47,7 @@ data SMTExpr t where
   Mult :: SMTArith t => [SMTExpr t] -> SMTExpr t
   Div :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
   Mod :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
+  Divide :: SMTExpr Rational -> SMTExpr Rational -> SMTExpr Rational
   Neg :: SMTArith t => SMTExpr t -> SMTExpr t
   Abs :: SMTArith t => SMTExpr t -> SMTExpr t
   ITE :: SMTExpr Bool -> SMTExpr t -> SMTExpr t -> SMTExpr t
@@ -101,6 +102,9 @@ exprToLisp (Minus l r) c = let (l',c') = exprToLisp l c
 exprToLisp (Div l r) c = let (l',c') = exprToLisp l c
                              (r',c'') = exprToLisp r c'
                          in (L.List [L.Symbol "div",l',r'],c'')
+exprToLisp (Divide l r) c = let (l',c') = exprToLisp l c
+                                (r',c'') = exprToLisp r c'
+                            in (L.List [L.Symbol "/",l',r'],c'')
 exprToLisp (Mod l r) c = let (l',c') = exprToLisp l c
                              (r',c'') = exprToLisp r c'
                          in (L.List [L.Symbol "mod",l',r'],c'')
@@ -263,6 +267,9 @@ minus = Minus
 div',mod' :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
 div' = Div
 mod' = Mod
+
+divide :: SMTExpr Rational -> SMTExpr Rational -> SMTExpr Rational
+divide = Divide
 
 neg,abs' :: SMTArith a => SMTExpr a -> SMTExpr a
 neg = Neg

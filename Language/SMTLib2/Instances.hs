@@ -57,6 +57,10 @@ instance Num (SMTExpr (Ratio Integer)) where
   negate = neg
   abs = abs'
 
+instance Fractional (SMTExpr (Ratio Integer)) where
+  (/) = divide
+  fromRational = constant
+
 -- Bool
 
 instance SMTType Bool where
