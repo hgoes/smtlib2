@@ -8,5 +8,8 @@ Library
   Build-Depends:        base,text,mtl,process,blaze-builder,bytestring,attoparsec,atto-lisp,array
   Exposed-Modules:
     Language.SMTLib2
+    Language.SMTLib2.Instances
     Language.SMTLib2.Solver
     Language.SMTLib2.Examples
+  Other-Modules:
+    Language.SMTLib2.Internals

@@ -4,6 +4,7 @@ module Language.SMTLib2.Examples where
 import Control.Monad
 import Control.Monad.Trans
 import Language.SMTLib2
+import Language.SMTLib2.Instances
 import Data.Array
 import Data.Word
 
