@@ -42,10 +42,13 @@ instance SMTType (Ratio Integer) where
 instance SMTValue (Ratio Integer) where
   unmangle (L.Number (L.I v)) = fromInteger v
   unmangle (L.Number (L.D v)) = realToFrac v
+  unmangle (L.List [L.Symbol "/"
+                   ,x
+                   ,y]) = unmangle x / unmangle y
   unmangle (L.List [L.Symbol "-",r]) = - (unmangle r)
   mangle v = L.List [L.Symbol "/"
-                    ,L.toLisp $ numerator v
-                    ,L.toLisp $ denominator v]
+                    ,L.Symbol $ T.pack $ (show $ numerator v)++".0"
+                    ,L.Symbol $ T.pack $ (show $ denominator v)++".0"]
 
 instance SMTArith (Ratio Integer)
 
@@ -183,4 +186,3 @@ instance (SMTType a,SMTType b) => Args (SMTExpr a,SMTExpr b) (a,b) where
   unpackArgs (e1,e2) _ c = let (r1,c1) = exprToLisp e1 c
                                (r2,c2) = exprToLisp e2 c1
                            in ([r1,r2],c2)
-
