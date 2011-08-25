@@ -27,7 +27,7 @@ module Language.SMTLib2
          forAll,
          -- ** Arithmetic
          (.>=.),(.<=.),(.>.),(.<.),
-         plus,minus,mult,div',neg,abs',divide,
+         plus,minus,mult,div',mod',neg,abs',divide,
          -- ** Arrays
          select,store,arrayConst,unmangleArray,
          -- ** Bitvectors
