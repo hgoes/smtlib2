@@ -67,6 +67,12 @@ data SMTExpr t where
   Forall :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
   Fun :: (Args a b,SMTType r) => Text -> SMTExpr (SMTFun a b r)
   App :: (Args a b,SMTType r) => SMTExpr (SMTFun a b r) -> a -> SMTExpr r
+  ConTest :: Constructor a -> SMTExpr a -> SMTExpr Bool
+  FieldSel :: Field a f -> SMTExpr a -> SMTExpr f
+
+data Constructor a = Constructor Text
+
+data Field a f = Field Text
 
 -- | Options controling the behaviour of the SMT solver
 data SMTOption
@@ -176,6 +182,11 @@ exprToLisp (App f x) c = let (_,bu,ru) = getFunUndef f
                              (f',c') = exprToLisp f c
                              (x',c'') = unpackArgs x bu c
                          in (L.List $ f':x',c'')
+exprToLisp (ConTest (Constructor name) e) c = let (e',c') = exprToLisp e c
+                                              in (L.List [L.Symbol $ T.append "is-" name
+                                                         ,e'],c')
+exprToLisp (FieldSel (Field name) e) c = let (e',c') = exprToLisp e c
+                                         in (L.List [L.Symbol name,e'],c')
 
 instance L.ToLisp (SMTExpr t) where
   toLisp e = fst $ exprToLisp e 0
@@ -331,6 +342,12 @@ bvmul = BVMul
 
 forAll :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
 forAll = Forall
+
+is :: SMTType a => SMTExpr a -> Constructor a -> SMTExpr Bool
+is e con = ConTest con e
+
+(.#) :: SMTType a => SMTExpr a -> Field a f -> SMTExpr f
+(.#) e f = FieldSel f e
 
 getValue :: SMTValue t => SMTExpr t -> SMT t
 getValue expr = do

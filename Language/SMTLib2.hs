@@ -8,6 +8,8 @@ module Language.SMTLib2
          SMTExpr,
          SMTOption(..),
          SMTFun,
+         Constructor,
+         Field,
          -- * Environment
          withSMTSolver,
          setOption,setLogic,
@@ -31,7 +33,9 @@ module Language.SMTLib2
          -- ** Bitvectors
          bvadd,bvsub,bvmul,
          -- ** Functions
-         fun,app,defFun
+         fun,app,defFun,
+         -- ** Data types
+         is,(.#)
        )
        where
 

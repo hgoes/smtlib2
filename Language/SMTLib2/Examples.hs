@@ -8,6 +8,7 @@ import Language.SMTLib2.Instances
 import Data.Array
 import Data.Word
 
+funTest :: SMT Integer
 funTest = do
   f <- fun :: SMT (SMTExpr (SMTFun (SMTExpr Integer,SMTExpr Integer) (Integer,Integer) Integer))
   g <- defFun (\x -> f `app` (x,x))
@@ -18,6 +19,7 @@ funTest = do
   vq <- getValue q
   return vq
 
+quantifierTest :: SMT (Integer,Integer)
 quantifierTest = do
   setOption (PrintSuccess False)
   setOption (ProduceModels True)
@@ -29,6 +31,7 @@ quantifierTest = do
   r2 <- getValue v2
   return (r1,r2)
 
+bvTest :: SMT Word8
 bvTest = do
   v1 <- var
   v2 <- var
@@ -39,7 +42,7 @@ bvTest = do
   checkSat
   getValue v3
 
-
+transposeTest :: SMT ([Integer],Bool)
 transposeTest = do
   let c1 = listArray (0,9) [6,2,4,5,1,9,0,3,8,7]
       c2 = listArray (0,9) [2,9,3,6,1,8,7,0,5,4]
@@ -71,6 +74,7 @@ add x y c r rc = assert (ite
                          )
                         )
 
+sendMoreMoney :: SMT (Integer,Integer,Integer,Integer,Integer,Integer,Integer,Integer,(Integer,Integer,Integer),Integer,Integer,Integer,Bool)
 sendMoreMoney = do
   setOption (PrintSuccess False)
   setOption (ProduceModels True)
