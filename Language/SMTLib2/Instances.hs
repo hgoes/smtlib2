@@ -1,7 +1,8 @@
-{-# LANGUAGE FlexibleInstances,OverloadedStrings,MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleInstances,OverloadedStrings,MultiParamTypeClasses,TemplateHaskell #-}
 module Language.SMTLib2.Instances() where
 
 import Language.SMTLib2.Internals
+import Language.SMTLib2.TH
 import qualified Data.AttoLisp as L
 import qualified Data.Attoparsec.Number as L
 import Data.Array
@@ -11,11 +12,13 @@ import Data.Char
 import Data.Bits
 import Data.Text as T
 import Data.Ratio
+import Data.Typeable
 
 -- Integer
 
 instance SMTType Integer where
   getSort _ = L.Symbol "Int"
+  declareType u = [(typeOf u,return ())]
 
 instance SMTValue Integer where
   unmangle (L.Number (L.I v)) = v
@@ -38,6 +41,7 @@ instance Num (SMTExpr Integer) where
 
 instance SMTType (Ratio Integer) where
   getSort _ = L.Symbol "Real"
+  declareType u = [(typeOf u,return ())]
 
 instance SMTValue (Ratio Integer) where
   unmangle (L.Number (L.I v)) = fromInteger v
@@ -68,6 +72,7 @@ instance Fractional (SMTExpr (Ratio Integer)) where
 
 instance SMTType Bool where
   getSort _ = L.Symbol "Bool"
+  declareType u = [(typeOf u,return ())]
 
 instance SMTValue Bool where
   unmangle (L.Symbol "true") = True
@@ -86,6 +91,15 @@ instance (SMTType idx,SMTType val) => SMTType (Array idx val) where
       getIdx _ = undefined
       getVal :: Array i v -> v
       getVal _ = undefined
+  declareType u = [(mkTyConApp (mkTyCon "Data.Array.Array") [],return ())] ++
+                  declareType (getIdx u) ++
+                  declareType (getVal u)
+    where
+      getIdx :: Array i v -> i
+      getIdx _ = undefined
+      getVal :: Array i v -> v
+      getVal _ = undefined
+
 
 -- BitVectors
 
@@ -96,6 +110,7 @@ bv n = L.List [L.Symbol "_"
 
 instance SMTType Word8 where
   getSort _ = bv 8
+  declareType u = [(typeOf u,return ())]
 
 getBVValue :: Num a => L.Lisp -> a
 getBVValue (L.Number (L.I v)) = fromInteger v
@@ -116,6 +131,7 @@ instance SMTBV Word8
 
 instance SMTType Word16 where
   getSort _ = bv 16
+  declareType u = [(typeOf u,return ())]
 
 instance SMTValue Word16 where
   unmangle = getBVValue
@@ -125,6 +141,7 @@ instance SMTBV Word16
 
 instance SMTType Word32 where
   getSort _ = bv 32
+  declareType u = [(typeOf u,return ())]
 
 instance SMTValue Word32 where
   unmangle = getBVValue
@@ -134,7 +151,8 @@ instance SMTBV Word32
 
 instance SMTType Word64 where
   getSort _ = bv 64
-
+  declareType u = [(typeOf u,return ())]
+  
 instance SMTValue Word64 where
   unmangle = getBVValue
   mangle = putBVValue
@@ -186,3 +204,24 @@ instance (SMTType a,SMTType b) => Args (SMTExpr a,SMTExpr b) (a,b) where
   unpackArgs (e1,e2) _ c = let (r1,c1) = exprToLisp e1 c
                                (r2,c2) = exprToLisp e2 c1
                            in ([r1,r2],c2)
+
+instance SMTType a => SMTType (Maybe a) where
+  getSort u = L.List [L.Symbol "Maybe",getSort (undef u)]
+    where
+      undef :: Maybe a -> a
+      undef _ = undefined
+  declareType u = let rec = declareType (undef u)
+                  in [(mkTyConApp (mkTyCon "Maybe") [],
+                       declareDatatypes ["a"] [("Maybe",[("Nothing",[]),("Just",[("fromJust",L.Symbol "a")])])])] ++
+                     rec
+    where
+      undef :: Maybe a -> a
+      undef _ = undefined
+
+instance SMTValue a => SMTValue (Maybe a) where
+  unmangle (L.Symbol "Nothing") = Nothing
+  unmangle (L.List [L.Symbol "Just"
+                   ,res]) = Just $ unmangle res
+  mangle Nothing = L.Symbol "Nothing"
+  mangle (Just x) = L.List [L.Symbol "Just"
+                           ,mangle x]

@@ -9,15 +9,17 @@ import Language.SMTLib2.Internals
 import Language.Haskell.TH
 import qualified Data.AttoLisp as L
 import Data.Text as T
+import Data.Typeable
 
 type ExtrType = [(Name,[(Name,Type)])]
 
 deriveSMT :: Name -> Q [Dec]
 deriveSMT name = do
   tp <- extractDataType name
+  pat <- newName "u"
   let decls = [instanceD (cxt []) (appT (conT ''SMTType) (conT name))
                [funD 'getSort [clause [wildP] (normalB $ generateSortExpr name) []],
-                funD 'declareType [clause [wildP] (normalB $ generateDeclExpr name tp) []]
+                funD 'declareType [clause [varP pat] (normalB $ generateDeclExpr name tp pat) []]
                ],
                instanceD (cxt []) (appT (conT ''SMTValue) (conT name))
                [generateMangleFun tp,
@@ -49,22 +51,29 @@ extractDataType name = do
       -> fmap (\con -> case con of
                   RecC n vars -> (n,fmap (\(vn,_,tp) -> (vn,tp)) vars)
                   NormalC n [] -> (n,[])
+                  _ -> error $ "Can't derive SMT classes for constructor "++show con
               ) cons
+    _ -> error $ "Can't derive SMT classes for "++show inf
 
 generateSortExpr :: Name -> Q Exp
 generateSortExpr name = [| L.Symbol $(stringE $ nameBase name) |]
 
-generateDeclExpr :: Name -> ExtrType -> Q Exp
-generateDeclExpr dname cons
-  = [| declareDatatypes [] [(T.pack $(stringE $ nameBase dname),
-                             $(listE [ tupE [ [| T.pack $(stringE $ nameBase cname) |],  
-                                              listE [ tupE [ stringE $ nameBase sname,
-                                                             [| getSort (undefined :: $(return tp)) |]
-                                                           ] 
-                                                    | (sname,tp) <- sels ]
-                                            ]
-                                     | (cname,sels) <- cons ])
-                             )] |]
+generateDeclExpr :: Name -> ExtrType -> Name -> Q Exp
+generateDeclExpr dname cons pat
+  = Prelude.foldl (\cur tp -> [| $(cur) ++ declareType (undefined :: $(return tp)) |])
+    [| [(typeOf $(varE pat),declareDatatypes [] [(T.pack $(stringE $ nameBase dname),
+                                                  $(listE [ tupE [ [| T.pack $(stringE $ nameBase cname) |],  
+                                                                   listE [ tupE [ stringE $ nameBase sname,
+                                                                                  [| getSort (undefined :: $(return tp)) |]
+                                                                                ] 
+                                                                         | (sname,tp) <- sels ]
+                                                                 ]
+                                                          | (cname,sels) <- cons ])
+                                                 )])] |]
+    [ tp
+    | (_,fields) <- cons, 
+      (_,tp) <- fields
+    ]
 
 generateMangleFun :: ExtrType -> Q Dec
 generateMangleFun cons

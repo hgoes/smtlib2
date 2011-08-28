@@ -15,14 +15,14 @@ import Data.Text as T
 import Data.Array
 import Data.Bits
 import Data.Typeable
+import Data.Foldable (foldlM)
 
 type SMT = ReaderT (Handle,Handle) (StateT (Integer,[TypeRep]) IO)
 
 -- | Haskell types which can be represented in SMT
-class Typeable t => SMTType t where
+class SMTType t where
   getSort :: t -> L.Lisp
-  declareType :: t -> SMT ()
-  declareType _ = return ()
+  declareType :: t -> [(TypeRep,SMT ())]
 
 -- | Haskell values which can be represented as SMT constants
 class SMTType t => SMTValue t where
@@ -213,12 +213,13 @@ var = do
   let name = T.pack $ "var"++show c
       res = Var name
       sort = getSort $ getUndef res
-      tp = typeOf $ getUndef res
-  if Prelude.elem tp decl
-    then put (c+1,decl)
-    else (do
-             declareType (getUndef res)
-             put (c+1,tp:decl))
+      tps = declareType $ getUndef res
+  ndecl <- foldlM (\decl (tp,act) -> if Prelude.elem tp decl
+                                     then return decl
+                                     else (do
+                                              act
+                                              return $ tp:decl)) decl tps
+  put (c+1,ndecl)
   declareFun name [] sort
   return res
 
