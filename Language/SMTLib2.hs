@@ -10,6 +10,7 @@ module Language.SMTLib2
          SMTFun,
          Constructor,
          Field,
+         Args,
          -- * Environment
          withSMTSolver,
          setOption,setLogic,

@@ -64,6 +64,8 @@ data SMTExpr t where
   BVAdd :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
   BVSub :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
   BVMul :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
+  BVURem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
+  BVSRem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
   Forall :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
   Exists :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
   Fun :: (Args a b,SMTType r) => Text -> SMTExpr (SMTFun a b r)
@@ -246,6 +248,7 @@ fun = do
   declareFun name [ l | (_,l) <- tps ] (getSort rtp)
   return res
     
+-- | Define a new function with a body
 defFun :: (Args a b,SMTType r) => (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a b r))
 defFun f = do
   (c,decl) <- get
@@ -258,15 +261,10 @@ defFun f = do
       (au2,tps,_) = createArgs 0
       
       (expr',_) = exprToLisp (f au2) 0
-  putRequest $ L.List [L.Symbol "define-fun"
-                      ,L.Symbol name
-                      ,args [ L.List [ L.Symbol n
-                                     , tp ] 
-                            | (n,tp) <- tps]
-                      ,getSort rtp
-                      ,expr']
+  defineFun name tps (getSort rtp) expr'
   return res
 
+-- | Apply a function to an argument
 app :: (Args a b,SMTType r) => SMTExpr (SMTFun a b r) -> a -> SMTExpr r
 app = App
 
@@ -289,6 +287,7 @@ infix 4 .==.
 infix 4 .>=.
 infix 4 .<.
 
+-- | Declares all arguments to be distinct
 distinct :: SMTType a => [SMTExpr a] -> SMTExpr Bool
 distinct = Distinct
 
@@ -329,6 +328,8 @@ select = Select
 
 store :: SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v -> SMTExpr (Array i v)
 store = Store
+
+
 
 arrayConst :: (SMTValue i,SMTValue v,Ix i) => SMTExpr (Array i v) -> Array i v -> SMTExpr Bool
 arrayConst expr arr = and' [(select expr (constant i)) .==. (constant v)
@@ -381,6 +382,14 @@ declareFun name tps rtp
                         ,args tps
                         ,rtp
                         ]
+
+defineFun :: Text -> [(Text,L.Lisp)] -> L.Lisp -> L.Lisp -> SMT ()
+defineFun name arg rtp body = putRequest $ L.List [L.Symbol "define-fun"
+                                                  ,L.Symbol name
+                                                  ,args [ L.List [ L.Symbol n, tp ]
+                                                        | (n,tp) <- arg ]
+                                                  ,rtp
+                                                  ,body ]
 
 declareDatatypes :: [Text] -> [(Text,[(Text,[(Text,L.Lisp)])])] -> SMT ()
 declareDatatypes params dts
