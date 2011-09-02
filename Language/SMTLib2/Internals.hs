@@ -222,7 +222,7 @@ var = do
                                      then return decl
                                      else (do
                                               act
-                                              return $ tp:decl)) decl tps
+                                              return $ tp:decl)) decl (Prelude.reverse tps)
   put (c+1,ndecl)
   declareFun name [] sort
   return res

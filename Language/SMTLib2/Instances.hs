@@ -25,7 +25,10 @@ instance SMTValue Integer where
   unmangle (L.List [L.Symbol "-"
                    ,L.Number (L.I v)]) = - v
   unmangle e = error $ "can't unmangle "++show e++" to Integer"
-  mangle v = L.toLisp v
+  mangle v
+    | v < 0 = L.List [L.Symbol "-"
+                     ,L.toLisp (-v)]
+    | otherwise = L.toLisp v
 
 instance SMTArith Integer
 
@@ -220,8 +223,13 @@ instance SMTType a => SMTType (Maybe a) where
 
 instance SMTValue a => SMTValue (Maybe a) where
   unmangle (L.Symbol "Nothing") = Nothing
+  unmangle (L.List [L.Symbol "as"
+                   ,L.Symbol "Nothing"
+                   ,_]) = Nothing
   unmangle (L.List [L.Symbol "Just"
                    ,res]) = Just $ unmangle res
-  mangle Nothing = L.Symbol "Nothing"
+  mangle u@Nothing = L.List [L.Symbol "as"
+                            ,L.Symbol "Nothing"
+                            ,getSort u]
   mangle (Just x) = L.List [L.Symbol "Just"
                            ,mangle x]
