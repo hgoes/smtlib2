@@ -1,0 +1,8 @@
+This library provides a pure haskell interface to many SMT solvers by
+implementing the [[http://www.smtlib.org/][SMTLib2 language]]. SMT solving is done by spawning a
+SMT solver process and communicating with it.
+
+* Supported solvers
+For the moment, only [[http://research.microsoft.com/en-us/um/redmond/projects/z3/][Z3]] supports every feature implemented in this
+interface. [[http://mathsat4.disi.unitn.it/][MathSAT]] implements most features. [[http://www.cs.nyu.edu/acsys/cvc3][CVC]] is missing a
+machine-readable interface to be usable.
