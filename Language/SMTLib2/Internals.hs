@@ -367,9 +367,11 @@ getValue expr = do
     _ -> error $ "unknown response to get-value: "++show val
 
 assert :: SMTExpr Bool -> SMT ()
-assert expr 
-  = putRequest $ L.List [L.Symbol "assert"
-                        ,L.toLisp expr]
+assert expr = assert' (L.toLisp expr)
+
+assert' :: L.Lisp -> SMT ()
+assert' expr = putRequest $ L.List [L.Symbol "assert"
+                                   ,expr]
 
 setLogic :: Text -> SMT ()
 setLogic name = putRequest $ L.List [L.Symbol "set-logic"
