@@ -212,21 +212,30 @@ setOption opt = putRequest $ L.List $ [L.Symbol "set-option"]
                       ProduceModels v -> [L.Symbol ":produce-models"
                                          ,L.Symbol $ if v then "true" else "false"])
 
--- | Create a fresh new variable
-var :: SMTType t => SMT (SMTExpr t)
-var = do
-  (c,decl) <- get
-  let name = T.pack $ "var"++show c
-      res = Var name
+-- | Create a new named variable
+varNamed :: SMTType t => Text -> SMT (SMTExpr t)
+varNamed name = do
+  let res = Var name
       sort = getSort $ getUndef res
       tps = declareType $ getUndef res
+  (c,decl) <- get
   ndecl <- foldlM (\decl (tp,act) -> if Prelude.elem tp decl
                                      then return decl
                                      else (do
                                               act
                                               return $ tp:decl)) decl (Prelude.reverse tps)
-  put (c+1,ndecl)
+  put (c,ndecl)
   declareFun name [] sort
+  return res
+  
+
+-- | Create a fresh new variable
+var :: SMTType t => SMT (SMTExpr t)
+var = do
+  (c,decl) <- get
+  let name = T.pack $ "var"++show c
+  res <- varNamed name
+  put (c+1,decl)
   return res
 
 -- | Create a new uninterpreted function

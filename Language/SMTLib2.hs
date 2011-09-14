@@ -18,7 +18,7 @@ module Language.SMTLib2
          checkSat,
          getValue,
          -- * Expressions
-         var,
+         var,varNamed,
          constant,
          -- ** Basic logic
          (.==.),
