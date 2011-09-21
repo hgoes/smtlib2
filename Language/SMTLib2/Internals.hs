@@ -427,7 +427,9 @@ checkSat = do
   res <- liftIO $ BS.hGetLine hout
   case res of
     "sat" -> return True
+    "sat\r" -> return True
     "unsat" -> return False
+    "unsat\r" -> return False
     _ -> error $ "unknown check-sat response: "++show res
   
 stack :: SMT a -> SMT a
