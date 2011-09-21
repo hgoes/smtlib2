@@ -6,7 +6,7 @@ Cabal-Version:  >=1.2
 
 Library
   Build-Depends:        base >= 4,text,mtl,process,blaze-builder,bytestring,
-                        attoparsec,atto-lisp,array,template-haskell
+                        attoparsec,atto-lisp == 0.2,array,template-haskell
   Exposed-Modules:
     Language.SMTLib2
     Language.SMTLib2.Solver

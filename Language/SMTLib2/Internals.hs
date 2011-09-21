@@ -472,7 +472,7 @@ clearInput = do
 putRequest :: L.Lisp -> SMT ()
 putRequest e = do
   (hin,_) <- ask
-  liftIO $ toByteStringIO (BS.hPutStr hin) (mappend (L.fromLisp e) flush)
+  liftIO $ toByteStringIO (BS.hPutStr hin) (mappend (L.fromLispExpr e) flush)
   liftIO $ BS.hPutStrLn hin ""
   liftIO $ hFlush hin
 
