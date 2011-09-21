@@ -437,9 +437,9 @@ stack act = do
   putRequest (L.List [L.Symbol "pop"])
   return res
 
-withSMTSolver :: FilePath -> [String] -> SMT a -> IO a
-withSMTSolver solver args f = do
-  let cmd = CreateProcess { cmdspec = RawCommand solver args
+withSMTSolver :: String -> SMT a -> IO a
+withSMTSolver solver f = do
+  let cmd = CreateProcess { cmdspec = ShellCommand solver
                           , cwd = Nothing
                           , env = Nothing
                           , std_in = CreatePipe
