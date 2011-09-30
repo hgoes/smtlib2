@@ -90,7 +90,7 @@ class Args a b | a -> b where
 instance SMTValue t => Eq (SMTExpr t) where
   (==) x y = (L.toLisp x) == (L.toLisp y)
 
-instance SMTValue t => Show (SMTExpr t) where
+instance Show (SMTExpr t) where
   show x = show (L.toLisp x)
 
 exprsToLisp :: [SMTExpr t] -> Integer -> ([L.Lisp],Integer)
