@@ -7,7 +7,7 @@ import qualified Data.Attoparsec.Number as L
 import Data.ByteString as BS
 import Blaze.ByteString.Builder
 import System.Process
-import System.IO
+import System.IO as IO
 import Data.Monoid
 import Control.Monad.Reader
 import Control.Monad.State
@@ -450,6 +450,11 @@ stack act = do
   res <- act
   putRequest (L.List [L.Symbol "pop"])
   return res
+
+comment :: String -> SMT ()
+comment msg = do
+  (hin,_) <- ask
+  liftIO $ IO.hPutStrLn hin $ ';':msg
 
 withSMTSolver :: String -> SMT a -> IO a
 withSMTSolver solver f = do

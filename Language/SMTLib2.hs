@@ -17,6 +17,7 @@ module Language.SMTLib2
          assert,stack,
          checkSat,
          getValue,
+         comment,
          -- * Expressions
          var,varNamed,
          constant,
