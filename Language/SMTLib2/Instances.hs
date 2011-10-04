@@ -71,18 +71,6 @@ instance Fractional (SMTExpr (Ratio Integer)) where
   (/) = divide
   fromRational = constant
 
--- Bool
-
-instance SMTType Bool where
-  getSort _ = L.Symbol "Bool"
-  declareType u = [(typeOf u,return ())]
-
-instance SMTValue Bool where
-  unmangle (L.Symbol "true") = True
-  unmangle (L.Symbol "false") = False
-  mangle True = L.Symbol "true"
-  mangle False = L.Symbol "false"
-
 -- Arrays
 
 instance (SMTType idx,SMTType val) => SMTType (Array idx val) where

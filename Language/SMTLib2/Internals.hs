@@ -93,6 +93,18 @@ instance SMTValue t => Eq (SMTExpr t) where
 instance Show (SMTExpr t) where
   show x = show (L.toLisp x)
 
+-- Bool
+
+instance SMTType Bool where
+  getSort _ = L.Symbol "Bool"
+  declareType u = [(typeOf u,return ())]
+
+instance SMTValue Bool where
+  unmangle (L.Symbol "true") = True
+  unmangle (L.Symbol "false") = False
+  mangle True = L.Symbol "true"
+  mangle False = L.Symbol "false"
+
 exprsToLisp :: [SMTExpr t] -> Integer -> ([L.Lisp],Integer)
 exprsToLisp [] c = ([],c)
 exprsToLisp (e:es) c = let (e',c') = exprToLisp e c
@@ -331,8 +343,12 @@ ite :: (SMTType a) => SMTExpr Bool -> SMTExpr a -> SMTExpr a -> SMTExpr a
 ite = ITE
 
 and',or' :: [SMTExpr Bool] -> SMTExpr Bool
-and' = And
-or' = Or
+and' [] = Const True
+and' [x] = x
+and' xs = And xs
+or' [] = Const False
+or' [x] = x
+or' xs = Or xs
 
 xor,(.=>.) :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
 xor = XOr
