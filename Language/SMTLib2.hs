@@ -26,6 +26,7 @@ module Language.SMTLib2
          ite,
          and',or',xor,not',(.=>.),
          forAll,exists,
+         forAllList,
          -- ** Arithmetic
          (.>=.),(.<=.),(.>.),(.<.),
          plus,minus,mult,div',mod',neg,abs',divide,

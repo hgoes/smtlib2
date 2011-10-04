@@ -177,6 +177,15 @@ exprToLisp (Forall f) c = let (arg,tps,nc) = createArgs c
                                      ,L.List [L.List [L.Symbol name,tp]
                                              | (name,tp) <- tps]
                                      ,arg'],nc')
+exprToLisp (ForallList i f) c
+  = let (args,tps,nc) = Prelude.foldl (\(cargs,ctps,cnc) _ -> let (arg,tp,nnc) = createArgs cnc
+                                                              in (arg:cargs,tp++ctps,nnc)
+                                      ) ([],[],c) [1..i]
+        (arg',nc') = exprToLisp (f args) nc
+    in (L.List [L.Symbol "forall"
+               ,L.List [L.List [L.Symbol name,tp]
+                       | (name,tp) <- tps]
+               ,arg'],nc')
 exprToLisp (Exists f) c = let (arg,tps,nc) = createArgs c
                               (arg',nc') = exprToLisp (f arg) nc
                           in (L.List [L.Symbol "exists"
@@ -358,6 +367,9 @@ bvmul = BVMul
 forAll,exists :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
 forAll = Forall
 exists = Exists
+
+forAllList :: Args a b => Integer -> ([a] -> SMTExpr Bool) -> SMTExpr Bool
+forAllList = ForallList
 
 is :: SMTType a => SMTExpr a -> Constructor a -> SMTExpr Bool
 is e con = ConTest con e
