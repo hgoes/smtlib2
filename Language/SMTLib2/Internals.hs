@@ -66,6 +66,14 @@ data SMTExpr t where
   BVMul :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
   BVURem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
   BVSRem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
+  BVULE :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
+  BVULT :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
+  BVUGE :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
+  BVUGT :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
+  BVSLE :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
+  BVSLT :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
+  BVSGE :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
+  BVSGT :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
   Forall :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
   ForallList :: Args a b => Integer -> ([a] -> SMTExpr Bool) -> SMTExpr Bool
   Exists :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
@@ -185,6 +193,30 @@ exprToLisp (BVSub l r) c = let (l',c') = exprToLisp l c
 exprToLisp (BVMul l r) c = let (l',c') = exprToLisp l c
                                (r',c'') = exprToLisp r c'
                            in (L.List [L.Symbol "bvmul",l',r'],c'')
+exprToLisp (BVULE l r) c = let (l',c') = exprToLisp l c
+                               (r',c'') = exprToLisp r c'
+                           in (L.List [L.Symbol "bvule",l',r'],c'')
+exprToLisp (BVULT l r) c = let (l',c') = exprToLisp l c
+                               (r',c'') = exprToLisp r c'
+                           in (L.List [L.Symbol "bvult",l',r'],c'')
+exprToLisp (BVUGE l r) c = let (l',c') = exprToLisp l c
+                               (r',c'') = exprToLisp r c'
+                           in (L.List [L.Symbol "bvuge",l',r'],c'')
+exprToLisp (BVUGT l r) c = let (l',c') = exprToLisp l c
+                               (r',c'') = exprToLisp r c'
+                           in (L.List [L.Symbol "bvugt",l',r'],c'')
+exprToLisp (BVSLE l r) c = let (l',c') = exprToLisp l c
+                               (r',c'') = exprToLisp r c'
+                           in (L.List [L.Symbol "bvsle",l',r'],c'')
+exprToLisp (BVSLT l r) c = let (l',c') = exprToLisp l c
+                               (r',c'') = exprToLisp r c'
+                           in (L.List [L.Symbol "bvslt",l',r'],c'')
+exprToLisp (BVSGE l r) c = let (l',c') = exprToLisp l c
+                               (r',c'') = exprToLisp r c'
+                           in (L.List [L.Symbol "bvsge",l',r'],c'')
+exprToLisp (BVSGT l r) c = let (l',c') = exprToLisp l c
+                               (r',c'') = exprToLisp r c'
+                           in (L.List [L.Symbol "bvsgt",l',r'],c'')
 exprToLisp (Forall f) c = let (arg,tps,nc) = createArgs c
                               (arg',nc') = exprToLisp (f arg) nc
                           in (L.List [L.Symbol "forall"
