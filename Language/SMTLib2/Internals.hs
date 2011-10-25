@@ -68,6 +68,7 @@ data SMTExpr t where
   BVSRem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
   Forall :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
   Exists :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
+  Let :: SMTType a => SMTExpr a -> (SMTExpr a -> SMTExpr b) -> SMTExpr b
   Fun :: (Args a b,SMTType r) => Text -> SMTExpr (SMTFun a b r)
   App :: (Args a b,SMTType r) => SMTExpr (SMTFun a b r) -> a -> SMTExpr r
   ConTest :: Constructor a -> SMTExpr a -> SMTExpr Bool
@@ -204,6 +205,12 @@ exprToLisp (Exists f) c = let (arg,tps,nc) = createArgs c
                                      ,L.List [L.List [L.Symbol name,tp]
                                              | (name,tp) <- tps ]
                                      ,arg'],nc')
+exprToLisp (Let x f) c = let (arg,nc) = exprToLisp x c
+                             name = T.pack $ "l"++show nc
+                             (arg',nc') = exprToLisp (f (Var name)) (nc+1)
+                         in (L.List [L.Symbol "let"
+                                    ,L.List [L.List [L.Symbol name,arg]]
+                                    ,arg'],nc')
 exprToLisp (Fun name) c = (L.Symbol name,c)
 exprToLisp (App f x) c = let (_,bu,ru) = getFunUndef f
                              (f',c') = exprToLisp f c
@@ -383,6 +390,9 @@ bvmul = BVMul
 forAll,exists :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
 forAll = Forall
 exists = Exists
+
+let' :: SMTType a => SMTExpr a -> (SMTExpr a -> SMTExpr b) -> SMTExpr b
+let' = Let
 
 forAllList :: Args a b => Integer -> ([a] -> SMTExpr Bool) -> SMTExpr Bool
 forAllList = ForallList

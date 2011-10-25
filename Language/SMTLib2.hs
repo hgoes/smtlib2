@@ -20,7 +20,7 @@ module Language.SMTLib2
          comment,
          -- * Expressions
          var,varNamed,
-         constant,
+         constant,let',
          -- ** Basic logic
          (.==.),
          distinct,
