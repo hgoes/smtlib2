@@ -275,10 +275,12 @@ setOption opt = putRequest $ L.List $ [L.Symbol "set-option"]
 
 -- | Create a new named variable
 varNamed :: SMTType t => Text -> SMT (SMTExpr t)
-varNamed name = do
-  let res = Var name
-      sort = getSort $ getUndef res
-      tps = declareType $ getUndef res
+varNamed name = mfix (\e -> varNamed' (getUndef e) name)
+
+varNamed' :: SMTType t => t -> Text -> SMT (SMTExpr t)
+varNamed' u name = do
+  let sort = getSort u
+      tps = declareType u
   (c,decl) <- get
   ndecl <- foldlM (\decl (tp,act) -> if Prelude.elem tp decl
                                      then return decl
@@ -287,8 +289,7 @@ varNamed name = do
                                               return $ tp:decl)) decl (Prelude.reverse tps)
   put (c,ndecl)
   declareFun name [] sort
-  return res
-  
+  return (Var name)
 
 -- | Create a fresh new variable
 var :: SMTType t => SMT (SMTExpr t)
