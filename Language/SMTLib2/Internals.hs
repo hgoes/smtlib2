@@ -67,6 +67,7 @@ data SMTExpr t where
   BVURem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
   BVSRem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
   Forall :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
+  ForallList :: Args a b => Integer -> ([a] -> SMTExpr Bool) -> SMTExpr Bool
   Exists :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
   Let :: SMTType a => SMTExpr a -> (SMTExpr a -> SMTExpr b) -> SMTExpr b
   Fun :: (Args a b,SMTType r) => Text -> SMTExpr (SMTFun a b r)
