@@ -82,6 +82,9 @@ data SMTExpr t where
   App :: (Args a b,SMTType r) => SMTExpr (SMTFun a b r) -> a -> SMTExpr r
   ConTest :: Constructor a -> SMTExpr a -> SMTExpr Bool
   FieldSel :: Field a f -> SMTExpr a -> SMTExpr f
+  Head :: SMTExpr [a] -> SMTExpr a
+  Tail :: SMTExpr [a] -> SMTExpr [a]
+  Insert :: SMTExpr a -> SMTExpr [a] -> SMTExpr [a]
 
 data Constructor a = Constructor Text
 
@@ -254,6 +257,13 @@ exprToLisp (ConTest (Constructor name) e) c = let (e',c') = exprToLisp e c
                                                          ,e'],c')
 exprToLisp (FieldSel (Field name) e) c = let (e',c') = exprToLisp e c
                                          in (L.List [L.Symbol name,e'],c')
+exprToLisp (Head xs) c = let (e,c') = exprToLisp xs c
+                         in (L.List [L.Symbol "head",e],c')
+exprToLisp (Tail xs) c = let (e,c') = exprToLisp xs c
+                         in (L.List [L.Symbol "tail",e],c')
+exprToLisp (Insert x xs) c = let (x',c') = exprToLisp x c
+                                 (xs',c'') = exprToLisp xs c'
+                             in (L.List [L.Symbol "insert",x',xs'],c'')
 
 instance L.ToLisp (SMTExpr t) where
   toLisp e = fst $ exprToLisp e 0
@@ -515,6 +525,15 @@ comment :: String -> SMT ()
 comment msg = do
   (hin,_) <- ask
   liftIO $ IO.hPutStrLn hin $ ';':msg
+
+head' :: SMTExpr [a] -> SMTExpr a
+head' = Head
+
+tail' :: SMTExpr [a] -> SMTExpr [a]
+tail' = Tail
+
+insert' :: SMTExpr a -> SMTExpr [a] -> SMTExpr [a]
+insert' = Insert
 
 withSMTSolver :: String -> SMT a -> IO a
 withSMTSolver solver f = do

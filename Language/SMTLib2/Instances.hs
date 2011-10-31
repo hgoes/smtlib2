@@ -221,3 +221,18 @@ instance SMTValue a => SMTValue (Maybe a) where
                             ,getSort u]
   mangle (Just x) = L.List [L.Symbol "Just"
                            ,mangle x]
+
+undefList :: [a] -> a
+undefList _ = undefined
+
+instance (Typeable a,SMTType a) => SMTType [a] where
+  getSort u = L.List [L.Symbol "List",getSort (undefList u)]
+  declareType u = (typeOf u,return ()):declareType (undefList u)
+
+instance (Typeable a,SMTValue a) => SMTValue [a] where
+  unmangle (L.Symbol "nil") = []
+  unmangle (L.List [L.Symbol "insert",h,t]) = unmangle h:unmangle t
+  mangle [] = L.Symbol "nil"
+  mangle (x:xs) = L.List [L.Symbol "insert"
+                         ,mangle x
+                         ,mangle xs]

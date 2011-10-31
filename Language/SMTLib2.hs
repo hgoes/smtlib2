@@ -38,7 +38,9 @@ module Language.SMTLib2
          -- ** Functions
          fun,app,defFun,
          -- ** Data types
-         is,(.#)
+         is,(.#),
+         -- ** Lists
+         head',tail',insert'
        )
        where
 
