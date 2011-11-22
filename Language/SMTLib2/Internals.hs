@@ -291,13 +291,15 @@ varNamed' :: SMTType t => t -> Text -> SMT (SMTExpr t)
 varNamed' u name = do
   let sort = getSort u
       tps = declareType u
-  (c,decl) <- get
-  ndecl <- foldlM (\decl (tp,act) -> if Prelude.elem tp decl
-                                     then return decl
-                                     else (do
-                                              act
-                                              return $ tp:decl)) decl (Prelude.reverse tps)
-  put (c,ndecl)
+  mapM_ (\(tp,act) -> do
+            (c,decl) <- get
+            if Prelude.elem tp decl
+              then return ()
+              else (do
+                       act
+                       modify (\(c',decl') -> (c',tp:decl'))
+                   )
+        ) (Prelude.reverse tps)
   declareFun name [] sort
   return (Var name)
 
@@ -305,9 +307,9 @@ varNamed' u name = do
 var :: SMTType t => SMT (SMTExpr t)
 var = do
   (c,decl) <- get
+  put (c+1,decl)
   let name = T.pack $ "var"++show c
   res <- varNamed name
-  put (c+1,decl)
   return res
 
 -- | Create a new uninterpreted function
