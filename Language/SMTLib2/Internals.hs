@@ -86,11 +86,14 @@ data SMTExpr t where
   Head :: SMTExpr [a] -> SMTExpr a
   Tail :: SMTExpr [a] -> SMTExpr [a]
   Insert :: SMTExpr a -> SMTExpr [a] -> SMTExpr [a]
+  Named :: SMTExpr a -> ExprName a -> SMTExpr a
   deriving Typeable
 
 data Constructor a = Constructor Text
 
 data Field a f = Field Text
+
+data ExprName a = ExprName Text
 
 -- | Options controling the behaviour of the SMT solver
 data SMTOption
@@ -268,6 +271,8 @@ exprToLisp (Tail xs) c = let (e,c') = exprToLisp xs c
 exprToLisp (Insert x xs) c = let (x',c') = exprToLisp x c
                                  (xs',c'') = exprToLisp xs c'
                              in (L.List [L.Symbol "insert",x',xs'],c'')
+exprToLisp (Named expr (ExprName name)) c = let (expr',c') = exprToLisp expr c
+                                            in (L.List [L.Symbol "!",expr',L.Symbol ":named",L.Symbol name],c')
 
 instance L.ToLisp (SMTExpr t) where
   toLisp e = fst $ exprToLisp e 0
@@ -595,3 +600,10 @@ parseResponse = do
         continue (feed res str)
       continue (Fail str ctx msg) = error $ "Error parsing "++show str++" response in "++show ctx++": "++msg
   liftIO $ continue $ parse L.lisp str
+
+named :: SMTExpr a -> SMT (SMTExpr a,ExprName a)
+named expr = do
+  (c,decl,mp) <- get
+  put (c+1,decl,mp)
+  let name = ExprName $ T.pack $ "named"++show c
+  return (Named expr name,name)

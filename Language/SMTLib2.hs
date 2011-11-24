@@ -21,6 +21,7 @@ module Language.SMTLib2
          -- * Expressions
          var,varNamed,
          constant,let',
+         named,
          -- ** Basic logic
          (.==.),
          distinct,
