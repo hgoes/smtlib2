@@ -96,6 +96,7 @@ data Field a f = Field Text
 data SMTOption
      = PrintSuccess Bool -- ^ Whether or not to print "success" after each operation
      | ProduceModels Bool -- ^ Produce a satisfying assignment after each successful checkSat
+     | ProduceProofs Bool -- ^ Produce a proof of unsatisfiability after each failed checkSat
      deriving (Show,Eq,Ord)
 
 class Args a b | a -> b where
@@ -284,6 +285,8 @@ setOption opt = putRequest $ L.List $ [L.Symbol "set-option"]
                       PrintSuccess v -> [L.Symbol ":print-success"
                                         ,L.Symbol $ if v then "true" else "false"]
                       ProduceModels v -> [L.Symbol ":produce-models"
+                                         ,L.Symbol $ if v then "true" else "false"]
+                      ProduceProofs v -> [L.Symbol ":produce-proofs"
                                          ,L.Symbol $ if v then "true" else "false"])
 
 -- | Create a new named variable
