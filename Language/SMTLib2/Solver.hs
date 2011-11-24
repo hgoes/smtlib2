@@ -10,3 +10,6 @@ withMathSat = withSMTSolver "mathsat"
 
 withCVC4 :: SMT a -> IO a
 withCVC4 = withSMTSolver "cvc4 --lang smt2"
+
+withSMTInterpol :: SMT a -> IO a
+withSMTInterpol = withSMTSolver "java -jar /usr/local/share/java/smtinterpol.jar -q"
