@@ -26,7 +26,7 @@ class SMTType t where
 
 -- | Haskell values which can be represented as SMT constants
 class SMTType t => SMTValue t where
-  unmangle :: L.Lisp -> t
+  unmangle :: L.Lisp -> Maybe t
   mangle :: t -> L.Lisp
 
 class (SMTValue t,Num t) => SMTArith t
@@ -113,8 +113,9 @@ instance SMTType Bool where
   declareType u = [(typeOf u,return ())]
 
 instance SMTValue Bool where
-  unmangle (L.Symbol "true") = True
-  unmangle (L.Symbol "false") = False
+  unmangle (L.Symbol "true") = Just True
+  unmangle (L.Symbol "false") = Just False
+  unmangle _ = Nothing
   mangle True = L.Symbol "true"
   mangle False = L.Symbol "false"
 
@@ -456,7 +457,9 @@ getValue expr = do
                       ,L.List [L.toLisp expr]]
   val <- parseResponse
   case val of
-    L.List [L.List [_,res]] -> return $ unmangle res
+    L.List [L.List [_,res]] -> case unmangle res of
+      Nothing -> error $ "Couldn't unmangle "++show res
+      Just r -> return r
     _ -> error $ "unknown response to get-value: "++show val
 
 assert :: SMTExpr Bool -> SMT ()

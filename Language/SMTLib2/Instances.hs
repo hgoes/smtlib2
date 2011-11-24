@@ -21,10 +21,10 @@ instance SMTType Integer where
   declareType u = [(typeOf u,return ())]
 
 instance SMTValue Integer where
-  unmangle (L.Number (L.I v)) = v
+  unmangle (L.Number (L.I v)) = Just v
   unmangle (L.List [L.Symbol "-"
-                   ,L.Number (L.I v)]) = - v
-  unmangle e = error $ "can't unmangle "++show e++" to Integer"
+                   ,L.Number (L.I v)]) = Just $ - v
+  unmangle e = Nothing
   mangle v
     | v < 0 = L.List [L.Symbol "-"
                      ,L.toLisp (-v)]
@@ -47,12 +47,18 @@ instance SMTType (Ratio Integer) where
   declareType u = [(typeOf u,return ())]
 
 instance SMTValue (Ratio Integer) where
-  unmangle (L.Number (L.I v)) = fromInteger v
-  unmangle (L.Number (L.D v)) = realToFrac v
+  unmangle (L.Number (L.I v)) = Just $ fromInteger v
+  unmangle (L.Number (L.D v)) = Just $ realToFrac v
   unmangle (L.List [L.Symbol "/"
                    ,x
-                   ,y]) = unmangle x / unmangle y
-  unmangle (L.List [L.Symbol "-",r]) = - (unmangle r)
+                   ,y]) = do
+                          q <- unmangle x
+                          r <- unmangle y
+                          return $ q / r
+  unmangle (L.List [L.Symbol "-",r]) = do
+    res <- unmangle r
+    return (-res)
+  unmangle _ = Nothing
   mangle v = L.List [L.Symbol "/"
                     ,L.Symbol $ T.pack $ (show $ numerator v)++".0"
                     ,L.Symbol $ T.pack $ (show $ denominator v)++".0"]
@@ -103,11 +109,13 @@ instance SMTType Word8 where
   getSort _ = bv 8
   declareType u = [(typeOf u,return ())]
 
-getBVValue :: Num a => L.Lisp -> a
-getBVValue (L.Number (L.I v)) = fromInteger v
+getBVValue :: Num a => L.Lisp -> Maybe a
+getBVValue (L.Number (L.I v)) = Just $ fromInteger v
 getBVValue (L.Symbol s) = case T.unpack s of
-  '#':'b':rest -> let [(v,_)] = readInt 2 (\x -> x=='0' || x=='1') (\x -> if x=='0' then 0 else 1) rest in v
-  '#':'x':rest -> let [(v,_)] = readHex rest in v
+  '#':'b':rest -> let [(v,_)] = readInt 2 (\x -> x=='0' || x=='1') (\x -> if x=='0' then 0 else 1) rest in Just v
+  '#':'x':rest -> let [(v,_)] = readHex rest in Just v
+  _ -> Nothing
+getBVValue _ = Nothing
 
 putBVValue :: Bits a => a -> L.Lisp
 putBVValue x = L.Symbol (T.pack ('#':'b':[ if testBit x i
@@ -210,28 +218,35 @@ instance SMTType a => SMTType (Maybe a) where
       undef _ = undefined
 
 instance SMTValue a => SMTValue (Maybe a) where
-  unmangle (L.Symbol "Nothing") = Nothing
+  unmangle (L.Symbol "Nothing") = Just Nothing
   unmangle (L.List [L.Symbol "as"
                    ,L.Symbol "Nothing"
-                   ,_]) = Nothing
+                   ,_]) = Just Nothing
   unmangle (L.List [L.Symbol "Just"
-                   ,res]) = Just $ unmangle res
+                   ,res]) = do
+    r <- unmangle res
+    return $ Just r
+  unmangle _ = Nothing
   mangle u@Nothing = L.List [L.Symbol "as"
                             ,L.Symbol "Nothing"
                             ,getSort u]
   mangle (Just x) = L.List [L.Symbol "Just"
                            ,mangle x]
 
-undefList :: [a] -> a
-undefList _ = undefined
+undefArg :: b a -> a
+undefArg _ = undefined
 
 instance (Typeable a,SMTType a) => SMTType [a] where
-  getSort u = L.List [L.Symbol "List",getSort (undefList u)]
-  declareType u = (typeOf u,return ()):declareType (undefList u)
+  getSort u = L.List [L.Symbol "List",getSort (undefArg u)]
+  declareType u = (typeOf u,return ()):declareType (undefArg u)
 
 instance (Typeable a,SMTValue a) => SMTValue [a] where
-  unmangle (L.Symbol "nil") = []
-  unmangle (L.List [L.Symbol "insert",h,t]) = unmangle h:unmangle t
+  unmangle (L.Symbol "nil") = Just []
+  unmangle (L.List [L.Symbol "insert",h,t]) = do
+    h' <- unmangle h
+    t' <- unmangle t
+    return $ h':t'
+  unmangle _ = Nothing
   mangle [] = L.Symbol "nil"
   mangle (x:xs) = L.List [L.Symbol "insert"
                          ,mangle x
