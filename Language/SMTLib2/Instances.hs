@@ -206,6 +206,22 @@ instance (SMTType a,SMTType b) => Args (SMTExpr a,SMTExpr b) (a,b) where
                                (r2,c2) = exprToLisp e2 c1
                            in ([r1,r2],c2)
 
+instance (SMTType a,SMTType b,SMTType c) => Args (SMTExpr a,SMTExpr b,SMTExpr c) (a,b,c) where
+  createArgs c = let n1 = T.pack $ "f"++show c
+                     n2 = T.pack $ "f"++show (c+1)
+                     n3 = T.pack $ "f"++show (c+2)
+                     v1 = Var n1
+                     v2 = Var n2
+                     v3 = Var n3
+                     t1 = getSort $ getUndef v1
+                     t2 = getSort $ getUndef v2
+                     t3 = getSort $ getUndef v3
+                 in ((v1,v2,v3),[(n1,t1),(n2,t2),(n3,t3)],c+3)
+  unpackArgs (e1,e2,e3) _ c = let (r1,c1) = exprToLisp e1 c
+                                  (r2,c2) = exprToLisp e2 c1
+                                  (r3,c3) = exprToLisp e3 c2
+                              in ([r1,r2,r3],c3)
+
 instance SMTType a => SMTType (Maybe a) where
   getSort u = L.List [L.Symbol "Maybe",getSort (undef u)]
     where
