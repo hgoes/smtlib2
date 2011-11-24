@@ -16,8 +16,9 @@ import Data.Array
 import Data.Bits
 import Data.Typeable
 import Data.Foldable (foldlM)
+import Data.Map as Map hiding (assocs)
 
-type SMT = ReaderT (Handle,Handle) (StateT (Integer,[TypeRep]) IO)
+type SMT = ReaderT (Handle,Handle) (StateT (Integer,[TypeRep],Map T.Text TypeRep) IO)
 
 -- | Haskell types which can be represented in SMT
 class SMTType t where
@@ -285,30 +286,31 @@ setOption opt = putRequest $ L.List $ [L.Symbol "set-option"]
                                          ,L.Symbol $ if v then "true" else "false"])
 
 -- | Create a new named variable
-varNamed :: SMTType t => Text -> SMT (SMTExpr t)
+varNamed :: (SMTType t,Typeable t) => Text -> SMT (SMTExpr t)
 varNamed name = mfix (\e -> varNamed' (getUndef e) name)
 
-varNamed' :: SMTType t => t -> Text -> SMT (SMTExpr t)
+varNamed' :: (SMTType t,Typeable t) => t -> Text -> SMT (SMTExpr t)
 varNamed' u name = do
   let sort = getSort u
       tps = declareType u
+  modify $ \(c,decl,mp) -> (c,decl,Map.insert name (typeOf u) mp)
   mapM_ (\(tp,act) -> do
-            (c,decl) <- get
+            (c,decl,_) <- get
             if Prelude.elem tp decl
               then return ()
               else (do
                        act
-                       modify (\(c',decl') -> (c',tp:decl'))
+                       modify (\(c',decl',mp') -> (c',tp:decl',mp'))
                    )
         ) (Prelude.reverse tps)
   declareFun name [] sort
   return (Var name)
 
 -- | Create a fresh new variable
-var :: SMTType t => SMT (SMTExpr t)
+var :: (SMTType t,Typeable t) => SMT (SMTExpr t)
 var = do
-  (c,decl) <- get
-  put (c+1,decl)
+  (c,decl,mp) <- get
+  put (c+1,decl,mp)
   let name = T.pack $ "var"++show c
   res <- varNamed name
   return res
@@ -316,8 +318,8 @@ var = do
 -- | Create a new uninterpreted function
 fun :: (Args a b,SMTType r) => SMT (SMTExpr (SMTFun a b r))
 fun = do
-  (c,decl) <- get
-  put (c+1,decl)
+  (c,decl,mp) <- get
+  put (c+1,decl,mp)
   let name = T.pack $ "fun"++show c
       res = Fun name
       
@@ -335,8 +337,8 @@ fun = do
 -- | Define a new function with a body
 defFun :: (Args a b,SMTType r) => (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a b r))
 defFun f = do
-  (c,decl) <- get
-  put (c+1,decl)
+  (c,decl,mp) <- get
+  put (c+1,decl,mp)
   let name = T.pack $ "fun"++show c
       res = Fun name
       
@@ -555,7 +557,7 @@ withSMTSolver solver f = do
                                  res <- f
                                  putRequest (L.List [L.Symbol "exit"])
                                  return res
-                                ) (hin,hout)) (0,[])
+                                ) (hin,hout)) (0,[],Map.empty)
   hClose hin
   hClose hout
   terminateProcess handle
