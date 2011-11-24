@@ -87,6 +87,7 @@ data SMTExpr t where
   Tail :: SMTExpr [a] -> SMTExpr [a]
   Insert :: SMTExpr a -> SMTExpr [a] -> SMTExpr [a]
   Named :: SMTExpr a -> Text -> SMTExpr a
+  InternalFun :: [L.Lisp] -> SMTExpr (SMTFun (SMTExpr Bool) Bool Bool)
   deriving Typeable
 
 data Constructor a = Constructor Text
@@ -271,6 +272,7 @@ exprToLisp (Insert x xs) c = let (x',c') = exprToLisp x c
                              in (L.List [L.Symbol "insert",x',xs'],c'')
 exprToLisp (Named expr name) c = let (expr',c') = exprToLisp expr c
                                  in (L.List [L.Symbol "!",expr',L.Symbol ":named",L.Symbol name],c')
+exprToLisp (InternalFun args) c = (L.List (L.Symbol "_":args),c)
 
 firstJust :: [Maybe a] -> Maybe a
 firstJust [] = Nothing

@@ -1,5 +1,5 @@
 {-# LANGUAGE FlexibleInstances,OverloadedStrings,MultiParamTypeClasses,TemplateHaskell,RankNTypes #-}
-module Language.SMTLib2.Instances(lispToExprT,lispToExprU,getInterpolants) where
+module Language.SMTLib2.Instances(lispToExprT,lispToExprU,getInterpolants,getProof) where
 
 import Language.SMTLib2.Internals
 import Language.SMTLib2.TH
@@ -298,7 +298,24 @@ lispToExprU f g l
                 L.List (L.Symbol "*":args) -> Just $ f (Mult $ fmap (\arg -> (lispToExprT g arg :: SMTExpr Integer)) args)
                 L.List [L.Symbol "/",lhs,rhs] -> Just $ f (Div (lispToExprT g lhs) (lispToExprT g rhs))
                 L.List [L.Symbol "mod",lhs,rhs] -> Just $ f (Mod (lispToExprT g lhs) (lispToExprT g rhs))
+                L.List (L.Symbol fn:args) -> Just $ fnToExpr f g fn args
               ]
+
+fnToExpr :: (forall a. (SMTValue a,Typeable a) => SMTExpr a -> b)
+            -> (T.Text -> TypeRep)
+            -> Text -> [L.Lisp] -> b
+fnToExpr f g fn args = case splitTyConApp $ g fn of
+  (_,[targs,res]) -> withUndef res $ \res' -> case splitTyConApp targs of
+    (_,rargs) -> case rargs of
+      [] -> let [a0] = args in withUndef targs $ \t0' -> f $ asType res' $ App (Fun fn) (asType t0' $ lispToExprT g a0)
+      [t0,t1] -> let [a0,a1] = args in withUndef t0 $ \t0' ->
+        withUndef t1 $ \t1' -> f $ asType res' $ App (Fun fn) (asType t0' $ lispToExprT g a0,
+                                                               asType t1' $ lispToExprT g a1)
+      [t0,t1,t2] -> let [a0,a1,a2] = args in withUndef t0 $ \t0' ->
+        withUndef t1 $ \t1' -> 
+        withUndef t2 $ \t2' -> f $ asType res' $ App (Fun fn) (asType t0' $ lispToExprT g a0,
+                                                               asType t1' $ lispToExprT g a1,
+                                                               asType t2' $ lispToExprT g a2)
 
 fgcast :: (Typeable a,Typeable b) => L.Lisp -> c a -> c b
 fgcast l x = case gcast x of
@@ -328,11 +345,15 @@ lispToExprT g l = case unmangle l of
     L.List (L.Symbol "or":args) -> fgcast l $ Or (fmap (lispToExprT g) args)
     L.List [L.Symbol "not",arg] -> fgcast l $ Not $ lispToExprT g arg
     L.List [L.Symbol "let",L.List syms,arg] -> letToExpr g syms arg
+    L.List (L.Symbol fn:args) -> fnToExpr (fgcast l) g fn args
+    L.List [L.List (L.Symbol "_":args),expr] -> fgcast l $ App (InternalFun args) (lispToExprT g expr)
+    _ -> error $ "Cannot parse "++show l
     where
       replSymbol name name' (L.Symbol x)
         | x == name = L.Symbol name'
         | otherwise = L.Symbol x
       replSymbol name name' (L.List xs) = L.List (fmap (replSymbol name name') xs)
+      replSymbol _ _ x = x
       
       letToExpr g (L.List [L.Symbol name,expr]:rest) arg
         = case lispToExprU (\expr' -> Let expr' (\var@(Var name') -> letToExpr (\txt -> if txt==name'
@@ -348,3 +369,19 @@ getInterpolants exprs = do
   putRequest (L.List (L.Symbol "get-interpolants":fmap (\e -> let (r,_) = exprToLisp e 0 in r) exprs))
   L.List res <- parseResponse
   return $ fmap (\l -> lispToExprT (\name -> mp Map.! name) l) res
+
+getProof :: SMT (SMTExpr Bool)
+getProof = do
+  (_,_,mp) <- get
+  let mp' = Map.union mp commonTheorems
+  putRequest (L.List [L.Symbol "get-proof"])
+  res <- parseResponse
+  return $ lispToExprT (\name -> case Map.lookup name mp' of
+                                      Nothing -> error $ "Failed to find a definition for "++show name
+                                      Just n -> n
+                       ) res
+
+commonTheorems :: Map T.Text TypeRep
+commonTheorems = Map.fromList
+  [(T.pack "|unit-resolution|",typeOf (undefined :: (Bool,Bool,Bool) -> Bool))
+  ,(T.pack "asserted",typeOf (undefined :: Bool -> Bool))]
