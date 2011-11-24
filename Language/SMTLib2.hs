@@ -18,6 +18,7 @@ module Language.SMTLib2
          checkSat,
          getValue,
          comment,
+         getInterpolants,
          -- * Expressions
          var,varNamed,
          constant,let',

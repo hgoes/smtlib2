@@ -272,6 +272,11 @@ exprToLisp (Insert x xs) c = let (x',c') = exprToLisp x c
 exprToLisp (Named expr name) c = let (expr',c') = exprToLisp expr c
                                  in (L.List [L.Symbol "!",expr',L.Symbol ":named",L.Symbol name],c')
 
+firstJust :: [Maybe a] -> Maybe a
+firstJust [] = Nothing
+firstJust (Nothing:rest) = firstJust rest
+firstJust ((Just x):rest) = Just x
+
 instance L.ToLisp (SMTExpr t) where
   toLisp e = fst $ exprToLisp e 0
 
