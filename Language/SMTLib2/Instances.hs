@@ -281,7 +281,7 @@ lispToExprU f g l
                 L.List [L.Symbol "-",lhs,rhs] -> Just $ f (Minus (lispToExprT g lhs :: SMTExpr Integer) (lispToExprT g rhs))
                 L.List (L.Symbol "*":args) -> Just $ f (Mult $ fmap (\arg -> (lispToExprT g arg :: SMTExpr Integer)) args)
                 L.List [L.Symbol "/",lhs,rhs] -> Just $ f (Div (lispToExprT g lhs) (lispToExprT g rhs))
-                L.List [L.Symbol "mod",lhs,rhs] -> Just $ f (Div (lispToExprT g lhs) (lispToExprT g rhs))
+                L.List [L.Symbol "mod",lhs,rhs] -> Just $ f (Mod (lispToExprT g lhs) (lispToExprT g rhs))
               ]
 
 fgcast :: (Typeable a,Typeable b) => L.Lisp -> c a -> c b
@@ -307,7 +307,7 @@ lispToExprT g l = case unmangle l of
     L.List [L.Symbol "-",lhs,rhs] -> fgcast l $ Minus (lispToExprT g lhs :: SMTExpr Integer) (lispToExprT g rhs)
     L.List (L.Symbol "*":args) -> fgcast l $ Mult (fmap (\arg -> (lispToExprT g arg :: SMTExpr Integer)) args)
     L.List [L.Symbol "/",lhs,rhs] -> fgcast l $ Div (lispToExprT g lhs) (lispToExprT g rhs)
-    L.List [L.Symbol "mod",lhs,rhs] -> fgcast l $ Div (lispToExprT g lhs) (lispToExprT g rhs)
+    L.List [L.Symbol "mod",lhs,rhs] -> fgcast l $ Mod (lispToExprT g lhs) (lispToExprT g rhs)
     L.List (L.Symbol "and":args) -> fgcast l $ And (fmap (lispToExprT g) args)
     L.List (L.Symbol "or":args) -> fgcast l $ Or (fmap (lispToExprT g) args)
     L.List [L.Symbol "not",arg] -> fgcast l $ Not $ lispToExprT g arg
