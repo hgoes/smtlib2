@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances,MultiParamTypeClasses,FunctionalDependencies #-}
+{-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances,MultiParamTypeClasses,FunctionalDependencies,RankNTypes,DeriveDataTypeable #-}
 module Language.SMTLib2.Internals where
 
 import Data.Attoparsec
@@ -86,6 +86,7 @@ data SMTExpr t where
   Head :: SMTExpr [a] -> SMTExpr a
   Tail :: SMTExpr [a] -> SMTExpr [a]
   Insert :: SMTExpr a -> SMTExpr [a] -> SMTExpr [a]
+  deriving Typeable
 
 data Constructor a = Constructor Text
 
