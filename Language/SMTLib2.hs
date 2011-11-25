@@ -36,7 +36,9 @@ module Language.SMTLib2
          -- ** Arrays
          select,store,arrayConst,unmangleArray,
          -- ** Bitvectors
-         bvadd,bvsub,bvmul,
+         bvadd,bvsub,bvmul,bvurem,bvsrem,
+         bvule,bvult,bvuge,bvugt,
+         bvsle,bvslt,bvsge,bvsgt,
          -- ** Functions
          fun,app,defFun,
          -- ** Data types

@@ -450,10 +450,23 @@ unmangleArray b expr = mapM (\i -> do
                                 return (i,v)
                             ) (range b) >>= return.array b
 
-bvadd,bvsub,bvmul :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
+bvadd,bvsub,bvmul,bvurem,bvsrem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
 bvadd = BVAdd
 bvsub = BVSub
 bvmul = BVMul
+bvurem = BVURem
+bvsrem = BVSRem
+
+bvule,bvult,bvuge,bvugt,
+  bvsle,bvslt,bvsge,bvsgt :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
+bvule = BVULE
+bvult = BVULT
+bvuge = BVUGE
+bvugt = BVUGT
+bvsle = BVSLE
+bvslt = BVSLT
+bvsge = BVSGE
+bvsgt = BVSGT
 
 forAll,exists :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
 forAll = Forall
