@@ -17,6 +17,8 @@ import Data.Bits
 import Data.Typeable
 import Data.Foldable (foldlM)
 import Data.Map as Map hiding (assocs)
+import Data.Set as Set
+import Data.List (genericReplicate)
 
 type SMT = ReaderT (Handle,Handle) (StateT (Integer,[TypeRep],Map T.Text TypeRep) IO)
 
@@ -88,6 +90,7 @@ data SMTExpr t where
   Insert :: SMTExpr a -> SMTExpr [a] -> SMTExpr [a]
   Named :: SMTExpr a -> Text -> SMTExpr a
   InternalFun :: [L.Lisp] -> SMTExpr (SMTFun (SMTExpr Bool) Bool Bool)
+  Undefined :: SMTExpr a
   deriving Typeable
 
 data Constructor a = Constructor Text
@@ -614,3 +617,56 @@ named expr = do
   put (c+1,decl,mp)
   let name = T.pack $ "named"++show c
   return (Named expr name,Var name)
+
+getVars :: SMTExpr a -> Set T.Text
+getVars (Var name) = Set.singleton name
+getVars (Const _) = Set.empty
+getVars (Eq l r) = Set.union (getVars l) (getVars r)
+getVars (Ge l r) = Set.union (getVars l) (getVars r)
+getVars (Gt l r) = Set.union (getVars l) (getVars r)
+getVars (Le l r) = Set.union (getVars l) (getVars r)
+getVars (Lt l r) = Set.union (getVars l) (getVars r)
+getVars (Distinct es) = Set.unions (fmap getVars es)
+getVars (Plus es) = Set.unions (fmap getVars es)
+getVars (Minus l r) = Set.union (getVars l) (getVars r)
+getVars (Mult es) = Set.unions (fmap getVars es)
+getVars (Div l r) = Set.union (getVars l) (getVars r)
+getVars (Mod l r) = Set.union (getVars l) (getVars r)
+getVars (Divide l r) = Set.union (getVars l) (getVars r)
+getVars (Neg e) = getVars e
+getVars (Abs e) = getVars e
+getVars (ITE c y n) = Set.unions [getVars c,getVars y,getVars n]
+getVars (And es) = Set.unions (fmap getVars es)
+getVars (Or es) = Set.unions (fmap getVars es)
+getVars (XOr l r) = Set.union (getVars l) (getVars r)
+getVars (Implies l r) = Set.union (getVars l) (getVars r)
+getVars (Not e) = getVars e
+getVars (Select l r) = Set.union (getVars l) (getVars r)
+getVars (Store a i v) = Set.unions [getVars a,getVars i,getVars v]
+getVars (BVAdd l r) = Set.union (getVars l) (getVars r)
+getVars (BVSub l r) = Set.union (getVars l) (getVars r)
+getVars (BVMul l r) = Set.union (getVars l) (getVars r)
+getVars (BVURem l r) = Set.union (getVars l) (getVars r)
+getVars (BVSRem l r) = Set.union (getVars l) (getVars r)
+getVars (BVULE l r) = Set.union (getVars l) (getVars r)
+getVars (BVULT l r) = Set.union (getVars l) (getVars r)
+getVars (BVUGE l r) = Set.union (getVars l) (getVars r)
+getVars (BVUGT l r) = Set.union (getVars l) (getVars r)
+getVars (BVSLE l r) = Set.union (getVars l) (getVars r)
+getVars (BVSLT l r) = Set.union (getVars l) (getVars r)
+getVars (BVSGE l r) = Set.union (getVars l) (getVars r)
+getVars (BVSGT l r) = Set.union (getVars l) (getVars r)
+getVars (Forall f) = getVars (f $ allOf Undefined)
+getVars (ForallList n f) = getVars (f $ genericReplicate n (allOf Undefined))
+getVars (Exists f) = getVars (f $ allOf Undefined)
+getVars (Let x f) = Set.union (getVars x) (getVars $ f Undefined)
+getVars (Fun name) = Set.singleton name
+getVars (App f arg) = Set.union (getVars f) (foldExprs (\s e -> Set.union s (getVars e)) Set.empty arg)
+getVars (ConTest _ e) = getVars e
+getVars (FieldSel _ e) = getVars e
+getVars (Head e) = getVars e
+getVars (Tail e) = getVars e
+getVars (Insert x xs) = Set.union (getVars x) (getVars xs)
+getVars (Named x _) = getVars x
+getVars (InternalFun _) = Set.empty
+getVars Undefined = Set.empty
