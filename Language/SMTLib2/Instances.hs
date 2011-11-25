@@ -111,12 +111,27 @@ instance SMTType Word8 where
   getSort _ = bv 8
   declareType u = [(typeOf u,return ())]
 
-getBVValue :: Num a => L.Lisp -> Maybe a
-getBVValue (L.Number (L.I v)) = Just $ fromInteger v
+withUndef1 :: (a -> g a) -> g a
+withUndef1 f = f undefined
+
+getBVValue :: (Num a,Bits a,Read a) => L.Lisp -> Maybe a
+getBVValue (L.Number (L.I v)) = Just (fromInteger v)
 getBVValue (L.Symbol s) = case T.unpack s of
-  '#':'b':rest -> let [(v,_)] = readInt 2 (\x -> x=='0' || x=='1') (\x -> if x=='0' then 0 else 1) rest in Just v
-  '#':'x':rest -> let [(v,_)] = readHex rest in Just v
+  '#':'b':rest -> withUndef1 (\u -> if Prelude.length rest == bitSize u
+                                    then (let [(v,_)] = readInt 2 (\x -> x=='0' || x=='1') (\x -> if x=='0' then 0 else 1) rest 
+                                          in Just v)
+                                    else Nothing)
+  '#':'x':rest -> withUndef1 (\u -> if Prelude.length rest == ((bitSize u) `div` 16)
+                                    then (let [(v,_)] = readHex rest
+                                          in Just v)
+                                    else Nothing)
   _ -> Nothing
+getBVValue (L.List [L.Symbol "_",L.Symbol val,L.Number (L.I bits)])
+  = withUndef1 (\u -> if bits == (fromIntegral $ bitSize u)
+                      then (case T.unpack val of
+                               'b':'v':num -> Just (read num)
+                               _ -> Nothing)
+                      else Nothing)
 getBVValue _ = Nothing
 
 putBVValue :: Bits a => a -> L.Lisp
@@ -280,8 +295,13 @@ withUndef :: TypeRep -> (forall a. (SMTValue a,Typeable a) => a -> b) -> b
 withUndef rep f
   | rep == typeOf (undefined :: Bool) = f (undefined::Bool)
   | rep == typeOf (undefined :: Integer) = f (undefined::Integer)
+  | rep == typeOf (undefined :: Word8) = f (undefined::Word8)
+  | rep == typeOf (undefined :: Word16) = f (undefined::Word16)
+  | rep == typeOf (undefined :: Word32) = f (undefined::Word32)
+  | rep == typeOf (undefined :: Word64) = f (undefined::Word64)
+  | otherwise = error $ "Language.SMTLib2.Instances.withUndef not implemented for "++show rep
 
-asType :: a -> SMTExpr a -> SMTExpr a
+asType :: a -> g a -> g a
 asType = const id
 
 lispToExprU :: (forall a. (SMTValue a,Typeable a) => SMTExpr a -> b)
@@ -290,6 +310,10 @@ lispToExprU :: (forall a. (SMTValue a,Typeable a) => SMTExpr a -> b)
 lispToExprU f g l
   = firstJust [(unmangle l :: Maybe Bool) >>= return.f.Const
               ,(unmangle l :: Maybe Integer) >>= return.f.Const
+              ,(unmangle l :: Maybe Word8) >>= return.f.Const
+              ,(unmangle l :: Maybe Word16) >>= return.f.Const
+              ,(unmangle l :: Maybe Word32) >>= return.f.Const
+              ,(unmangle l :: Maybe Word64) >>= return.f.Const
               ,case l of
                 L.Symbol name -> withUndef (g name) $ \u -> Just $ f $ asType u (Var name)
                 L.List [L.Symbol "=",lhs,rhs] -> case lispToExprU (\lhs' -> f (Eq lhs' (lispToExprT g rhs))) g lhs of
@@ -304,8 +328,30 @@ lispToExprU f g l
                 L.List (L.Symbol "*":args) -> Just $ f (Mult $ fmap (\arg -> (lispToExprT g arg :: SMTExpr Integer)) args)
                 L.List [L.Symbol "/",lhs,rhs] -> Just $ f (Div (lispToExprT g lhs) (lispToExprT g rhs))
                 L.List [L.Symbol "mod",lhs,rhs] -> Just $ f (Mod (lispToExprT g lhs) (lispToExprT g rhs))
+                L.List (L.Symbol "and":exprs) -> Just $ f $ And $ fmap (lispToExprT g) exprs
+                L.List (L.Symbol "or":exprs) -> Just $ f $ Or $ fmap (lispToExprT g) exprs
+                L.List [L.Symbol "not",arg] -> Just $ f $ Not $ lispToExprT g arg
+                L.List [L.Symbol "bvule",lhs,rhs] -> Just $ f $ binBV BVULE g lhs rhs
+                L.List [L.Symbol "bvult",lhs,rhs] -> Just $ f $ binBV BVULT g lhs rhs
+                L.List [L.Symbol "bvuge",lhs,rhs] -> Just $ f $ binBV BVUGE g lhs rhs
+                L.List [L.Symbol "bvugt",lhs,rhs] -> Just $ f $ binBV BVUGT g lhs rhs
+                L.List [L.Symbol "bvsle",lhs,rhs] -> Just $ f $ binBV BVSLE g lhs rhs
+                L.List [L.Symbol "bvslt",lhs,rhs] -> Just $ f $ binBV BVSLT g lhs rhs
+                L.List [L.Symbol "bvsge",lhs,rhs] -> Just $ f $ binBV BVSGE g lhs rhs
+                L.List [L.Symbol "bvsgt",lhs,rhs] -> Just $ f $ binBV BVSGT g lhs rhs
                 L.List (L.Symbol fn:args) -> Just $ fnToExpr f g fn args
               ]
+
+asBV :: Typeable a => (forall b. (SMTBV b,Typeable b) => SMTExpr b -> c) -> SMTExpr a -> c
+asBV f e = case (gcast e :: Maybe (SMTExpr Word8)) of
+  Just r -> f r
+  Nothing -> case (gcast e :: Maybe (SMTExpr Word16)) of
+    Just r -> f r
+    Nothing -> case (gcast e :: Maybe (SMTExpr Word32)) of
+      Just r -> f r
+      Nothing -> case (gcast e :: Maybe (SMTExpr Word64)) of
+        Just r -> f r
+        Nothing -> error $ "Cannot treat expression of type "++show (typeOf e)++" as bitvector"
 
 fnToExpr :: (forall a. (SMTValue a,Typeable a) => SMTExpr a -> b)
             -> (T.Text -> TypeRep)
@@ -327,6 +373,13 @@ fgcast :: (Typeable a,Typeable b) => L.Lisp -> c a -> c b
 fgcast l x = case gcast x of
   Just r -> r
   Nothing -> error $ "Type error in expression "++show l
+
+binBV :: (forall a. (SMTBV a,Typeable a) => SMTExpr a -> SMTExpr a -> SMTExpr b) -> (T.Text -> TypeRep) -> L.Lisp -> L.Lisp -> SMTExpr b
+binBV f g lhs rhs = case lispToExprU (asBV $ \lhs' -> f lhs' (lispToExprT g rhs)) g lhs of
+  Just r -> r
+  Nothing -> case lispToExprU (asBV $ \rhs' -> f (lispToExprT g lhs) rhs') g rhs of
+    Just r -> r
+    Nothing -> error $ "Parsing bitvector expression failed"
 
 lispToExprT :: (SMTValue a,Typeable a) => (T.Text -> TypeRep) -> L.Lisp -> SMTExpr a
 lispToExprT g l = case unmangle l of
@@ -351,6 +404,14 @@ lispToExprT g l = case unmangle l of
     L.List (L.Symbol "or":args) -> fgcast l $ Or (fmap (lispToExprT g) args)
     L.List [L.Symbol "not",arg] -> fgcast l $ Not $ lispToExprT g arg
     L.List [L.Symbol "let",L.List syms,arg] -> letToExpr g syms arg
+    L.List [L.Symbol "bvule",lhs,rhs] -> fgcast l $ binBV BVULE g lhs rhs
+    L.List [L.Symbol "bvult",lhs,rhs] -> fgcast l $ binBV BVULT g lhs rhs
+    L.List [L.Symbol "bvuge",lhs,rhs] -> fgcast l $ binBV BVUGE g lhs rhs
+    L.List [L.Symbol "bvugt",lhs,rhs] -> fgcast l $ binBV BVUGT g lhs rhs
+    L.List [L.Symbol "bvsle",lhs,rhs] -> fgcast l $ binBV BVSLE g lhs rhs
+    L.List [L.Symbol "bvslt",lhs,rhs] -> fgcast l $ binBV BVSLT g lhs rhs
+    L.List [L.Symbol "bvsge",lhs,rhs] -> fgcast l $ binBV BVSGE g lhs rhs
+    L.List [L.Symbol "bvsgt",lhs,rhs] -> fgcast l $ binBV BVSGT g lhs rhs
     L.List (L.Symbol fn:args) -> fnToExpr (fgcast l) g fn args
     L.List [L.List (L.Symbol "_":args),expr] -> fgcast l $ App (InternalFun args) (lispToExprT g expr)
     _ -> error $ "Cannot parse "++show l
