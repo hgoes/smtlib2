@@ -104,6 +104,8 @@ data SMTOption
 class Args a b | a -> b where
   createArgs :: Integer -> (a,[(Text,L.Lisp)],Integer)
   unpackArgs :: a -> b -> Integer -> ([L.Lisp],Integer)
+  foldExprs :: (forall t. s -> SMTExpr t -> s) -> s -> a -> s
+  allOf :: (forall t. SMTExpr t) -> a
 
 instance SMTValue t => Eq (SMTExpr t) where
   (==) x y = (L.toLisp x) == (L.toLisp y)

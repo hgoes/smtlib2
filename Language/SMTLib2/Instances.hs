@@ -193,6 +193,8 @@ instance SMTType a => Args (SMTExpr a) a where
                  in (v1,[(n1,t1)],c+1)
   unpackArgs e _ c = let (e',c') = exprToLisp e c
                      in ([e'],c)
+  foldExprs f s x = f s x
+  allOf x = x
 
 instance (SMTType a,SMTType b) => Args (SMTExpr a,SMTExpr b) (a,b) where
   createArgs c = let n1 = T.pack $ "f"++show c
@@ -205,6 +207,8 @@ instance (SMTType a,SMTType b) => Args (SMTExpr a,SMTExpr b) (a,b) where
   unpackArgs (e1,e2) _ c = let (r1,c1) = exprToLisp e1 c
                                (r2,c2) = exprToLisp e2 c1
                            in ([r1,r2],c2)
+  foldExprs f s (e1,e2) = f (f s e1) e2
+  allOf x = (x,x)
 
 instance (SMTType a,SMTType b,SMTType c) => Args (SMTExpr a,SMTExpr b,SMTExpr c) (a,b,c) where
   createArgs c = let n1 = T.pack $ "f"++show c
@@ -221,6 +225,8 @@ instance (SMTType a,SMTType b,SMTType c) => Args (SMTExpr a,SMTExpr b,SMTExpr c)
                                   (r2,c2) = exprToLisp e2 c1
                                   (r3,c3) = exprToLisp e3 c2
                               in ([r1,r2,r3],c3)
+  foldExprs f s (e1,e2,e3) = f (f (f s e1) e2) e3
+  allOf x = (x,x,x)
 
 instance SMTType a => SMTType (Maybe a) where
   getSort u = L.List [L.Symbol "Maybe",getSort (undef u)]
