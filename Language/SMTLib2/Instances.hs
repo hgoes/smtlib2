@@ -121,7 +121,7 @@ getBVValue (L.Symbol s) = case T.unpack s of
                                     then (let [(v,_)] = readInt 2 (\x -> x=='0' || x=='1') (\x -> if x=='0' then 0 else 1) rest 
                                           in Just v)
                                     else Nothing)
-  '#':'x':rest -> withUndef1 (\u -> if Prelude.length rest == ((bitSize u) `div` 16)
+  '#':'x':rest -> withUndef1 (\u -> if Prelude.length rest == ((bitSize u) `div` 4)
                                     then (let [(v,_)] = readHex rest
                                           in Just v)
                                     else Nothing)
