@@ -18,7 +18,7 @@ import Data.Typeable
 import Data.Foldable (foldlM)
 import Data.Map as Map hiding (assocs)
 import Data.Set as Set
-import Data.List (genericReplicate)
+import Data.List as List (genericReplicate,mapAccumL)
 
 type SMT = ReaderT (Handle,Handle) (StateT (Integer,[TypeRep],Map T.Text TypeRep) IO)
 
@@ -81,6 +81,7 @@ data SMTExpr t where
   ForallList :: Args a b => Integer -> ([a] -> SMTExpr Bool) -> SMTExpr Bool
   Exists :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
   Let :: SMTType a => SMTExpr a -> (SMTExpr a -> SMTExpr b) -> SMTExpr b
+  Lets :: SMTType a => [SMTExpr a] -> ([SMTExpr a] -> SMTExpr b) -> SMTExpr b
   Fun :: (Args a b,SMTType r) => Text -> SMTExpr (SMTFun a b r)
   App :: (Args a b,SMTType r) => SMTExpr (SMTFun a b r) -> a -> SMTExpr r
   ConTest :: Constructor a -> SMTExpr a -> SMTExpr Bool
@@ -258,6 +259,12 @@ exprToLisp (Let x f) c = let (arg,nc) = exprToLisp x c
                          in (L.List [L.Symbol "let"
                                     ,L.List [L.List [L.Symbol name,arg]]
                                     ,arg'],nc')
+exprToLisp (Lets xs f) c = let (nc,xs') = List.mapAccumL (\cc x -> let (x',cc') = exprToLisp x cc
+                                                                       name = T.pack $ "l"++show cc'
+                                                                   in (cc'+1,(name,x'))) c xs
+                           in (L.List [L.Symbol "let"
+                                      ,L.List [L.List [L.Symbol name,arg]
+                                              | (name,arg) <- xs']],nc)
 exprToLisp (Fun name) c = (L.Symbol name,c)
 exprToLisp (App f x) c = let (_,bu,ru) = getFunUndef f
                              (f',c') = exprToLisp f c
@@ -474,6 +481,9 @@ exists = Exists
 
 let' :: SMTType a => SMTExpr a -> (SMTExpr a -> SMTExpr b) -> SMTExpr b
 let' = Let
+
+lets :: SMTType a => [SMTExpr a] -> ([SMTExpr a] -> SMTExpr b) -> SMTExpr b
+lets = Lets
 
 forAllList :: Args a b => Integer -> ([a] -> SMTExpr Bool) -> SMTExpr Bool
 forAllList = ForallList

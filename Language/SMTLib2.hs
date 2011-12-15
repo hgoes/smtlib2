@@ -21,7 +21,7 @@ module Language.SMTLib2
          getInterpolants,getProof,
          -- * Expressions
          var,varNamed,
-         constant,let',
+         constant,let',lets,
          named,
          -- ** Basic logic
          (.==.),
