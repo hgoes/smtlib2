@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances,MultiParamTypeClasses,FunctionalDependencies,RankNTypes,DeriveDataTypeable #-}
+{-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances,MultiParamTypeClasses,FunctionalDependencies,RankNTypes,DeriveDataTypeable,TypeSynonymInstances #-}
 module Language.SMTLib2.Internals where
 
 import Data.Attoparsec
@@ -104,6 +104,28 @@ data SMTOption
      | ProduceModels Bool -- ^ Produce a satisfying assignment after each successful checkSat
      | ProduceProofs Bool -- ^ Produce a proof of unsatisfiability after each failed checkSat
      deriving (Show,Eq,Ord)
+
+class SMTInfo i r | i -> r where
+  getInfo :: i -> SMT r
+
+data SMTSolverName = SMTSolverName deriving (Show,Eq,Ord)
+
+instance SMTInfo SMTSolverName String where
+  getInfo _ = do
+    putRequest (L.List [L.Symbol "get-info",L.Symbol ":name"])
+    res <- parseResponse
+    case res of
+      L.List [L.Symbol ":name",L.String name] -> return $ T.unpack name
+
+data SMTSolverVersion = SMTSolverVersion deriving (Show,Eq,Ord)
+
+instance SMTInfo SMTSolverVersion String where
+  getInfo _ = do
+    putRequest (L.List [L.Symbol "get-info",L.Symbol ":version"])
+    res <- parseResponse
+    case res of
+      L.List [L.Symbol ":version",L.String name] -> return $ T.unpack name
+
 
 class Args a b | a -> b where
   createArgs :: Integer -> (a,[(Text,L.Lisp)],Integer)

@@ -14,6 +14,7 @@ module Language.SMTLib2
          -- * Environment
          withSMTSolver,
          setOption,setLogic,
+         SMTInfo(..),SMTSolverName(..),SMTSolverVersion(..),
          assert,stack,
          checkSat,
          getValue,
