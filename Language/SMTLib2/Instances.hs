@@ -451,6 +451,7 @@ getProof = do
 commonTheorems :: Map T.Text TypeRep
 commonTheorems = Map.fromList
   [(T.pack "|unit-resolution|",typeOf (undefined :: (Bool,Bool,Bool) -> Bool))
+  ,(T.pack "|and-elim|",typeOf (undefined :: (Bool,Bool) -> Bool))
   ,(T.pack "asserted",typeOf (undefined :: Bool -> Bool))
   ,(T.pack "monotonicity",typeOf (undefined :: (Bool,Bool) -> Bool))
   ,(T.pack "trans",typeOf (undefined :: (Bool,Bool,Bool) -> Bool))
