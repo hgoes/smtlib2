@@ -20,6 +20,7 @@ import Data.Map as Map hiding (assocs)
 import Data.Set as Set
 import Data.List as List (genericReplicate,mapAccumL)
 
+-- | The SMT monad used for communating with the SMT solver
 type SMT = ReaderT (Handle,Handle) (StateT (Integer,[TypeRep],Map T.Text TypeRep) IO)
 
 -- | Haskell types which can be represented in SMT
@@ -32,6 +33,7 @@ class SMTType t => SMTValue t where
   unmangle :: L.Lisp -> Maybe t
   mangle :: t -> L.Lisp
 
+-- | A type class for all types which support arithmetic operations in SMT
 class (SMTValue t,Num t) => SMTArith t
 
 class (SMTValue t,Bits t) => SMTBV t
@@ -94,8 +96,11 @@ data SMTExpr t where
   Undefined :: SMTExpr a
   deriving Typeable
 
+-- | Represents a constructor of a datatype /a/
+--   Can be obtained by using the template haskell extension module
 data Constructor a = Constructor Text
 
+-- | Represents a field of the datatype /a/ of the type /f/
 data Field a f = Field Text
 
 -- | Options controling the behaviour of the SMT solver
@@ -105,9 +110,11 @@ data SMTOption
      | ProduceProofs Bool -- ^ Produce a proof of unsatisfiability after each failed checkSat
      deriving (Show,Eq,Ord)
 
+-- | A piece of information of type /r/ that can be obtained by the SMT solver
 class SMTInfo i r | i -> r where
   getInfo :: i -> SMT r
 
+-- | The name of the SMT solver
 data SMTSolverName = SMTSolverName deriving (Show,Eq,Ord)
 
 instance SMTInfo SMTSolverName String where
@@ -117,6 +124,7 @@ instance SMTInfo SMTSolverName String where
     case res of
       L.List [L.Symbol ":name",L.String name] -> return $ T.unpack name
 
+-- | The version of the SMT solver
 data SMTSolverVersion = SMTSolverVersion deriving (Show,Eq,Ord)
 
 instance SMTInfo SMTSolverVersion String where
@@ -125,7 +133,6 @@ instance SMTInfo SMTSolverVersion String where
     res <- parseResponse
     case res of
       L.List [L.Symbol ":version",L.String name] -> return $ T.unpack name
-
 
 class Args a b | a -> b where
   createArgs :: Integer -> (a,[(Text,L.Lisp)],Integer)
@@ -458,21 +465,24 @@ xor,(.=>.) :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
 xor = XOr
 (.=>.) = Implies
 
+-- | Negates a boolean expression
 not' :: SMTExpr Bool -> SMTExpr Bool
 not' = Not
 
+-- | Extracts an element of an array by its index
 select :: SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v
 select = Select
 
+-- | The expression @store arr i v@ stores the value /v/ in the array /arr/ at position /i/ and returns the resulting new array.
 store :: SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v -> SMTExpr (Array i v)
 store = Store
 
-
-
+-- | Create a boolean expression that encodes that the array is equal to the supplied constant array.
 arrayConst :: (SMTValue i,SMTValue v,Ix i) => SMTExpr (Array i v) -> Array i v -> SMTExpr Bool
 arrayConst expr arr = and' [(select expr (constant i)) .==. (constant v)
                            | (i,v) <- assocs arr ]
 
+-- | Extract all values of an array by giving the range of indices.
 unmangleArray :: (Ix i,SMTValue i,SMTValue v) => (i,i) -> SMTExpr (Array i v) -> SMT (Array i v)
 unmangleArray b expr = mapM (\i -> do
                                 v <- getValue (select expr (constant i))
@@ -501,21 +511,29 @@ forAll,exists :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
 forAll = Forall
 exists = Exists
 
+-- | Binds an expression to a variable.
+--   Can be used to prevent blowups in the command stream if expressions are used multiple times.
+--   @let' x f@ is functionally equivalent to @f x@.
 let' :: SMTType a => SMTExpr a -> (SMTExpr a -> SMTExpr b) -> SMTExpr b
 let' = Let
 
+-- | Like 'let'', but can define multiple variables of the same type.
 lets :: SMTType a => [SMTExpr a] -> ([SMTExpr a] -> SMTExpr b) -> SMTExpr b
 lets = Lets
 
 forAllList :: Args a b => Integer -> ([a] -> SMTExpr Bool) -> SMTExpr Bool
 forAllList = ForallList
 
+-- | Checks if the expression is formed a specific constructor.
 is :: SMTType a => SMTExpr a -> Constructor a -> SMTExpr Bool
 is e con = ConTest con e
 
+-- | Access a field of an expression
 (.#) :: SMTType a => SMTExpr a -> Field a f -> SMTExpr f
 (.#) e f = FieldSel f e
 
+-- | After a successful 'checkSat' call, extract values from the generated model.
+--   The 'ProduceModels' option must be enabled for this.
 getValue :: SMTValue t => SMTExpr t -> SMT t
 getValue expr = do
   clearInput
@@ -528,13 +546,12 @@ getValue expr = do
       Just r -> return r
     _ -> error $ "unknown response to get-value: "++show val
 
+-- | Asserts that a boolean expression is true
 assert :: SMTExpr Bool -> SMT ()
-assert expr = assert' (L.toLisp expr)
+assert expr = putRequest $ L.List [L.Symbol "assert"
+                                  ,L.toLisp expr]
 
-assert' :: L.Lisp -> SMT ()
-assert' expr = putRequest $ L.List [L.Symbol "assert"
-                                   ,expr]
-
+-- | Sets the logic used for the following program (Not needed for many solvers).
 setLogic :: Text -> SMT ()
 setLogic name = putRequest $ L.List [L.Symbol "set-logic"
                                     ,L.Symbol name]
@@ -572,6 +589,7 @@ args :: [L.Lisp] -> L.Lisp
 args [] = L.Symbol "()"
 args xs = L.List xs
 
+-- | Check if the model is satisfiable (e.g. if there is a value for each variable so that every assertion holds)
 checkSat :: SMT Bool
 checkSat = do
   (_,hout) <- ask
@@ -585,6 +603,7 @@ checkSat = do
     "unsat\r" -> return False
     _ -> error $ "unknown check-sat response: "++show res
   
+-- | Perform a stacked operation, meaning that every assertion and declaration made in it will be undone after the operation.
 stack :: SMT a -> SMT a
 stack act = do
   putRequest (L.List [L.Symbol "push"])
@@ -592,6 +611,8 @@ stack act = do
   putRequest (L.List [L.Symbol "pop"])
   return res
 
+-- | Insert a comment into the SMTLib2 command stream.
+--   If you aren't looking at the command stream for debugging, this will do nothing.
 comment :: String -> SMT ()
 comment msg = do
   (hin,_) <- ask
@@ -656,6 +677,7 @@ parseResponse = do
       continue (Fail str ctx msg) = error $ "Error parsing "++show str++" response in "++show ctx++": "++msg
   liftIO $ continue $ parse L.lisp str
 
+-- | Given an arbitrary expression, this creates a named version of it and a name to reference it later on.
 named :: SMTType a => SMTExpr a -> SMT (SMTExpr a,SMTExpr a)
 named expr = do
   (c,decl,mp) <- get
