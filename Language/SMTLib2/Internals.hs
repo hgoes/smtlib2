@@ -36,8 +36,10 @@ class SMTType t => SMTValue t where
 -- | A type class for all types which support arithmetic operations in SMT
 class (SMTValue t,Num t) => SMTArith t
 
+-- | A type class for all types which support bitvector operations in SMT
 class (SMTValue t,Bits t) => SMTBV t
 
+-- | Represents a function in the SMT solver. /a/ is the argument of the function in SMT terms, /b/ is the argument in haskell types and /r/ is the result type of the function.
 data SMTFun a b r = SMTFun
 
 -- | An abstract SMT expression
@@ -105,7 +107,7 @@ data Field a f = Field Text
 
 -- | Options controling the behaviour of the SMT solver
 data SMTOption
-     = PrintSuccess Bool -- ^ Whether or not to print "success" after each operation
+     = PrintSuccess Bool -- ^ Whether or not to print \"success\" after each operation
      | ProduceModels Bool -- ^ Produce a satisfying assignment after each successful checkSat
      | ProduceProofs Bool -- ^ Produce a proof of unsatisfiability after each failed checkSat
      deriving (Show,Eq,Ord)
@@ -134,6 +136,7 @@ instance SMTInfo SMTSolverVersion String where
     case res of
       L.List [L.Symbol ":version",L.String name] -> return $ T.unpack name
 
+-- | Instances of this class may be used as arguments for constructed functions and quantifiers.
 class Args a b | a -> b where
   createArgs :: Integer -> (a,[(Text,L.Lisp)],Integer)
   unpackArgs :: a -> b -> Integer -> ([L.Lisp],Integer)
@@ -419,10 +422,20 @@ constant = Const
 
 infix 4 .==.
 
-(.>=.),(.>.),(.<=.),(.<.) :: (SMTType a,Num a) => SMTExpr a -> SMTExpr a -> SMTExpr Bool
+-- | Greater-or-equal function
+(.>=.) :: (SMTType a,Num a) => SMTExpr a -> SMTExpr a -> SMTExpr Bool
 (.>=.) = Ge
+
+-- | Greater-than function
+(.>.) :: (SMTType a,Num a) => SMTExpr a -> SMTExpr a -> SMTExpr Bool
 (.>.) = Gt
+
+-- | Less-or-equal function
+(.<=.) :: (SMTType a,Num a) => SMTExpr a -> SMTExpr a -> SMTExpr Bool
 (.<=.) = Le
+
+-- | Less-than function
+(.<.) :: (SMTType a,Num a) => SMTExpr a -> SMTExpr a -> SMTExpr Bool
 (.<.) = Lt
 
 infix 4 .>=.
@@ -432,37 +445,65 @@ infix 4 .<.
 distinct :: SMTType a => [SMTExpr a] -> SMTExpr Bool
 distinct = Distinct
 
-plus,mult :: (SMTArith a) => [SMTExpr a] -> SMTExpr a
+-- | Calculate the sum of arithmetic expressions
+plus :: (SMTArith a) => [SMTExpr a] -> SMTExpr a
 plus = Plus
+
+-- | Calculate the product of arithmetic expressions
+mult :: (SMTArith a) => [SMTExpr a] -> SMTExpr a
 mult = Mult
 
+-- | Subtracts two expressions
 minus :: (SMTArith a) => SMTExpr a -> SMTExpr a -> SMTExpr a
 minus = Minus
 
-div',mod' :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
+-- | Divide an arithmetic expression by another
+div' :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
 div' = Div
+
+-- | Perform a modulo operation on an arithmetic expression
+mod' :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
 mod' = Mod
 
+-- | Divide a rational expression by another one
 divide :: SMTExpr Rational -> SMTExpr Rational -> SMTExpr Rational
 divide = Divide
 
-neg,abs' :: SMTArith a => SMTExpr a -> SMTExpr a
+-- | For an expression @x@, this returns the expression @-x@.
+neg :: SMTArith a => SMTExpr a -> SMTExpr a
 neg = Neg
+
+-- | Calculate the absolute (non-negative) value of an expression.
+abs' :: SMTArith a => SMTExpr a -> SMTExpr a
 abs' = Abs
 
-ite :: (SMTType a) => SMTExpr Bool -> SMTExpr a -> SMTExpr a -> SMTExpr a
+-- | If-then-else construct
+ite :: (SMTType a) => SMTExpr Bool -- ^ If this expression is true
+       -> SMTExpr a -- ^ Then return this expression
+       -> SMTExpr a -- ^ Else this one
+       -> SMTExpr a
 ite = ITE
 
-and',or' :: [SMTExpr Bool] -> SMTExpr Bool
+-- | Boolean conjunction
+and' :: [SMTExpr Bool] -> SMTExpr Bool
 and' [] = Const True
 and' [x] = x
 and' xs = And xs
+
+-- | Boolean disjunction
+or' :: [SMTExpr Bool] -> SMTExpr Bool
 or' [] = Const False
 or' [x] = x
 or' xs = Or xs
 
-xor,(.=>.) :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
+-- | Exclusive or: Return true if exactly one argument is true.
+xor :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
 xor = XOr
+
+-- | Implication
+(.=>.) :: SMTExpr Bool -- ^ If this expression is true
+          -> SMTExpr Bool -- ^ This one must be as well
+          -> SMTExpr Bool
 (.=>.) = Implies
 
 -- | Negates a boolean expression
@@ -489,26 +530,64 @@ unmangleArray b expr = mapM (\i -> do
                                 return (i,v)
                             ) (range b) >>= return.array b
 
-bvadd,bvsub,bvmul,bvurem,bvsrem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
+-- | Bitvector addition
+bvadd :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
 bvadd = BVAdd
+
+-- | Bitvector subtraction
+bvsub :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
 bvsub = BVSub
+
+-- | Bitvector multiplication
+bvmul :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
 bvmul = BVMul
+
+-- | Bitvector unsigned remainder
+bvurem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
 bvurem = BVURem
+
+-- | Bitvector signed remainder
+bvsrem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
 bvsrem = BVSRem
 
-bvule,bvult,bvuge,bvugt,
-  bvsle,bvslt,bvsge,bvsgt :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
+-- | Bitvector unsigned less-or-equal
+bvule :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
 bvule = BVULE
+
+-- | Bitvector unsigned less-than
+bvult :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
 bvult = BVULT
+
+-- | Bitvector unsigned greater-or-equal
+bvuge :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
 bvuge = BVUGE
+
+-- | Bitvector unsigned greater-than
+bvugt :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
 bvugt = BVUGT
+
+-- | Bitvector signed less-or-equal
+bvsle :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
 bvsle = BVSLE
+
+-- | Bitvector signed less-than
+bvslt :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
 bvslt = BVSLT
+
+-- | Bitvector signed greater-or-equal
+bvsge :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
 bvsge = BVSGE
+
+-- | Bitvector signed greater-than
+bvsgt :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
 bvsgt = BVSGT
 
-forAll,exists :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
+-- | If the supplied function returns true for all possible values, the forall quantification returns true.
+forAll :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
 forAll = Forall
+
+-- | If the supplied function returns true for at least one possible value, the exists quantification returns true.
+exists :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
 exists = Exists
 
 -- | Binds an expression to a variable.
@@ -521,7 +600,10 @@ let' = Let
 lets :: SMTType a => [SMTExpr a] -> ([SMTExpr a] -> SMTExpr b) -> SMTExpr b
 lets = Lets
 
-forAllList :: Args a b => Integer -> ([a] -> SMTExpr Bool) -> SMTExpr Bool
+-- | Like 'forAll', but can quantify over more than one variable (of the same type)
+forAllList :: Args a b => Integer -- ^ Number of variables to quantify
+              -> ([a] -> SMTExpr Bool) -- ^ Function which takes a list of the quantified variables
+              -> SMTExpr Bool
 forAllList = ForallList
 
 -- | Checks if the expression is formed a specific constructor.
@@ -618,16 +700,22 @@ comment msg = do
   (hin,_) <- ask
   liftIO $ IO.hPutStrLn hin $ ';':msg
 
+-- | Takes the first element of a list
 head' :: SMTExpr [a] -> SMTExpr a
 head' = Head
 
+-- | Drops the first element from a list
 tail' :: SMTExpr [a] -> SMTExpr [a]
 tail' = Tail
 
+-- | Put a new element at the front of the list
 insert' :: SMTExpr a -> SMTExpr [a] -> SMTExpr [a]
 insert' = Insert
 
-withSMTSolver :: String -> SMT a -> IO a
+-- | Spawn a shell command that is used as a SMT solver via stdin/-out to process the given SMT operation.
+withSMTSolver :: String -- ^ The shell command to execute
+                 -> SMT a -- ^ The SMT operation to perform
+                 -> IO a
 withSMTSolver solver f = do
   let cmd = CreateProcess { cmdspec = ShellCommand solver
                           , cwd = Nothing

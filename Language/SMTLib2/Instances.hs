@@ -430,6 +430,8 @@ lispToExprT g l = case unmangle l of
           Just r -> r
       letToExpr g [] arg = lispToExprT g arg
 
+-- | Perform craig interpolation (<http://en.wikipedia.org/wiki/Craig_interpolation>) on the given terms and returns interpolants for them.
+--   Note that not all SMT solvers support this.
 getInterpolants :: [SMTExpr Bool] -> SMT [SMTExpr Bool]
 getInterpolants exprs = do
   (_,_,mp) <- get
@@ -437,6 +439,7 @@ getInterpolants exprs = do
   L.List res <- parseResponse
   return $ fmap (\l -> lispToExprT (\name -> mp Map.! name) l) res
 
+-- | After an unsuccessful 'checkSat' this method extracts a proof from the SMT solver that the instance is unsatisfiable.
 getProof :: SMT (SMTExpr Bool)
 getProof = do
   (_,_,mp) <- get
