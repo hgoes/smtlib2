@@ -1,4 +1,6 @@
 {-# LANGUAGE TemplateHaskell,OverloadedStrings #-}
+{- | This module can be used to automatically lift haskell data-types into the SMT realm.
+ -}
 module Language.SMTLib2.TH 
        (deriveSMT,
         constructor,
@@ -13,6 +15,8 @@ import Data.Typeable
 
 type ExtrType = [(Name,[(Name,Type)])]
 
+-- | Given a data-type, this function derives an instance of both 'SMTType' and 'SMTValue' for it.
+--   Example: @ $(deriveSMT 'MyType) @
 deriveSMT :: Name -> Q [Dec]
 deriveSMT name = do
   tp <- extractDataType name
@@ -31,12 +35,14 @@ endType :: Type -> Type
 endType (AppT _ tp) = endType tp
 endType tp = tp
 
+-- | Get the SMT representation for a given constructor.
 constructor :: Name -> Q Exp
 constructor name = do
   inf <- reify name
   case inf of
     DataConI _ tp _ _ -> [| Constructor $(stringE $ nameBase name) :: Constructor $(return $ endType tp) |]
 
+-- | Get the SMT representation for a given record field accessor.
 field :: Name -> Q Exp
 field name = do
   inf <- reify name
