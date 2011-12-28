@@ -691,9 +691,9 @@ checkSat = do
 -- | Perform a stacked operation, meaning that every assertion and declaration made in it will be undone after the operation.
 stack :: SMT a -> SMT a
 stack act = do
-  putRequest (L.List [L.Symbol "push"])
+  putRequest (L.List [L.Symbol "push",L.toLisp (1::Integer)])
   res <- act
-  putRequest (L.List [L.Symbol "pop"])
+  putRequest (L.List [L.Symbol "pop",L.toLisp (1::Integer)])
   return res
 
 -- | Insert a comment into the SMTLib2 command stream.
