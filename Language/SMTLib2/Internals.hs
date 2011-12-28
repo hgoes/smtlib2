@@ -773,6 +773,10 @@ named expr = do
   let name = T.pack $ "named"++show c
   return (Named expr name,Var name)
 
+-- | Declare a new sort with a specified arity
+declareSort :: T.Text -> Integer -> SMT ()
+declareSort name arity = putRequest (L.List [L.Symbol "declare-sort",L.Symbol name,L.toLisp arity])
+
 getVars :: SMTExpr a -> Set T.Text
 getVars (Var name) = Set.singleton name
 getVars (Const _) = Set.empty
