@@ -27,8 +27,8 @@ type SMT = ReaderT (Handle,Handle) (StateT (Integer,[TypeRep],Map T.Text TypeRep
 class SMTType t where
   getSort :: t -> L.Lisp
   declareType :: t -> [(TypeRep,SMT ())]
-  additionalConstraints :: SMTExpr t -> [SMTExpr Bool]
-  additionalConstraints _ = []
+  additionalConstraints :: t -> SMTExpr t -> [SMTExpr Bool]
+  additionalConstraints _ _ = []
 
 -- | Haskell values which can be represented as SMT constants
 class SMTType t => SMTValue t where
@@ -364,6 +364,7 @@ varNamed' u name = do
                    )
         ) (Prelude.reverse tps)
   declareFun name [] sort
+  mapM_ assert $ additionalConstraints u (Var name)
   return (Var name)
 
 -- | Create a fresh new variable
@@ -373,7 +374,6 @@ var = do
   put (c+1,decl,mp)
   let name = T.pack $ "var"++show c
   res <- varNamed name
-  mapM_ assert $ additionalConstraints res
   return res
 
 -- | Create a new uninterpreted function
