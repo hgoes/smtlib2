@@ -27,6 +27,8 @@ type SMT = ReaderT (Handle,Handle) (StateT (Integer,[TypeRep],Map T.Text TypeRep
 class SMTType t where
   getSort :: t -> L.Lisp
   declareType :: t -> [(TypeRep,SMT ())]
+  additionalConstraints :: SMTExpr t -> [SMTExpr Bool]
+  additionalConstraints _ = []
 
 -- | Haskell values which can be represented as SMT constants
 class SMTType t => SMTValue t where
@@ -371,6 +373,7 @@ var = do
   put (c+1,decl,mp)
   let name = T.pack $ "var"++show c
   res <- varNamed name
+  mapM_ assert $ additionalConstraints res
   return res
 
 -- | Create a new uninterpreted function
