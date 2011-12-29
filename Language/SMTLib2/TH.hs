@@ -99,13 +99,15 @@ generateUnmangleFun :: ExtrType -> Q Dec
 generateUnmangleFun cons
   = funD 'unmangle 
     [do
-       vars <- mapM (const $ newName "f") fields
+       vars <- mapM (const $ do
+                               v1 <- newName "f"
+                               v2 <- newName "r"
+                               return (v1,v2)) fields
        clause [(if Prelude.null fields
                 then conP 'L.Symbol [litP $ stringL $ nameBase cname]
                 else conP 'L.List [listP $ [conP 'L.Symbol [litP $ stringL $ nameBase cname]]++
-                                           (fmap varP vars)])]
-                (normalB $ appsE $ (conE cname):[ [| unmangle $(varE v) |]
-                                                | v <- vars
-                                                ]) []
+                                           (fmap (varP . fst) vars)])]
+                (normalB $ doE $ [ bindS (conP 'Just [varP r]) [| unmangle $(varE v) |] | (v,r) <- vars ]++
+                                 [ noBindS $ appsE [[| return |],appsE [ [| Just |],appsE $ (conE cname):(fmap (varE . snd) vars)] ]]) []
     | (cname,fields) <- cons
     ]
