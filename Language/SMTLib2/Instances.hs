@@ -222,7 +222,9 @@ instance (SMTType a,SMTType b) => Args (SMTExpr a,SMTExpr b) (a,b) where
   unpackArgs (e1,e2) _ c = let (r1,c1) = exprToLisp e1 c
                                (r2,c2) = exprToLisp e2 c1
                            in ([r1,r2],c2)
-  foldExprs f s (e1,e2) = f (f s e1) e2
+  foldExprs f s (e1,e2) = let (s1,e1') = f s e1
+                              (s2,e2') = f s1 e2
+                          in (s2,(e1',e2'))
   allOf x = (x,x)
 
 instance (SMTType a,SMTType b,SMTType c) => Args (SMTExpr a,SMTExpr b,SMTExpr c) (a,b,c) where
@@ -240,7 +242,10 @@ instance (SMTType a,SMTType b,SMTType c) => Args (SMTExpr a,SMTExpr b,SMTExpr c)
                                   (r2,c2) = exprToLisp e2 c1
                                   (r3,c3) = exprToLisp e3 c2
                               in ([r1,r2,r3],c3)
-  foldExprs f s (e1,e2,e3) = f (f (f s e1) e2) e3
+  foldExprs f s (e1,e2,e3) = let (s1,e1') = f s e1
+                                 (s2,e2') = f s1 e2
+                                 (s3,e3') = f s2 e3
+                             in (s3,(e1',e2',e3'))
   allOf x = (x,x,x)
 
 instance SMTType a => SMTType (Maybe a) where
