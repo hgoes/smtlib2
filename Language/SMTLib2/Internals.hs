@@ -32,7 +32,7 @@ class SMTType t where
 
 -- | Haskell values which can be represented as SMT constants
 class SMTType t => SMTValue t where
-  unmangle :: L.Lisp -> Maybe t
+  unmangle :: L.Lisp -> SMT (Maybe t)
   mangle :: t -> L.Lisp
 
 -- | A type class for all types which support arithmetic operations in SMT
@@ -158,9 +158,9 @@ instance SMTType Bool where
   declareType u = [(typeOf u,return ())]
 
 instance SMTValue Bool where
-  unmangle (L.Symbol "true") = Just True
-  unmangle (L.Symbol "false") = Just False
-  unmangle _ = Nothing
+  unmangle (L.Symbol "true") = return $ Just True
+  unmangle (L.Symbol "false") = return $ Just False
+  unmangle _ = return Nothing
   mangle True = L.Symbol "true"
   mangle False = L.Symbol "false"
 
@@ -320,10 +320,13 @@ exprToLisp (Named expr name) c = let (expr',c') = exprToLisp expr c
                                  in (L.List [L.Symbol "!",expr',L.Symbol ":named",L.Symbol name],c')
 exprToLisp (InternalFun args) c = (L.List (L.Symbol "_":args),c)
 
-firstJust :: [Maybe a] -> Maybe a
-firstJust [] = Nothing
-firstJust (Nothing:rest) = firstJust rest
-firstJust ((Just x):rest) = Just x
+firstJust :: Monad m => [m (Maybe a)] -> m (Maybe a)
+firstJust [] = return Nothing
+firstJust (act:acts) = do
+  r <- act
+  case r of
+    Nothing -> firstJust acts
+    Just res -> return $ Just res
 
 instance L.ToLisp (SMTExpr t) where
   toLisp e = fst $ exprToLisp e 0
@@ -626,9 +629,11 @@ getValue expr = do
                       ,L.List [L.toLisp expr]]
   val <- parseResponse
   case val of
-    L.List [L.List [_,res]] -> case unmangle res of
-      Nothing -> error $ "Couldn't unmangle "++show res
-      Just r -> return r
+    L.List [L.List [_,res]] -> do
+      rres <- unmangle res
+      case rres of
+        Nothing -> error $ "Couldn't unmangle "++show res
+        Just r -> return r
     _ -> error $ "unknown response to get-value: "++show val
 
 -- | Asserts that a boolean expression is true
