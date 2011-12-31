@@ -1,4 +1,24 @@
 {-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances,MultiParamTypeClasses,FunctionalDependencies #-}
+{- | Example usage: This program tries to find two numbers greater than zero which sum up to 5.
+
+     @
+import Language.SMTLib2
+import Language.SMTLib2.Solver
+
+program :: SMT (Integer,Integer)
+program = do
+  x <- var
+  y <- var
+  assert $ (plus [x,y]) .==. (constant 5)
+  assert $ x .>. (constant 0)
+  assert $ y .>. (constant 0)
+  checkSat
+  vx <- getValue x
+  vy <- getValue y
+  return (vx,vy)
+
+main = withZ3 program >>= print
+     @ -}
 module Language.SMTLib2 
        (-- * Data types
          SMT(),
@@ -14,13 +34,16 @@ module Language.SMTLib2
          -- * Environment
          withSMTSolver,
          setOption,setLogic,
+         SMTInfo(),SMTSolverName(..),SMTSolverVersion(..),
          assert,stack,
          checkSat,
          getValue,
          comment,
+         getInterpolants,getProof,
          -- * Expressions
          var,varNamed,
-         constant,let',
+         constant,let',lets,
+         named,
          -- ** Basic logic
          (.==.),
          distinct,
@@ -34,7 +57,9 @@ module Language.SMTLib2
          -- ** Arrays
          select,store,arrayConst,unmangleArray,
          -- ** Bitvectors
-         bvadd,bvsub,bvmul,
+         bvadd,bvsub,bvmul,bvurem,bvsrem,
+         bvule,bvult,bvuge,bvugt,
+         bvsle,bvslt,bvsge,bvsgt,
          -- ** Functions
          fun,app,defFun,
          -- ** Data types
