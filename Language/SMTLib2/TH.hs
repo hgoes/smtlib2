@@ -2,7 +2,8 @@
 module Language.SMTLib2.TH 
        (deriveSMT,
         constructor,
-        field)
+        field,
+        matches)
        where
 
 import Language.SMTLib2.Internals
@@ -10,6 +11,8 @@ import Language.Haskell.TH
 import qualified Data.AttoLisp as L
 import Data.Text as T
 import Data.Typeable
+import Data.List as List
+import Data.Maybe (catMaybes)
 
 type ExtrType = [(Name,[(Name,Type)])]
 
@@ -42,6 +45,7 @@ field name = do
   inf <- reify name
   case inf of
     VarI _ (AppT (AppT ArrowT orig) res) _ _ -> [| Field $(stringE $ nameBase name) :: Field $(return orig) $(return res) |]
+    _ -> error $ show inf ++ " is not a valid field"
 
 extractDataType :: Name -> Q ExtrType
 extractDataType name = do
@@ -103,3 +107,23 @@ generateUnmangleFun cons
                                                 ]) []
     | (cname,fields) <- cons
     ]
+
+matches :: Q Exp -> Q Pat -> Q Exp
+matches exp pat = do
+  p <- pat
+  case matches' exp p of
+    Nothing -> [| constant True |]
+    Just res -> res
+  where
+    matches' exp (LitP l) = Just [| $exp .==. $(litE l) |]
+    matches' _ WildP = Nothing
+    matches' exp (ConP name []) = Just [| is $exp $(constructor name) |]
+    matches' exp (ConP name pats) = Just $ do
+      DataConI _ _ d _ <- reify name
+      TyConI (DataD _ _ _ cons _) <- reify d
+      let Just (RecC _ fields) = List.find (\con -> case con of
+                                               RecC n _ -> n==name
+                                               _ -> False) cons
+      [| and' $ (is $exp $(constructor name)): $(listE $ catMaybes [ matches' [| $exp .# $(field f) |] pat | ((f,_,_),pat) <- Prelude.zip fields pats ]) |]
+    matches' exp (RecP name pats) = Just [| and' $ (is $exp $(constructor name)): $(listE $ catMaybes [ matches' [| $exp .# $(field f) |] pat | (f,pat) <- pats ]) |]
+    
