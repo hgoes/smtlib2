@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances,OverloadedStrings,MultiParamTypeClasses,TemplateHaskell,RankNTypes #-}
+{-# LANGUAGE FlexibleInstances,OverloadedStrings,MultiParamTypeClasses,TemplateHaskell,RankNTypes,TypeFamilies #-}
 module Language.SMTLib2.Instances(lispToExprT,lispToExprU,getInterpolants,getProof) where
 
 import Language.SMTLib2.Internals
@@ -19,14 +19,15 @@ import Data.Map as Map
 -- Integer
 
 instance SMTType Integer where
+  type SMTAnnotation Integer = ()
   getSort _ = L.Symbol "Int"
   declareType u = [(typeOf u,return ())]
 
 instance SMTValue Integer where
-  unmangle (L.Number (L.I v)) = return $ Just v
+  unmangle (L.Number (L.I v)) _ = return $ Just v
   unmangle (L.List [L.Symbol "-"
-                   ,L.Number (L.I v)]) = return $ Just $ - v
-  unmangle e = return Nothing
+                   ,L.Number (L.I v)]) _ = return $ Just $ - v
+  unmangle e _ = return Nothing
   mangle v
     | v < 0 = L.List [L.Symbol "-"
                      ,L.toLisp (-v)]
@@ -45,25 +46,26 @@ instance Num (SMTExpr Integer) where
 -- Real
 
 instance SMTType (Ratio Integer) where
+  type SMTAnnotation (Ratio Integer) = ()
   getSort _ = L.Symbol "Real"
   declareType u = [(typeOf u,return ())]
 
 instance SMTValue (Ratio Integer) where
-  unmangle (L.Number (L.I v)) = return $ Just $ fromInteger v
-  unmangle (L.Number (L.D v)) = return $ Just $ realToFrac v
+  unmangle (L.Number (L.I v)) _ = return $ Just $ fromInteger v
+  unmangle (L.Number (L.D v)) _ = return $ Just $ realToFrac v
   unmangle (L.List [L.Symbol "/"
                    ,x
-                   ,y]) = do
-                          q <- unmangle x
-                          r <- unmangle y
+                   ,y]) _ = do
+                          q <- unmangle x Nothing
+                          r <- unmangle y Nothing
                           return (do
                                      qq <- q
                                      rr <- r
                                      return $ qq / rr)
-  unmangle (L.List [L.Symbol "-",r]) = do
-    res <- unmangle r
+  unmangle (L.List [L.Symbol "-",r]) ann = do
+    res <- unmangle r ann
     return (fmap (\x -> -x) res)
-  unmangle _ = return Nothing
+  unmangle _ _ = return Nothing
   mangle v = L.List [L.Symbol "/"
                     ,L.Symbol $ T.pack $ (show $ numerator v)++".0"
                     ,L.Symbol $ T.pack $ (show $ denominator v)++".0"]
@@ -85,6 +87,7 @@ instance Fractional (SMTExpr (Ratio Integer)) where
 -- Arrays
 
 instance (SMTType idx,SMTType val) => SMTType (Array idx val) where
+  type SMTAnnotation (Array idx val) = ()
   getSort u = L.List [L.Symbol "Array"
                      ,getSort (getIdx u)
                      ,getSort (getVal u)]
@@ -111,15 +114,16 @@ bv n = L.List [L.Symbol "_"
               ,L.Number $ L.I n]
 
 instance SMTType Word8 where
+  type SMTAnnotation Word8 = ()
   getSort _ = bv 8
   declareType u = [(typeOf u,return ())]
 
 withUndef1 :: (a -> g a) -> g a
 withUndef1 f = f undefined
 
-getBVValue :: (Num a,Bits a,Read a) => L.Lisp -> SMT (Maybe a)
-getBVValue (L.Number (L.I v)) = return $ Just (fromInteger v)
-getBVValue (L.Symbol s) = return $ case T.unpack s of
+getBVValue :: (Num a,Bits a,Read a) => L.Lisp -> b -> SMT (Maybe a)
+getBVValue (L.Number (L.I v)) _ = return $ Just (fromInteger v)
+getBVValue (L.Symbol s) _ = return $ case T.unpack s of
   '#':'b':rest -> withUndef1 (\u -> if Prelude.length rest == bitSize u
                                     then (let [(v,_)] = readInt 2 (\x -> x=='0' || x=='1') (\x -> if x=='0' then 0 else 1) rest 
                                           in Just v)
@@ -129,13 +133,13 @@ getBVValue (L.Symbol s) = return $ case T.unpack s of
                                           in Just v)
                                     else Nothing)
   _ -> Nothing
-getBVValue (L.List [L.Symbol "_",L.Symbol val,L.Number (L.I bits)])
+getBVValue (L.List [L.Symbol "_",L.Symbol val,L.Number (L.I bits)]) _
   = return $ withUndef1 (\u -> if bits == (fromIntegral $ bitSize u)
                                then (case T.unpack val of
                                         'b':'v':num -> Just (read num)
                                         _ -> Nothing)
                                else Nothing)
-getBVValue _ = return Nothing
+getBVValue _ _ = return Nothing
 
 putBVValue :: Bits a => a -> L.Lisp
 putBVValue x = L.Symbol (T.pack ('#':'b':[ if testBit x i
@@ -149,6 +153,7 @@ instance SMTValue Word8 where
 instance SMTBV Word8
 
 instance SMTType Word16 where
+  type SMTAnnotation Word16 = ()
   getSort _ = bv 16
   declareType u = [(typeOf u,return ())]
 
@@ -159,6 +164,7 @@ instance SMTValue Word16 where
 instance SMTBV Word16
 
 instance SMTType Word32 where
+  type SMTAnnotation Word32 = ()
   getSort _ = bv 32
   declareType u = [(typeOf u,return ())]
 
@@ -169,6 +175,7 @@ instance SMTValue Word32 where
 instance SMTBV Word32
 
 instance SMTType Word64 where
+  type SMTAnnotation Word64 = ()
   getSort _ = bv 64
   declareType u = [(typeOf u,return ())]
   
@@ -206,7 +213,7 @@ instance Num (SMTExpr Word64) where
 
 instance SMTType a => Args (SMTExpr a) a where
   createArgs c = let n1 = T.pack $ "f"++show c
-                     v1 = Var n1
+                     v1 = Var n1 Nothing
                      t1 = getSort $ getUndef v1
                  in (v1,[(n1,t1)],c+1)
   unpackArgs e _ c = let (e',c') = exprToLisp e c
@@ -217,8 +224,8 @@ instance SMTType a => Args (SMTExpr a) a where
 instance (SMTType a,SMTType b) => Args (SMTExpr a,SMTExpr b) (a,b) where
   createArgs c = let n1 = T.pack $ "f"++show c
                      n2 = T.pack $ "f"++show (c+1)
-                     v1 = Var n1
-                     v2 = Var n2
+                     v1 = Var n1 Nothing
+                     v2 = Var n2 Nothing
                      t1 = getSort $ getUndef v1
                      t2 = getSort $ getUndef v2
                  in ((v1,v2),[(n1,t1),(n2,t2)],c+2)
@@ -234,9 +241,9 @@ instance (SMTType a,SMTType b,SMTType c) => Args (SMTExpr a,SMTExpr b,SMTExpr c)
   createArgs c = let n1 = T.pack $ "f"++show c
                      n2 = T.pack $ "f"++show (c+1)
                      n3 = T.pack $ "f"++show (c+2)
-                     v1 = Var n1
-                     v2 = Var n2
-                     v3 = Var n3
+                     v1 = Var n1 Nothing
+                     v2 = Var n2 Nothing
+                     v3 = Var n3 Nothing
                      t1 = getSort $ getUndef v1
                      t2 = getSort $ getUndef v2
                      t3 = getSort $ getUndef v3
@@ -252,6 +259,7 @@ instance (SMTType a,SMTType b,SMTType c) => Args (SMTExpr a,SMTExpr b,SMTExpr c)
   allOf x = (x,x,x)
 
 instance SMTType a => SMTType (Maybe a) where
+  type SMTAnnotation (Maybe a) = ()
   getSort u = L.List [L.Symbol "Maybe",getSort (undef u)]
     where
       undef :: Maybe a -> a
@@ -265,15 +273,15 @@ instance SMTType a => SMTType (Maybe a) where
       undef _ = undefined
 
 instance SMTValue a => SMTValue (Maybe a) where
-  unmangle (L.Symbol "Nothing") = return $ Just Nothing
+  unmangle (L.Symbol "Nothing") _ = return $ Just Nothing
   unmangle (L.List [L.Symbol "as"
                    ,L.Symbol "Nothing"
-                   ,_]) = return $ Just Nothing
+                   ,_]) _ = return $ Just Nothing
   unmangle (L.List [L.Symbol "Just"
-                   ,res]) = do
-    r <- unmangle res
+                   ,res]) _ = do
+    r <- unmangle res Nothing
     return (fmap Just r)
-  unmangle _ = return Nothing
+  unmangle _ _ = return Nothing
   mangle u@Nothing = L.List [L.Symbol "as"
                             ,L.Symbol "Nothing"
                             ,getSort u]
@@ -284,19 +292,20 @@ undefArg :: b a -> a
 undefArg _ = undefined
 
 instance (Typeable a,SMTType a) => SMTType [a] where
+  type SMTAnnotation [a] = ()
   getSort u = L.List [L.Symbol "List",getSort (undefArg u)]
   declareType u = (typeOf u,return ()):declareType (undefArg u)
 
 instance (Typeable a,SMTValue a) => SMTValue [a] where
-  unmangle (L.Symbol "nil") = return $ Just []
-  unmangle (L.List [L.Symbol "insert",h,t]) = do
-    h' <- unmangle h
-    t' <- unmangle t
+  unmangle (L.Symbol "nil") _ = return $ Just []
+  unmangle (L.List [L.Symbol "insert",h,t]) _ = do
+    h' <- unmangle h Nothing
+    t' <- unmangle t Nothing
     return (do
                hh <- h'
                tt <- t'
                return $ hh:tt)
-  unmangle _ = return Nothing
+  unmangle _ _ = return Nothing
   mangle [] = L.Symbol "nil"
   mangle (x:xs) = L.List [L.Symbol "insert"
                          ,mangle x
@@ -327,14 +336,14 @@ lispToExprU :: (forall a. (SMTValue a,Typeable a) => SMTExpr a -> SMT b)
                -> (T.Text -> TypeRep)
                -> L.Lisp -> SMT (Maybe b)
 lispToExprU f g l
-  = firstJust [(unmangle l :: SMT (Maybe Bool)) >>= maybe (return Nothing) (fmap Just . f . Const)
-              ,(unmangle l :: SMT (Maybe Integer)) >>= maybe (return Nothing) (fmap Just . f . Const)
-              ,(unmangle l :: SMT (Maybe Word8)) >>= maybe (return Nothing) (fmap Just . f . Const)
-              ,(unmangle l :: SMT (Maybe Word16)) >>= maybe (return Nothing) (fmap Just . f . Const)
-              ,(unmangle l :: SMT (Maybe Word32)) >>= maybe (return Nothing) (fmap Just . f . Const)
-              ,(unmangle l :: SMT (Maybe Word64)) >>= maybe (return Nothing) (fmap Just . f . Const)
+  = firstJust [(unmangle l Nothing :: SMT (Maybe Bool)) >>= maybe (return Nothing) (fmap Just . f . Const)
+              ,(unmangle l Nothing :: SMT (Maybe Integer)) >>= maybe (return Nothing) (fmap Just . f . Const)
+              ,(unmangle l Nothing :: SMT (Maybe Word8)) >>= maybe (return Nothing) (fmap Just . f . Const)
+              ,(unmangle l Nothing :: SMT (Maybe Word16)) >>= maybe (return Nothing) (fmap Just . f . Const)
+              ,(unmangle l Nothing :: SMT (Maybe Word32)) >>= maybe (return Nothing) (fmap Just . f . Const)
+              ,(unmangle l Nothing :: SMT (Maybe Word64)) >>= maybe (return Nothing) (fmap Just . f . Const)
               ,case l of
-                L.Symbol name -> withUndef (g name) $ \u -> fmap Just $ f $ asType u (Var name)
+                L.Symbol name -> withUndef (g name) $ \u -> fmap Just $ f $ asType u (Var name Nothing)
                 L.List [L.Symbol "=",lhs,rhs] -> do
                   lhs' <- lispToExprU (\lhs' -> do
                                           rhs' <- lispToExprT g rhs
@@ -427,11 +436,11 @@ binBV f g lhs rhs = do
 
 lispToExprT :: (SMTValue a,Typeable a) => (T.Text -> TypeRep) -> L.Lisp -> SMT (SMTExpr a)
 lispToExprT g l = do
-  ll <- unmangle l
+  ll <- unmangle l Nothing
   case ll of
     Just v -> return $ Const v
     Nothing -> case l of
-      L.Symbol name -> return $ Var name
+      L.Symbol name -> return $ Var name Nothing
       L.List [L.Symbol "=",lhs,rhs] -> do
         lhs' <- lispToExprU (\lhs' -> do
                                 rhs' <- lispToExprT g rhs
@@ -513,9 +522,9 @@ lispToExprT g l = do
                                    rest' <- letToExpr (\txt -> if txt==name
                                                                then typeOf expr'
                                                                else g txt) rest arg
-                                   return $ Let expr' (\var@(Var name') -> replaceName (\n -> if n==name 
-                                                                                              then name' 
-                                                                                              else n) rest')
+                                   return $ Let expr' (\var@(Var name' _) -> replaceName (\n -> if n==name 
+                                                                                                then name' 
+                                                                                                else n) rest')
                                ) g expr
             case res of
               Just r -> return r

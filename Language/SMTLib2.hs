@@ -41,7 +41,7 @@ module Language.SMTLib2
          comment,
          getInterpolants,getProof,
          -- * Expressions
-         var,varNamed,
+         var,varNamed,varNamedAnn,varAnn,
          constant,let',lets,
          named,
          -- ** Basic logic

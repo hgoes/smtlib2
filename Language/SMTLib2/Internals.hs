@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances,MultiParamTypeClasses,FunctionalDependencies,RankNTypes,DeriveDataTypeable,TypeSynonymInstances #-}
+{-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances,MultiParamTypeClasses,FunctionalDependencies,RankNTypes,DeriveDataTypeable,TypeSynonymInstances,TypeFamilies #-}
 module Language.SMTLib2.Internals where
 
 import Data.Attoparsec
@@ -25,6 +25,7 @@ type SMT = ReaderT (Handle,Handle) (StateT (Integer,[TypeRep],Map T.Text TypeRep
 
 -- | Haskell types which can be represented in SMT
 class SMTType t where
+  type SMTAnnotation t
   getSort :: t -> L.Lisp
   declareType :: t -> [(TypeRep,SMT ())]
   additionalConstraints :: t -> SMTExpr t -> [SMTExpr Bool]
@@ -32,7 +33,7 @@ class SMTType t where
 
 -- | Haskell values which can be represented as SMT constants
 class SMTType t => SMTValue t where
-  unmangle :: L.Lisp -> SMT (Maybe t)
+  unmangle :: L.Lisp -> Maybe (SMTAnnotation t) -> SMT (Maybe t)
   mangle :: t -> L.Lisp
 
 -- | A type class for all types which support arithmetic operations in SMT
@@ -46,7 +47,7 @@ data SMTFun a b r = SMTFun
 
 -- | An abstract SMT expression
 data SMTExpr t where
-  Var :: SMTType t => Text -> SMTExpr t
+  Var :: SMTType t => Text -> Maybe (SMTAnnotation t) -> SMTExpr t
   Const :: SMTValue t => t -> SMTExpr t
   Eq :: SMTType a => SMTExpr a -> SMTExpr a -> SMTExpr Bool
   Ge :: (Num a,SMTType a) => SMTExpr a -> SMTExpr a -> SMTExpr Bool
@@ -154,13 +155,14 @@ instance Show (SMTExpr t) where
 -- Bool
 
 instance SMTType Bool where
+  type SMTAnnotation Bool = ()
   getSort _ = L.Symbol "Bool"
   declareType u = [(typeOf u,return ())]
 
 instance SMTValue Bool where
-  unmangle (L.Symbol "true") = return $ Just True
-  unmangle (L.Symbol "false") = return $ Just False
-  unmangle _ = return Nothing
+  unmangle (L.Symbol "true") _ = return $ Just True
+  unmangle (L.Symbol "false") _ = return $ Just False
+  unmangle _ _ = return Nothing
   mangle True = L.Symbol "true"
   mangle False = L.Symbol "false"
 
@@ -171,7 +173,7 @@ exprsToLisp (e:es) c = let (e',c') = exprToLisp e c
                        in (e':es',c'')
 
 exprToLisp :: SMTExpr t -> Integer -> (L.Lisp,Integer)
-exprToLisp (Var name) c = (L.Symbol name,c)
+exprToLisp (Var name ann) c = (L.Symbol name,c)
 exprToLisp (Const x) c = (mangle x,c)
 exprToLisp (Eq l r) c = let (l',c') = exprToLisp l c
                             (r',c'') = exprToLisp r c'
@@ -289,7 +291,7 @@ exprToLisp (Exists f) c = let (arg,tps,nc) = createArgs c
                                      ,arg'],nc')
 exprToLisp (Let x f) c = let (arg,nc) = exprToLisp x c
                              name = T.pack $ "l"++show nc
-                             (arg',nc') = exprToLisp (f (Var name)) (nc+1)
+                             (arg',nc') = exprToLisp (f (Var name Nothing)) (nc+1)
                          in (L.List [L.Symbol "let"
                                     ,L.List [L.List [L.Symbol name,arg]]
                                     ,arg'],nc')
@@ -350,10 +352,13 @@ setOption opt = putRequest $ L.List $ [L.Symbol "set-option"]
 
 -- | Create a new named variable
 varNamed :: (SMTType t,Typeable t) => Text -> SMT (SMTExpr t)
-varNamed name = mfix (\e -> varNamed' (getUndef e) name)
+varNamed name = varNamedAnn name Nothing
 
-varNamed' :: (SMTType t,Typeable t) => t -> Text -> SMT (SMTExpr t)
-varNamed' u name = do
+varNamedAnn :: (SMTType t,Typeable t) => Text -> Maybe (SMTAnnotation t) -> SMT (SMTExpr t)
+varNamedAnn name ann = mfix (\e -> varNamed' (getUndef e) name ann)
+
+varNamed' :: (SMTType t,Typeable t) => t -> Text -> Maybe (SMTAnnotation t) -> SMT (SMTExpr t)
+varNamed' u name ann = do
   let sort = getSort u
       tps = declareType u
   modify $ \(c,decl,mp) -> (c,decl,Map.insert name (typeOf u) mp)
@@ -367,8 +372,16 @@ varNamed' u name = do
                    )
         ) (Prelude.reverse tps)
   declareFun name [] sort
-  mapM_ assert $ additionalConstraints u (Var name)
-  return (Var name)
+  mapM_ assert $ additionalConstraints u (Var name ann)
+  return (Var name ann)
+
+-- | Create a annotated variable
+varAnn :: (SMTType t,Typeable t) => SMTAnnotation t -> SMT (SMTExpr t)
+varAnn ann = do
+  (c,decl,mp) <- get
+  put (c+1,decl,mp)
+  let name = T.pack $ "var"++show c
+  varNamedAnn name (Just ann)
 
 -- | Create a fresh new variable
 var :: (SMTType t,Typeable t) => SMT (SMTExpr t)
@@ -376,8 +389,7 @@ var = do
   (c,decl,mp) <- get
   put (c+1,decl,mp)
   let name = T.pack $ "var"++show c
-  res <- varNamed name
-  return res
+  varNamed name
 
 -- | Create a new uninterpreted function
 fun :: (Args a b,SMTType r) => SMT (SMTExpr (SMTFun a b r))
@@ -624,16 +636,27 @@ is e con = ConTest con e
 --   The 'ProduceModels' option must be enabled for this.
 getValue :: SMTValue t => SMTExpr t -> SMT t
 getValue expr = do
+  let ann = case expr of
+        Var _ ann -> ann
+        _ -> Nothing
+  getValue' ann expr
+  
+getValue' :: SMTValue t => Maybe (SMTAnnotation t) -> SMTExpr t -> SMT t
+getValue' ann expr = do
+  res <- getRawValue expr
+  rres <- unmangle res ann
+  case rres of
+    Nothing -> error $ "Couldn't unmangle "++show res
+    Just r -> return r
+
+getRawValue :: SMTType t => SMTExpr t -> SMT L.Lisp
+getRawValue expr = do
   clearInput
   putRequest $ L.List [L.Symbol "get-value"
                       ,L.List [L.toLisp expr]]
   val <- parseResponse
   case val of
-    L.List [L.List [_,res]] -> do
-      rres <- unmangle res
-      case rres of
-        Nothing -> error $ "Couldn't unmangle "++show res
-        Just r -> return r
+    L.List [L.List [_,res]] -> return res
     _ -> error $ "unknown response to get-value: "++show val
 
 -- | Asserts that a boolean expression is true
@@ -779,7 +802,7 @@ named expr = do
   (c,decl,mp) <- get
   put (c+1,decl,mp)
   let name = T.pack $ "named"++show c
-  return (Named expr name,Var name)
+  return (Named expr name,Var name Nothing)
 
 -- | Declare a new sort with a specified arity
 declareSort :: T.Text -> Integer -> SMT ()
@@ -915,10 +938,10 @@ foldExpr f x e = f x e
 
 getVars :: SMTExpr a -> Set T.Text
 getVars = fst . foldExpr (\s expr -> (case expr of
-                                         Var n -> Set.insert n s
+                                         Var n _ -> Set.insert n s
                                          _ -> s,expr)) Set.empty
 
 replaceName :: (T.Text -> T.Text) -> SMTExpr a -> SMTExpr a
 replaceName f = snd . foldExpr (\_ expr -> ((),case expr of
-                                               Var n -> Var (f n)
+                                               Var n ann -> Var (f n) ann
                                                _ -> expr)) ()
