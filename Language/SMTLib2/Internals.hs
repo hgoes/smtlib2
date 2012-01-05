@@ -42,6 +42,13 @@ class (SMTValue t,Num t) => SMTArith t
 -- | A type class for all types which support bitvector operations in SMT
 class (SMTValue t,Bits t) => SMTBV t
 
+-- | Lifts the 'Ord' class into SMT
+class (SMTType t) => SMTOrd t where
+  (.<.) :: SMTExpr t -> SMTExpr t -> SMTExpr Bool
+  (.>=.) :: SMTExpr t -> SMTExpr t -> SMTExpr Bool
+  (.>.) :: SMTExpr t -> SMTExpr t -> SMTExpr Bool
+  (.<=.) :: SMTExpr t -> SMTExpr t -> SMTExpr Bool
+
 -- | Represents a function in the SMT solver. /a/ is the argument of the function in SMT terms, /b/ is the argument in haskell types and /r/ is the result type of the function.
 data SMTFun a b r = SMTFun
 
@@ -439,25 +446,6 @@ constant = Const
 (.==.) = Eq
 
 infix 4 .==.
-
--- | Greater-or-equal function
-(.>=.) :: (SMTType a,Num a) => SMTExpr a -> SMTExpr a -> SMTExpr Bool
-(.>=.) = Ge
-
--- | Greater-than function
-(.>.) :: (SMTType a,Num a) => SMTExpr a -> SMTExpr a -> SMTExpr Bool
-(.>.) = Gt
-
--- | Less-or-equal function
-(.<=.) :: (SMTType a,Num a) => SMTExpr a -> SMTExpr a -> SMTExpr Bool
-(.<=.) = Le
-
--- | Less-than function
-(.<.) :: (SMTType a,Num a) => SMTExpr a -> SMTExpr a -> SMTExpr Bool
-(.<.) = Lt
-
-infix 4 .>=.
-infix 4 .<.
 
 -- | Declares all arguments to be distinct
 distinct :: SMTType a => [SMTExpr a] -> SMTExpr Bool

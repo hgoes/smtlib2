@@ -43,6 +43,12 @@ instance Num (SMTExpr Integer) where
   negate = neg
   abs = abs'
 
+instance SMTOrd Integer where
+  (.<.) = Lt
+  (.<=.) = Le
+  (.>.) = Gt
+  (.>=.) = Ge
+
 -- Real
 
 instance SMTType (Ratio Integer) where
@@ -83,6 +89,12 @@ instance Num (SMTExpr (Ratio Integer)) where
 instance Fractional (SMTExpr (Ratio Integer)) where
   (/) = divide
   fromRational = constant
+
+instance SMTOrd (Ratio Integer) where
+  (.<.) = Lt
+  (.<=.) = Le
+  (.>.) = Gt
+  (.>=.) = Ge
 
 -- Arrays
 
@@ -152,6 +164,12 @@ instance SMTValue Word8 where
 
 instance SMTBV Word8
 
+instance SMTOrd Word8 where
+  (.<.) = BVULT
+  (.<=.) = BVULE
+  (.>.) = BVUGT
+  (.>=.) = BVUGE
+
 instance SMTType Word16 where
   type SMTAnnotation Word16 = ()
   getSort _ = bv 16
@@ -162,6 +180,12 @@ instance SMTValue Word16 where
   mangle = putBVValue
 
 instance SMTBV Word16
+
+instance SMTOrd Word16 where
+  (.<.) = BVULT
+  (.<=.) = BVULE
+  (.>.) = BVUGT
+  (.>=.) = BVUGE
 
 instance SMTType Word32 where
   type SMTAnnotation Word32 = ()
@@ -174,6 +198,12 @@ instance SMTValue Word32 where
 
 instance SMTBV Word32
 
+instance SMTOrd Word32 where
+  (.<.) = BVULT
+  (.<=.) = BVULE
+  (.>.) = BVUGT
+  (.>=.) = BVUGE
+
 instance SMTType Word64 where
   type SMTAnnotation Word64 = ()
   getSort _ = bv 64
@@ -184,6 +214,12 @@ instance SMTValue Word64 where
   mangle = putBVValue
 
 instance SMTBV Word64
+
+instance SMTOrd Word64 where
+  (.<.) = BVULT
+  (.<=.) = BVULE
+  (.>.) = BVUGT
+  (.>=.) = BVUGE
 
 instance Num (SMTExpr Word8) where
   fromInteger = constant.fromInteger

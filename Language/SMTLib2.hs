@@ -25,6 +25,7 @@ module Language.SMTLib2
          SMTType,
          SMTValue,
          SMTArith,
+         SMTOrd(..),
          SMTExpr,
          SMTOption(..),
          SMTFun,
@@ -52,7 +53,6 @@ module Language.SMTLib2
          forAll,exists,
          forAllList,
          -- ** Arithmetic
-         (.>=.),(.<=.),(.>.),(.<.),
          plus,minus,mult,div',mod',neg,abs',divide,
          -- ** Arrays
          select,store,arrayConst,unmangleArray,
