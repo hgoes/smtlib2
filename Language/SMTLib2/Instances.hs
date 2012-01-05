@@ -7,6 +7,7 @@ import qualified Data.AttoLisp as L
 import qualified Data.Attoparsec.Number as L
 import Data.Array
 import Data.Word
+import Data.Int
 import Numeric
 import Data.Char
 import Data.Bits
@@ -130,6 +131,11 @@ instance SMTType Word8 where
   getSort _ = bv 8
   declareType u = [(typeOf u,return ())]
 
+instance SMTType Int8 where
+  type SMTAnnotation Int8 = ()
+  getSort _ = bv 8
+  declareType u = [(typeOf u,return ())]
+
 withUndef1 :: (a -> g a) -> g a
 withUndef1 f = f undefined
 
@@ -162,7 +168,12 @@ instance SMTValue Word8 where
   unmangle = getBVValue
   mangle = putBVValue
 
+instance SMTValue Int8 where
+  unmangle = getBVValue
+  mangle = putBVValue
+
 instance SMTBV Word8
+instance SMTBV Int8
 
 instance SMTOrd Word8 where
   (.<.) = BVULT
@@ -170,8 +181,19 @@ instance SMTOrd Word8 where
   (.>.) = BVUGT
   (.>=.) = BVUGE
 
+instance SMTOrd Int8 where
+  (.<.) = BVSLT
+  (.<=.) = BVSLE
+  (.>.) = BVSGT
+  (.>=.) = BVSGE
+
 instance SMTType Word16 where
   type SMTAnnotation Word16 = ()
+  getSort _ = bv 16
+  declareType u = [(typeOf u,return ())]
+
+instance SMTType Int16 where
+  type SMTAnnotation Int16 = ()
   getSort _ = bv 16
   declareType u = [(typeOf u,return ())]
 
@@ -179,7 +201,12 @@ instance SMTValue Word16 where
   unmangle = getBVValue
   mangle = putBVValue
 
+instance SMTValue Int16 where
+  unmangle = getBVValue
+  mangle = putBVValue
+
 instance SMTBV Word16
+instance SMTBV Int16
 
 instance SMTOrd Word16 where
   (.<.) = BVULT
@@ -187,8 +214,19 @@ instance SMTOrd Word16 where
   (.>.) = BVUGT
   (.>=.) = BVUGE
 
+instance SMTOrd Int16 where
+  (.<.) = BVSLT
+  (.<=.) = BVSLE
+  (.>.) = BVSGT
+  (.>=.) = BVSGE
+
 instance SMTType Word32 where
   type SMTAnnotation Word32 = ()
+  getSort _ = bv 32
+  declareType u = [(typeOf u,return ())]
+
+instance SMTType Int32 where
+  type SMTAnnotation Int32 = ()
   getSort _ = bv 32
   declareType u = [(typeOf u,return ())]
 
@@ -196,7 +234,12 @@ instance SMTValue Word32 where
   unmangle = getBVValue
   mangle = putBVValue
 
+instance SMTValue Int32 where
+  unmangle = getBVValue
+  mangle = putBVValue
+
 instance SMTBV Word32
+instance SMTBV Int32
 
 instance SMTOrd Word32 where
   (.<.) = BVULT
@@ -204,16 +247,32 @@ instance SMTOrd Word32 where
   (.>.) = BVUGT
   (.>=.) = BVUGE
 
+instance SMTOrd Int32 where
+  (.<.) = BVSLT
+  (.<=.) = BVSLE
+  (.>.) = BVSGT
+  (.>=.) = BVSGE
+
 instance SMTType Word64 where
   type SMTAnnotation Word64 = ()
   getSort _ = bv 64
   declareType u = [(typeOf u,return ())]
   
+instance SMTType Int64 where
+  type SMTAnnotation Int64 = ()
+  getSort _ = bv 64
+  declareType u = [(typeOf u,return ())]
+
 instance SMTValue Word64 where
   unmangle = getBVValue
   mangle = putBVValue
 
+instance SMTValue Int64 where
+  unmangle = getBVValue
+  mangle = putBVValue
+
 instance SMTBV Word64
+instance SMTBV Int64
 
 instance SMTOrd Word64 where
   (.<.) = BVULT
@@ -221,29 +280,59 @@ instance SMTOrd Word64 where
   (.>.) = BVUGT
   (.>=.) = BVUGE
 
+instance SMTOrd Int64 where
+  (.<.) = BVSLT
+  (.<=.) = BVSLE
+  (.>.) = BVSGT
+  (.>=.) = BVSGE
+
 instance Num (SMTExpr Word8) where
   fromInteger = constant.fromInteger
-  (+) = bvadd
-  (-) = bvsub
-  (*) = bvmul
+  (+) = BVAdd
+  (-) = BVSub
+  (*) = BVMul
+
+instance Num (SMTExpr Int8) where
+  fromInteger = constant.fromInteger
+  (+) = BVAdd
+  (-) = BVSub
+  (*) = BVMul
 
 instance Num (SMTExpr Word16) where
   fromInteger = constant.fromInteger
-  (+) = bvadd
-  (-) = bvsub
-  (*) = bvmul
+  (+) = BVAdd
+  (-) = BVSub
+  (*) = BVMul
+
+instance Num (SMTExpr Int16) where
+  fromInteger = constant.fromInteger
+  (+) = BVAdd
+  (-) = BVSub
+  (*) = BVMul
 
 instance Num (SMTExpr Word32) where
   fromInteger = constant.fromInteger
-  (+) = bvadd
-  (-) = bvsub
-  (*) = bvmul
+  (+) = BVAdd
+  (-) = BVSub
+  (*) = BVMul
+
+instance Num (SMTExpr Int32) where
+  fromInteger = constant.fromInteger
+  (+) = BVAdd
+  (-) = BVSub
+  (*) = BVMul
 
 instance Num (SMTExpr Word64) where
   fromInteger = constant.fromInteger
-  (+) = bvadd
-  (-) = bvsub
-  (*) = bvmul
+  (+) = BVAdd
+  (-) = BVSub
+  (*) = BVMul
+
+instance Num (SMTExpr Int64) where
+  fromInteger = constant.fromInteger
+  (+) = BVAdd
+  (-) = BVSub
+  (*) = BVMul
 
 -- Arguments
 
