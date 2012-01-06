@@ -83,6 +83,8 @@ data SMTExpr t where
   BVMul :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
   BVURem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
   BVSRem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
+  BVUDiv :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
+  BVSDiv :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
   BVULE :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
   BVULT :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
   BVUGE :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
@@ -251,6 +253,12 @@ exprToLisp (BVSub l r) c = let (l',c') = exprToLisp l c
 exprToLisp (BVMul l r) c = let (l',c') = exprToLisp l c
                                (r',c'') = exprToLisp r c'
                            in (L.List [L.Symbol "bvmul",l',r'],c'')
+exprToLisp (BVUDiv l r) c = let (l',c') = exprToLisp l c
+                                (r',c'') = exprToLisp r c'
+                            in (L.List [L.Symbol "bvudiv",l',r'],c'')
+exprToLisp (BVSDiv l r) c = let (l',c') = exprToLisp l c
+                                (r',c'') = exprToLisp r c'
+                            in (L.List [L.Symbol "bvsdiv",l',r'],c'')
 exprToLisp (BVULE l r) c = let (l',c') = exprToLisp l c
                                (r',c'') = exprToLisp r c'
                            in (L.List [L.Symbol "bvule",l',r'],c'')
