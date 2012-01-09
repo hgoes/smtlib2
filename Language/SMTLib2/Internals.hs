@@ -26,7 +26,7 @@ type SMT = ReaderT (Handle,Handle) (StateT (Integer,[TypeRep],Map T.Text TypeRep
 -- | Haskell types which can be represented in SMT
 class SMTType t where
   type SMTAnnotation t
-  getSort :: t -> L.Lisp
+  getSort :: t -> Maybe (SMTAnnotation t) -> L.Lisp
   declareType :: t -> [(TypeRep,SMT ())]
   additionalConstraints :: t -> SMTExpr t -> [SMTExpr Bool]
   additionalConstraints _ _ = []
@@ -165,7 +165,7 @@ instance Show (SMTExpr t) where
 
 instance SMTType Bool where
   type SMTAnnotation Bool = ()
-  getSort _ = L.Symbol "Bool"
+  getSort _ _ = L.Symbol "Bool"
   declareType u = [(typeOf u,return ())]
 
 instance SMTValue Bool where
@@ -374,7 +374,7 @@ varNamedAnn name ann = mfix (\e -> varNamed' (getUndef e) name ann)
 
 varNamed' :: (SMTType t,Typeable t) => t -> Text -> Maybe (SMTAnnotation t) -> SMT (SMTExpr t)
 varNamed' u name ann = do
-  let sort = getSort u
+  let sort = getSort u ann
       tps = declareType u
   modify $ \(c,decl,mp) -> (c,decl,Map.insert name (typeOf u) mp)
   mapM_ (\(tp,act) -> do
@@ -422,7 +422,7 @@ fun = do
       (au2,tps,_) = createArgs 0
       
   assertEq au au2 $ return ()
-  declareFun name [ l | (_,l) <- tps ] (getSort rtp)
+  declareFun name [ l | (_,l) <- tps ] (getSort rtp Nothing)
   return res
     
 -- | Define a new function with a body
@@ -438,7 +438,7 @@ defFun f = do
       (au2,tps,_) = createArgs 0
       
       (expr',_) = exprToLisp (f au2) 0
-  defineFun name tps (getSort rtp) expr'
+  defineFun name tps (getSort rtp Nothing) expr'
   return res
 
 -- | Apply a function to an argument

@@ -21,7 +21,7 @@ import Data.Map as Map
 
 instance SMTType Integer where
   type SMTAnnotation Integer = ()
-  getSort _ = L.Symbol "Int"
+  getSort _ _ = L.Symbol "Int"
   declareType u = [(typeOf u,return ())]
 
 instance SMTValue Integer where
@@ -54,7 +54,7 @@ instance SMTOrd Integer where
 
 instance SMTType (Ratio Integer) where
   type SMTAnnotation (Ratio Integer) = ()
-  getSort _ = L.Symbol "Real"
+  getSort _ _ = L.Symbol "Real"
   declareType u = [(typeOf u,return ())]
 
 instance SMTValue (Ratio Integer) where
@@ -100,15 +100,18 @@ instance SMTOrd (Ratio Integer) where
 -- Arrays
 
 instance (SMTType idx,SMTType val) => SMTType (Array idx val) where
-  type SMTAnnotation (Array idx val) = ()
-  getSort u = L.List [L.Symbol "Array"
-                     ,getSort (getIdx u)
-                     ,getSort (getVal u)]
+  type SMTAnnotation (Array idx val) = (SMTAnnotation idx,SMTAnnotation val)
+  getSort u ann = L.List [L.Symbol "Array"
+                         ,getSort (getIdx u) anni
+                         ,getSort (getVal u) annv]
     where
       getIdx :: Array i v -> i
       getIdx _ = undefined
       getVal :: Array i v -> v
       getVal _ = undefined
+      (anni,annv) = case ann of
+        Nothing -> (Nothing,Nothing)
+        Just (i,v) -> (Just i,Just v)
   declareType u = [(mkTyConApp (mkTyCon "Data.Array.Array") [],return ())] ++
                   declareType (getIdx u) ++
                   declareType (getVal u)
@@ -128,12 +131,12 @@ bv n = L.List [L.Symbol "_"
 
 instance SMTType Word8 where
   type SMTAnnotation Word8 = ()
-  getSort _ = bv 8
+  getSort _ _ = bv 8
   declareType u = [(typeOf u,return ())]
 
 instance SMTType Int8 where
   type SMTAnnotation Int8 = ()
-  getSort _ = bv 8
+  getSort _ _ = bv 8
   declareType u = [(typeOf u,return ())]
 
 withUndef1 :: (a -> g a) -> g a
@@ -189,12 +192,12 @@ instance SMTOrd Int8 where
 
 instance SMTType Word16 where
   type SMTAnnotation Word16 = ()
-  getSort _ = bv 16
+  getSort _ _ = bv 16
   declareType u = [(typeOf u,return ())]
 
 instance SMTType Int16 where
   type SMTAnnotation Int16 = ()
-  getSort _ = bv 16
+  getSort _ _ = bv 16
   declareType u = [(typeOf u,return ())]
 
 instance SMTValue Word16 where
@@ -222,12 +225,12 @@ instance SMTOrd Int16 where
 
 instance SMTType Word32 where
   type SMTAnnotation Word32 = ()
-  getSort _ = bv 32
+  getSort _ _ = bv 32
   declareType u = [(typeOf u,return ())]
 
 instance SMTType Int32 where
   type SMTAnnotation Int32 = ()
-  getSort _ = bv 32
+  getSort _ _ = bv 32
   declareType u = [(typeOf u,return ())]
 
 instance SMTValue Word32 where
@@ -255,12 +258,12 @@ instance SMTOrd Int32 where
 
 instance SMTType Word64 where
   type SMTAnnotation Word64 = ()
-  getSort _ = bv 64
+  getSort _ _ = bv 64
   declareType u = [(typeOf u,return ())]
   
 instance SMTType Int64 where
   type SMTAnnotation Int64 = ()
-  getSort _ = bv 64
+  getSort _ _ = bv 64
   declareType u = [(typeOf u,return ())]
 
 instance SMTValue Word64 where
@@ -339,7 +342,7 @@ instance Num (SMTExpr Int64) where
 instance SMTType a => Args (SMTExpr a) a where
   createArgs c = let n1 = T.pack $ "f"++show c
                      v1 = Var n1 Nothing
-                     t1 = getSort $ getUndef v1
+                     t1 = getSort (getUndef v1) Nothing
                  in (v1,[(n1,t1)],c+1)
   unpackArgs e _ c = let (e',c') = exprToLisp e c
                      in ([e'],c)
@@ -351,8 +354,8 @@ instance (SMTType a,SMTType b) => Args (SMTExpr a,SMTExpr b) (a,b) where
                      n2 = T.pack $ "f"++show (c+1)
                      v1 = Var n1 Nothing
                      v2 = Var n2 Nothing
-                     t1 = getSort $ getUndef v1
-                     t2 = getSort $ getUndef v2
+                     t1 = getSort (getUndef v1) Nothing
+                     t2 = getSort (getUndef v2) Nothing
                  in ((v1,v2),[(n1,t1),(n2,t2)],c+2)
   unpackArgs (e1,e2) _ c = let (r1,c1) = exprToLisp e1 c
                                (r2,c2) = exprToLisp e2 c1
@@ -369,9 +372,9 @@ instance (SMTType a,SMTType b,SMTType c) => Args (SMTExpr a,SMTExpr b,SMTExpr c)
                      v1 = Var n1 Nothing
                      v2 = Var n2 Nothing
                      v3 = Var n3 Nothing
-                     t1 = getSort $ getUndef v1
-                     t2 = getSort $ getUndef v2
-                     t3 = getSort $ getUndef v3
+                     t1 = getSort (getUndef v1) Nothing
+                     t2 = getSort (getUndef v2) Nothing
+                     t3 = getSort (getUndef v3) Nothing
                  in ((v1,v2,v3),[(n1,t1),(n2,t2),(n3,t3)],c+3)
   unpackArgs (e1,e2,e3) _ c = let (r1,c1) = exprToLisp e1 c
                                   (r2,c2) = exprToLisp e2 c1
@@ -384,8 +387,8 @@ instance (SMTType a,SMTType b,SMTType c) => Args (SMTExpr a,SMTExpr b,SMTExpr c)
   allOf x = (x,x,x)
 
 instance SMTType a => SMTType (Maybe a) where
-  type SMTAnnotation (Maybe a) = ()
-  getSort u = L.List [L.Symbol "Maybe",getSort (undef u)]
+  type SMTAnnotation (Maybe a) = SMTAnnotation a
+  getSort u ann = L.List [L.Symbol "Maybe",getSort (undef u) ann]
     where
       undef :: Maybe a -> a
       undef _ = undefined
@@ -409,7 +412,7 @@ instance SMTValue a => SMTValue (Maybe a) where
   unmangle _ _ = return Nothing
   mangle u@Nothing = L.List [L.Symbol "as"
                             ,L.Symbol "Nothing"
-                            ,getSort u]
+                            ,getSort u Nothing]
   mangle (Just x) = L.List [L.Symbol "Just"
                            ,mangle x]
 
@@ -417,15 +420,15 @@ undefArg :: b a -> a
 undefArg _ = undefined
 
 instance (Typeable a,SMTType a) => SMTType [a] where
-  type SMTAnnotation [a] = ()
-  getSort u = L.List [L.Symbol "List",getSort (undefArg u)]
+  type SMTAnnotation [a] = SMTAnnotation a
+  getSort u ann = L.List [L.Symbol "List",getSort (undefArg u) ann]
   declareType u = (typeOf u,return ()):declareType (undefArg u)
 
 instance (Typeable a,SMTValue a) => SMTValue [a] where
   unmangle (L.Symbol "nil") _ = return $ Just []
-  unmangle (L.List [L.Symbol "insert",h,t]) _ = do
-    h' <- unmangle h Nothing
-    t' <- unmangle t Nothing
+  unmangle (L.List [L.Symbol "insert",h,t]) ann = do
+    h' <- unmangle h ann
+    t' <- unmangle t ann
     return (do
                hh <- h'
                tt <- t'
