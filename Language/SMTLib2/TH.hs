@@ -25,8 +25,9 @@ deriveSMT name = do
   tp <- extractDataType name
   pat <- newName "u"
   let decls = [instanceD (cxt []) (appT (conT ''SMTType) (conT name))
-               [funD 'getSort [clause [wildP] (normalB $ generateSortExpr name) []],
-                funD 'declareType [clause [varP pat] (normalB $ generateDeclExpr name tp pat) []]
+               [funD 'getSort [clause [wildP,wildP] (normalB $ generateSortExpr name) []],
+                funD 'declareType [clause [varP pat] (normalB $ generateDeclExpr name tp pat) []],
+                tySynInstD ''SMTAnnotation [conT name] (tupleT 0)
                ],
                instanceD (cxt []) (appT (conT ''SMTValue) (conT name))
                [generateMangleFun tp,
@@ -74,7 +75,7 @@ generateDeclExpr dname cons pat
     [| [(typeOf $(varE pat),declareDatatypes [] [(T.pack $(stringE $ nameBase dname),
                                                   $(listE [ tupE [ [| T.pack $(stringE $ nameBase cname) |],  
                                                                    listE [ tupE [ stringE $ nameBase sname,
-                                                                                  [| getSort (undefined :: $(return tp)) |]
+                                                                                  [| getSort (undefined :: $(return tp)) Nothing |]
                                                                                 ] 
                                                                          | (sname,tp) <- sels ]
                                                                  ]
@@ -110,8 +111,9 @@ generateUnmangleFun cons
        clause [(if Prelude.null fields
                 then conP 'L.Symbol [litP $ stringL $ nameBase cname]
                 else conP 'L.List [listP $ [conP 'L.Symbol [litP $ stringL $ nameBase cname]]++
-                                           (fmap (varP . fst) vars)])]
-                (normalB $ doE $ [ bindS (conP 'Just [varP r]) [| unmangle $(varE v) |] | (v,r) <- vars ]++
+                                           (fmap (varP . fst) vars)])
+              ,wildP]
+                (normalB $ doE $ [ bindS (conP 'Just [varP r]) [| unmangle $(varE v) Nothing |] | (v,r) <- vars ]++
                                  [ noBindS $ appsE [[| return |],appsE [ [| Just |],appsE $ (conE cname):(fmap (varE . snd) vars)] ]]) []
     | (cname,fields) <- cons
     ]
