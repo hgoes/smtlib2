@@ -18,24 +18,22 @@ funTest = do
   vq <- getValue q
   return vq
 
-quantifierTest :: SMT (Integer,Integer)
+quantifierTest :: SMT Integer
 quantifierTest = do
   setOption (PrintSuccess False)
   setOption (ProduceModels True)
   v1 <- var :: SMT (SMTExpr Integer)
-  v2 <- var
-  assert $ forAll $ \(x,y) -> v1 + x .==. v2 + x + y
+  assert $ forAll $ \(x,y) -> v1 * x .==. v1 * y
   checkSat
   r1 <- getValue v1
-  r2 <- getValue v2
-  return (r1,r2)
+  return r1
 
 bvTest :: SMT Word8
 bvTest = do
   v1 <- var
   v2 <- var
   v3 <- var
-  assert $ v1 .==. (constant (16::Word8))
+  assert $ v1 .==. 16
   assert $ v2 .==. 35
   assert $ v3 .==. v1 + v2
   checkSat
@@ -110,4 +108,38 @@ sendMoreMoney = do
       money = vm*10000+vo*1000+vn*100+ve*10+vy
   return (vs,ve,vn,vd,vm,vo,vr,vy,(vc0,vc1,vc2),send,more,money,send+more==money)
 
---soduko :: 
+sudoko :: SMT [[Integer]]
+sudoko = do
+  setOption (PrintSuccess False)
+  setOption (ProduceModels True)
+  field <- mapM (\line -> mapM (\col -> var) [0..8]) [0..8]
+  mapM_ (mapM_ (\v -> assert $ and' [ v .<. 10, v .>=. 0])) field
+  mapM_ (\line -> assert $ distinct line) field
+  mapM_ (\i -> assert $ distinct [ line!!i | line <- field ]) [0..8]
+  assert $ distinct [ field!!i!!j | i <- [0..2],j <- [0..2] ]
+  assert $ distinct [ field!!i!!j | i <- [0..2],j <- [3..5] ]
+  assert $ distinct [ field!!i!!j | i <- [0..2],j <- [6..8] ]
+
+  assert $ distinct [ field!!i!!j | i <- [3..5],j <- [0..2] ]
+  assert $ distinct [ field!!i!!j | i <- [3..5],j <- [3..5] ]
+  assert $ distinct [ field!!i!!j | i <- [3..5],j <- [6..8] ]
+
+  assert $ distinct [ field!!i!!j | i <- [6..8],j <- [0..2] ]
+  assert $ distinct [ field!!i!!j | i <- [6..8],j <- [3..5] ]
+  assert $ distinct [ field!!i!!j | i <- [6..8],j <- [6..8] ]
+
+  
+  assert $ field!!0!!1 .==. 6
+  assert $ field!!0!!7 .==. 1
+  assert $ field!!1!!3 .==. 6
+  assert $ field!!1!!4 .==. 5
+  assert $ field!!1!!5 .==. 1
+  assert $ field!!2!!0 .==. 1
+  assert $ field!!2!!2 .==. 7
+  assert $ field!!2!!6 .==. 6
+  assert $ field!!2!!8 .==. 2
+  assert $ field!!3!!0 .==. 6
+  assert $ field!!3!!1 .==. 2
+
+  checkSat
+  mapM (mapM getValue) field
