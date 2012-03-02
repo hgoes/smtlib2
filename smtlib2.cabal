@@ -6,7 +6,7 @@ Cabal-Version:  >=1.2
 
 Library
   Build-Depends:        base >= 4,text,mtl,process,blaze-builder,bytestring,
-                        attoparsec,atto-lisp == 0.2,array,template-haskell,
+                        attoparsec,atto-lisp >= 0.2,array,template-haskell,
                         containers
   Exposed-Modules:
     Language.SMTLib2
@@ -15,4 +15,7 @@ Library
     Language.SMTLib2.TH
     Language.SMTLib2.Internals
   Other-Modules:
-    Language.SMTLib2.Instances
+    Language.SMTLib2.Internals.Instances
+    Language.SMTLib2.Internals.Translation
+    Language.SMTLib2.Internals.Interface
+    Data.Unit

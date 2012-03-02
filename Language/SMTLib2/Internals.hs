@@ -3,6 +3,7 @@ module Language.SMTLib2.Internals where
 
 import Data.Attoparsec
 import qualified Data.AttoLisp as L
+import Data.AttoLisp.Pretty
 import qualified Data.Attoparsec.Number as L
 import Data.ByteString as BS
 import Blaze.ByteString.Builder
@@ -19,22 +20,23 @@ import Data.Foldable (foldlM)
 import Data.Map as Map hiding (assocs)
 import Data.Set as Set
 import Data.List as List (genericReplicate,mapAccumL)
+import Data.Unit
 
 -- | The SMT monad used for communating with the SMT solver
 type SMT = ReaderT (Handle,Handle) (StateT (Integer,[TypeRep],Map T.Text TypeRep) IO)
 
 -- | Haskell types which can be represented in SMT
-class SMTType t where
+class (Eq t,Typeable t) => SMTType t where
   type SMTAnnotation t
-  getSort :: t -> Maybe (SMTAnnotation t) -> L.Lisp
+  getSort :: t -> SMTAnnotation t -> L.Lisp
   declareType :: t -> [(TypeRep,SMT ())]
   additionalConstraints :: t -> SMTExpr t -> [SMTExpr Bool]
   additionalConstraints _ _ = []
 
 -- | Haskell values which can be represented as SMT constants
 class SMTType t => SMTValue t where
-  unmangle :: L.Lisp -> Maybe (SMTAnnotation t) -> SMT (Maybe t)
-  mangle :: t -> L.Lisp
+  unmangle :: L.Lisp -> SMTAnnotation t -> SMT (Maybe t)
+  mangle :: t -> SMTAnnotation t -> L.Lisp
 
 -- | A type class for all types which support arithmetic operations in SMT
 class (SMTValue t,Num t) => SMTArith t
@@ -54,8 +56,8 @@ data SMTFun a b r = SMTFun
 
 -- | An abstract SMT expression
 data SMTExpr t where
-  Var :: SMTType t => Text -> Maybe (SMTAnnotation t) -> SMTExpr t
-  Const :: SMTValue t => t -> SMTExpr t
+  Var :: SMTType t => Text -> SMTAnnotation t -> SMTExpr t
+  Const :: SMTValue t => t -> SMTAnnotation t -> SMTExpr t
   Eq :: SMTType a => SMTExpr a -> SMTExpr a -> SMTExpr Bool
   Ge :: (Num a,SMTType a) => SMTExpr a -> SMTExpr a -> SMTExpr Bool
   Gt :: (Num a,SMTType a) => SMTExpr a -> SMTExpr a -> SMTExpr Bool
@@ -70,52 +72,129 @@ data SMTExpr t where
   Divide :: SMTExpr Rational -> SMTExpr Rational -> SMTExpr Rational
   Neg :: SMTArith t => SMTExpr t -> SMTExpr t
   Abs :: SMTArith t => SMTExpr t -> SMTExpr t
-  ITE :: SMTExpr Bool -> SMTExpr t -> SMTExpr t -> SMTExpr t
+  ITE :: SMTType t => SMTExpr Bool -> SMTExpr t -> SMTExpr t -> SMTExpr t
   And :: [SMTExpr Bool] -> SMTExpr Bool
   Or :: [SMTExpr Bool] -> SMTExpr Bool
   XOr :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
   Implies :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
   Not :: SMTExpr Bool -> SMTExpr Bool
-  Select :: SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v
-  Store :: SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v -> SMTExpr (Array i v)
-  BVAdd :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-  BVSub :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-  BVMul :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-  BVURem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-  BVSRem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-  BVUDiv :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-  BVSDiv :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-  BVULE :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-  BVULT :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-  BVUGE :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-  BVUGT :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-  BVSLE :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-  BVSLT :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-  BVSGE :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-  BVSGT :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
+  Select :: (Ix i,SMTType i,SMTType v) => SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v
+  Store :: (Ix i,SMTType i,SMTType v) => SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v -> SMTExpr (Array i v)
+  BVAdd :: SMTExpr t -> SMTExpr t -> SMTExpr t
+  BVSub :: SMTExpr t -> SMTExpr t -> SMTExpr t
+  BVMul :: SMTExpr t -> SMTExpr t -> SMTExpr t
+  BVURem :: SMTExpr t -> SMTExpr t -> SMTExpr t
+  BVSRem :: SMTExpr t -> SMTExpr t -> SMTExpr t
+  BVUDiv :: SMTExpr t -> SMTExpr t -> SMTExpr t
+  BVSDiv :: SMTExpr t -> SMTExpr t -> SMTExpr t
+  BVULE :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
+  BVULT :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
+  BVUGE :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
+  BVUGT :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
+  BVSLE :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
+  BVSLT :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
+  BVSGE :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
+  BVSGT :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
+  BVExtract :: SMTType t1 => Integer -> Integer -> SMTExpr t1 -> SMTExpr t2
+  BVConcat :: (SMTType t1,SMTType t2) => SMTExpr t1 -> SMTExpr t2 -> SMTExpr t3
+  BVConcats :: SMTType t1 => [SMTExpr t1] -> SMTExpr t2
+  BVXor :: SMTExpr t -> SMTExpr t -> SMTExpr t
+  BVAnd :: SMTExpr t -> SMTExpr t -> SMTExpr t
   Forall :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
   ForallList :: Args a b => Integer -> ([a] -> SMTExpr Bool) -> SMTExpr Bool
   Exists :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
-  Let :: SMTType a => SMTExpr a -> (SMTExpr a -> SMTExpr b) -> SMTExpr b
+  Let :: (SMTType a) => SMTExpr a -> (SMTExpr a -> SMTExpr b) -> SMTExpr b
   Lets :: SMTType a => [SMTExpr a] -> ([SMTExpr a] -> SMTExpr b) -> SMTExpr b
   Fun :: (Args a b,SMTType r) => Text -> SMTExpr (SMTFun a b r)
   App :: (Args a b,SMTType r) => SMTExpr (SMTFun a b r) -> a -> SMTExpr r
-  ConTest :: Constructor a -> SMTExpr a -> SMTExpr Bool
-  FieldSel :: Field a f -> SMTExpr a -> SMTExpr f
+  ConTest :: SMTType a => Constructor a -> SMTExpr a -> SMTExpr Bool
+  FieldSel :: (SMTType a,SMTType f) => Field a f -> SMTExpr a -> SMTExpr f
   Head :: SMTExpr [a] -> SMTExpr a
   Tail :: SMTExpr [a] -> SMTExpr [a]
   Insert :: SMTExpr a -> SMTExpr [a] -> SMTExpr [a]
   Named :: SMTExpr a -> Text -> SMTExpr a
+  InterpolationGrp :: SMTExpr Bool -> Text -> SMTExpr Bool
   InternalFun :: [L.Lisp] -> SMTExpr (SMTFun (SMTExpr Bool) Bool Bool)
   Undefined :: SMTExpr a
   deriving Typeable
 
+instance Show (SMTExpr a) where
+    show expr = "<smt-expr>"
+
+instance Eq a => Eq (SMTExpr a) where
+    (==) (Var v1 _) (Var v2 _) = v1 == v2
+    (==) (Const v1 _) (Const v2 _) = v1 == v2
+    (==) (Ge l1 r1) (Ge l2 r2) = (eqExpr l1 l2) && (eqExpr r1 r2)
+    (==) (Gt l1 r1) (Gt l2 r2) = (eqExpr l1 l2) && (eqExpr r1 r2)
+    (==) (Le l1 r1) (Le l2 r2) = (eqExpr l1 l2) && (eqExpr r1 r2)
+    (==) (Lt l1 r1) (Lt l2 r2) = (eqExpr l1 l2) && (eqExpr r1 r2)
+    (==) (Distinct x1) (Distinct x2) = eqExprs x1 x2
+    (==) (Plus x1) (Plus x2) = eqExprs x1 x2
+    (==) (Minus l1 r1) (Minus l2 r2) = (eqExpr l1 l2) && (eqExpr r1 r2)
+    (==) (Mult x1) (Mult x2) = eqExprs x1 x2
+    (==) (Div l1 r1) (Div l2 r2) = l1 == l2 && r1 == r2
+    (==) (Mod l1 r1) (Mod l2 r2) = l1 == l2 && r1 == r2
+    (==) (Divide l1 r1) (Divide l2 r2) = l1 == l2 && r1 == r2
+    (==) (Neg x) (Neg y) = x == y
+    (==) (Abs x) (Abs y) = x == y
+    (==) (ITE c1 l1 r1) (ITE c2 l2 r2) = c1 == c2 && eqExpr l1 l2 && eqExpr r1 r2
+    (==) (And x) (And y) = x == y
+    (==) (Or x) (Or y) = x == y
+    (==) (XOr l1 r1) (XOr l2 r2) = l1 == l2 && r1 == r2
+    (==) (Implies l1 r1) (Implies l2 r2) = l1 == l2 && r1 == r2
+    (==) (Not x) (Not y) = x==y
+    (==) (Select a1 i1) (Select a2 i2) = eqExpr a1 a2 && eqExpr i1 i2
+    (==) (Store a1 i1 v1) (Store a2 i2 v2) = a1==a2 && i1 == i2 && v1 == v2
+    (==) (BVAdd l1 r1) (BVAdd l2 r2) = l1 == l2 && r1 == r2
+    (==) (BVSub l1 r1) (BVSub l2 r2) = l1 == l2 && r1 == r2
+    (==) (BVMul l1 r1) (BVMul l2 r2) = l1 == l2 && r1 == r2
+    (==) (BVURem l1 r1) (BVURem l2 r2) = l1 == l2 && r1 == r2
+    (==) (BVSRem l1 r1) (BVSRem l2 r2) = l1 == l2 && r1 == r2
+    (==) (BVUDiv l1 r1) (BVUDiv l2 r2) = l1 == l2 && r1 == r2
+    (==) (BVSDiv l1 r1) (BVSDiv l2 r2) = l1 == l2 && r1 == r2
+    (==) (BVULE l1 r1) (BVULE l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
+    (==) (BVULT l1 r1) (BVULT l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
+    (==) (BVUGE l1 r1) (BVUGE l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
+    (==) (BVUGT l1 r1) (BVUGT l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
+    (==) (BVSLE l1 r1) (BVSLE l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
+    (==) (BVSLT l1 r1) (BVSLT l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
+    (==) (BVSGE l1 r1) (BVSGE l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
+    (==) (BVSGT l1 r1) (BVSGT l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
+    (==) (BVExtract l1 u1 e1) (BVExtract l2 u2 e2) = l1 == l2 && u1 == u2 && eqExpr e1 e2
+    (==) (BVConcat l1 r1) (BVConcat l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
+    (==) (BVConcats x) (BVConcats y) = eqExprs x y
+    (==) (BVXor l1 r1) (BVXor l2 r2) = l1 == l2 && r1 == r2
+    (==) (BVAnd l1 r1) (BVAnd l2 r2) = l1 == l2 && r1 == r2
+    (==) (ConTest c1 e1) (ConTest c2 e2) = eqExpr c1 c2 && eqExpr e1 e2
+    (==) (FieldSel (Field f1) e1) (FieldSel (Field f2) e2) = f1 == f2 && eqExpr e1 e2
+    (==) (Head x) (Head y) = x == y
+    (==) (Tail x) (Tail y) = x == y
+    -- This doesn't work for unknown reasons
+    --(==) (Insert x xs) (Insert y ys) = x == y && xs == ys
+    (==) (Named e1 n1) (Named e2 n2) = e1==e2 && n1==n2
+    (==) (InterpolationGrp e1 n1) (InterpolationGrp e2 n2) = e1 == e2 && n1 == n2
+    (==) (InternalFun arg1) (InternalFun arg2) = arg1 == arg2
+    (==) Undefined Undefined = True
+    (==) _ _ = False
+  
+eqExprs :: (Eq a,Typeable a,Typeable b) => [SMTExpr a] -> [SMTExpr b] -> Bool
+eqExprs (x:xs) (y:ys) = eqExpr x y && eqExprs xs ys
+eqExprs [] [] = True
+eqExprs _ _ = False
+
+eqExpr :: (Eq (c a),Typeable a,Typeable b) => c a -> c b -> Bool
+eqExpr lhs rhs = case gcast rhs of
+                   Nothing -> False
+                   Just rhs' -> lhs == rhs'
+
 -- | Represents a constructor of a datatype /a/
 --   Can be obtained by using the template haskell extension module
-data Constructor a = Constructor Text
+data Constructor a = Constructor Text deriving (Eq)
 
 -- | Represents a field of the datatype /a/ of the type /f/
-data Field a f = Field Text
+data Field a f = Field Text deriving (Eq)
+
+newtype InterpolationGroup = InterpolationGroup Text
 
 -- | Options controling the behaviour of the SMT solver
 data SMTOption
@@ -151,191 +230,9 @@ instance SMTInfo SMTSolverVersion String where
 -- | Instances of this class may be used as arguments for constructed functions and quantifiers.
 class Args a b | a -> b where
   createArgs :: Integer -> (a,[(Text,L.Lisp)],Integer)
-  unpackArgs :: a -> b -> Integer -> ([L.Lisp],Integer)
+  unpackArgs :: (forall t. SMTExpr t -> Integer -> (c,Integer)) -> a -> b -> Integer -> ([c],Integer)
   foldExprs :: (forall t. s -> SMTExpr t -> (s,SMTExpr t)) -> s -> a -> (s,a)
   allOf :: (forall t. SMTExpr t) -> a
-
-instance SMTValue t => Eq (SMTExpr t) where
-  (==) x y = (L.toLisp x) == (L.toLisp y)
-
-instance Show (SMTExpr t) where
-  show x = show (L.toLisp x)
-
--- Bool
-
-instance SMTType Bool where
-  type SMTAnnotation Bool = ()
-  getSort _ _ = L.Symbol "Bool"
-  declareType u = [(typeOf u,return ())]
-
-instance SMTValue Bool where
-  unmangle (L.Symbol "true") _ = return $ Just True
-  unmangle (L.Symbol "false") _ = return $ Just False
-  unmangle _ _ = return Nothing
-  mangle True = L.Symbol "true"
-  mangle False = L.Symbol "false"
-
-exprsToLisp :: [SMTExpr t] -> Integer -> ([L.Lisp],Integer)
-exprsToLisp [] c = ([],c)
-exprsToLisp (e:es) c = let (e',c') = exprToLisp e c
-                           (es',c'') = exprsToLisp es c'
-                       in (e':es',c'')
-
-exprToLisp :: SMTExpr t -> Integer -> (L.Lisp,Integer)
-exprToLisp (Var name ann) c = (L.Symbol name,c)
-exprToLisp (Const x) c = (mangle x,c)
-exprToLisp (Eq l r) c = let (l',c') = exprToLisp l c
-                            (r',c'') = exprToLisp r c'
-                        in (L.List [L.Symbol "=",l',r'],c'')
-exprToLisp (Distinct lst) c = let (lst',c') = exprsToLisp lst c
-                              in (L.List $ [L.Symbol "distinct"] ++ lst',c')
-exprToLisp (Plus lst) c = let (lst',c') = exprsToLisp lst c
-                          in (L.List $ [L.Symbol "+"] ++ lst',c')
-exprToLisp (Mult lst) c = let (lst',c') = exprsToLisp lst c
-                          in (L.List $ [L.Symbol "*"] ++ lst',c')
-exprToLisp (Minus l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "-",l',r'],c'')
-exprToLisp (Div l r) c = let (l',c') = exprToLisp l c
-                             (r',c'') = exprToLisp r c'
-                         in (L.List [L.Symbol "div",l',r'],c'')
-exprToLisp (Divide l r) c = let (l',c') = exprToLisp l c
-                                (r',c'') = exprToLisp r c'
-                            in (L.List [L.Symbol "/",l',r'],c'')
-exprToLisp (Mod l r) c = let (l',c') = exprToLisp l c
-                             (r',c'') = exprToLisp r c'
-                         in (L.List [L.Symbol "mod",l',r'],c'')
-exprToLisp (Neg e) c = let (e',c') = exprToLisp e c
-                       in (L.List [L.Symbol "-",e'],c')
-exprToLisp (Abs e) c = let (e',c') = exprToLisp e c
-                       in (L.List [L.Symbol "abs",e'],c')
-exprToLisp (ITE cond tt ff) c = let (cond',c') = exprToLisp cond c
-                                    (tt',c'') = exprToLisp tt c'
-                                    (ff',c''') = exprToLisp ff c''
-                                in (L.List [L.Symbol "ite",cond',tt',ff'],c''')
-exprToLisp (Ge l r) c = let (l',c') = exprToLisp l c
-                            (r',c'') = exprToLisp r c'
-                        in (L.List [L.Symbol ">=",l',r'],c'')
-exprToLisp (Gt l r) c = let (l',c') = exprToLisp l c
-                            (r',c'') = exprToLisp r c'
-                        in (L.List [L.Symbol ">",l',r'],c'')
-exprToLisp (Le l r) c = let (l',c') = exprToLisp l c
-                            (r',c'') = exprToLisp r c'
-                        in (L.List [L.Symbol "<=",l',r'],c'')
-exprToLisp (Lt l r) c = let (l',c') = exprToLisp l c
-                            (r',c'') = exprToLisp r c'
-                        in (L.List [L.Symbol "<",l',r'],c'')
-exprToLisp (And lst) c = let (lst',c') = exprsToLisp lst c
-                         in (L.List $ [L.Symbol "and"] ++ lst',c')
-exprToLisp (Or lst) c = let (lst',c') = exprsToLisp lst c
-                        in (L.List $ [L.Symbol "or"] ++ lst',c')
-exprToLisp (XOr l r) c = let (l',c') = exprToLisp l c
-                             (r',c'') = exprToLisp r c'
-                         in (L.List [L.Symbol "xor",l',r'],c'')
-exprToLisp (Implies l r) c = let (l',c') = exprToLisp l c
-                                 (r',c'') = exprToLisp r c'
-                             in (L.List [L.Symbol "=>",l',r'],c'')
-exprToLisp (Not expr) c = let (expr',c') = exprToLisp expr c
-                          in (L.List [L.Symbol "not",expr'],c')
-exprToLisp (Select arr idx) c = let (arr',c') = exprToLisp arr c
-                                    (idx',c'') = exprToLisp idx c'
-                                in (L.List [L.Symbol "select",arr',idx'],c'')
-exprToLisp (Store arr idx val) c = let (arr',c') = exprToLisp arr c
-                                       (idx',c'') = exprToLisp idx c''
-                                       (val',c''') = exprToLisp val c'''
-                                   in (L.List [L.Symbol "store",arr',idx',val'],c''')
-exprToLisp (BVAdd l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvadd",l',r'],c'')
-exprToLisp (BVSub l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvsub",l',r'],c'')
-exprToLisp (BVMul l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvmul",l',r'],c'')
-exprToLisp (BVUDiv l r) c = let (l',c') = exprToLisp l c
-                                (r',c'') = exprToLisp r c'
-                            in (L.List [L.Symbol "bvudiv",l',r'],c'')
-exprToLisp (BVSDiv l r) c = let (l',c') = exprToLisp l c
-                                (r',c'') = exprToLisp r c'
-                            in (L.List [L.Symbol "bvsdiv",l',r'],c'')
-exprToLisp (BVULE l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvule",l',r'],c'')
-exprToLisp (BVULT l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvult",l',r'],c'')
-exprToLisp (BVUGE l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvuge",l',r'],c'')
-exprToLisp (BVUGT l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvugt",l',r'],c'')
-exprToLisp (BVSLE l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvsle",l',r'],c'')
-exprToLisp (BVSLT l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvslt",l',r'],c'')
-exprToLisp (BVSGE l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvsge",l',r'],c'')
-exprToLisp (BVSGT l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvsgt",l',r'],c'')
-exprToLisp (Forall f) c = let (arg,tps,nc) = createArgs c
-                              (arg',nc') = exprToLisp (f arg) nc
-                          in (L.List [L.Symbol "forall"
-                                     ,L.List [L.List [L.Symbol name,tp]
-                                             | (name,tp) <- tps]
-                                     ,arg'],nc')
-exprToLisp (ForallList i f) c
-  = let (args,tps,nc) = Prelude.foldl (\(cargs,ctps,cnc) _ -> let (arg,tp,nnc) = createArgs cnc
-                                                              in (arg:cargs,tp++ctps,nnc)
-                                      ) ([],[],c) [1..i]
-        (arg',nc') = exprToLisp (f args) nc
-    in (L.List [L.Symbol "forall"
-               ,L.List [L.List [L.Symbol name,tp]
-                       | (name,tp) <- tps]
-               ,arg'],nc')
-exprToLisp (Exists f) c = let (arg,tps,nc) = createArgs c
-                              (arg',nc') = exprToLisp (f arg) nc
-                          in (L.List [L.Symbol "exists"
-                                     ,L.List [L.List [L.Symbol name,tp]
-                                             | (name,tp) <- tps ]
-                                     ,arg'],nc')
-exprToLisp (Let x f) c = let (arg,nc) = exprToLisp x c
-                             name = T.pack $ "l"++show nc
-                             (arg',nc') = exprToLisp (f (Var name Nothing)) (nc+1)
-                         in (L.List [L.Symbol "let"
-                                    ,L.List [L.List [L.Symbol name,arg]]
-                                    ,arg'],nc')
-exprToLisp (Lets xs f) c = let (nc,xs') = List.mapAccumL (\cc x -> let (x',cc') = exprToLisp x cc
-                                                                       name = T.pack $ "l"++show cc'
-                                                                   in (cc'+1,(name,x'))) c xs
-                           in (L.List [L.Symbol "let"
-                                      ,L.List [L.List [L.Symbol name,arg]
-                                              | (name,arg) <- xs']],nc)
-exprToLisp (Fun name) c = (L.Symbol name,c)
-exprToLisp (App f x) c = let (_,bu,ru) = getFunUndef f
-                             (f',c') = exprToLisp f c
-                             (x',c'') = unpackArgs x bu c
-                         in (L.List $ f':x',c'')
-exprToLisp (ConTest (Constructor name) e) c = let (e',c') = exprToLisp e c
-                                              in (L.List [L.Symbol $ T.append "is-" name
-                                                         ,e'],c')
-exprToLisp (FieldSel (Field name) e) c = let (e',c') = exprToLisp e c
-                                         in (L.List [L.Symbol name,e'],c')
-exprToLisp (Head xs) c = let (e,c') = exprToLisp xs c
-                         in (L.List [L.Symbol "head",e],c')
-exprToLisp (Tail xs) c = let (e,c') = exprToLisp xs c
-                         in (L.List [L.Symbol "tail",e],c')
-exprToLisp (Insert x xs) c = let (x',c') = exprToLisp x c
-                                 (xs',c'') = exprToLisp xs c'
-                             in (L.List [L.Symbol "insert",x',xs'],c'')
-exprToLisp (Named expr name) c = let (expr',c') = exprToLisp expr c
-                                 in (L.List [L.Symbol "!",expr',L.Symbol ":named",L.Symbol name],c')
-exprToLisp (InternalFun args) c = (L.List (L.Symbol "_":args),c)
 
 firstJust :: Monad m => [m (Maybe a)] -> m (Maybe a)
 firstJust [] = return Nothing
@@ -345,325 +242,11 @@ firstJust (act:acts) = do
     Nothing -> firstJust acts
     Just res -> return $ Just res
 
-instance L.ToLisp (SMTExpr t) where
-  toLisp e = fst $ exprToLisp e 0
-
 getUndef :: SMTExpr t -> t
 getUndef _ = undefined
 
 getFunUndef :: SMTExpr (SMTFun a b r) -> (a,b,r)
 getFunUndef _ = (undefined,undefined,undefined)
-
--- | Set an option for the underlying SMT solver
-setOption :: SMTOption -> SMT ()
-setOption opt = putRequest $ L.List $ [L.Symbol "set-option"]
-                ++(case opt of
-                      PrintSuccess v -> [L.Symbol ":print-success"
-                                        ,L.Symbol $ if v then "true" else "false"]
-                      ProduceModels v -> [L.Symbol ":produce-models"
-                                         ,L.Symbol $ if v then "true" else "false"]
-                      ProduceProofs v -> [L.Symbol ":produce-proofs"
-                                         ,L.Symbol $ if v then "true" else "false"])
-
--- | Create a new named variable
-varNamed :: (SMTType t,Typeable t) => Text -> SMT (SMTExpr t)
-varNamed name = varNamedAnn name Nothing
-
-varNamedAnn :: (SMTType t,Typeable t) => Text -> Maybe (SMTAnnotation t) -> SMT (SMTExpr t)
-varNamedAnn name ann = mfix (\e -> varNamed' (getUndef e) name ann)
-
-varNamed' :: (SMTType t,Typeable t) => t -> Text -> Maybe (SMTAnnotation t) -> SMT (SMTExpr t)
-varNamed' u name ann = do
-  let sort = getSort u ann
-      tps = declareType u
-  modify $ \(c,decl,mp) -> (c,decl,Map.insert name (typeOf u) mp)
-  mapM_ (\(tp,act) -> do
-            (c,decl,_) <- get
-            if Prelude.elem tp decl
-              then return ()
-              else (do
-                       act
-                       modify (\(c',decl',mp') -> (c',tp:decl',mp'))
-                   )
-        ) (Prelude.reverse tps)
-  declareFun name [] sort
-  mapM_ assert $ additionalConstraints u (Var name ann)
-  return (Var name ann)
-
--- | Create a annotated variable
-varAnn :: (SMTType t,Typeable t) => SMTAnnotation t -> SMT (SMTExpr t)
-varAnn ann = do
-  (c,decl,mp) <- get
-  put (c+1,decl,mp)
-  let name = T.pack $ "var"++show c
-  varNamedAnn name (Just ann)
-
--- | Create a fresh new variable
-var :: (SMTType t,Typeable t) => SMT (SMTExpr t)
-var = do
-  (c,decl,mp) <- get
-  put (c+1,decl,mp)
-  let name = T.pack $ "var"++show c
-  varNamed name
-
--- | Create a new uninterpreted function
-fun :: (Args a b,SMTType r) => SMT (SMTExpr (SMTFun a b r))
-fun = do
-  (c,decl,mp) <- get
-  put (c+1,decl,mp)
-  let name = T.pack $ "fun"++show c
-      res = Fun name
-      
-      (au,bu,rtp) = getFunUndef res
-      
-      assertEq :: x -> x -> y -> y
-      assertEq _ _ p = p
-      
-      (au2,tps,_) = createArgs 0
-      
-  assertEq au au2 $ return ()
-  declareFun name [ l | (_,l) <- tps ] (getSort rtp Nothing)
-  return res
-    
--- | Define a new function with a body
-defFun :: (Args a b,SMTType r) => (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a b r))
-defFun f = do
-  (c,decl,mp) <- get
-  put (c+1,decl,mp)
-  let name = T.pack $ "fun"++show c
-      res = Fun name
-      
-      (au,bu,rtp) = getFunUndef res
-      
-      (au2,tps,_) = createArgs 0
-      
-      (expr',_) = exprToLisp (f au2) 0
-  defineFun name tps (getSort rtp Nothing) expr'
-  return res
-
--- | Apply a function to an argument
-app :: (Args a b,SMTType r) => SMTExpr (SMTFun a b r) -> a -> SMTExpr r
-app = App
-
--- | A constant expression
-constant :: SMTValue t => t -> SMTExpr t
-constant = Const
-
--- | Two expressions shall be equal
-(.==.) :: SMTType a => SMTExpr a -> SMTExpr a -> SMTExpr Bool
-(.==.) = Eq
-
-infix 4 .==.
-
--- | Declares all arguments to be distinct
-distinct :: SMTType a => [SMTExpr a] -> SMTExpr Bool
-distinct = Distinct
-
--- | Calculate the sum of arithmetic expressions
-plus :: (SMTArith a) => [SMTExpr a] -> SMTExpr a
-plus = Plus
-
--- | Calculate the product of arithmetic expressions
-mult :: (SMTArith a) => [SMTExpr a] -> SMTExpr a
-mult = Mult
-
--- | Subtracts two expressions
-minus :: (SMTArith a) => SMTExpr a -> SMTExpr a -> SMTExpr a
-minus = Minus
-
--- | Divide an arithmetic expression by another
-div' :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
-div' = Div
-
--- | Perform a modulo operation on an arithmetic expression
-mod' :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
-mod' = Mod
-
--- | Divide a rational expression by another one
-divide :: SMTExpr Rational -> SMTExpr Rational -> SMTExpr Rational
-divide = Divide
-
--- | For an expression @x@, this returns the expression @-x@.
-neg :: SMTArith a => SMTExpr a -> SMTExpr a
-neg = Neg
-
--- | Calculate the absolute (non-negative) value of an expression.
-abs' :: SMTArith a => SMTExpr a -> SMTExpr a
-abs' = Abs
-
--- | If-then-else construct
-ite :: (SMTType a) => SMTExpr Bool -- ^ If this expression is true
-       -> SMTExpr a -- ^ Then return this expression
-       -> SMTExpr a -- ^ Else this one
-       -> SMTExpr a
-ite = ITE
-
--- | Boolean conjunction
-and' :: [SMTExpr Bool] -> SMTExpr Bool
-and' [] = Const True
-and' [x] = x
-and' xs = And xs
-
--- | Boolean disjunction
-or' :: [SMTExpr Bool] -> SMTExpr Bool
-or' [] = Const False
-or' [x] = x
-or' xs = Or xs
-
--- | Exclusive or: Return true if exactly one argument is true.
-xor :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
-xor = XOr
-
--- | Implication
-(.=>.) :: SMTExpr Bool -- ^ If this expression is true
-          -> SMTExpr Bool -- ^ This one must be as well
-          -> SMTExpr Bool
-(.=>.) = Implies
-
--- | Negates a boolean expression
-not' :: SMTExpr Bool -> SMTExpr Bool
-not' = Not
-
--- | Extracts an element of an array by its index
-select :: SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v
-select = Select
-
--- | The expression @store arr i v@ stores the value /v/ in the array /arr/ at position /i/ and returns the resulting new array.
-store :: SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v -> SMTExpr (Array i v)
-store = Store
-
--- | Create a boolean expression that encodes that the array is equal to the supplied constant array.
-arrayConst :: (SMTValue i,SMTValue v,Ix i) => SMTExpr (Array i v) -> Array i v -> SMTExpr Bool
-arrayConst expr arr = and' [(select expr (constant i)) .==. (constant v)
-                           | (i,v) <- assocs arr ]
-
--- | Extract all values of an array by giving the range of indices.
-unmangleArray :: (Ix i,SMTValue i,SMTValue v) => (i,i) -> SMTExpr (Array i v) -> SMT (Array i v)
-unmangleArray b expr = mapM (\i -> do
-                                v <- getValue (select expr (constant i))
-                                return (i,v)
-                            ) (range b) >>= return.array b
-
--- | Bitvector addition
-bvadd :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvadd = BVAdd
-
--- | Bitvector subtraction
-bvsub :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvsub = BVSub
-
--- | Bitvector multiplication
-bvmul :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvmul = BVMul
-
--- | Bitvector unsigned remainder
-bvurem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvurem = BVURem
-
--- | Bitvector signed remainder
-bvsrem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvsrem = BVSRem
-
--- | Bitvector unsigned less-or-equal
-bvule :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvule = BVULE
-
--- | Bitvector unsigned less-than
-bvult :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvult = BVULT
-
--- | Bitvector unsigned greater-or-equal
-bvuge :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvuge = BVUGE
-
--- | Bitvector unsigned greater-than
-bvugt :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvugt = BVUGT
-
--- | Bitvector signed less-or-equal
-bvsle :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvsle = BVSLE
-
--- | Bitvector signed less-than
-bvslt :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvslt = BVSLT
-
--- | Bitvector signed greater-or-equal
-bvsge :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvsge = BVSGE
-
--- | Bitvector signed greater-than
-bvsgt :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvsgt = BVSGT
-
--- | If the supplied function returns true for all possible values, the forall quantification returns true.
-forAll :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
-forAll = Forall
-
--- | If the supplied function returns true for at least one possible value, the exists quantification returns true.
-exists :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
-exists = Exists
-
--- | Binds an expression to a variable.
---   Can be used to prevent blowups in the command stream if expressions are used multiple times.
---   @let' x f@ is functionally equivalent to @f x@.
-let' :: SMTType a => SMTExpr a -> (SMTExpr a -> SMTExpr b) -> SMTExpr b
-let' = Let
-
--- | Like 'let'', but can define multiple variables of the same type.
-lets :: SMTType a => [SMTExpr a] -> ([SMTExpr a] -> SMTExpr b) -> SMTExpr b
-lets = Lets
-
--- | Like 'forAll', but can quantify over more than one variable (of the same type)
-forAllList :: Args a b => Integer -- ^ Number of variables to quantify
-              -> ([a] -> SMTExpr Bool) -- ^ Function which takes a list of the quantified variables
-              -> SMTExpr Bool
-forAllList = ForallList
-
--- | Checks if the expression is formed a specific constructor.
-is :: SMTType a => SMTExpr a -> Constructor a -> SMTExpr Bool
-is e con = ConTest con e
-
--- | Access a field of an expression
-(.#) :: SMTType a => SMTExpr a -> Field a f -> SMTExpr f
-(.#) e f = FieldSel f e
-
--- | After a successful 'checkSat' call, extract values from the generated model.
---   The 'ProduceModels' option must be enabled for this.
-getValue :: SMTValue t => SMTExpr t -> SMT t
-getValue expr = do
-  let ann = case expr of
-        Var _ ann -> ann
-        _ -> Nothing
-  getValue' ann expr
-  
-getValue' :: SMTValue t => Maybe (SMTAnnotation t) -> SMTExpr t -> SMT t
-getValue' ann expr = do
-  res <- getRawValue expr
-  rres <- unmangle res ann
-  case rres of
-    Nothing -> error $ "Couldn't unmangle "++show res
-    Just r -> return r
-
-getRawValue :: SMTType t => SMTExpr t -> SMT L.Lisp
-getRawValue expr = do
-  clearInput
-  putRequest $ L.List [L.Symbol "get-value"
-                      ,L.List [L.toLisp expr]]
-  val <- parseResponse
-  case val of
-    L.List [L.List [_,res]] -> return res
-    _ -> error $ "unknown response to get-value: "++show val
-
--- | Asserts that a boolean expression is true
-assert :: SMTExpr Bool -> SMT ()
-assert expr = putRequest $ L.List [L.Symbol "assert"
-                                  ,L.toLisp expr]
-
--- | Sets the logic used for the following program (Not needed for many solvers).
-setLogic :: Text -> SMT ()
-setLogic name = putRequest $ L.List [L.Symbol "set-logic"
-                                    ,L.Symbol name]
 
 declareFun :: Text -> [L.Lisp] -> L.Lisp -> SMT ()
 declareFun name tps rtp
@@ -711,7 +294,7 @@ checkSat = do
     "unsat" -> return False
     "unsat\r" -> return False
     _ -> error $ "unknown check-sat response: "++show res
-  
+
 -- | Perform a stacked operation, meaning that every assertion and declaration made in it will be undone after the operation.
 stack :: SMT a -> SMT a
 stack act = do
@@ -726,18 +309,6 @@ comment :: String -> SMT ()
 comment msg = do
   (hin,_) <- ask
   liftIO $ IO.hPutStrLn hin $ ';':msg
-
--- | Takes the first element of a list
-head' :: SMTExpr [a] -> SMTExpr a
-head' = Head
-
--- | Drops the first element from a list
-tail' :: SMTExpr [a] -> SMTExpr [a]
-tail' = Tail
-
--- | Put a new element at the front of the list
-insert' :: SMTExpr a -> SMTExpr [a] -> SMTExpr [a]
-insert' = Insert
 
 -- | Spawn a shell command that is used as a SMT solver via stdin/-out to process the given SMT operation.
 withSMTSolver :: String -- ^ The shell command to execute
@@ -776,6 +347,7 @@ clearInput = do
 
 putRequest :: L.Lisp -> SMT ()
 putRequest e = do
+  liftIO $ print $ prettyLisp e
   (hin,_) <- ask
   liftIO $ toByteStringIO (BS.hPutStr hin) (mappend (L.fromLispExpr e) flush)
   liftIO $ BS.hPutStrLn hin ""
@@ -791,14 +363,6 @@ parseResponse = do
         continue (feed res str)
       continue (Fail str ctx msg) = error $ "Error parsing "++show str++" response in "++show ctx++": "++msg
   liftIO $ continue $ parse L.lisp str
-
--- | Given an arbitrary expression, this creates a named version of it and a name to reference it later on.
-named :: SMTType a => SMTExpr a -> SMT (SMTExpr a,SMTExpr a)
-named expr = do
-  (c,decl,mp) <- get
-  put (c+1,decl,mp)
-  let name = T.pack $ "named"++show c
-  return (Named expr name,Var name Nothing)
 
 -- | Declare a new sort with a specified arity
 declareSort :: T.Text -> Integer -> SMT ()
@@ -941,3 +505,4 @@ replaceName :: (T.Text -> T.Text) -> SMTExpr a -> SMTExpr a
 replaceName f = snd . foldExpr (\_ expr -> ((),case expr of
                                                Var n ann -> Var (f n) ann
                                                _ -> expr)) ()
+

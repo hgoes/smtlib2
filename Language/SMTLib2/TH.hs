@@ -9,6 +9,7 @@ module Language.SMTLib2.TH
        where
 
 import Language.SMTLib2.Internals
+import Language.SMTLib2.Internals.Interface
 import Language.Haskell.TH
 import qualified Data.AttoLisp as L
 import Data.Text as T
@@ -75,7 +76,9 @@ generateDeclExpr dname cons pat
     [| [(typeOf $(varE pat),declareDatatypes [] [(T.pack $(stringE $ nameBase dname),
                                                   $(listE [ tupE [ [| T.pack $(stringE $ nameBase cname) |],  
                                                                    listE [ tupE [ stringE $ nameBase sname,
-                                                                                  [| getSort (undefined :: $(return tp)) Nothing |]
+                                                                                  appsE [ [| getSort |],
+                                                                                          [| (undefined :: $(return tp)) |],
+                                                                                          tupE [] ]
                                                                                 ] 
                                                                          | (sname,tp) <- sels ]
                                                                  ]
@@ -90,11 +93,11 @@ generateMangleFun :: ExtrType -> Q Dec
 generateMangleFun cons
   = funD 'mangle [ do
     vars <- mapM (const $ newName "f") fields
-    clause [conP cname (fmap varP vars)]
+    clause [conP cname (fmap varP vars),wildP]
             (normalB (if Prelude.null vars
                       then [| L.Symbol $(stringE $ nameBase cname) |]
                       else [| L.List $ [L.Symbol $(stringE $ nameBase cname)] ++
-                                       $(listE [ [| mangle $(varE v) |]
+                                       $(listE [ appsE [ [| mangle |], varE v, tupE [] ]
                                                | v <- vars ])
                             |])) []
     | (cname,fields) <- cons
@@ -113,7 +116,7 @@ generateUnmangleFun cons
                 else conP 'L.List [listP $ [conP 'L.Symbol [litP $ stringL $ nameBase cname]]++
                                            (fmap (varP . fst) vars)])
               ,wildP]
-                (normalB $ doE $ [ bindS (conP 'Just [varP r]) [| unmangle $(varE v) Nothing |] | (v,r) <- vars ]++
+                (normalB $ doE $ [ bindS (conP 'Just [varP r]) (appsE [ [| unmangle |],varE v,tupE [] ]) | (v,r) <- vars ]++
                                  [ noBindS $ appsE [[| return |],appsE [ [| Just |],appsE $ (conE cname):(fmap (varE . snd) vars)] ]]) []
     | (cname,fields) <- cons
     ]
