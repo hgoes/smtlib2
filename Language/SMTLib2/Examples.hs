@@ -6,6 +6,7 @@ import Control.Monad.Trans
 import Language.SMTLib2
 import Data.Array
 import Data.Word
+import Data.Int
 
 funTest :: SMT Integer
 funTest = do
@@ -108,12 +109,28 @@ sendMoreMoney = do
       money = vm*10000+vo*1000+vn*100+ve*10+vy
   return (vs,ve,vn,vd,vm,vo,vr,vy,(vc0,vc1,vc2),send,more,money,send+more==money)
 
-sudoko :: SMT [[Integer]]
-sudoko = do
+type Problem = [[Maybe Int8]]
+
+emptyProblem :: Problem
+emptyProblem = [ [ Nothing | i <- [0..8] ] | j <- [0..8] ]
+
+puzzle1 :: Problem
+puzzle1 = [ [ Nothing, Just 6 , Nothing, Nothing, Nothing, Nothing, Nothing, Just 1 , Nothing ]
+          , [ Nothing, Nothing, Nothing, Just 6 , Just 5 , Just  1, Nothing, Nothing, Nothing ]
+          , [ Just 1 , Nothing, Just 7 , Nothing, Nothing, Nothing, Just 6 , Nothing, Just 2  ]
+          , [ Just 6 , Just 2 , Nothing, Just 3 , Nothing, Just 5 , Nothing, Just 9 , Just 4  ]
+          , [ Nothing, Nothing, Just 3 , Nothing, Nothing, Nothing, Just 2 , Nothing, Nothing ]
+          , [ Just 4 , Just 8 , Nothing, Just 9 , Nothing, Just 7 , Nothing, Just 3 , Just 6  ]
+          , [ Just 9 , Nothing, Just 6 , Nothing, Nothing, Nothing, Just 4 , Nothing, Just 8  ]
+          , [ Nothing, Nothing, Nothing, Just 7 , Just 9 , Just 4 , Nothing, Nothing, Nothing ]
+          , [ Nothing, Just 5 , Nothing, Nothing, Nothing, Nothing, Nothing, Just 7 , Nothing ] ]
+
+sudoku :: Problem -> SMT [[Int8]]
+sudoku prob = do
   setOption (PrintSuccess False)
   setOption (ProduceModels True)
   field <- mapM (\line -> mapM (\col -> var) [0..8]) [0..8]
-  mapM_ (mapM_ (\v -> assert $ and' [ v .<. 10, v .>=. 0])) field
+  mapM_ (mapM_ (\v -> assert $ and' [ v .<. 10, v .>. 0])) field
   mapM_ (\line -> assert $ distinct line) field
   mapM_ (\i -> assert $ distinct [ line!!i | line <- field ]) [0..8]
   assert $ distinct [ field!!i!!j | i <- [0..2],j <- [0..2] ]
@@ -128,18 +145,18 @@ sudoko = do
   assert $ distinct [ field!!i!!j | i <- [6..8],j <- [3..5] ]
   assert $ distinct [ field!!i!!j | i <- [6..8],j <- [6..8] ]
 
-  
-  assert $ field!!0!!1 .==. 6
-  assert $ field!!0!!7 .==. 1
-  assert $ field!!1!!3 .==. 6
-  assert $ field!!1!!4 .==. 5
-  assert $ field!!1!!5 .==. 1
-  assert $ field!!2!!0 .==. 1
-  assert $ field!!2!!2 .==. 7
-  assert $ field!!2!!6 .==. 6
-  assert $ field!!2!!8 .==. 2
-  assert $ field!!3!!0 .==. 6
-  assert $ field!!3!!1 .==. 2
+  sequence_ [ sequence_ [ case el of
+                            Nothing -> return ()
+                            Just n -> assert $ field!!i!!j .==. (constant n)
+                          | (el,j) <- zip line [0..8]
+                        ] 
+              | (line,i) <- zip prob [0..8] ]
 
   checkSat
   mapM (mapM getValue) field
+
+displaySolution :: [[Int8]] -> String
+displaySolution = displayLines . fmap displayLine
+    where
+      displayLines [a,b,c,d,e,f,g,h,i] = unlines [a,b,c,"",d,e,f,"",g,h,i]
+      displayLine [a,b,c,d,e,f,g,h,i] = show a ++ show b ++ show c ++ " " ++ show d ++ show e ++ show f ++ " " ++ show g ++ show h ++ show i
