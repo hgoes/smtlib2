@@ -8,6 +8,7 @@ Library
   Build-Depends:        base >= 4,text,mtl,process,blaze-builder,bytestring,
                         attoparsec,atto-lisp >= 0.2,array,template-haskell,
                         containers
+  GHC-Options: -fwarn-unused-imports
   Exposed-Modules:
     Language.SMTLib2
     Language.SMTLib2.Solver

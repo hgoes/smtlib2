@@ -3,8 +3,6 @@ module Language.SMTLib2.Internals where
 
 import Data.Attoparsec
 import qualified Data.AttoLisp as L
-import Data.AttoLisp.Pretty
-import qualified Data.Attoparsec.Number as L
 import Data.ByteString as BS
 import Blaze.ByteString.Builder
 import System.Process
@@ -16,11 +14,9 @@ import Data.Text as T
 import Data.Array
 import Data.Bits
 import Data.Typeable
-import Data.Foldable (foldlM)
 import Data.Map as Map hiding (assocs)
 import Data.Set as Set
 import Data.List as List (genericReplicate,mapAccumL)
-import Data.Unit
 
 -- | The SMT monad used for communating with the SMT solver
 type SMT = ReaderT (Handle,Handle) (StateT (Integer,[TypeRep],Map T.Text TypeRep) IO)
@@ -353,7 +349,6 @@ clearInput = do
 
 putRequest :: L.Lisp -> SMT ()
 putRequest e = do
-  --liftIO $ print $ prettyLisp e
   (hin,_) <- ask
   liftIO $ toByteStringIO (BS.hPutStr hin) (mappend (L.fromLispExpr e) flush)
   liftIO $ BS.hPutStrLn hin ""

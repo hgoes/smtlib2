@@ -2,7 +2,7 @@
 module Language.SMTLib2.Internals.Translation where
 
 import Language.SMTLib2.Internals
-import Language.SMTLib2.Internals.Instances
+import Language.SMTLib2.Internals.Instances ()
 
 import qualified Data.AttoLisp as L
 import Data.Typeable

@@ -8,15 +8,11 @@ import Data.Array
 import Data.Word
 import Data.Int
 import Numeric
-import Data.Char
 import Data.Bits
 import qualified Data.Text as T
 import Data.Ratio
 import Data.Typeable
-import Control.Monad.State (get)
-import Data.Map as Map
 import qualified Data.ByteString as BS
-import Data.List (genericLength,genericReplicate)
 
 -- Bool
 
