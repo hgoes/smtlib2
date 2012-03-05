@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances,MultiParamTypeClasses,FunctionalDependencies,RankNTypes,DeriveDataTypeable,TypeSynonymInstances,TypeFamilies #-}
+{-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances,MultiParamTypeClasses,FunctionalDependencies,RankNTypes,DeriveDataTypeable,TypeSynonymInstances,TypeFamilies,FlexibleContexts #-}
 module Language.SMTLib2.Internals where
 
 import Data.Attoparsec
@@ -54,6 +54,10 @@ class (SMTType t) => SMTOrd t where
 -- | Represents a function in the SMT solver. /a/ is the argument of the function in SMT terms, /b/ is the argument in haskell types and /r/ is the result type of the function.
 data SMTFun a b r = SMTFun
 
+class Concatable a b where
+    type ConcatResult a b
+    concat' :: a -> b -> ConcatResult a b
+
 -- | An abstract SMT expression
 data SMTExpr t where
   Var :: SMTType t => Text -> SMTAnnotation t -> SMTExpr t
@@ -96,7 +100,7 @@ data SMTExpr t where
   BVSGE :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
   BVSGT :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
   BVExtract :: SMTType t1 => Integer -> Integer -> SMTExpr t1 -> SMTExpr t2
-  BVConcat :: (SMTType t1,SMTType t2) => SMTExpr t1 -> SMTExpr t2 -> SMTExpr t3
+  BVConcat :: (SMTType t1,SMTType t2,Concatable t1 t2,t3 ~ ConcatResult t1 t2,Concatable (SMTAnnotation t1) (SMTAnnotation t2),SMTAnnotation t3 ~ ConcatResult (SMTAnnotation t1) (SMTAnnotation t2)) => SMTExpr t1 -> SMTExpr t2 -> SMTExpr t3
   BVConcats :: SMTType t1 => [SMTExpr t1] -> SMTExpr t2
   BVXor :: SMTExpr t -> SMTExpr t -> SMTExpr t
   BVAnd :: SMTExpr t -> SMTExpr t -> SMTExpr t

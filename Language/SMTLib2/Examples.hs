@@ -7,6 +7,7 @@ import Language.SMTLib2
 import Data.Array
 import Data.Word
 import Data.Int
+import qualified Data.ByteString as BS
 
 funTest :: SMT Integer
 funTest = do
@@ -160,3 +161,26 @@ displaySolution = displayLines . fmap displayLine
     where
       displayLines [a,b,c,d,e,f,g,h,i] = unlines [a,b,c,"",d,e,f,"",g,h,i]
       displayLine [a,b,c,d,e,f,g,h,i] = show a ++ show b ++ show c ++ " " ++ show d ++ show e ++ show f ++ " " ++ show g ++ show h ++ show i
+
+-- Bitvector concat example
+concatExample :: SMT Word16
+concatExample = do
+  x1 <- var :: SMT (SMTExpr Word8)
+  x2 <- var :: SMT (SMTExpr Word8)
+  res <- var
+  assert $ res .==. bvconcat x1 x2
+  assert $ x1 .>. 2
+  assert $ x2 .>. 8
+  checkSat
+  getValue res
+
+concatExample2 :: SMT BS.ByteString
+concatExample2 = do
+  v1 <- varAnn 2
+  v2 <- varAnn 1
+  res <- varAnn 3
+  assert $ v1 .==. (constantAnn (BS.pack [0xAA,0xBB]) 2)
+  assert $ v2 .==. (constantAnn (BS.pack [0x01]) 1)
+  assert $ res .==. bvconcat v1 v2
+  checkSat
+  getValue res

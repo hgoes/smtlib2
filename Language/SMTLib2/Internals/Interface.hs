@@ -248,6 +248,11 @@ bvsge = BVSGE
 bvsgt :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
 bvsgt = BVSGT
 
+-- | Bitvector concat
+bvconcat :: (SMTType t1,SMTType t2,Concatable t1 t2,t3 ~ ConcatResult t1 t2,Concatable (SMTAnnotation t1) (SMTAnnotation t2),SMTAnnotation t3 ~ ConcatResult (SMTAnnotation t1) (SMTAnnotation t2))
+            => SMTExpr t1 -> SMTExpr t2 -> SMTExpr t3
+bvconcat = BVConcat
+
 -- | If the supplied function returns true for all possible values, the forall quantification returns true.
 forAll :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
 forAll = Forall

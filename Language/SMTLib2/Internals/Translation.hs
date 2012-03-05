@@ -508,6 +508,7 @@ extractAnnotation (BVURem x _) = extractAnnotation x
 extractAnnotation (BVSRem x _) = extractAnnotation x
 extractAnnotation (BVUDiv x _) = extractAnnotation x
 extractAnnotation (BVSDiv x _) = extractAnnotation x
+extractAnnotation (BVConcat x y) = concat' (extractAnnotation x) (extractAnnotation y)
 extractAnnotation (BVULE _ _) = ()
 extractAnnotation (BVULT _ _) = ()
 extractAnnotation (BVUGE _ _) = ()

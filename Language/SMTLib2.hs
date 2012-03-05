@@ -61,6 +61,7 @@ module Language.SMTLib2
          bvadd,bvsub,bvmul,bvurem,bvsrem,
          bvule,bvult,bvuge,bvugt,
          bvsle,bvslt,bvsge,bvsgt,
+         bvconcat,
          -- ** Functions
          fun,app,defFun,
          -- ** Data types

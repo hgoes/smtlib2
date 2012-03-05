@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances,OverloadedStrings,MultiParamTypeClasses,TemplateHaskell,RankNTypes,TypeFamilies #-}
+{-# LANGUAGE FlexibleInstances,OverloadedStrings,MultiParamTypeClasses,TemplateHaskell,RankNTypes,TypeFamilies,GeneralizedNewtypeDeriving #-}
 module Language.SMTLib2.Internals.Instances where
 
 import Language.SMTLib2.Internals
@@ -15,6 +15,8 @@ import Data.Ratio
 import Data.Typeable
 import Control.Monad.State (get)
 import Data.Map as Map
+import qualified Data.ByteString as BS
+import Data.List (genericLength,genericReplicate)
 
 -- Bool
 
@@ -134,10 +136,10 @@ instance (Ix idx,SMTType idx,SMTType val) => SMTType (Array idx val) where
 
 -- BitVectors
 
-bv :: Integer -> L.Lisp
+bv :: Int -> L.Lisp
 bv n = L.List [L.Symbol "_"
               ,L.Symbol "BitVec"
-              ,L.Number $ L.I n]
+              ,L.Number $ L.I (fromIntegral n)]
 
 instance SMTType Word8 where
   type SMTAnnotation Word8 = ()
@@ -153,36 +155,48 @@ withUndef1 :: (a -> g a) -> g a
 withUndef1 f = f undefined
 
 getBVValue :: (Num a,Bits a,Read a) => L.Lisp -> b -> SMT (Maybe a)
-getBVValue (L.Number (L.I v)) _ = return $ Just (fromInteger v)
-getBVValue (L.Symbol s) _ = return $ case T.unpack s of
-  '#':'b':rest -> withUndef1 (\u -> if Prelude.length rest == bitSize u
-                                    then (let [(v,_)] = readInt 2 (\x -> x=='0' || x=='1') (\x -> if x=='0' then 0 else 1) rest 
-                                          in Just v)
-                                    else Nothing)
-  '#':'x':rest -> withUndef1 (\u -> if Prelude.length rest == ((bitSize u) `div` 4)
-                                    then (let [(v,_)] = readHex rest
-                                          in Just v)
-                                    else Nothing)
+getBVValue arg _ = return $ withUndef1 $ \u -> getBVValue' (fromIntegral $ bitSize u) arg
+
+getBVValue' :: (Num a,Bits a,Read a) => Int -> L.Lisp -> Maybe a
+getBVValue' _ (L.Number (L.I v)) = Just (fromInteger v)
+getBVValue' len (L.Symbol s) = case T.unpack s of
+  '#':'b':rest -> if Prelude.length rest == len
+                  then (case readInt 2
+                                 (\x -> x=='0' || x=='1')
+                                 (\x -> if x=='0' then 0 else 1) 
+                                 rest of
+                          [(v,_)] -> Just v
+                          _ -> Nothing)
+                  else Nothing
+  '#':'x':rest -> if (Prelude.length rest,0) == (len `divMod` 4)
+                  then (case readHex rest of
+                          [(v,_)] -> Just v
+                          _ -> Nothing)
+                  else Nothing
   _ -> Nothing
-getBVValue (L.List [L.Symbol "_",L.Symbol val,L.Number (L.I bits)]) _
-  = return $ withUndef1 (\u -> if bits == (fromIntegral $ bitSize u)
-                               then (case T.unpack val of
-                                        'b':'v':num -> Just (read num)
-                                        _ -> Nothing)
-                               else Nothing)
-getBVValue _ _ = return Nothing
+getBVValue' len (L.List [L.Symbol "_",L.Symbol val,L.Number (L.I bits)])
+  = if bits == (fromIntegral len)
+    then (case T.unpack val of
+            'b':'v':num -> Just (read num)
+            _ -> Nothing)
+    else Nothing
+getBVValue' _ _ = Nothing
 
 putBVValue :: (Bits a,Ord a,Integral a) => a -> b -> L.Lisp
-putBVValue x _ 
-  | bitSize x `mod` 4 == 0 = let v' = if x < 0
-                                      then complement (x-1)
-                                      else x
-                                 enc = showHex v' "" 
-                                 l = length enc
-                             in L.Symbol $ T.pack $ '#':'x':((replicate (((bitSize x) `div` 4)-l) '0')++enc)
+putBVValue x _ = putBVValue' (fromIntegral $ bitSize x) x
+
+putBVValue' :: (Bits a,Ord a,Integral a) => Int -> a -> L.Lisp
+putBVValue' len x
+  | len `mod` 4 == 0 = let v' = if x < 0
+                                then complement (x-1)
+                                else x
+                           enc = showHex v' "" 
+                           l = Prelude.length enc
+                       in L.Symbol $ T.pack $ '#':'x':((Prelude.replicate ((len `div` 4)-l) '0')++enc)
   | otherwise = L.Symbol (T.pack ('#':'b':[ if testBit x i
-                                             then '1'
-                                             else '0' | i <- Prelude.reverse [0..((bitSize x)-1)] ]))
+                                            then '1'
+                                            else '0'
+                                            | i <- Prelude.reverse [0..(len-1)] ]))
 
 instance SMTValue Word8 where
   unmangle = getBVValue
@@ -456,3 +470,58 @@ instance (Typeable a,SMTValue a) => SMTValue [a] where
                              ,mangle x ann
                              ,mangle xs ann]
 
+-- Bitvector implementations for ByteString
+newtype ByteStringLen = ByteStringLen Int deriving (Show,Eq,Ord,Num)
+
+instance SMTType BS.ByteString where
+    type SMTAnnotation BS.ByteString = ByteStringLen
+    getSort _ (ByteStringLen l) = bv (l*8)
+    declareType u = [(typeOf u,return ())]
+
+instance SMTValue BS.ByteString where
+    unmangle v (ByteStringLen l) = return $ fmap (int2bs l) (getBVValue' (l*8) v)
+        where
+          int2bs :: Int -> Integer -> BS.ByteString
+          int2bs l v = BS.pack $ fmap (\i -> fromInteger $ v `shiftR` i) (reverse [0..(l-1)])
+    mangle v (ByteStringLen l) = putBVValue' (l*8) (bs2int v)
+        where
+          bs2int :: BS.ByteString -> Integer
+          bs2int = BS.foldl (\v w -> (v `shiftL` 8) .|. (fromIntegral w)) 0
+
+instance Concatable ByteStringLen ByteStringLen where
+    type ConcatResult ByteStringLen ByteStringLen = ByteStringLen
+    concat' (ByteStringLen l1) (ByteStringLen l2) = ByteStringLen (l1+l2)
+
+instance Concatable BS.ByteString BS.ByteString where
+    type ConcatResult BS.ByteString BS.ByteString = BS.ByteString
+    concat' b1 b2 = BS.append b1 b2
+
+-- Concat instances
+
+instance Concatable () () where
+    type ConcatResult () () = ()
+    concat' _ _ = ()
+
+instance Concatable Word8 Word8 where
+    type ConcatResult Word8 Word8 = Word16
+    concat' x y = ((fromIntegral x) `shiftL` 8) .|. (fromIntegral y)
+
+instance Concatable Int8 Word8 where
+    type ConcatResult Int8 Word8 = Int16
+    concat' x y = ((fromIntegral x) `shiftL` 8) .|. (fromIntegral y)
+
+instance Concatable Word16 Word16 where
+    type ConcatResult Word16 Word16 = Word32
+    concat' x y = ((fromIntegral x) `shiftL` 16) .|. (fromIntegral y)
+
+instance Concatable Int16 Word16 where
+    type ConcatResult Int16 Word16 = Int32
+    concat' x y = ((fromIntegral x) `shiftL` 16) .|. (fromIntegral y)
+
+instance Concatable Word32 Word32 where
+    type ConcatResult Word32 Word32 = Word64
+    concat' x y = ((fromIntegral x) `shiftL` 32) .|. (fromIntegral y)
+
+instance Concatable Int32 Word32 where
+    type ConcatResult Int32 Word32 = Int64
+    concat' x y = ((fromIntegral x) `shiftL` 32) .|. (fromIntegral y)
