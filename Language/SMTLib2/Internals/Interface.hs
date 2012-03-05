@@ -103,7 +103,7 @@ interpolationGroup = do
   return (InterpolationGroup name)
 
 -- | Create a new uninterpreted function
-fun :: (Args a,SMTType r,SMTAnnotation r ~ ()) => SMT (SMTExpr (SMTFun a (Unpacked a) r))
+fun :: (Args a,SMTType r,SMTAnnotation r ~ ()) => SMT (SMTExpr (SMTFun a r))
 fun = do
   (c,decl,mp) <- get
   put (c+1,decl,mp)
@@ -122,7 +122,7 @@ fun = do
   return res
     
 -- | Apply a function to an argument
-app :: (Args a,SMTType r) => SMTExpr (SMTFun a (Unpacked a) r) -> a -> SMTExpr r
+app :: (Args a,SMTType r) => SMTExpr (SMTFun a r) -> a -> SMTExpr r
 app = App
 
 -- | Two expressions shall be equal

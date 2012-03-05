@@ -11,7 +11,7 @@ import qualified Data.ByteString as BS
 
 funTest :: SMT Integer
 funTest = do
-  f <- fun :: SMT (SMTExpr (SMTFun (SMTExpr Integer,SMTExpr Integer) (Integer,Integer) Integer))
+  f <- fun :: SMT (SMTExpr (SMTFun (SMTExpr Integer,SMTExpr Integer) Integer))
   g <- defFun (\x -> f `app` (x,x))
   q <- var
   assert $ forAll $ \x -> g `app` x .==. 2

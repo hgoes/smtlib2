@@ -52,7 +52,7 @@ class (SMTType t) => SMTOrd t where
   (.<=.) :: SMTExpr t -> SMTExpr t -> SMTExpr Bool
 
 -- | Represents a function in the SMT solver. /a/ is the argument of the function in SMT terms, /b/ is the argument in haskell types and /r/ is the result type of the function.
-data SMTFun a b r = SMTFun
+data SMTFun a r = SMTFun
 
 class Concatable a b where
     type ConcatResult a b
@@ -109,8 +109,8 @@ data SMTExpr t where
   Exists :: Args a => (a -> SMTExpr Bool) -> SMTExpr Bool
   Let :: (SMTType a) => SMTExpr a -> (SMTExpr a -> SMTExpr b) -> SMTExpr b
   Lets :: SMTType a => [SMTExpr a] -> ([SMTExpr a] -> SMTExpr b) -> SMTExpr b
-  Fun :: (Args a,SMTType r) => Text -> SMTExpr (SMTFun a (Unpacked a) r)
-  App :: (Args a,SMTType r) => SMTExpr (SMTFun a (Unpacked a) r) -> a -> SMTExpr r
+  Fun :: (Args a,SMTType r) => Text -> SMTExpr (SMTFun a r)
+  App :: (Args a,SMTType r) => SMTExpr (SMTFun a r) -> a -> SMTExpr r
   ConTest :: SMTType a => Constructor a -> SMTExpr a -> SMTExpr Bool
   FieldSel :: (SMTType a,SMTType f) => Field a f -> SMTExpr a -> SMTExpr f
   Head :: SMTExpr [a] -> SMTExpr a
@@ -118,7 +118,7 @@ data SMTExpr t where
   Insert :: SMTExpr a -> SMTExpr [a] -> SMTExpr [a]
   Named :: SMTExpr a -> Text -> SMTExpr a
   InterpolationGrp :: SMTExpr Bool -> Text -> SMTExpr Bool
-  InternalFun :: [L.Lisp] -> SMTExpr (SMTFun (SMTExpr Bool) Bool Bool)
+  InternalFun :: [L.Lisp] -> SMTExpr (SMTFun (SMTExpr Bool) Bool)
   Undefined :: SMTExpr a
   deriving Typeable
 
@@ -253,7 +253,7 @@ firstJust (act:acts) = do
 getUndef :: SMTExpr t -> t
 getUndef _ = undefined
 
-getFunUndef :: SMTExpr (SMTFun a b r) -> (a,b,r)
+getFunUndef :: Args a => SMTExpr (SMTFun a r) -> (a,Unpacked a,r)
 getFunUndef _ = (undefined,undefined,undefined)
 
 declareFun :: Text -> [L.Lisp] -> L.Lisp -> SMT ()
