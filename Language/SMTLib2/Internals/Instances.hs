@@ -57,7 +57,8 @@ instance Num (SMTExpr Integer) where
   (-) = Minus
   (*) x y = Mult [x,y]
   negate = Neg
-  abs = Abs
+  abs x = ITE (Ge x (Const 0 ())) x (Neg x)
+  signum x = ITE (Ge x (Const 0 ())) (Const 1 ()) (Const (-1) ())
 
 instance SMTOrd Integer where
   (.<.) = Lt
@@ -100,7 +101,8 @@ instance Num (SMTExpr (Ratio Integer)) where
   (-) = Minus
   (*) x y = Mult [x,y]
   negate = Neg
-  abs = Abs
+  abs x = ITE (Ge x (Const 0 ())) x (Neg x)
+  signum x = ITE (Ge x (Const 0 ())) (Const 1 ()) (Const (-1) ())
 
 instance Fractional (SMTExpr (Ratio Integer)) where
   (/) = Divide
@@ -325,48 +327,64 @@ instance Num (SMTExpr Word8) where
   (+) = BVAdd
   (-) = BVSub
   (*) = BVMul
+  abs x = x
+  signum x = Const 1 ()
 
 instance Num (SMTExpr Int8) where
   fromInteger x = Const (fromInteger x) ()
   (+) = BVAdd
   (-) = BVSub
   (*) = BVMul
+  abs x = ITE (BVSGE x (Const 0 ())) x (BVSub (Const 0 ()) x)
+  signum x = ITE (BVSGE x (Const 0 ())) (Const 1 ()) (Const (-1) ())
 
 instance Num (SMTExpr Word16) where
   fromInteger x = Const (fromInteger x) ()
   (+) = BVAdd
   (-) = BVSub
   (*) = BVMul
+  abs x = x
+  signum x = Const 1 ()
 
 instance Num (SMTExpr Int16) where
   fromInteger x = Const (fromInteger x) ()
   (+) = BVAdd
   (-) = BVSub
   (*) = BVMul
+  abs x = ITE (BVSGE x (Const 0 ())) x (BVSub (Const 0 ()) x)
+  signum x = ITE (BVSGE x (Const 0 ())) (Const 1 ()) (Const (-1) ())
 
 instance Num (SMTExpr Word32) where
   fromInteger x = Const (fromInteger x) ()
   (+) = BVAdd
   (-) = BVSub
   (*) = BVMul
+  abs x = x
+  signum x = Const 1 ()
 
 instance Num (SMTExpr Int32) where
   fromInteger x = Const (fromInteger x) ()
   (+) = BVAdd
   (-) = BVSub
   (*) = BVMul
+  abs x = ITE (BVSGE x (Const 0 ())) x (BVSub (Const 0 ()) x)
+  signum x = ITE (BVSGE x (Const 0 ())) (Const 1 ()) (Const (-1) ())
 
 instance Num (SMTExpr Word64) where
   fromInteger x = Const (fromInteger x) ()
   (+) = BVAdd
   (-) = BVSub
   (*) = BVMul
+  abs x = x
+  signum x = Const 1 ()
 
 instance Num (SMTExpr Int64) where
   fromInteger x = Const (fromInteger x) ()
   (+) = BVAdd
   (-) = BVSub
   (*) = BVMul
+  abs x = ITE (BVSGE x (Const 0 ())) x (BVSub (Const 0 ()) x)
+  signum x = ITE (BVSGE x (Const 0 ())) (Const 1 ()) (Const (-1) ())
 
 -- Arguments
 

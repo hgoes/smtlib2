@@ -54,7 +54,7 @@ module Language.SMTLib2
          forAll,exists,
          forAllList,
          -- ** Arithmetic
-         plus,minus,mult,div',mod',neg,abs',divide,
+         plus,minus,mult,div',mod',neg,divide,
          -- ** Arrays
          select,store,arrayConst,unmangleArray,
          -- ** Bitvectors

@@ -163,10 +163,6 @@ divide = Divide
 neg :: SMTArith a => SMTExpr a -> SMTExpr a
 neg = Neg
 
--- | Calculate the absolute (non-negative) value of an expression.
-abs' :: SMTArith a => SMTExpr a -> SMTExpr a
-abs' = Abs
-
 -- | If-then-else construct
 ite :: (SMTType a) => SMTExpr Bool -- ^ If this expression is true
        -> SMTExpr a -- ^ Then return this expression

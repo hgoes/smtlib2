@@ -75,7 +75,6 @@ data SMTExpr t where
   Mod :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
   Divide :: SMTExpr Rational -> SMTExpr Rational -> SMTExpr Rational
   Neg :: SMTArith t => SMTExpr t -> SMTExpr t
-  Abs :: SMTArith t => SMTExpr t -> SMTExpr t
   ITE :: SMTType t => SMTExpr Bool -> SMTExpr t -> SMTExpr t -> SMTExpr t
   And :: [SMTExpr Bool] -> SMTExpr Bool
   Or :: [SMTExpr Bool] -> SMTExpr Bool
@@ -140,7 +139,6 @@ instance Eq a => Eq (SMTExpr a) where
     (==) (Mod l1 r1) (Mod l2 r2) = l1 == l2 && r1 == r2
     (==) (Divide l1 r1) (Divide l2 r2) = l1 == l2 && r1 == r2
     (==) (Neg x) (Neg y) = x == y
-    (==) (Abs x) (Abs y) = x == y
     (==) (ITE c1 l1 r1) (ITE c2 l2 r2) = c1 == c2 && eqExpr l1 l2 && eqExpr r1 r2
     (==) (And x) (And y) = x == y
     (==) (Or x) (Or y) = x == y
@@ -412,8 +410,6 @@ foldExpr f x (Divide l r) = let (x1,e1) = foldExpr f x l
                             in f x2 (Divide e1 e2)
 foldExpr f x (Neg l) = let (x1,e1) = foldExpr f x l
                        in f x1 (Neg e1)
-foldExpr f x (Abs l) = let (x1,e1) = foldExpr f x l
-                       in f x1 (Abs e1)
 foldExpr f x (ITE l r c) = let (x1,e1) = foldExpr f x l
                                (x2,e2) = foldExpr f x1 r
                                (x3,e3) = foldExpr f x2 c

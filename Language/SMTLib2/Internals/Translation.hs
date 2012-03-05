@@ -105,8 +105,6 @@ exprToLisp (Mod l r) c = let (l',c') = exprToLisp l c
                          in (L.List [L.Symbol "mod",l',r'],c'')
 exprToLisp (Neg e) c = let (e',c') = exprToLisp e c
                        in (L.List [L.Symbol "-",e'],c')
-exprToLisp (Abs e) c = let (e',c') = exprToLisp e c
-                       in (L.List [L.Symbol "abs",e'],c')
 exprToLisp (ITE cond tt ff) c = let (cond',c') = exprToLisp cond c
                                     (tt',c'') = exprToLisp tt c'
                                     (ff',c''') = exprToLisp ff c''
@@ -492,7 +490,6 @@ extractAnnotation (Div _ _) = ()
 extractAnnotation (Mod _ _) = ()
 extractAnnotation (Divide _ _) = ()
 extractAnnotation (Neg x) = extractAnnotation x
-extractAnnotation (Abs x) = extractAnnotation x
 extractAnnotation (ITE _ x _) = extractAnnotation x
 extractAnnotation (And _) = ()
 extractAnnotation (Or _) = ()
