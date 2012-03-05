@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances,MultiParamTypeClasses,FunctionalDependencies,RankNTypes,DeriveDataTypeable,TypeSynonymInstances,TypeFamilies,FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances,MultiParamTypeClasses,RankNTypes,DeriveDataTypeable,TypeSynonymInstances,TypeFamilies,FlexibleContexts #-}
 module Language.SMTLib2.Internals where
 
 import Data.Attoparsec
@@ -104,13 +104,13 @@ data SMTExpr t where
   BVConcats :: SMTType t1 => [SMTExpr t1] -> SMTExpr t2
   BVXor :: SMTExpr t -> SMTExpr t -> SMTExpr t
   BVAnd :: SMTExpr t -> SMTExpr t -> SMTExpr t
-  Forall :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
-  ForallList :: Args a b => Integer -> ([a] -> SMTExpr Bool) -> SMTExpr Bool
-  Exists :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
+  Forall :: Args a => (a -> SMTExpr Bool) -> SMTExpr Bool
+  ForallList :: Args a => Integer -> ([a] -> SMTExpr Bool) -> SMTExpr Bool
+  Exists :: Args a => (a -> SMTExpr Bool) -> SMTExpr Bool
   Let :: (SMTType a) => SMTExpr a -> (SMTExpr a -> SMTExpr b) -> SMTExpr b
   Lets :: SMTType a => [SMTExpr a] -> ([SMTExpr a] -> SMTExpr b) -> SMTExpr b
-  Fun :: (Args a b,SMTType r) => Text -> SMTExpr (SMTFun a b r)
-  App :: (Args a b,SMTType r) => SMTExpr (SMTFun a b r) -> a -> SMTExpr r
+  Fun :: (Args a,SMTType r) => Text -> SMTExpr (SMTFun a (Unpacked a) r)
+  App :: (Args a,SMTType r) => SMTExpr (SMTFun a (Unpacked a) r) -> a -> SMTExpr r
   ConTest :: SMTType a => Constructor a -> SMTExpr a -> SMTExpr Bool
   FieldSel :: (SMTType a,SMTType f) => Field a f -> SMTExpr a -> SMTExpr f
   Head :: SMTExpr [a] -> SMTExpr a
@@ -235,9 +235,10 @@ instance SMTInfo SMTSolverVersion where
       L.List [L.Symbol ":version",L.String name] -> return $ T.unpack name
 
 -- | Instances of this class may be used as arguments for constructed functions and quantifiers.
-class Args a b | a -> b where
+class Args a where
+  type Unpacked a
   createArgs :: Integer -> (a,[(Text,L.Lisp)],Integer)
-  unpackArgs :: (forall t. SMTExpr t -> Integer -> (c,Integer)) -> a -> b -> Integer -> ([c],Integer)
+  unpackArgs :: (forall t. SMTExpr t -> Integer -> (c,Integer)) -> a -> Unpacked a -> Integer -> ([c],Integer)
   foldExprs :: (forall t. s -> SMTExpr t -> (s,SMTExpr t)) -> s -> a -> (s,a)
   allOf :: (forall t. SMTExpr t) -> a
 

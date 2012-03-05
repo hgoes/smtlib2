@@ -103,7 +103,7 @@ interpolationGroup = do
   return (InterpolationGroup name)
 
 -- | Create a new uninterpreted function
-fun :: (Args a b,SMTType r,SMTAnnotation r ~ ()) => SMT (SMTExpr (SMTFun a b r))
+fun :: (Args a,SMTType r,SMTAnnotation r ~ ()) => SMT (SMTExpr (SMTFun a (Unpacked a) r))
 fun = do
   (c,decl,mp) <- get
   put (c+1,decl,mp)
@@ -122,7 +122,7 @@ fun = do
   return res
     
 -- | Apply a function to an argument
-app :: (Args a b,SMTType r) => SMTExpr (SMTFun a b r) -> a -> SMTExpr r
+app :: (Args a,SMTType r) => SMTExpr (SMTFun a (Unpacked a) r) -> a -> SMTExpr r
 app = App
 
 -- | Two expressions shall be equal
@@ -254,11 +254,11 @@ bvconcat :: (SMTType t1,SMTType t2,Concatable t1 t2,t3 ~ ConcatResult t1 t2,Conc
 bvconcat = BVConcat
 
 -- | If the supplied function returns true for all possible values, the forall quantification returns true.
-forAll :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
+forAll :: Args a => (a -> SMTExpr Bool) -> SMTExpr Bool
 forAll = Forall
 
 -- | If the supplied function returns true for at least one possible value, the exists quantification returns true.
-exists :: Args a b => (a -> SMTExpr Bool) -> SMTExpr Bool
+exists :: Args a => (a -> SMTExpr Bool) -> SMTExpr Bool
 exists = Exists
 
 -- | Binds an expression to a variable.
@@ -272,7 +272,7 @@ lets :: SMTType a => [SMTExpr a] -> ([SMTExpr a] -> SMTExpr b) -> SMTExpr b
 lets = Lets
 
 -- | Like 'forAll', but can quantify over more than one variable (of the same type)
-forAllList :: Args a b => Integer -- ^ Number of variables to quantify
+forAllList :: Args a => Integer -- ^ Number of variables to quantify
               -> ([a] -> SMTExpr Bool) -- ^ Function which takes a list of the quantified variables
               -> SMTExpr Bool
 forAllList = ForallList

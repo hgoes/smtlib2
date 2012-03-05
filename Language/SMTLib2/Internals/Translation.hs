@@ -51,7 +51,7 @@ getRawValue expr = do
     _ -> error $ "unknown response to get-value: "++show val
 
 -- | Define a new function with a body
-defFun :: (Args a b,SMTType r,SMTAnnotation r ~ ()) => (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a b r))
+defFun :: (Args a,SMTType r,SMTAnnotation r ~ ()) => (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a (Unpacked a) r))
 defFun f = do
   (c,decl,mp) <- get
   put (c+1,decl,mp)

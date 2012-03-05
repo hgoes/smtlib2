@@ -370,7 +370,8 @@ instance Num (SMTExpr Int64) where
 
 -- Arguments
 
-instance (SMTType a,SMTAnnotation a ~ ()) => Args (SMTExpr a) a where
+instance (SMTType a,SMTAnnotation a ~ ()) => Args (SMTExpr a) where
+  type Unpacked (SMTExpr a) = a
   createArgs c = let n1 = T.pack $ "f"++show c
                      v1 = Var n1 ()
                      t1 = getSort (getUndef v1) ()
@@ -380,7 +381,8 @@ instance (SMTType a,SMTAnnotation a ~ ()) => Args (SMTExpr a) a where
   foldExprs f s x = f s x
   allOf x = x
 
-instance (SMTType a,SMTType b,SMTAnnotation a ~ (),SMTAnnotation b ~ ()) => Args (SMTExpr a,SMTExpr b) (a,b) where
+instance (SMTType a,SMTType b,SMTAnnotation a ~ (),SMTAnnotation b ~ ()) => Args (SMTExpr a,SMTExpr b) where
+  type Unpacked (SMTExpr a,SMTExpr b) = (a,b)
   createArgs c = let n1 = T.pack $ "f"++show c
                      n2 = T.pack $ "f"++show (c+1)
                      v1 = Var n1 ()
@@ -396,7 +398,8 @@ instance (SMTType a,SMTType b,SMTAnnotation a ~ (),SMTAnnotation b ~ ()) => Args
                           in (s2,(e1',e2'))
   allOf x = (x,x)
 
-instance (SMTType a,SMTType b,SMTType c,SMTAnnotation a ~ (),SMTAnnotation b ~ (),SMTAnnotation c ~ ()) => Args (SMTExpr a,SMTExpr b,SMTExpr c) (a,b,c) where
+instance (SMTType a,SMTType b,SMTType c,SMTAnnotation a ~ (),SMTAnnotation b ~ (),SMTAnnotation c ~ ()) => Args (SMTExpr a,SMTExpr b,SMTExpr c) where
+  type Unpacked (SMTExpr a,SMTExpr b,SMTExpr c) = (a,b,c)
   createArgs c = let n1 = T.pack $ "f"++show c
                      n2 = T.pack $ "f"++show (c+1)
                      n3 = T.pack $ "f"++show (c+2)
