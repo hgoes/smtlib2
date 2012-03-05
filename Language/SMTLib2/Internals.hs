@@ -208,13 +208,15 @@ data SMTOption
      deriving (Show,Eq,Ord)
 
 -- | A piece of information of type /r/ that can be obtained by the SMT solver
-class SMTInfo i r | i -> r where
-  getInfo :: i -> SMT r
+class SMTInfo i where
+  type SMTInfoResult i
+  getInfo :: i -> SMT (SMTInfoResult i)
 
 -- | The name of the SMT solver
 data SMTSolverName = SMTSolverName deriving (Show,Eq,Ord)
 
-instance SMTInfo SMTSolverName String where
+instance SMTInfo SMTSolverName where
+  type SMTInfoResult SMTSolverName = String
   getInfo _ = do
     putRequest (L.List [L.Symbol "get-info",L.Symbol ":name"])
     res <- parseResponse
@@ -224,7 +226,8 @@ instance SMTInfo SMTSolverName String where
 -- | The version of the SMT solver
 data SMTSolverVersion = SMTSolverVersion deriving (Show,Eq,Ord)
 
-instance SMTInfo SMTSolverVersion String where
+instance SMTInfo SMTSolverVersion where
+  type SMTInfoResult SMTSolverVersion = String
   getInfo _ = do
     putRequest (L.List [L.Symbol "get-info",L.Symbol ":version"])
     res <- parseResponse
