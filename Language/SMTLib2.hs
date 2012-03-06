@@ -61,7 +61,11 @@ module Language.SMTLib2
          bvadd,bvsub,bvmul,bvurem,bvsrem,
          bvule,bvult,bvuge,bvugt,
          bvsle,bvslt,bvsge,bvsgt,
-         bvconcat,
+         ByteStringLen(..),BitstreamLen(..),
+         bvconcat,bvextract,
+         bvsplitu16to8,
+         bvsplitu32to16,bvsplitu32to8,
+         bvsplitu64to32,bvsplitu64to16,bvsplitu64to8,
          -- ** Functions
          fun,app,defFun,
          -- ** Data types
@@ -72,6 +76,6 @@ module Language.SMTLib2
        where
 
 import Language.SMTLib2.Internals
-import Language.SMTLib2.Internals.Instances ()
+import Language.SMTLib2.Internals.Instances
 import Language.SMTLib2.Internals.Translation
 import Language.SMTLib2.Internals.Interface

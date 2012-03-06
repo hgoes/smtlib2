@@ -548,6 +548,11 @@ instance Concatable (BitS.Bitstream BitS.Right) (BitS.Bitstream BitS.Right) wher
     type ConcatResult (BitS.Bitstream BitS.Right) (BitS.Bitstream BitS.Right) = BitS.Bitstream BitS.Right
     concat' = BitS.append
 
+instance Extractable (BitS.Bitstream BitS.Left) (BitS.Bitstream BitS.Left) where
+    extract' _ _ u l _ = BitstreamLen (fromIntegral $ u-l+1)
+instance Extractable (BitS.Bitstream BitS.Right) (BitS.Bitstream BitS.Right) where
+    extract' _ _ u l _ = BitstreamLen (fromIntegral $ u-l+1)
+
 -- Concat instances
 
 instance Concatable () () where
@@ -577,3 +582,17 @@ instance Concatable Word32 Word32 where
 instance Concatable Int32 Word32 where
     type ConcatResult Int32 Word32 = Int64
     concat' x y = ((fromIntegral x) `shiftL` 32) .|. (fromIntegral y)
+
+-- Extract instances
+instance Extractable Word16 Word8 where
+    extract' _ _ _ _ _ = ()
+instance Extractable Word32 Word16 where
+    extract' _ _ _ _ _ = ()
+instance Extractable Word32 Word8 where
+    extract' _ _ _ _ _ = ()
+instance Extractable Word64 Word32 where
+    extract' _ _ _ _ _ = ()
+instance Extractable Word64 Word16 where
+    extract' _ _ _ _ _ = ()
+instance Extractable Word64 Word8 where
+    extract' _ _ _ _ _ = ()

@@ -12,6 +12,7 @@ import Data.Map as Map hiding (assocs)
 import Data.Array
 import qualified Data.AttoLisp as L
 import Data.Unit
+import Data.Word
 
 -- | Create a new named variable
 varNamed :: (SMTType t,Typeable t,Unit (SMTAnnotation t)) => Text -> SMT (SMTExpr t)
@@ -248,6 +249,30 @@ bvsgt = BVSGT
 bvconcat :: (SMTType t1,SMTType t2,Concatable t1 t2,t3 ~ ConcatResult t1 t2,Concatable (SMTAnnotation t1) (SMTAnnotation t2),SMTAnnotation t3 ~ ConcatResult (SMTAnnotation t1) (SMTAnnotation t2))
             => SMTExpr t1 -> SMTExpr t2 -> SMTExpr t3
 bvconcat = BVConcat
+
+bvextract :: (SMTType t,Extractable t t) => Integer -> Integer -> SMTExpr t -> SMTExpr t
+bvextract u l e = withUndef $ \un -> BVExtract u l (extract' un un u l (extractAnnotation e)) e
+    where
+      withUndef :: (t -> SMTExpr t) -> SMTExpr t
+      withUndef f = f undefined
+
+bvsplitu16to8 :: SMTExpr Word16 -> (SMTExpr Word8,SMTExpr Word8)
+bvsplitu16to8 e = (BVExtract 15 8 () e,BVExtract 7 0 () e)
+
+bvsplitu32to16 :: SMTExpr Word32 -> (SMTExpr Word16,SMTExpr Word16)
+bvsplitu32to16 e = (BVExtract 31 16 () e,BVExtract 15 0 () e)
+
+bvsplitu32to8 :: SMTExpr Word32 -> (SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8)
+bvsplitu32to8 e = (BVExtract 31 24 () e,BVExtract 23 16 () e,BVExtract 15 8 () e,BVExtract 7 0 () e)
+
+bvsplitu64to32 :: SMTExpr Word64 -> (SMTExpr Word32,SMTExpr Word32)
+bvsplitu64to32 e = (BVExtract 63 32 () e,BVExtract 31 0 () e)
+
+bvsplitu64to16 :: SMTExpr Word64 -> (SMTExpr Word16,SMTExpr Word16,SMTExpr Word16,SMTExpr Word16)
+bvsplitu64to16 e = (BVExtract 63 48 () e,BVExtract 47 32 () e,BVExtract 31 16 () e,BVExtract 15 0 () e)
+
+bvsplitu64to8 :: SMTExpr Word64 -> (SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8)
+bvsplitu64to8 e = (BVExtract 63 56 () e,BVExtract 55 48 () e,BVExtract 47 40 () e,BVExtract 39 32 () e,BVExtract 31 24 () e,BVExtract 23 16 () e,BVExtract 15 8 () e,BVExtract 7 0 () e)
 
 -- | If the supplied function returns true for all possible values, the forall quantification returns true.
 forAll :: Args a => (a -> SMTExpr Bool) -> SMTExpr Bool

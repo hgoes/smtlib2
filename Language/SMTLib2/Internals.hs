@@ -54,6 +54,9 @@ class Concatable a b where
     type ConcatResult a b
     concat' :: a -> b -> ConcatResult a b
 
+class Extractable a b where
+    extract' :: a -> b -> Integer -> Integer -> SMTAnnotation a -> SMTAnnotation b
+
 -- | An abstract SMT expression
 data SMTExpr t where
   Var :: SMTType t => Text -> SMTAnnotation t -> SMTExpr t
@@ -94,7 +97,7 @@ data SMTExpr t where
   BVSLT :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
   BVSGE :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
   BVSGT :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-  BVExtract :: SMTType t1 => Integer -> Integer -> SMTExpr t1 -> SMTExpr t2
+  BVExtract :: (SMTType t1,SMTType t2,Extractable t1 t2) => Integer -> Integer -> SMTAnnotation t2 -> SMTExpr t1 -> SMTExpr t2
   BVConcat :: (SMTType t1,SMTType t2,Concatable t1 t2,t3 ~ ConcatResult t1 t2,Concatable (SMTAnnotation t1) (SMTAnnotation t2),SMTAnnotation t3 ~ ConcatResult (SMTAnnotation t1) (SMTAnnotation t2)) => SMTExpr t1 -> SMTExpr t2 -> SMTExpr t3
   BVConcats :: SMTType t1 => [SMTExpr t1] -> SMTExpr t2
   BVXor :: SMTExpr t -> SMTExpr t -> SMTExpr t
@@ -158,7 +161,7 @@ instance Eq a => Eq (SMTExpr a) where
     (==) (BVSLT l1 r1) (BVSLT l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
     (==) (BVSGE l1 r1) (BVSGE l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
     (==) (BVSGT l1 r1) (BVSGT l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
-    (==) (BVExtract l1 u1 e1) (BVExtract l2 u2 e2) = l1 == l2 && u1 == u2 && eqExpr e1 e2
+    (==) (BVExtract l1 u1 ann1 e1) (BVExtract l2 u2 ann2 e2) = l1 == l2 && u1 == u2 && eqExpr e1 e2
     (==) (BVConcat l1 r1) (BVConcat l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
     (==) (BVConcats x) (BVConcats y) = eqExprs x y
     (==) (BVXor l1 r1) (BVXor l2 r2) = l1 == l2 && r1 == r2

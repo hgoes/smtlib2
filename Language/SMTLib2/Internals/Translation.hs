@@ -179,12 +179,12 @@ exprToLisp (BVSGE l r) c = let (l',c') = exprToLisp l c
 exprToLisp (BVSGT l r) c = let (l',c') = exprToLisp l c
                                (r',c'') = exprToLisp r c'
                            in (L.List [L.Symbol "bvsgt",l',r'],c'')
-exprToLisp (BVExtract i j v) c = let (v',c') = exprToLisp v c
-                                 in (L.List [L.List [L.Symbol "_"
-                                                    ,L.Symbol "extract"
-                                                    ,L.toLisp i
-                                                    ,L.toLisp j]
-                                            ,v'],c')
+exprToLisp (BVExtract i j ann v) c = let (v',c') = exprToLisp v c
+                                     in (L.List [L.List [L.Symbol "_"
+                                                        ,L.Symbol "extract"
+                                                        ,L.toLisp i
+                                                        ,L.toLisp j]
+                                                ,v'],c')
 exprToLisp (BVConcat v1 v2) c = let (v1',c') = exprToLisp v1 c
                                     (v2',c'') = exprToLisp v2 c'
                                 in (L.List [L.Symbol "concat"
@@ -506,6 +506,7 @@ extractAnnotation (BVSRem x _) = extractAnnotation x
 extractAnnotation (BVUDiv x _) = extractAnnotation x
 extractAnnotation (BVSDiv x _) = extractAnnotation x
 extractAnnotation (BVConcat x y) = concat' (extractAnnotation x) (extractAnnotation y)
+extractAnnotation (BVExtract _ _ ann _) = ann
 extractAnnotation (BVULE _ _) = ()
 extractAnnotation (BVULT _ _) = ()
 extractAnnotation (BVUGE _ _) = ()
