@@ -15,8 +15,8 @@ Library
     Language.SMTLib2.Examples
     Language.SMTLib2.TH
     Language.SMTLib2.Internals
-  Other-Modules:
     Language.SMTLib2.Internals.Instances
     Language.SMTLib2.Internals.Translation
     Language.SMTLib2.Internals.Interface
+  Other-Modules:
     Data.Unit
