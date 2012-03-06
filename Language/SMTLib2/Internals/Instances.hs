@@ -13,6 +13,7 @@ import qualified Data.Text as T
 import Data.Ratio
 import Data.Typeable
 import qualified Data.ByteString as BS
+import qualified Data.Bitstream as BitS
 
 -- Bool
 
@@ -512,6 +513,40 @@ instance Concatable ByteStringLen ByteStringLen where
 instance Concatable BS.ByteString BS.ByteString where
     type ConcatResult BS.ByteString BS.ByteString = BS.ByteString
     concat' b1 b2 = BS.append b1 b2
+
+-- BitStream implementation
+
+newtype BitstreamLen = BitstreamLen Int deriving (Show,Eq,Ord,Num)
+
+instance SMTType (BitS.Bitstream BitS.Left) where
+    type SMTAnnotation (BitS.Bitstream BitS.Left) = BitstreamLen
+    getSort _ (BitstreamLen l) = bv l
+    declareType u _ = [(typeOf u,return ())]
+
+instance SMTType (BitS.Bitstream BitS.Right) where
+    type SMTAnnotation (BitS.Bitstream BitS.Right) = BitstreamLen
+    getSort _ (BitstreamLen l) = bv l
+    declareType u _ = [(typeOf u,return ())]
+
+instance SMTValue (BitS.Bitstream BitS.Left) where
+    unmangle v (BitstreamLen l) = return $ fmap (BitS.fromNBits l) (getBVValue' l v :: Maybe Integer)
+    mangle v (BitstreamLen l) = putBVValue' l (BitS.toBits v :: Integer)
+
+instance SMTValue (BitS.Bitstream BitS.Right) where
+    unmangle v (BitstreamLen l) = return $ fmap (BitS.fromNBits l) (getBVValue' l v :: Maybe Integer)
+    mangle v (BitstreamLen l) = putBVValue' l (BitS.toBits v :: Integer)
+
+instance Concatable BitstreamLen BitstreamLen where
+    type ConcatResult BitstreamLen BitstreamLen = BitstreamLen
+    concat' (BitstreamLen l1) (BitstreamLen l2) = BitstreamLen (l1+l2)
+
+instance Concatable (BitS.Bitstream BitS.Left) (BitS.Bitstream BitS.Left) where
+    type ConcatResult (BitS.Bitstream BitS.Left) (BitS.Bitstream BitS.Left) = BitS.Bitstream BitS.Left
+    concat' = BitS.append
+
+instance Concatable (BitS.Bitstream BitS.Right) (BitS.Bitstream BitS.Right) where
+    type ConcatResult (BitS.Bitstream BitS.Right) (BitS.Bitstream BitS.Right) = BitS.Bitstream BitS.Right
+    concat' = BitS.append
 
 -- Concat instances
 
