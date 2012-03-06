@@ -25,7 +25,7 @@ type SMT = ReaderT (Handle,Handle) (StateT (Integer,[TypeRep],Map T.Text TypeRep
 class (Eq t,Typeable t) => SMTType t where
   type SMTAnnotation t
   getSort :: t -> SMTAnnotation t -> L.Lisp
-  declareType :: t -> [(TypeRep,SMT ())]
+  declareType :: t -> SMTAnnotation t -> [(TypeRep,SMT ())]
   additionalConstraints :: t -> SMTExpr t -> [SMTExpr Bool]
   additionalConstraints _ _ = []
 
@@ -245,7 +245,7 @@ firstJust (act:acts) = do
     Just res -> return $ Just res
 
 getUndef :: SMTExpr t -> t
-getUndef _ = undefined
+getUndef _ = error "Don't evaluate the result of 'getUndef'"
 
 getFunUndef :: Args a => SMTExpr (SMTFun a r) -> (a,Unpacked a,r)
 getFunUndef _ = (undefined,undefined,undefined)

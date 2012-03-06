@@ -23,7 +23,7 @@ varNamedAnn name ann = mfix (\e -> varNamed' (getUndef e) name ann)
 varNamed' :: (SMTType t,Typeable t) => t -> Text -> SMTAnnotation t -> SMT (SMTExpr t)
 varNamed' u name ann = do
   let sort = getSort u ann
-      tps = declareType u
+      tps = declareType u ann
   modify $ \(c,decl,mp) -> (c,decl,Map.insert name (typeOf u) mp)
   mapM_ (\(tp,act) -> do
             (c,decl,_) <- get

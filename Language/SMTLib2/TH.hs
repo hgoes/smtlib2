@@ -72,7 +72,7 @@ generateSortExpr name = [| L.Symbol $(stringE $ nameBase name) |]
 
 generateDeclExpr :: Name -> ExtrType -> Name -> Q Exp
 generateDeclExpr dname cons pat
-  = Prelude.foldl (\cur tp -> [| $(cur) ++ declareType (undefined :: $(return tp)) |])
+  = Prelude.foldl (\cur tp -> [| $(cur) ++ declareType (undefined :: $(return tp)) $(tupE []) |])
     [| [(typeOf $(varE pat),declareDatatypes [] [(T.pack $(stringE $ nameBase dname),
                                                   $(listE [ tupE [ [| T.pack $(stringE $ nameBase cname) |],  
                                                                    listE [ tupE [ stringE $ nameBase sname,
