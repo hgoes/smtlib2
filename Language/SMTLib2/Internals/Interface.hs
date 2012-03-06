@@ -35,7 +35,7 @@ varNamed' u name ann = do
                    )
         ) (Prelude.reverse tps)
   declareFun name [] sort
-  mapM_ assert $ additionalConstraints u (Var name ann)
+  mapM_ assert $ additionalConstraints u ann (Var name ann)
   return (Var name ann)
 
 -- | Create a annotated variable

@@ -26,8 +26,8 @@ class (Eq t,Typeable t) => SMTType t where
   type SMTAnnotation t
   getSort :: t -> SMTAnnotation t -> L.Lisp
   declareType :: t -> SMTAnnotation t -> [(TypeRep,SMT ())]
-  additionalConstraints :: t -> SMTExpr t -> [SMTExpr Bool]
-  additionalConstraints _ _ = []
+  additionalConstraints :: t -> SMTAnnotation t -> SMTExpr t -> [SMTExpr Bool]
+  additionalConstraints _ _ _ = []
 
 -- | Haskell values which can be represented as SMT constants
 class SMTType t => SMTValue t where
