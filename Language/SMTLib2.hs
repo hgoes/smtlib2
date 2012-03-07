@@ -56,7 +56,7 @@ module Language.SMTLib2
          -- ** Arithmetic
          plus,minus,mult,div',mod',neg,divide,
          -- ** Arrays
-         select,store,arrayConst,unmangleArray,
+         select,store,arrayConst,unmangleArray,asArray,
          -- ** Bitvectors
          bvadd,bvsub,bvmul,bvurem,bvsrem,
          bvule,bvult,bvuge,bvugt,

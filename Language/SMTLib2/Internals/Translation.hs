@@ -140,6 +140,8 @@ exprToLisp (Store arr idx val) c = let (arr',c') = exprToLisp arr c
                                        (idx',c'') = exprToLisp idx c''
                                        (val',c''') = exprToLisp val c'''
                                    in (L.List [L.Symbol "store",arr',idx',val'],c''')
+exprToLisp (AsArray f) c = let (f',c') = exprToLisp f c
+                           in (L.List [L.Symbol "_",L.Symbol "as-array",f'],c')
 exprToLisp (BVAdd l r) c = let (l',c') = exprToLisp l c
                                (r',c'') = exprToLisp r c'
                            in (L.List [L.Symbol "bvadd",l',r'],c'')

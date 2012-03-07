@@ -184,3 +184,12 @@ concatExample2 = do
   assert $ res .==. bvconcat v1 v2
   checkSat
   getValue res
+
+arrayExample :: SMT Integer
+arrayExample = do
+  f <- fun
+  v <- var
+  assert $ forAll $ \i -> (f `app` i) .==. (i*2)
+  assert $ v .==. select (asArray f) 4
+  checkSat
+  getValue v

@@ -48,7 +48,7 @@ class (SMTType t) => SMTOrd t where
   (.<=.) :: SMTExpr t -> SMTExpr t -> SMTExpr Bool
 
 -- | Represents a function in the SMT solver. /a/ is the argument of the function in SMT terms, /b/ is the argument in haskell types and /r/ is the result type of the function.
-data SMTFun a r = SMTFun
+data SMTFun a r = SMTFun deriving (Eq,Typeable)
 
 class Concatable a b where
     type ConcatResult a b
@@ -82,6 +82,7 @@ data SMTExpr t where
   Not :: SMTExpr Bool -> SMTExpr Bool
   Select :: (Ix i,SMTType i,SMTType v) => SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v
   Store :: (Ix i,SMTType i,SMTType v) => SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v -> SMTExpr (Array i v)
+  AsArray :: (SMTType i,SMTType v) => SMTExpr (SMTFun (SMTExpr i) v) -> SMTExpr (Array i v)
   BVAdd :: SMTExpr t -> SMTExpr t -> SMTExpr t
   BVSub :: SMTExpr t -> SMTExpr t -> SMTExpr t
   BVMul :: SMTExpr t -> SMTExpr t -> SMTExpr t
@@ -146,6 +147,7 @@ instance Eq a => Eq (SMTExpr a) where
     (==) (Not x) (Not y) = x==y
     (==) (Select a1 i1) (Select a2 i2) = eqExpr a1 a2 && eqExpr i1 i2
     (==) (Store a1 i1 v1) (Store a2 i2 v2) = a1==a2 && i1 == i2 && v1 == v2
+    (==) (AsArray f1) (AsArray f2) = eqExpr f1 f2
     (==) (BVAdd l1 r1) (BVAdd l2 r2) = l1 == l2 && r1 == r2
     (==) (BVSub l1 r1) (BVSub l2 r2) = l1 == l2 && r1 == r2
     (==) (BVMul l1 r1) (BVMul l2 r2) = l1 == l2 && r1 == r2
@@ -431,6 +433,8 @@ foldExpr f x (Store l r c) = let (x1,e1) = foldExpr f x l
                                  (x2,e2) = foldExpr f x1 r
                                  (x3,e3) = foldExpr f x2 c
                              in f x3 (Store e1 e2 e3)
+foldExpr f x (AsArray fun) = let (x',fun') = foldExpr f x fun
+                             in f x' (AsArray fun')
 foldExpr f x (BVAdd l r) = let (x1,e1) = foldExpr f x l
                                (x2,e2) = foldExpr f x1 r
                            in f x2 (BVAdd e1 e2)

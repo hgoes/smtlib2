@@ -193,6 +193,9 @@ select = Select
 store :: (Ix i,SMTType i,SMTType v) => SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v -> SMTExpr (Array i v)
 store = Store
 
+asArray :: (SMTType i,SMTType v) => SMTExpr (SMTFun (SMTExpr i) v) -> SMTExpr (Array i v)
+asArray = AsArray
+
 -- | Bitvector addition
 bvadd :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
 bvadd = BVAdd
