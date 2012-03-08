@@ -32,7 +32,7 @@ module Language.SMTLib2
          SMTArray,
          Constructor,
          Field,
-         Args,
+         Args(..),LiftArgs(..),ArgAnnotation,Unpacked,
          -- * Environment
          withSMTSolver,
          setOption,setLogic,
@@ -43,7 +43,7 @@ module Language.SMTLib2
          comment,
          getInterpolants,getProof,
          -- * Expressions
-         var,varNamed,varNamedAnn,varAnn,
+         var,varNamed,varNamedAnn,varAnn,argVars,argVarsAnn,
          constant,constantAnn,
          let',lets,
          named,

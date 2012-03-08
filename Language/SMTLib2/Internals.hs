@@ -268,6 +268,7 @@ createArgs i = let ((tps,ni),res) = foldExprs (\(tps,ci) e ann -> let name = T.p
 
 class Args a => LiftArgs a where
   liftArgs :: Unpacked a -> a
+  unliftArgs :: a -> SMT (Unpacked a)
 
 firstJust :: Monad m => [m (Maybe a)] -> m (Maybe a)
 firstJust [] = return Nothing
@@ -544,4 +545,3 @@ replaceName :: (T.Text -> T.Text) -> SMTExpr a -> SMTExpr a
 replaceName f = snd . foldExpr (\_ expr -> ((),case expr of
                                                Var n ann -> Var (f n) ann
                                                _ -> expr)) ()
-

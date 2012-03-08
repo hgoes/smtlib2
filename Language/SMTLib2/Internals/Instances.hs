@@ -386,15 +386,19 @@ instance (SMTType a,SMTAnnotation a ~ ()) => Args (SMTExpr a) where
   type ArgAnnotation (SMTExpr a) = SMTAnnotation a
   foldExprs f s x = f s x
 
-instance (SMTValue a,SMTAnnotation a ~ ()) => LiftArgs (SMTExpr a) where
-  liftArgs x = Const x ()
-
 instance (Args a,Args b) => Args (a,b) where
   type Unpacked (a,b) = (Unpacked a,Unpacked b)
   type ArgAnnotation (a,b) = (ArgAnnotation a,ArgAnnotation b)
   foldExprs f s ~(e1,e2) ~(ann1,ann2) = let ~(s1,e1') = foldExprs f s e1 ann1
                                             ~(s2,e2') = foldExprs f s1 e2 ann2
                                         in (s2,(e1',e2'))
+
+instance (LiftArgs a,LiftArgs b) => LiftArgs (a,b) where
+  liftArgs (x,y) = (liftArgs x,liftArgs y)
+  unliftArgs (x,y) = do
+    rx <- unliftArgs x
+    ry <- unliftArgs y
+    return (rx,ry)
 
 instance (Args a,Args b,Args c) => Args (a,b,c) where
   type Unpacked (a,b,c) = (Unpacked a,Unpacked b,Unpacked c)
@@ -403,6 +407,14 @@ instance (Args a,Args b,Args c) => Args (a,b,c) where
                                                     ~(s2,e2') = foldExprs f s1 e2 ann2
                                                     ~(s3,e3') = foldExprs f s2 e3 ann3
                                                 in (s3,(e1',e2',e3'))
+
+instance (LiftArgs a,LiftArgs b,LiftArgs c) => LiftArgs (a,b,c) where
+  liftArgs (x,y,z) = (liftArgs x,liftArgs y,liftArgs z)
+  unliftArgs (x,y,z) = do
+    rx <- unliftArgs x
+    ry <- unliftArgs y
+    rz <- unliftArgs z
+    return (rx,ry,rz)
 
 instance SMTType a => SMTType (Maybe a) where
   type SMTAnnotation (Maybe a) = SMTAnnotation a

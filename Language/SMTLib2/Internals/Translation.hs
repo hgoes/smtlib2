@@ -535,3 +535,7 @@ extractAnnotation (Tail x) = extractAnnotation x
 extractAnnotation (Insert _ x) = extractAnnotation x
 extractAnnotation (Named x _) = extractAnnotation x
 extractAnnotation (InterpolationGrp _ _) = ()
+
+instance (SMTValue a,SMTAnnotation a ~ ()) => LiftArgs (SMTExpr a) where
+  liftArgs x = Const x ()
+  unliftArgs = getValue

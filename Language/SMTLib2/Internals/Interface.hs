@@ -55,6 +55,21 @@ var = do
   let name = T.pack $ "var"++show c
   varNamed name
 
+argVarsAnn :: Args a => ArgAnnotation a -> SMT a
+argVarsAnn ann = do
+  (c,decl,mp) <- get
+  let ((nc,act),res) = foldExprs 
+                       (\(cc,act) u ann' 
+                            -> let name = T.pack $ "var"++show cc
+                               in ((cc+1,act >> varNamed' (getUndef u) name ann' >> return ())
+                                  ,Var name ann')) (c,return ()) undefined ann
+  put (nc,decl,mp)
+  act
+  return res
+
+argVars :: (Args a,Unit (ArgAnnotation a)) => SMT a
+argVars = argVarsAnn unit
+
 -- | A constant expression
 constant :: (SMTValue t,Unit (SMTAnnotation t)) => t -> SMTExpr t
 constant x = Const x unit
