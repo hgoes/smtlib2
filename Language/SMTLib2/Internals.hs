@@ -254,7 +254,7 @@ allOf x = snd $ foldExprs (\_ _ _ -> ((),x)) () undefined undefined
 unpackArgs :: Args a => (forall t. SMTExpr t -> Integer -> (c,Integer)) -> a -> Unpacked a -> Integer -> ([c],Integer)
 unpackArgs f x unp i = fst $ foldExprs (\(res,ci) e ann -> let (p,ni) = f e ci
                                                            in ((res++[p],ni),e)
-                                       ) ([],i) x undefined
+                                       ) ([],i) x (error "Evaluated the argument to unpackArgs")
 
 declareArgTypes :: Args a => a -> ArgAnnotation a -> [(TypeRep,SMT ())]
 declareArgTypes arg ann = fst $ foldExprs (\decls e ann -> (decls++(declareType (getUndef e) ann),e)) [] arg ann
@@ -263,7 +263,7 @@ createArgs :: Args a => Integer -> (a,[(Text,L.Lisp)],Integer)
 createArgs i = let ((tps,ni),res) = foldExprs (\(tps,ci) e ann -> let name = T.pack $ "arg"++show ci
                                                                       sort = getSort (getUndef e) ann
                                                                   in ((tps++[(name,sort)],ci+1),Var name ann)
-                                              ) ([],i) undefined undefined
+                                              ) ([],i) (error "Evaluated the first argument to createArgs") (error "Evaluated the second argument to createArgs")
                in (res,tps,ni)
 
 class Args a => LiftArgs a where
@@ -281,7 +281,9 @@ getUndef :: SMTExpr t -> t
 getUndef _ = error "Don't evaluate the result of 'getUndef'"
 
 getFunUndef :: Args a => SMTExpr (SMTFun a r) -> (a,Unpacked a,r)
-getFunUndef _ = (undefined,undefined,undefined)
+getFunUndef _ = (error "Don't evaluate the first result of 'getFunUndef'",
+                 error "Don't evaluate the second result of 'getFunUndef'",
+                 error "Don't evaluate the third result of 'getFunUndef'")
 
 getArrayUndef :: Args i => SMTExpr (SMTArray i v) -> (i,Unpacked i,v)
 getArrayUndef _ = (undefined,undefined,undefined)

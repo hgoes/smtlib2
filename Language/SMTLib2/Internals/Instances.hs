@@ -392,16 +392,16 @@ instance (SMTValue a,SMTAnnotation a ~ ()) => LiftArgs (SMTExpr a) where
 instance (Args a,Args b) => Args (a,b) where
   type Unpacked (a,b) = (Unpacked a,Unpacked b)
   type ArgAnnotation (a,b) = (ArgAnnotation a,ArgAnnotation b)
-  foldExprs f s ~(e1,e2) ~(ann1,ann2) = let (s1,e1') = foldExprs f s e1 ann1
-                                            (s2,e2') = foldExprs f s1 e2 ann2
+  foldExprs f s ~(e1,e2) ~(ann1,ann2) = let ~(s1,e1') = foldExprs f s e1 ann1
+                                            ~(s2,e2') = foldExprs f s1 e2 ann2
                                         in (s2,(e1',e2'))
 
 instance (Args a,Args b,Args c) => Args (a,b,c) where
   type Unpacked (a,b,c) = (Unpacked a,Unpacked b,Unpacked c)
   type ArgAnnotation (a,b,c) = (ArgAnnotation a,ArgAnnotation b,ArgAnnotation c)
-  foldExprs f s ~(e1,e2,e3) ~(ann1,ann2,ann3) = let (s1,e1') = foldExprs f s e1 ann1
-                                                    (s2,e2') = foldExprs f s1 e2 ann2
-                                                    (s3,e3') = foldExprs f s2 e3 ann3
+  foldExprs f s ~(e1,e2,e3) ~(ann1,ann2,ann3) = let ~(s1,e1') = foldExprs f s e1 ann1
+                                                    ~(s2,e2') = foldExprs f s1 e2 ann2
+                                                    ~(s3,e3') = foldExprs f s2 e3 ann3
                                                 in (s3,(e1',e2',e3'))
 
 instance SMTType a => SMTType (Maybe a) where

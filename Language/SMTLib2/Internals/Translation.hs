@@ -61,11 +61,11 @@ defFun f = do
       (au,bu,rtp) = getFunUndef res
       
       sorts = argSorts au unit
-      tps = Prelude.zipWith (\sort num -> (T.pack $ "arg"++show num,sort)) sorts [0..]
+      --tps = Prelude.zipWith (\sort num -> (T.pack $ "arg"++show num,sort)) sorts [0..]
 
-      --(au2,tps,_) = createArgs 0
+      (au2,tps,_) = createArgs 0
       
-      (expr',_) = exprToLisp (f au) 0
+      (expr',_) = exprToLisp (f au2) 0
   defineFun name tps (getSort rtp ()) expr'
   return res
 
@@ -243,9 +243,9 @@ exprToLisp (Lets xs f) c = let (nc,xs') = List.mapAccumL (\cc x -> let (x',cc') 
                                       ,L.List [L.List [L.Symbol name,arg]
                                               | (name,arg) <- xs']],nc)
 exprToLisp (Fun name) c = (L.Symbol name,c)
-exprToLisp (App f x) c = let (_,bu,ru) = getFunUndef f
-                             (f',c') = exprToLisp f c
-                             (x',c'') = unpackArgs exprToLisp x bu c
+exprToLisp (App f x) c = let ~(_,bu,ru) = getFunUndef f
+                             ~(f',c') = exprToLisp f c
+                             ~(x',c'') = unpackArgs exprToLisp x bu c
                          in (L.List $ f':x',c'')
 exprToLisp (ConTest (Constructor name) e) c = let (e',c') = exprToLisp e c
                                               in (L.List [L.Symbol $ T.append "is-" name
