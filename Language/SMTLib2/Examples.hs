@@ -45,9 +45,9 @@ transposeTest :: SMT ([Integer],Bool)
 transposeTest = do
   let c1 = listArray (0,9) [6,2,4,5,1,9,0,3,8,7]
       c2 = listArray (0,9) [2,9,3,6,1,8,7,0,5,4]
-  v1 <- var :: SMT (SMTExpr (Array Integer Integer))
-  v2 <- var :: SMT (SMTExpr (Array Integer Integer))
-  v3 <- var :: SMT (SMTExpr (Array Integer Integer))
+  v1 <- var :: SMT (SMTExpr (SMTArray (SMTExpr Integer) Integer))
+  v2 <- var :: SMT (SMTExpr (SMTArray (SMTExpr Integer) Integer))
+  v3 <- var :: SMT (SMTExpr (SMTArray (SMTExpr Integer) Integer))
   assert $ arrayConst v1 c1
   assert $ arrayConst v2 c2
   mapM_ (\i -> assert $ (select v3 (constant i)) .<. 10) [0..9]
@@ -193,3 +193,13 @@ arrayExample = do
   assert $ v .==. select (asArray f) 4
   checkSat
   getValue v
+
+arrayExample2 :: SMT [[Integer]]
+arrayExample2 = do
+  arr <- var :: SMT (SMTExpr (SMTArray (SMTExpr Integer,SMTExpr Integer) Integer))
+  assert $ select arr (0,1) .==. 9
+  assert $ select arr (2,4) .==. 7
+  assert $ select arr (3,5) .==. 2
+  assert $ forAll $ \(i,j) -> select arr (i,j) .==. select arr (j,i)
+  checkSat
+  sequence [ sequence [ getValue (select arr (constant i,constant j)) | j <- [0..9] ] | i <- [0..9] ]

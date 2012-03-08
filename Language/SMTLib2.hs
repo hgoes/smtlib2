@@ -29,6 +29,7 @@ module Language.SMTLib2
          SMTExpr,
          SMTOption(..),
          SMTFun,
+         SMTArray,
          Constructor,
          Field,
          Args,

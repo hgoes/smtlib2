@@ -51,7 +51,7 @@ getRawValue expr = do
     _ -> error $ "unknown response to get-value: "++show val
 
 -- | Define a new function with a body
-defFun :: (Args a,SMTType r,SMTAnnotation r ~ ()) => (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a r))
+defFun :: (Args a,SMTType r,Unit (ArgAnnotation a),SMTAnnotation r ~ ()) => (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a r))
 defFun f = do
   (c,decl,mp) <- get
   put (c+1,decl,mp)
@@ -60,16 +60,19 @@ defFun f = do
       
       (au,bu,rtp) = getFunUndef res
       
-      (au2,tps,_) = createArgs 0
+      sorts = argSorts au unit
+      tps = Prelude.zipWith (\sort num -> (T.pack $ "arg"++show num,sort)) sorts [0..]
+
+      --(au2,tps,_) = createArgs 0
       
-      (expr',_) = exprToLisp (f au2) 0
+      (expr',_) = exprToLisp (f au) 0
   defineFun name tps (getSort rtp ()) expr'
   return res
 
 -- | Extract all values of an array by giving the range of indices.
-unmangleArray :: (Ix i,SMTValue i,SMTValue v,Unit (SMTAnnotation i)) => (i,i) -> SMTExpr (Array i v) -> SMT (Array i v)
+unmangleArray :: (LiftArgs i,Ix (Unpacked i),SMTValue v,Unit (SMTAnnotation (Unpacked i))) => (Unpacked i,Unpacked i) -> SMTExpr (SMTArray i v) -> SMT (Array (Unpacked i) v)
 unmangleArray b expr = mapM (\i -> do
-                                v <- getValue (Select expr (Const i unit))
+                                v <- getValue (Select expr (liftArgs i))
                                 return (i,v)
                             ) (range b) >>= return.array b
 
@@ -134,12 +137,14 @@ exprToLisp (Implies l r) c = let (l',c') = exprToLisp l c
 exprToLisp (Not expr) c = let (expr',c') = exprToLisp expr c
                           in (L.List [L.Symbol "not",expr'],c')
 exprToLisp (Select arr idx) c = let (arr',c') = exprToLisp arr c
-                                    (idx',c'') = exprToLisp idx c'
-                                in (L.List [L.Symbol "select",arr',idx'],c'')
+                                    (_,ui,_) = getArrayUndef arr
+                                    (idx',c'') = unpackArgs exprToLisp idx ui c'
+                                in (L.List (L.Symbol "select":arr':idx'),c'')
 exprToLisp (Store arr idx val) c = let (arr',c') = exprToLisp arr c
-                                       (idx',c'') = exprToLisp idx c''
+                                       (_,ui,_) = getArrayUndef arr
+                                       (idx',c'') = unpackArgs exprToLisp idx ui c''
                                        (val',c''') = exprToLisp val c'''
-                                   in (L.List [L.Symbol "store",arr',idx',val'],c''')
+                                   in (L.List (L.Symbol "store":arr':idx'++[val']),c''')
 exprToLisp (AsArray f) c = let (f',c') = exprToLisp f c
                            in (L.List [L.Symbol "_",L.Symbol "as-array",f'],c')
 exprToLisp (BVAdd l r) c = let (l',c') = exprToLisp l c

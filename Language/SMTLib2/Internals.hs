@@ -50,6 +50,8 @@ class (SMTType t) => SMTOrd t where
 -- | Represents a function in the SMT solver. /a/ is the argument of the function in SMT terms, /b/ is the argument in haskell types and /r/ is the result type of the function.
 data SMTFun a r = SMTFun deriving (Eq,Typeable)
 
+data SMTArray i v = SMTArray deriving (Eq,Typeable)
+
 class Concatable a b where
     type ConcatResult a b
     concat' :: a -> b -> ConcatResult a b
@@ -80,9 +82,9 @@ data SMTExpr t where
   XOr :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
   Implies :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
   Not :: SMTExpr Bool -> SMTExpr Bool
-  Select :: (Ix i,SMTType i,SMTType v) => SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v
-  Store :: (Ix i,SMTType i,SMTType v) => SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v -> SMTExpr (Array i v)
-  AsArray :: (SMTType i,SMTType v) => SMTExpr (SMTFun (SMTExpr i) v) -> SMTExpr (Array i v)
+  Select :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v
+  Store :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v -> SMTExpr (SMTArray i v)
+  AsArray :: (Args i,SMTType v) => SMTExpr (SMTFun i v) -> SMTExpr (SMTArray i v)
   BVAdd :: SMTExpr t -> SMTExpr t -> SMTExpr t
   BVSub :: SMTExpr t -> SMTExpr t -> SMTExpr t
   BVMul :: SMTExpr t -> SMTExpr t -> SMTExpr t
@@ -145,7 +147,9 @@ instance Eq a => Eq (SMTExpr a) where
     (==) (XOr l1 r1) (XOr l2 r2) = l1 == l2 && r1 == r2
     (==) (Implies l1 r1) (Implies l2 r2) = l1 == l2 && r1 == r2
     (==) (Not x) (Not y) = x==y
-    (==) (Select a1 i1) (Select a2 i2) = eqExpr a1 a2 && eqExpr i1 i2
+    (==) (Select a1 i1) (Select a2 i2) = eqExpr a1 a2 && (case cast i2 of
+                                                            Nothing -> False
+                                                            Just i2' -> i1 == i2')
     (==) (Store a1 i1 v1) (Store a2 i2 v2) = a1==a2 && i1 == i2 && v1 == v2
     (==) (AsArray f1) (AsArray f2) = eqExpr f1 f2
     (==) (BVAdd l1 r1) (BVAdd l2 r2) = l1 == l2 && r1 == r2
@@ -234,12 +238,36 @@ instance SMTInfo SMTSolverVersion where
       L.List [L.Symbol ":version",L.String name] -> return $ T.unpack name
 
 -- | Instances of this class may be used as arguments for constructed functions and quantifiers.
-class Args a where
+class (Eq a,Typeable a) => Args a where
   type Unpacked a
-  createArgs :: Integer -> (a,[(Text,L.Lisp)],Integer)
-  unpackArgs :: (forall t. SMTExpr t -> Integer -> (c,Integer)) -> a -> Unpacked a -> Integer -> ([c],Integer)
-  foldExprs :: (forall t. s -> SMTExpr t -> (s,SMTExpr t)) -> s -> a -> (s,a)
-  allOf :: (forall t. SMTExpr t) -> a
+  type ArgAnnotation a
+  foldExprs :: (forall t. SMTType t => s -> SMTExpr t -> SMTAnnotation t -> (s,SMTExpr t)) -> s -> a -> ArgAnnotation a -> (s,a)
+
+argSorts :: Args a => a -> ArgAnnotation a -> [L.Lisp]
+argSorts arg ann = Prelude.reverse res
+    where
+      (res,_) = foldExprs (\tps e ann' -> ((getSort (getUndef e) ann'):tps,e)) [] arg ann
+
+allOf :: Args a => (forall t. SMTExpr t) -> a
+allOf x = snd $ foldExprs (\_ _ _ -> ((),x)) () undefined undefined
+
+unpackArgs :: Args a => (forall t. SMTExpr t -> Integer -> (c,Integer)) -> a -> Unpacked a -> Integer -> ([c],Integer)
+unpackArgs f x unp i = fst $ foldExprs (\(res,ci) e ann -> let (p,ni) = f e ci
+                                                           in ((res++[p],ni),e)
+                                       ) ([],i) x undefined
+
+declareArgTypes :: Args a => a -> ArgAnnotation a -> [(TypeRep,SMT ())]
+declareArgTypes arg ann = fst $ foldExprs (\decls e ann -> (decls++(declareType (getUndef e) ann),e)) [] arg ann
+
+createArgs :: Args a => Integer -> (a,[(Text,L.Lisp)],Integer)
+createArgs i = let ((tps,ni),res) = foldExprs (\(tps,ci) e ann -> let name = T.pack $ "arg"++show ci
+                                                                      sort = getSort (getUndef e) ann
+                                                                  in ((tps++[(name,sort)],ci+1),Var name ann)
+                                              ) ([],i) undefined undefined
+               in (res,tps,ni)
+
+class Args a => LiftArgs a where
+  liftArgs :: Unpacked a -> a
 
 firstJust :: Monad m => [m (Maybe a)] -> m (Maybe a)
 firstJust [] = return Nothing
@@ -254,6 +282,9 @@ getUndef _ = error "Don't evaluate the result of 'getUndef'"
 
 getFunUndef :: Args a => SMTExpr (SMTFun a r) -> (a,Unpacked a,r)
 getFunUndef _ = (undefined,undefined,undefined)
+
+getArrayUndef :: Args i => SMTExpr (SMTArray i v) -> (i,Unpacked i,v)
+getArrayUndef _ = (undefined,undefined,undefined)
 
 declareFun :: Text -> [L.Lisp] -> L.Lisp -> SMT ()
 declareFun name tps rtp
@@ -427,10 +458,11 @@ foldExpr f x (Implies l r) = let (x1,e1) = foldExpr f x l
 foldExpr f x (Not l) = let (x1,e1) = foldExpr f x l
                        in f x1 (Not e1)
 foldExpr f x (Select l r) = let (x1,e1) = foldExpr f x l
-                                (x2,e2) = foldExpr f x1 r
+                                (x2,e2) = foldExprs (\st e ann -> f st e)
+                                          x1 r undefined
                             in f x2 (Select e1 e2)
 foldExpr f x (Store l r c) = let (x1,e1) = foldExpr f x l
-                                 (x2,e2) = foldExpr f x1 r
+                                 (x2,e2) = foldExprs (\st e ann -> f st e) x1 r undefined
                                  (x3,e3) = foldExpr f x2 c
                              in f x3 (Store e1 e2 e3)
 foldExpr f x (AsArray fun) = let (x',fun') = foldExpr f x fun
@@ -484,7 +516,7 @@ foldExpr f x (Let arg g) = let g' = foldExpr f x1 . g
                                (x1,e1) = foldExpr f x arg
                            in f (fst $ g' Undefined) (Let e1 (snd . g'))
 foldExpr f x (App g arg) = let (x1,e1) = foldExpr f x g
-                               (x2,e2) = foldExprs f x1 arg
+                               (x2,e2) = foldExprs (\st e ann -> f st e) x1 arg undefined
                            in f x2 (App e1 e2)
 foldExpr f x (ConTest c e) = let (x1,e1) = foldExpr f x e
                              in f x1 (ConTest c e1)
@@ -500,7 +532,6 @@ foldExpr f x (Insert l r) = let (x1,e1) = foldExpr f x l
 foldExpr f x (Named e n) = let (x1,e1) = foldExpr f x e
                            in f x1 (Named e1 n)
 foldExpr f x e = f x e
-
 
 getVars :: SMTExpr a -> Set T.Text
 getVars = fst . foldExpr (\s expr -> (case expr of

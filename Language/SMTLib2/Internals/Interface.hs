@@ -75,8 +75,8 @@ or' [x] = x
 or' xs = Or xs
 
 -- | Create a boolean expression that encodes that the array is equal to the supplied constant array.
-arrayConst :: (SMTValue i,SMTValue v,Ix i,Unit (SMTAnnotation i),Unit (SMTAnnotation v)) => SMTExpr (Array i v) -> Array i v -> SMTExpr Bool
-arrayConst expr arr = and' [(select expr (constant i)) .==. (constant v)
+arrayConst :: (LiftArgs i,SMTValue v,Ix (Unpacked i),Unit (ArgAnnotation i),Unit (SMTAnnotation v)) => SMTExpr (SMTArray i v) -> Array (Unpacked i) v -> SMTExpr Bool
+arrayConst expr arr = and' [(select expr (liftArgs i)) .==. (constant v)
                            | (i,v) <- assocs arr ]
 
 -- | Asserts that a boolean expression is true
@@ -186,14 +186,14 @@ not' :: SMTExpr Bool -> SMTExpr Bool
 not' = Not
 
 -- | Extracts an element of an array by its index
-select :: (Ix i,SMTType i,SMTType v) => SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v
+select :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v
 select = Select
 
 -- | The expression @store arr i v@ stores the value /v/ in the array /arr/ at position /i/ and returns the resulting new array.
-store :: (Ix i,SMTType i,SMTType v) => SMTExpr (Array i v) -> SMTExpr i -> SMTExpr v -> SMTExpr (Array i v)
+store :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v -> SMTExpr (SMTArray i v)
 store = Store
 
-asArray :: (SMTType i,SMTType v) => SMTExpr (SMTFun (SMTExpr i) v) -> SMTExpr (Array i v)
+asArray :: (Args i,SMTType v) => SMTExpr (SMTFun i v) -> SMTExpr (SMTArray i v)
 asArray = AsArray
 
 -- | Bitvector addition

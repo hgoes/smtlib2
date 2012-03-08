@@ -113,25 +113,22 @@ instance SMTOrd (Ratio Integer) where
 
 -- Arrays
 
-instance (Ix idx,SMTType idx,SMTType val) => SMTType (Array idx val) where
-  type SMTAnnotation (Array idx val) = (SMTAnnotation idx,SMTAnnotation val)
-  getSort u (anni,annv) = L.List [L.Symbol "Array"
-                         ,getSort (getIdx u) anni
-                         ,getSort (getVal u) annv]
+instance (Args idx,SMTType val) => SMTType (SMTArray idx val) where
+  type SMTAnnotation (SMTArray idx val) = (ArgAnnotation idx,SMTAnnotation val)
+  getSort u (anni,annv) = L.List $ L.Symbol "Array":(argSorts (getIdx u) anni++[getSort (getVal u) annv])
     where
-      getIdx :: Array i v -> i
+      getIdx :: SMTArray i v -> i
       getIdx _ = undefined
-      getVal :: Array i v -> v
+      getVal :: SMTArray i v -> v
       getVal _ = undefined
   declareType u (anni,annv) = [(mkTyConApp (mkTyCon "Data.Array.Array") [],return ())] ++
-                              declareType (getIdx u) anni ++
+                              declareArgTypes (getIdx u) anni ++
                               declareType (getVal u) annv
     where
-      getIdx :: Array i v -> i
+      getIdx :: SMTArray i v -> i
       getIdx _ = undefined
-      getVal :: Array i v -> v
+      getVal :: SMTArray i v -> v
       getVal _ = undefined
-
 
 -- BitVectors
 
@@ -387,53 +384,79 @@ instance Num (SMTExpr Int64) where
 
 instance (SMTType a,SMTAnnotation a ~ ()) => Args (SMTExpr a) where
   type Unpacked (SMTExpr a) = a
-  createArgs c = let n1 = T.pack $ "f"++show c
-                     v1 = Var n1 ()
-                     t1 = getSort (getUndef v1) ()
-                 in (v1,[(n1,t1)],c+1)
+  type ArgAnnotation (SMTExpr a) = SMTAnnotation a
+  {-argSorts u ann = [getSort (undef u) ann]
+    where
+      undef :: SMTExpr a -> a
+      undef _ = undefined
+  getArgVars [name] = Var name ()
   unpackArgs f e _ c = let (e',c') = f e c
-                       in ([e'],c)
+                       in ([e'],c)-}
   foldExprs f s x = f s x
-  allOf x = x
+  {-allOf x = x
+  declareArgTypes u ann = declareType (undef u) ann
+    where
+      undef :: SMTExpr a -> a
+      undef _ = undefined-}
+
+instance (SMTValue a,SMTAnnotation a ~ ()) => LiftArgs (SMTExpr a) where
+  liftArgs x = Const x ()
 
 instance (SMTType a,SMTType b,SMTAnnotation a ~ (),SMTAnnotation b ~ ()) => Args (SMTExpr a,SMTExpr b) where
   type Unpacked (SMTExpr a,SMTExpr b) = (a,b)
-  createArgs c = let n1 = T.pack $ "f"++show c
-                     n2 = T.pack $ "f"++show (c+1)
-                     v1 = Var n1 ()
-                     v2 = Var n2 ()
-                     t1 = getSort (getUndef v1) ()
-                     t2 = getSort (getUndef v2) ()
-                 in ((v1,v2),[(n1,t1),(n2,t2)],c+2)
+  type ArgAnnotation (SMTExpr a,SMTExpr b) = (SMTAnnotation a,SMTAnnotation b)
+  {-argSorts u (ann1,ann2) = [getSort (get1 u) ann1,getSort (get2 u) ann2]
+    where
+      get1 :: (SMTExpr a,SMTExpr b) -> a
+      get1 _ = undefined
+      get2 :: (SMTExpr a,SMTExpr b) -> b
+      get2 _ = undefined
   unpackArgs f (e1,e2) _ c = let (r1,c1) = f e1 c
                                  (r2,c2) = f e2 c1
-                             in ([r1,r2],c2)
-  foldExprs f s (e1,e2) = let (s1,e1') = f s e1
-                              (s2,e2') = f s1 e2
-                          in (s2,(e1',e2'))
-  allOf x = (x,x)
+                             in ([r1,r2],c2)-}
+  foldExprs f s ~(e1,e2) ~(ann1,ann2) = let (s1,e1') = f s e1 ann1
+                                            (s2,e2') = f s1 e2 ann2
+                                        in (s2,(e1',e2'))
+  {-allOf x = (x,x)
+  declareArgTypes u (ann1,ann2) = (declareType (get1 u) ann1)++(declareType (get2 u) ann2)
+    where
+      get1 :: (SMTExpr a,SMTExpr b) -> a
+      get1 _ = undefined
+      get2 :: (SMTExpr a,SMTExpr b) -> b
+      get2 _ = undefined-}
 
 instance (SMTType a,SMTType b,SMTType c,SMTAnnotation a ~ (),SMTAnnotation b ~ (),SMTAnnotation c ~ ()) => Args (SMTExpr a,SMTExpr b,SMTExpr c) where
   type Unpacked (SMTExpr a,SMTExpr b,SMTExpr c) = (a,b,c)
-  createArgs c = let n1 = T.pack $ "f"++show c
-                     n2 = T.pack $ "f"++show (c+1)
-                     n3 = T.pack $ "f"++show (c+2)
-                     v1 = Var n1 ()
-                     v2 = Var n2 ()
-                     v3 = Var n3 ()
-                     t1 = getSort (getUndef v1) ()
-                     t2 = getSort (getUndef v2) ()
-                     t3 = getSort (getUndef v3) ()
-                 in ((v1,v2,v3),[(n1,t1),(n2,t2),(n3,t3)],c+3)
+  type ArgAnnotation (SMTExpr a,SMTExpr b,SMTExpr c) = (SMTAnnotation a,SMTAnnotation b,SMTAnnotation c)
+  {-argSorts u (ann1,ann2,ann3) = [getSort (get1 u) ann1,
+                                 getSort (get2 u) ann2,
+                                 getSort (get3 u) ann3]
+      where
+        get1 :: (SMTExpr a,SMTExpr b,SMTExpr c) -> a
+        get1 _ = undefined
+        get2 :: (SMTExpr a,SMTExpr b,SMTExpr c) -> b
+        get2 _ = undefined
+        get3 :: (SMTExpr a,SMTExpr b,SMTExpr c) -> c
+        get3 _ = undefined
   unpackArgs f (e1,e2,e3) _ c = let (r1,c1) = f e1 c
                                     (r2,c2) = f e2 c1
                                     (r3,c3) = f e3 c2
-                              in ([r1,r2,r3],c3)
-  foldExprs f s (e1,e2,e3) = let (s1,e1') = f s e1
-                                 (s2,e2') = f s1 e2
-                                 (s3,e3') = f s2 e3
-                             in (s3,(e1',e2',e3'))
-  allOf x = (x,x,x)
+                              in ([r1,r2,r3],c3)-}
+  foldExprs f s ~(e1,e2,e3) ~(ann1,ann2,ann3) = let (s1,e1') = f s e1 ann1
+                                                    (s2,e2') = f s1 e2 ann2
+                                                    (s3,e3') = f s2 e3 ann3
+                                                in (s3,(e1',e2',e3'))
+  {-allOf x = (x,x,x)
+  declareArgTypes u (ann1,ann2,ann3) = (declareType (get1 u) ann1)++
+                                       (declareType (get2 u) ann2)++
+                                       (declareType (get3 u) ann3)
+      where
+        get1 :: (SMTExpr a,SMTExpr b,SMTExpr c) -> a
+        get1 _ = undefined
+        get2 :: (SMTExpr a,SMTExpr b,SMTExpr c) -> b
+        get2 _ = undefined
+        get3 :: (SMTExpr a,SMTExpr b,SMTExpr c) -> c
+        get3 _ = undefined-}
 
 instance SMTType a => SMTType (Maybe a) where
   type SMTAnnotation (Maybe a) = SMTAnnotation a
