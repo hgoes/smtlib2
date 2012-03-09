@@ -70,9 +70,9 @@ defFun f = do
   return res
 
 -- | Extract all values of an array by giving the range of indices.
-unmangleArray :: (LiftArgs i,Ix (Unpacked i),SMTValue v,Unit (SMTAnnotation (Unpacked i))) => (Unpacked i,Unpacked i) -> SMTExpr (SMTArray i v) -> SMT (Array (Unpacked i) v)
+unmangleArray :: (LiftArgs i,Ix (Unpacked i),SMTValue v,Unit (SMTAnnotation (Unpacked i)),Unit (ArgAnnotation i)) => (Unpacked i,Unpacked i) -> SMTExpr (SMTArray i v) -> SMT (Array (Unpacked i) v)
 unmangleArray b expr = mapM (\i -> do
-                                v <- getValue (Select expr (liftArgs i))
+                                v <- getValue (Select expr (liftArgs i unit))
                                 return (i,v)
                             ) (range b) >>= return.array b
 
@@ -536,6 +536,6 @@ extractAnnotation (Insert _ x) = extractAnnotation x
 extractAnnotation (Named x _) = extractAnnotation x
 extractAnnotation (InterpolationGrp _ _) = ()
 
-instance (SMTValue a,SMTAnnotation a ~ ()) => LiftArgs (SMTExpr a) where
-  liftArgs x = Const x ()
+instance (SMTValue a) => LiftArgs (SMTExpr a) where
+  liftArgs = Const
   unliftArgs = getValue

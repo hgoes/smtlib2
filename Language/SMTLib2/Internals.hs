@@ -267,7 +267,7 @@ createArgs i = let ((tps,ni),res) = foldExprs (\(tps,ci) e ann -> let name = T.p
                in (res,tps,ni)
 
 class Args a => LiftArgs a where
-  liftArgs :: Unpacked a -> a
+  liftArgs :: Unpacked a -> ArgAnnotation a -> a
   unliftArgs :: a -> SMT (Unpacked a)
 
 firstJust :: Monad m => [m (Maybe a)] -> m (Maybe a)

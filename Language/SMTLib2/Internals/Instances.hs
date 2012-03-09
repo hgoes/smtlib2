@@ -381,7 +381,7 @@ instance Num (SMTExpr Int64) where
 
 -- Arguments
 
-instance (SMTType a,SMTAnnotation a ~ ()) => Args (SMTExpr a) where
+instance (SMTType a) => Args (SMTExpr a) where
   type Unpacked (SMTExpr a) = a
   type ArgAnnotation (SMTExpr a) = SMTAnnotation a
   foldExprs f s x = f s x
@@ -394,7 +394,7 @@ instance (Args a,Args b) => Args (a,b) where
                                         in (s2,(e1',e2'))
 
 instance (LiftArgs a,LiftArgs b) => LiftArgs (a,b) where
-  liftArgs (x,y) = (liftArgs x,liftArgs y)
+  liftArgs (x,y) ~(a1,a2) = (liftArgs x a1,liftArgs y a2)
   unliftArgs (x,y) = do
     rx <- unliftArgs x
     ry <- unliftArgs y
@@ -409,7 +409,7 @@ instance (Args a,Args b,Args c) => Args (a,b,c) where
                                                 in (s3,(e1',e2',e3'))
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c) => LiftArgs (a,b,c) where
-  liftArgs (x,y,z) = (liftArgs x,liftArgs y,liftArgs z)
+  liftArgs (x,y,z) ~(a1,a2,a3) = (liftArgs x a1,liftArgs y a2,liftArgs z a3)
   unliftArgs (x,y,z) = do
     rx <- unliftArgs x
     ry <- unliftArgs y
@@ -425,8 +425,8 @@ instance Args a => Args [a] where
                              in (s'',x':xs')
 
 instance LiftArgs a => LiftArgs [a] where
-  liftArgs [] = []
-  liftArgs (x:xs) = liftArgs x:liftArgs xs
+  liftArgs [] _ = []
+  liftArgs (x:xs) ann = liftArgs x ann:liftArgs xs ann
   unliftArgs [] = return []
   unliftArgs (x:xs) = do
     x' <- unliftArgs x

@@ -91,7 +91,7 @@ or' xs = Or xs
 
 -- | Create a boolean expression that encodes that the array is equal to the supplied constant array.
 arrayConst :: (LiftArgs i,SMTValue v,Ix (Unpacked i),Unit (ArgAnnotation i),Unit (SMTAnnotation v)) => SMTExpr (SMTArray i v) -> Array (Unpacked i) v -> SMTExpr Bool
-arrayConst expr arr = and' [(select expr (liftArgs i)) .==. (constant v)
+arrayConst expr arr = and' [(select expr (liftArgs i unit)) .==. (constant v)
                            | (i,v) <- assocs arr ]
 
 -- | Asserts that a boolean expression is true
