@@ -13,6 +13,7 @@ import Data.Array
 import qualified Data.AttoLisp as L
 import Data.Unit
 import Data.Word
+import Data.List (genericLength)
 
 -- | Create a new named variable
 varNamed :: (SMTType t,Typeable t,Unit (SMTAnnotation t)) => Text -> SMT (SMTExpr t)
@@ -303,12 +304,12 @@ exists = Exists unit
 -- | Binds an expression to a variable.
 --   Can be used to prevent blowups in the command stream if expressions are used multiple times.
 --   @let' x f@ is functionally equivalent to @f x@.
-let' :: (SMTType a,SMTAnnotation a ~ ()) => SMTExpr a -> (SMTExpr a -> SMTExpr b) -> SMTExpr b
-let' = Let
+let' :: (Args a,Unit (ArgAnnotation a)) => a -> (a -> SMTExpr b) -> SMTExpr b
+let' = Let unit
 
 -- | Like 'let'', but can define multiple variables of the same type.
-lets :: SMTType a => [SMTExpr a] -> ([SMTExpr a] -> SMTExpr b) -> SMTExpr b
-lets = Lets
+lets :: (Args a,Unit (ArgAnnotation a)) => [a] -> ([a] -> SMTExpr b) -> SMTExpr b
+lets xs = Let (unit,genericLength xs) xs
 
 -- | Like 'forAll', but can quantify over more than one variable (of the same type)
 forAllList :: (Args a,Unit (ArgAnnotation a)) => Integer -- ^ Number of variables to quantify

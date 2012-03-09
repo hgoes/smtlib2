@@ -10,7 +10,6 @@ import Data.Text as T
 import Data.Word
 import Data.Array
 import Control.Monad.State
-import Data.List as List
 import Data.Unit
 
 instance L.ToLisp (SMTExpr t) where
@@ -137,12 +136,10 @@ exprToLisp (Implies l r) c = let (l',c') = exprToLisp l c
 exprToLisp (Not expr) c = let (expr',c') = exprToLisp expr c
                           in (L.List [L.Symbol "not",expr'],c')
 exprToLisp (Select arr idx) c = let (arr',c') = exprToLisp arr c
-                                    (_,ui,_) = getArrayUndef arr
-                                    (idx',c'') = unpackArgs exprToLisp idx ui c'
+                                    (idx',c'') = unpackArgs (\e _ i -> exprToLisp e i) idx undefined c'
                                 in (L.List (L.Symbol "select":arr':idx'),c'')
 exprToLisp (Store arr idx val) c = let (arr',c') = exprToLisp arr c
-                                       (_,ui,_) = getArrayUndef arr
-                                       (idx',c'') = unpackArgs exprToLisp idx ui c''
+                                       (idx',c'') = unpackArgs (\e _ i -> exprToLisp e i) idx undefined c''
                                        (val',c''') = exprToLisp val c'''
                                    in (L.List (L.Symbol "store":arr':idx'++[val']),c''')
 exprToLisp (AsArray f) c = let (f',c') = exprToLisp f c
@@ -221,22 +218,16 @@ exprToLisp (Exists ann f) c = let (arg,tps,nc) = createArgs ann c
                                          ,L.List [L.List [L.Symbol name,tp]
                                                   | (name,tp) <- tps ]
                                          ,arg'],nc')
-exprToLisp (Let x f) c = let (arg,nc) = exprToLisp x c
-                             name = T.pack $ "l"++show nc
-                             (arg',nc') = exprToLisp (f (Var name (extractAnnotation x))) (nc+1)
-                         in (L.List [L.Symbol "let"
-                                    ,L.List [L.List [L.Symbol name,arg]]
-                                    ,arg'],nc')
-exprToLisp (Lets xs f) c = let (nc,xs') = List.mapAccumL (\cc x -> let (x',cc') = exprToLisp x cc
-                                                                       name = T.pack $ "l"++show cc'
-                                                                   in (cc'+1,(name,x'))) c xs
-                           in (L.List [L.Symbol "let"
-                                      ,L.List [L.List [L.Symbol name,arg]
-                                              | (name,arg) <- xs']],nc)
+exprToLisp (Let ann x f) c = let (arg,tps,nc) = createArgs ann c
+                                 (arg',nc') = unpackArgs (\e ann' cc -> exprToLisp e cc
+                                                         ) x ann nc
+                                 (arg'',nc'') = exprToLisp (f arg) nc'
+                             in (L.List [L.Symbol "let"
+                                        ,L.List [L.List [L.Symbol name,lisp] | ((name,_),lisp) <- Prelude.zip tps arg' ]
+                                        ,arg''],nc'')
 exprToLisp (Fun name) c = (L.Symbol name,c)
-exprToLisp (App f x) c = let ~(_,bu,ru) = getFunUndef f
-                             ~(f',c') = exprToLisp f c
-                             ~(x',c'') = unpackArgs exprToLisp x bu c
+exprToLisp (App f x) c = let ~(f',c') = exprToLisp f c
+                             ~(x',c'') = unpackArgs (\e _ i -> exprToLisp e i) x undefined c
                          in (L.List $ f':x',c'')
 exprToLisp (ConTest (Constructor name) e) c = let (e',c') = exprToLisp e c
                                               in (L.List [L.Symbol $ T.append "is-" name
@@ -465,9 +456,9 @@ lispToExprT ann g l = do
                                    rest' <- letToExpr (\txt -> if txt==name
                                                                then typeOf expr'
                                                                else g txt) rest arg
-                                   return $ Let expr' (\var@(Var name' _) -> replaceName (\n -> if n==name 
-                                                                                                then name' 
-                                                                                                else n) rest')
+                                   return $ Let (extractAnnotation expr') expr' (\var@(Var name' _) -> replaceName (\n -> if n==name 
+                                                                                                                          then name' 
+                                                                                                                          else n) rest')
                                ) g expr
             case res of
               Just r -> return r
@@ -517,8 +508,7 @@ extractAnnotation (BVXor x _) = extractAnnotation x
 extractAnnotation (BVAnd x _) = extractAnnotation x
 extractAnnotation (Forall _ _) = ()
 extractAnnotation (Exists _ _) = ()
-extractAnnotation (Let x f) = extractAnnotation (f x)
-extractAnnotation (Lets x f) = extractAnnotation (f x)
+extractAnnotation (Let _ x f) = extractAnnotation (f x)
 extractAnnotation (ConTest _ _) = ()
 extractAnnotation (Head x) = extractAnnotation x
 extractAnnotation (Tail x) = extractAnnotation x

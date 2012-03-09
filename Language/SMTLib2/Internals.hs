@@ -106,8 +106,7 @@ data SMTExpr t where
   BVAnd :: SMTExpr t -> SMTExpr t -> SMTExpr t
   Forall :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
   Exists :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
-  Let :: (SMTType a) => SMTExpr a -> (SMTExpr a -> SMTExpr b) -> SMTExpr b
-  Lets :: SMTType a => [SMTExpr a] -> ([SMTExpr a] -> SMTExpr b) -> SMTExpr b
+  Let :: (Args a) => ArgAnnotation a -> a -> (a -> SMTExpr b) -> SMTExpr b
   Fun :: (Args a,SMTType r) => Text -> SMTExpr (SMTFun a r)
   App :: (Args a,SMTType r) => SMTExpr (SMTFun a r) -> a -> SMTExpr r
   ConTest :: SMTType a => Constructor a -> SMTExpr a -> SMTExpr Bool
@@ -249,10 +248,10 @@ argSorts arg ann = Prelude.reverse res
 allOf :: Args a => (forall t. SMTExpr t) -> a
 allOf x = snd $ foldExprs (\_ _ _ -> ((),x)) () undefined undefined
 
-unpackArgs :: Args a => (forall t. SMTExpr t -> Integer -> (c,Integer)) -> a -> Unpacked a -> Integer -> ([c],Integer)
-unpackArgs f x unp i = fst $ foldExprs (\(res,ci) e ann -> let (p,ni) = f e ci
-                                                           in ((res++[p],ni),e)
-                                       ) ([],i) x (error "Evaluated the argument to unpackArgs")
+unpackArgs :: Args a => (forall t. SMTType t => SMTExpr t -> SMTAnnotation t -> Integer -> (c,Integer)) -> a -> ArgAnnotation a -> Integer -> ([c],Integer)
+unpackArgs f x ann i = fst $ foldExprs (\(res,ci) e ann' -> let (p,ni) = f e ann' ci
+                                                            in ((res++[p],ni),e)
+                                       ) ([],i) x ann
 
 declareArgTypes :: Args a => a -> ArgAnnotation a -> [(TypeRep,SMT ())]
 declareArgTypes arg ann = fst $ foldExprs (\decls e ann -> (decls++(declareType (getUndef e) ann),e)) [] arg ann
@@ -511,9 +510,9 @@ foldExpr f x (Forall ann g) = let g' = foldExpr f x . g
                               in f (fst $ g' $ allOf Undefined) (Forall ann (snd . g'))
 foldExpr f x (Exists ann g) = let g' = foldExpr f x . g
                               in f (fst $ g' $ allOf Undefined) (Exists ann (snd . g'))
-foldExpr f x (Let arg g) = let g' = foldExpr f x1 . g
-                               (x1,e1) = foldExpr f x arg
-                           in f (fst $ g' Undefined) (Let e1 (snd . g'))
+foldExpr f x (Let ann arg g) = let g' = foldExpr f x1 . g
+                                   (x1,e1) = foldExprs (\st e ann -> f st e) x arg ann
+                               in f (fst $ g' $ allOf Undefined) (Let ann e1 (snd . g'))
 foldExpr f x (App g arg) = let (x1,e1) = foldExpr f x g
                                (x2,e2) = foldExprs (\st e ann -> f st e) x1 arg undefined
                            in f x2 (App e1 e2)
