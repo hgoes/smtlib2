@@ -416,6 +416,23 @@ instance (LiftArgs a,LiftArgs b,LiftArgs c) => LiftArgs (a,b,c) where
     rz <- unliftArgs z
     return (rx,ry,rz)
 
+instance Args a => Args [a] where
+  type Unpacked [a] = [Unpacked a]
+  type ArgAnnotation [a] = ArgAnnotation a
+  foldExprs f s [] ann = (s,[])
+  foldExprs f s (x:xs) ann = let (s',x') = foldExprs f s x ann
+                                 (s'',xs') = foldExprs f s' xs ann
+                             in (s'',x':xs')
+
+instance LiftArgs a => LiftArgs [a] where
+  liftArgs [] = []
+  liftArgs (x:xs) = liftArgs x:liftArgs xs
+  unliftArgs [] = return []
+  unliftArgs (x:xs) = do
+    x' <- unliftArgs x
+    xs' <- unliftArgs xs
+    return (x':xs')
+
 instance SMTType a => SMTType (Maybe a) where
   type SMTAnnotation (Maybe a) = SMTAnnotation a
   getSort u ann = L.List [L.Symbol "Maybe",getSort (undef u) ann]
