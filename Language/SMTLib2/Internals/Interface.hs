@@ -13,7 +13,7 @@ import Data.Array
 import qualified Data.AttoLisp as L
 import Data.Unit
 import Data.Word
-import Data.List (genericLength)
+import Data.List (genericReplicate)
 
 -- | Create a new named variable
 varNamed :: (SMTType t,Typeable t,Unit (SMTAnnotation t)) => Text -> SMT (SMTExpr t)
@@ -309,16 +309,16 @@ let' = Let unit
 
 -- | Like 'let'', but can define multiple variables of the same type.
 lets :: (Args a,Unit (ArgAnnotation a)) => [a] -> ([a] -> SMTExpr b) -> SMTExpr b
-lets xs = Let (unit,genericLength xs) xs
+lets xs = Let (fmap (const unit) xs) xs
 
 -- | Like 'forAll', but can quantify over more than one variable (of the same type)
 forAllList :: (Args a,Unit (ArgAnnotation a)) => Integer -- ^ Number of variables to quantify
               -> ([a] -> SMTExpr Bool) -- ^ Function which takes a list of the quantified variables
               -> SMTExpr Bool
-forAllList l = Forall (unit,l)
+forAllList l = Forall (genericReplicate l unit)
 
 existsList :: (Args a,Unit (ArgAnnotation a)) => Integer -> ([a] -> SMTExpr Bool) -> SMTExpr Bool
-existsList l = Exists (unit,l)
+existsList l = Exists (genericReplicate l unit)
 
 
 -- | Checks if the expression is formed a specific constructor.
