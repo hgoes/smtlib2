@@ -50,22 +50,26 @@ getRawValue expr = do
     _ -> error $ "unknown response to get-value: "++show val
 
 -- | Define a new function with a body
-defFun :: (Args a,SMTType r,Unit (ArgAnnotation a),SMTAnnotation r ~ ()) => (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a r))
-defFun f = do
+defFun :: (Args a,SMTType r,Unit (ArgAnnotation a),Unit (SMTAnnotation r)) => (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a r))
+defFun = defFunAnn unit unit
+
+defFunAnn :: (Args a,SMTType r) => ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a r))
+defFunAnn ann_arg ann_res f = do
   (c,decl,mp) <- get
   put (c+1,decl,mp)
+
   let name = T.pack $ "fun"++show c
       res = Fun name
       
       (au,bu,rtp) = getFunUndef res
       
-      sorts = argSorts au unit
+      sorts = argSorts au ann_arg
       --tps = Prelude.zipWith (\sort num -> (T.pack $ "arg"++show num,sort)) sorts [0..]
 
-      (au2,tps,_) = createArgs unit 0
+      (au2,tps,_) = createArgs ann_arg 0
       
       (expr',_) = exprToLisp (f au2) 0
-  defineFun name tps (getSort rtp ()) expr'
+  defineFun name tps (getSort rtp ann_res) expr'
   return res
 
 -- | Extract all values of an array by giving the range of indices.
