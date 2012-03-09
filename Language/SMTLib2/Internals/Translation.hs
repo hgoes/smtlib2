@@ -63,7 +63,7 @@ defFun f = do
       sorts = argSorts au unit
       --tps = Prelude.zipWith (\sort num -> (T.pack $ "arg"++show num,sort)) sorts [0..]
 
-      (au2,tps,_) = createArgs 0
+      (au2,tps,_) = createArgs unit 0
       
       (expr',_) = exprToLisp (f au2) 0
   defineFun name tps (getSort rtp ()) expr'
@@ -209,27 +209,18 @@ exprToLisp (BVAnd v1 v2) c = let (v1',c') = exprToLisp v1 c
                              in (L.List [L.Symbol "bvand"
                                         ,v1'
                                         ,v2'],c'')
-exprToLisp (Forall f) c = let (arg,tps,nc) = createArgs c
-                              (arg',nc') = exprToLisp (f arg) nc
-                          in (L.List [L.Symbol "forall"
-                                     ,L.List [L.List [L.Symbol name,tp]
-                                             | (name,tp) <- tps]
-                                     ,arg'],nc')
-exprToLisp (ForallList i f) c
-  = let (args,tps,nc) = Prelude.foldl (\(cargs,ctps,cnc) _ -> let (arg,tp,nnc) = createArgs cnc
-                                                              in (arg:cargs,tp++ctps,nnc)
-                                      ) ([],[],c) [1..i]
-        (arg',nc') = exprToLisp (f args) nc
-    in (L.List [L.Symbol "forall"
-               ,L.List [L.List [L.Symbol name,tp]
-                       | (name,tp) <- tps]
-               ,arg'],nc')
-exprToLisp (Exists f) c = let (arg,tps,nc) = createArgs c
-                              (arg',nc') = exprToLisp (f arg) nc
-                          in (L.List [L.Symbol "exists"
-                                     ,L.List [L.List [L.Symbol name,tp]
-                                             | (name,tp) <- tps ]
-                                     ,arg'],nc')
+exprToLisp (Forall ann f) c = let (arg,tps,nc) = createArgs ann c
+                                  (arg',nc') = exprToLisp (f arg) nc
+                              in (L.List [L.Symbol "forall"
+                                         ,L.List [L.List [L.Symbol name,tp]
+                                                  | (name,tp) <- tps]
+                                         ,arg'],nc')
+exprToLisp (Exists ann f) c = let (arg,tps,nc) = createArgs ann c
+                                  (arg',nc') = exprToLisp (f arg) nc
+                              in (L.List [L.Symbol "exists"
+                                         ,L.List [L.List [L.Symbol name,tp]
+                                                  | (name,tp) <- tps ]
+                                         ,arg'],nc')
 exprToLisp (Let x f) c = let (arg,nc) = exprToLisp x c
                              name = T.pack $ "l"++show nc
                              (arg',nc') = exprToLisp (f (Var name (extractAnnotation x))) (nc+1)
@@ -524,9 +515,8 @@ extractAnnotation (BVSGE _ _) = ()
 extractAnnotation (BVSGT _ _) = ()
 extractAnnotation (BVXor x _) = extractAnnotation x
 extractAnnotation (BVAnd x _) = extractAnnotation x
-extractAnnotation (Forall _) = ()
-extractAnnotation (ForallList _ _) = ()
-extractAnnotation (Exists _) = ()
+extractAnnotation (Forall _ _) = ()
+extractAnnotation (Exists _ _) = ()
 extractAnnotation (Let x f) = extractAnnotation (f x)
 extractAnnotation (Lets x f) = extractAnnotation (f x)
 extractAnnotation (ConTest _ _) = ()

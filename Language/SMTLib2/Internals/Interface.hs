@@ -119,7 +119,7 @@ interpolationGroup = do
   return (InterpolationGroup name)
 
 -- | Create a new uninterpreted function
-fun :: (Args a,SMTType r,SMTAnnotation r ~ ()) => SMT (SMTExpr (SMTFun a r))
+fun :: (Args a,SMTType r,SMTAnnotation r ~ (),Unit (ArgAnnotation a)) => SMT (SMTExpr (SMTFun a r))
 fun = do
   (c,decl,mp) <- get
   put (c+1,decl,mp)
@@ -131,7 +131,7 @@ fun = do
       assertEq :: x -> x -> y -> y
       assertEq _ _ p = p
       
-      (au2,tps,_) = createArgs 0
+      (au2,tps,_) = createArgs unit 0
       
   assertEq au au2 $ return ()
   declareFun name [ l | (_,l) <- tps ] (getSort rtp ())
@@ -293,12 +293,12 @@ bvsplitu64to8 :: SMTExpr Word64 -> (SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SM
 bvsplitu64to8 e = (BVExtract 63 56 () e,BVExtract 55 48 () e,BVExtract 47 40 () e,BVExtract 39 32 () e,BVExtract 31 24 () e,BVExtract 23 16 () e,BVExtract 15 8 () e,BVExtract 7 0 () e)
 
 -- | If the supplied function returns true for all possible values, the forall quantification returns true.
-forAll :: Args a => (a -> SMTExpr Bool) -> SMTExpr Bool
-forAll = Forall
+forAll :: (Args a,Unit (ArgAnnotation a)) => (a -> SMTExpr Bool) -> SMTExpr Bool
+forAll = Forall unit
 
 -- | If the supplied function returns true for at least one possible value, the exists quantification returns true.
-exists :: Args a => (a -> SMTExpr Bool) -> SMTExpr Bool
-exists = Exists
+exists :: (Args a,Unit (ArgAnnotation a)) => (a -> SMTExpr Bool) -> SMTExpr Bool
+exists = Exists unit
 
 -- | Binds an expression to a variable.
 --   Can be used to prevent blowups in the command stream if expressions are used multiple times.
@@ -311,10 +311,14 @@ lets :: SMTType a => [SMTExpr a] -> ([SMTExpr a] -> SMTExpr b) -> SMTExpr b
 lets = Lets
 
 -- | Like 'forAll', but can quantify over more than one variable (of the same type)
-forAllList :: Args a => Integer -- ^ Number of variables to quantify
+forAllList :: (Args a,Unit (ArgAnnotation a)) => Integer -- ^ Number of variables to quantify
               -> ([a] -> SMTExpr Bool) -- ^ Function which takes a list of the quantified variables
               -> SMTExpr Bool
-forAllList = ForallList
+forAllList l = Forall (unit,l)
+
+existsList :: (Args a,Unit (ArgAnnotation a)) => Integer -> ([a] -> SMTExpr Bool) -> SMTExpr Bool
+existsList l = Exists (unit,l)
+
 
 -- | Checks if the expression is formed a specific constructor.
 is :: SMTType a => SMTExpr a -> Constructor a -> SMTExpr Bool

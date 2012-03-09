@@ -418,15 +418,15 @@ instance (LiftArgs a,LiftArgs b,LiftArgs c) => LiftArgs (a,b,c) where
 
 instance Args a => Args [a] where
   type Unpacked [a] = [Unpacked a]
-  type ArgAnnotation [a] = ArgAnnotation a
-  foldExprs f s [] ann = (s,[])
-  foldExprs f s (x:xs) ann = let (s',x') = foldExprs f s x ann
-                                 (s'',xs') = foldExprs f s' xs ann
-                             in (s'',x':xs')
+  type ArgAnnotation [a] = (ArgAnnotation a,Integer)
+  foldExprs f s _ (_,0) = (s,[])
+  foldExprs f s ~(x:xs) (ann,n) = let (s',x') = foldExprs f s x ann
+                                      (s'',xs') = foldExprs f s' xs (ann,n-1)
+                                  in (s'',x':xs')
 
 instance LiftArgs a => LiftArgs [a] where
-  liftArgs [] _ = []
-  liftArgs (x:xs) ann = liftArgs x ann:liftArgs xs ann
+  liftArgs _ (_,0) = []
+  liftArgs ~(x:xs) (ann,n) = liftArgs x ann:liftArgs xs (ann,n-1)
   unliftArgs [] = return []
   unliftArgs (x:xs) = do
     x' <- unliftArgs x

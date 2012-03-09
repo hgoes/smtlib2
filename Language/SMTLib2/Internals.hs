@@ -11,7 +11,6 @@ import Data.Monoid
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Text as T
-import Data.Array
 import Data.Bits
 import Data.Typeable
 import Data.Map as Map hiding (assocs)
@@ -105,9 +104,8 @@ data SMTExpr t where
   BVConcats :: SMTType t1 => [SMTExpr t1] -> SMTExpr t2
   BVXor :: SMTExpr t -> SMTExpr t -> SMTExpr t
   BVAnd :: SMTExpr t -> SMTExpr t -> SMTExpr t
-  Forall :: Args a => (a -> SMTExpr Bool) -> SMTExpr Bool
-  ForallList :: Args a => Integer -> ([a] -> SMTExpr Bool) -> SMTExpr Bool
-  Exists :: Args a => (a -> SMTExpr Bool) -> SMTExpr Bool
+  Forall :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
+  Exists :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
   Let :: (SMTType a) => SMTExpr a -> (SMTExpr a -> SMTExpr b) -> SMTExpr b
   Lets :: SMTType a => [SMTExpr a] -> ([SMTExpr a] -> SMTExpr b) -> SMTExpr b
   Fun :: (Args a,SMTType r) => Text -> SMTExpr (SMTFun a r)
@@ -259,11 +257,11 @@ unpackArgs f x unp i = fst $ foldExprs (\(res,ci) e ann -> let (p,ni) = f e ci
 declareArgTypes :: Args a => a -> ArgAnnotation a -> [(TypeRep,SMT ())]
 declareArgTypes arg ann = fst $ foldExprs (\decls e ann -> (decls++(declareType (getUndef e) ann),e)) [] arg ann
 
-createArgs :: Args a => Integer -> (a,[(Text,L.Lisp)],Integer)
-createArgs i = let ((tps,ni),res) = foldExprs (\(tps,ci) e ann -> let name = T.pack $ "arg"++show ci
-                                                                      sort = getSort (getUndef e) ann
-                                                                  in ((tps++[(name,sort)],ci+1),Var name ann)
-                                              ) ([],i) (error "Evaluated the first argument to createArgs") (error "Evaluated the second argument to createArgs")
+createArgs :: Args a => ArgAnnotation a -> Integer -> (a,[(Text,L.Lisp)],Integer)
+createArgs ann i = let ((tps,ni),res) = foldExprs (\(tps,ci) e ann' -> let name = T.pack $ "arg"++show ci
+                                                                           sort = getSort (getUndef e) ann'
+                                                                       in ((tps++[(name,sort)],ci+1),Var name ann')
+                                                  ) ([],i) (error "Evaluated the argument to createArgs") ann
                in (res,tps,ni)
 
 class Args a => LiftArgs a where
@@ -509,12 +507,10 @@ foldExpr f x (BVSGE l r) = let (x1,e1) = foldExpr f x l
 foldExpr f x (BVSGT l r) = let (x1,e1) = foldExpr f x l
                                (x2,e2) = foldExpr f x1 r
                            in f x2 (BVSGT e1 e2)
-foldExpr f x (Forall g) = let g' = foldExpr f x . g
-                          in f (fst $ g' $ allOf Undefined) (Forall (snd . g'))
-foldExpr f x (ForallList n g) = let g' = foldExpr f x . g
-                                in f (fst $ g' $ genericReplicate n (allOf Undefined)) (ForallList n (snd . g'))
-foldExpr f x (Exists g) = let g' = foldExpr f x . g
-                          in f (fst $ g' $ allOf Undefined) (Exists (snd . g'))
+foldExpr f x (Forall ann g) = let g' = foldExpr f x . g
+                              in f (fst $ g' $ allOf Undefined) (Forall ann (snd . g'))
+foldExpr f x (Exists ann g) = let g' = foldExpr f x . g
+                              in f (fst $ g' $ allOf Undefined) (Exists ann (snd . g'))
 foldExpr f x (Let arg g) = let g' = foldExpr f x1 . g
                                (x1,e1) = foldExpr f x arg
                            in f (fst $ g' Undefined) (Let e1 (snd . g'))
