@@ -551,6 +551,9 @@ instance Extractable (BitS.Bitstream BitS.Left) (BitS.Bitstream BitS.Left) where
 instance Extractable (BitS.Bitstream BitS.Right) (BitS.Bitstream BitS.Right) where
     extract' _ _ u l _ = BitstreamLen (fromIntegral $ u-l+1)
 
+instance SMTBV (BitS.Bitstream BitS.Left)
+instance SMTBV (BitS.Bitstream BitS.Right)
+
 -- Concat instances
 
 instance Concatable () () where

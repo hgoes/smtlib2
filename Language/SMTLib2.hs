@@ -63,7 +63,7 @@ module Language.SMTLib2
          bvule,bvult,bvuge,bvugt,
          bvsle,bvslt,bvsge,bvsgt,
          ByteStringLen(..),BitstreamLen(..),
-         bvconcat,bvextract,
+         bvconcat,bvconcats,bvextract,
          bvsplitu16to8,
          bvsplitu32to16,bvsplitu32to8,
          bvsplitu64to32,bvsplitu64to16,bvsplitu64to8,

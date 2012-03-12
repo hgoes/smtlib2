@@ -8,6 +8,7 @@ import Data.Array
 import Data.Word
 import Data.Int
 import qualified Data.ByteString as BS
+import qualified Data.Bitstream as BitS
 
 funTest :: SMT Integer
 funTest = do
@@ -40,6 +41,19 @@ bvTest = do
   assert $ v3 .==. v1 + v2
   checkSat
   getValue v3
+
+bvTest2 :: SMT (BitS.Bitstream BitS.Left)
+bvTest2 = do
+  v1 <- varAnn 32 :: SMT (SMTExpr (BitS.Bitstream BitS.Left))
+  v2 <- varAnn 32
+  v3 <- varAnn 32
+  res <- varAnn 96
+  assert $ not' $ v1 .==. (constantAnn (BitS.fromBits (0::Word32)) 32)
+  assert $ not' $ v2 .==. (constantAnn (BitS.fromBits (0::Word32)) 32)
+  assert $ v3 .==. bvadd v1 v2
+  assert $ res .==. bvconcats [v1,v2,v3]
+  checkSat
+  getValue res
 
 transposeTest :: SMT ([Integer],Bool)
 transposeTest = do

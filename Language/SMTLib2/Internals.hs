@@ -15,7 +15,7 @@ import Data.Bits
 import Data.Typeable
 import Data.Map as Map hiding (assocs)
 import Data.Set as Set
-import Data.List as List (genericReplicate,mapAccumL)
+import Data.List as List (mapAccumL)
 
 -- | The SMT monad used for communating with the SMT solver
 type SMT = ReaderT (Handle,Handle) (StateT (Integer,[TypeRep],Map T.Text TypeRep) IO)
@@ -37,7 +37,7 @@ class SMTType t => SMTValue t where
 class (SMTValue t,Num t) => SMTArith t
 
 -- | A type class for all types which support bitvector operations in SMT
-class (SMTValue t,Bits t) => SMTBV t
+class (SMTValue t) => SMTBV t
 
 -- | Lifts the 'Ord' class into SMT
 class (SMTType t) => SMTOrd t where
@@ -100,8 +100,10 @@ data SMTExpr t where
   BVSGE :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
   BVSGT :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
   BVExtract :: (SMTType t1,SMTType t2,Extractable t1 t2) => Integer -> Integer -> SMTAnnotation t2 -> SMTExpr t1 -> SMTExpr t2
-  BVConcat :: (SMTType t1,SMTType t2,Concatable t1 t2,t3 ~ ConcatResult t1 t2,Concatable (SMTAnnotation t1) (SMTAnnotation t2),SMTAnnotation t3 ~ ConcatResult (SMTAnnotation t1) (SMTAnnotation t2)) => SMTExpr t1 -> SMTExpr t2 -> SMTExpr t3
-  BVConcats :: SMTType t1 => [SMTExpr t1] -> SMTExpr t2
+  BVConcat :: (SMTType t1,SMTType t2,Concatable t1 t2,t3 ~ ConcatResult t1 t2,Concatable (SMTAnnotation t1) (SMTAnnotation t2),SMTAnnotation t3 ~ ConcatResult (SMTAnnotation t1) (SMTAnnotation t2)) 
+              => SMTExpr t1 -> SMTExpr t2 -> SMTExpr t3
+  BVConcats :: (SMTType t1,SMTType t2,Concatable t2 t1,t2 ~ ConcatResult t2 t1,Concatable (SMTAnnotation t2) (SMTAnnotation t1),SMTAnnotation t2 ~ ConcatResult (SMTAnnotation t2) (SMTAnnotation t1))
+               => [SMTExpr t1] -> SMTExpr t2
   BVXor :: SMTExpr t -> SMTExpr t -> SMTExpr t
   BVAnd :: SMTExpr t -> SMTExpr t -> SMTExpr t
   Forall :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool

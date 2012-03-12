@@ -269,6 +269,10 @@ bvconcat :: (SMTType t1,SMTType t2,Concatable t1 t2,t3 ~ ConcatResult t1 t2,Conc
             => SMTExpr t1 -> SMTExpr t2 -> SMTExpr t3
 bvconcat = BVConcat
 
+bvconcats :: (SMTType t1,SMTType t2,Concatable t2 t1,t2 ~ ConcatResult t2 t1,Concatable (SMTAnnotation t2) (SMTAnnotation t1),SMTAnnotation t2 ~ ConcatResult (SMTAnnotation t2) (SMTAnnotation t1))
+            => [SMTExpr t1] -> SMTExpr t2
+bvconcats = BVConcats
+
 bvextract :: (SMTType t,Extractable t t) => Integer -> Integer -> SMTExpr t -> SMTExpr t
 bvextract u l e = withUndef $ \un -> BVExtract u l (extract' un un u l (extractAnnotation e)) e
     where
