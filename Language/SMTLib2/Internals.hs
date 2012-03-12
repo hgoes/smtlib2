@@ -51,9 +51,10 @@ data SMTFun a r = SMTFun deriving (Eq,Typeable)
 
 data SMTArray i v = SMTArray deriving (Eq,Typeable)
 
-class Concatable a b where
+class (SMTType a,SMTType b,SMTType (ConcatResult a b)) => Concatable a b where
     type ConcatResult a b
     concat' :: a -> b -> ConcatResult a b
+    concatAnn :: a -> b -> SMTAnnotation a -> SMTAnnotation b -> SMTAnnotation (ConcatResult a b)
 
 class Extractable a b where
     extract' :: a -> b -> Integer -> Integer -> SMTAnnotation a -> SMTAnnotation b
@@ -100,9 +101,9 @@ data SMTExpr t where
   BVSGE :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
   BVSGT :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
   BVExtract :: (SMTType t1,SMTType t2,Extractable t1 t2) => Integer -> Integer -> SMTAnnotation t2 -> SMTExpr t1 -> SMTExpr t2
-  BVConcat :: (SMTType t1,SMTType t2,Concatable t1 t2,t3 ~ ConcatResult t1 t2,Concatable (SMTAnnotation t1) (SMTAnnotation t2),SMTAnnotation t3 ~ ConcatResult (SMTAnnotation t1) (SMTAnnotation t2)) 
+  BVConcat :: (Concatable t1 t2,t3 ~ ConcatResult t1 t2)
               => SMTExpr t1 -> SMTExpr t2 -> SMTExpr t3
-  BVConcats :: (SMTType t1,SMTType t2,Concatable t2 t1,t2 ~ ConcatResult t2 t1,Concatable (SMTAnnotation t2) (SMTAnnotation t1),SMTAnnotation t2 ~ ConcatResult (SMTAnnotation t2) (SMTAnnotation t1))
+  BVConcats :: (SMTType t1,SMTType t2,Concatable t2 t1,t2 ~ ConcatResult t2 t1)
                => [SMTExpr t1] -> SMTExpr t2
   BVXor :: SMTExpr t -> SMTExpr t -> SMTExpr t
   BVAnd :: SMTExpr t -> SMTExpr t -> SMTExpr t

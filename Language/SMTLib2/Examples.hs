@@ -44,12 +44,12 @@ bvTest = do
 
 bvTest2 :: SMT (BitS.Bitstream BitS.Left)
 bvTest2 = do
-  v1 <- varAnn 32 :: SMT (SMTExpr (BitS.Bitstream BitS.Left))
-  v2 <- varAnn 32
-  v3 <- varAnn 32
-  res <- varAnn 96
-  assert $ not' $ v1 .==. (constantAnn (BitS.fromBits (0::Word32)) 32)
-  assert $ not' $ v2 .==. (constantAnn (BitS.fromBits (0::Word32)) 32)
+  v1 <- var :: SMT (SMTExpr Word8)
+  v2 <- var
+  v3 <- var
+  res <- varAnn 24
+  assert $ not' $ v1 .==. 0
+  assert $ not' $ v2 .==. 0
   assert $ v3 .==. bvadd v1 v2
   assert $ res .==. bvconcats [v1,v2,v3]
   checkSat

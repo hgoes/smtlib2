@@ -504,13 +504,10 @@ instance SMTValue BS.ByteString where
           bs2int :: BS.ByteString -> Integer
           bs2int = BS.foldl (\v w -> (v `shiftL` 8) .|. (fromIntegral w)) 0
 
-instance Concatable ByteStringLen ByteStringLen where
-    type ConcatResult ByteStringLen ByteStringLen = ByteStringLen
-    concat' (ByteStringLen l1) (ByteStringLen l2) = ByteStringLen (l1+l2)
-
 instance Concatable BS.ByteString BS.ByteString where
     type ConcatResult BS.ByteString BS.ByteString = BS.ByteString
     concat' b1 b2 = BS.append b1 b2
+    concatAnn _ _ = (+)
 
 -- BitStream implementation
 
@@ -534,17 +531,56 @@ instance SMTValue (BitS.Bitstream BitS.Right) where
     unmangle v (BitstreamLen l) = return $ fmap (BitS.fromNBits l) (getBVValue' l v :: Maybe Integer)
     mangle v (BitstreamLen l) = putBVValue' l (BitS.toBits v :: Integer)
 
-instance Concatable BitstreamLen BitstreamLen where
-    type ConcatResult BitstreamLen BitstreamLen = BitstreamLen
-    concat' (BitstreamLen l1) (BitstreamLen l2) = BitstreamLen (l1+l2)
-
 instance Concatable (BitS.Bitstream BitS.Left) (BitS.Bitstream BitS.Left) where
     type ConcatResult (BitS.Bitstream BitS.Left) (BitS.Bitstream BitS.Left) = BitS.Bitstream BitS.Left
     concat' = BitS.append
+    concatAnn _ _ = (+)
 
 instance Concatable (BitS.Bitstream BitS.Right) (BitS.Bitstream BitS.Right) where
     type ConcatResult (BitS.Bitstream BitS.Right) (BitS.Bitstream BitS.Right) = BitS.Bitstream BitS.Right
     concat' = BitS.append
+    concatAnn _ _ = (+)
+
+instance Concatable (BitS.Bitstream BitS.Left) Word8 where
+    type ConcatResult (BitS.Bitstream BitS.Left) Word8 = BitS.Bitstream BitS.Left
+    concat' x y = BitS.append x (BitS.fromBits y)
+    concatAnn _ _ (BitstreamLen l) _ = BitstreamLen (l+8)
+
+instance Concatable (BitS.Bitstream BitS.Left) Word16 where
+    type ConcatResult (BitS.Bitstream BitS.Left) Word16 = BitS.Bitstream BitS.Left
+    concat' x y = BitS.append x (BitS.fromBits y)
+    concatAnn _ _ (BitstreamLen l) _ = BitstreamLen (l+16)
+
+instance Concatable (BitS.Bitstream BitS.Left) Word32 where
+    type ConcatResult (BitS.Bitstream BitS.Left) Word32 = BitS.Bitstream BitS.Left
+    concat' x y = BitS.append x (BitS.fromBits y)
+    concatAnn _ _ (BitstreamLen l) _ = BitstreamLen (l+32)
+
+instance Concatable (BitS.Bitstream BitS.Left) Word64 where
+    type ConcatResult (BitS.Bitstream BitS.Left) Word64 = BitS.Bitstream BitS.Left
+    concat' x y = BitS.append x (BitS.fromBits y)
+    concatAnn _ _ (BitstreamLen l) _ = BitstreamLen (l+64)
+
+instance Concatable (BitS.Bitstream BitS.Right) Word8 where
+    type ConcatResult (BitS.Bitstream BitS.Right) Word8 = BitS.Bitstream BitS.Right
+    concat' x y = BitS.append x (BitS.fromBits y)
+    concatAnn _ _ (BitstreamLen l) _ = BitstreamLen (l+8)
+
+instance Concatable (BitS.Bitstream BitS.Right) Word16 where
+    type ConcatResult (BitS.Bitstream BitS.Right) Word16 = BitS.Bitstream BitS.Right
+    concat' x y = BitS.append x (BitS.fromBits y)
+    concatAnn _ _ (BitstreamLen l) _ = BitstreamLen (l+16)
+
+instance Concatable (BitS.Bitstream BitS.Right) Word32 where
+    type ConcatResult (BitS.Bitstream BitS.Right) Word32 = BitS.Bitstream BitS.Right
+    concat' x y = BitS.append x (BitS.fromBits y)
+    concatAnn _ _ (BitstreamLen l) _ = BitstreamLen (l+32)
+
+instance Concatable (BitS.Bitstream BitS.Right) Word64 where
+    type ConcatResult (BitS.Bitstream BitS.Right) Word64 = BitS.Bitstream BitS.Right
+    concat' x y = BitS.append x (BitS.fromBits y)
+    concatAnn _ _ (BitstreamLen l) _ = BitstreamLen (l+64)
+
 
 instance Extractable (BitS.Bitstream BitS.Left) (BitS.Bitstream BitS.Left) where
     extract' _ _ u l _ = BitstreamLen (fromIntegral $ u-l+1)
@@ -556,33 +592,35 @@ instance SMTBV (BitS.Bitstream BitS.Right)
 
 -- Concat instances
 
-instance Concatable () () where
-    type ConcatResult () () = ()
-    concat' _ _ = ()
-
 instance Concatable Word8 Word8 where
     type ConcatResult Word8 Word8 = Word16
     concat' x y = ((fromIntegral x) `shiftL` 8) .|. (fromIntegral y)
+    concatAnn _ _ _ _ = ()
 
 instance Concatable Int8 Word8 where
     type ConcatResult Int8 Word8 = Int16
     concat' x y = ((fromIntegral x) `shiftL` 8) .|. (fromIntegral y)
+    concatAnn _ _ _ _ = ()
 
 instance Concatable Word16 Word16 where
     type ConcatResult Word16 Word16 = Word32
     concat' x y = ((fromIntegral x) `shiftL` 16) .|. (fromIntegral y)
+    concatAnn _ _ _ _ = ()
 
 instance Concatable Int16 Word16 where
     type ConcatResult Int16 Word16 = Int32
     concat' x y = ((fromIntegral x) `shiftL` 16) .|. (fromIntegral y)
+    concatAnn _ _ _ _ = ()
 
 instance Concatable Word32 Word32 where
     type ConcatResult Word32 Word32 = Word64
     concat' x y = ((fromIntegral x) `shiftL` 32) .|. (fromIntegral y)
+    concatAnn _ _ _ _ = ()
 
 instance Concatable Int32 Word32 where
     type ConcatResult Int32 Word32 = Int64
     concat' x y = ((fromIntegral x) `shiftL` 32) .|. (fromIntegral y)
+    concatAnn _ _ _ _ = ()
 
 -- Extract instances
 instance Extractable Word16 Word8 where
