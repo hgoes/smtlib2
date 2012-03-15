@@ -381,10 +381,15 @@ instance Num (SMTExpr Int64) where
 
 -- Arguments
 
+instance Args () where
+  type Unpacked () = ()
+  type ArgAnnotation () = ()
+  foldExprs _ s _ _ = (s,())
+
 instance (SMTType a) => Args (SMTExpr a) where
   type Unpacked (SMTExpr a) = a
   type ArgAnnotation (SMTExpr a) = SMTAnnotation a
-  foldExprs f s x = f s x
+  foldExprs f = f
 
 instance (Args a,Args b) => Args (a,b) where
   type Unpacked (a,b) = (Unpacked a,Unpacked b)
