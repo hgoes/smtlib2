@@ -521,5 +521,6 @@ extractAnnotation (Named x _) = extractAnnotation x
 extractAnnotation (InterpolationGrp _ _) = ()
 
 instance (SMTValue a) => LiftArgs (SMTExpr a) where
+  type Unpacked (SMTExpr a) = a
   liftArgs = Const
   unliftArgs = getValue

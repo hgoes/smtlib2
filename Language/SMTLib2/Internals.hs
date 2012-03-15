@@ -239,7 +239,6 @@ instance SMTInfo SMTSolverVersion where
 
 -- | Instances of this class may be used as arguments for constructed functions and quantifiers.
 class (Eq a,Typeable a) => Args a where
-  type Unpacked a
   type ArgAnnotation a
   foldExprs :: (forall t. SMTType t => s -> SMTExpr t -> SMTAnnotation t -> (s,SMTExpr t)) -> s -> a -> ArgAnnotation a -> (s,a)
 
@@ -267,6 +266,7 @@ createArgs ann i = let ((tps,ni),res) = foldExprs (\(tps,ci) e ann' -> let name 
                in (res,tps,ni)
 
 class Args a => LiftArgs a where
+  type Unpacked a
   liftArgs :: Unpacked a -> ArgAnnotation a -> a
   unliftArgs :: a -> SMT (Unpacked a)
 

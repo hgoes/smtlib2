@@ -382,23 +382,21 @@ instance Num (SMTExpr Int64) where
 -- Arguments
 
 instance Args () where
-  type Unpacked () = ()
   type ArgAnnotation () = ()
   foldExprs _ s _ _ = (s,())
 
 instance (SMTType a) => Args (SMTExpr a) where
-  type Unpacked (SMTExpr a) = a
   type ArgAnnotation (SMTExpr a) = SMTAnnotation a
   foldExprs f = f
 
 instance (Args a,Args b) => Args (a,b) where
-  type Unpacked (a,b) = (Unpacked a,Unpacked b)
   type ArgAnnotation (a,b) = (ArgAnnotation a,ArgAnnotation b)
   foldExprs f s ~(e1,e2) ~(ann1,ann2) = let ~(s1,e1') = foldExprs f s e1 ann1
                                             ~(s2,e2') = foldExprs f s1 e2 ann2
                                         in (s2,(e1',e2'))
 
 instance (LiftArgs a,LiftArgs b) => LiftArgs (a,b) where
+  type Unpacked (a,b) = (Unpacked a,Unpacked b)
   liftArgs (x,y) ~(a1,a2) = (liftArgs x a1,liftArgs y a2)
   unliftArgs (x,y) = do
     rx <- unliftArgs x
@@ -406,7 +404,6 @@ instance (LiftArgs a,LiftArgs b) => LiftArgs (a,b) where
     return (rx,ry)
 
 instance (Args a,Args b,Args c) => Args (a,b,c) where
-  type Unpacked (a,b,c) = (Unpacked a,Unpacked b,Unpacked c)
   type ArgAnnotation (a,b,c) = (ArgAnnotation a,ArgAnnotation b,ArgAnnotation c)
   foldExprs f s ~(e1,e2,e3) ~(ann1,ann2,ann3) = let ~(s1,e1') = foldExprs f s e1 ann1
                                                     ~(s2,e2') = foldExprs f s1 e2 ann2
@@ -414,6 +411,7 @@ instance (Args a,Args b,Args c) => Args (a,b,c) where
                                                 in (s3,(e1',e2',e3'))
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c) => LiftArgs (a,b,c) where
+  type Unpacked (a,b,c) = (Unpacked a,Unpacked b,Unpacked c)
   liftArgs (x,y,z) ~(a1,a2,a3) = (liftArgs x a1,liftArgs y a2,liftArgs z a3)
   unliftArgs (x,y,z) = do
     rx <- unliftArgs x
@@ -422,7 +420,6 @@ instance (LiftArgs a,LiftArgs b,LiftArgs c) => LiftArgs (a,b,c) where
     return (rx,ry,rz)
 
 instance Args a => Args [a] where
-  type Unpacked [a] = [Unpacked a]
   type ArgAnnotation [a] = [ArgAnnotation a]
   foldExprs f s _ [] = (s,[])
   foldExprs f s ~(x:xs) (ann:anns) = let (s',x') = foldExprs f s x ann
@@ -430,6 +427,7 @@ instance Args a => Args [a] where
                                      in (s'',x':xs')
 
 instance LiftArgs a => LiftArgs [a] where
+  type Unpacked [a] = [Unpacked a]
   liftArgs _ [] = []
   liftArgs ~(x:xs) (ann:anns) = liftArgs x ann:liftArgs xs anns
   unliftArgs [] = return []
