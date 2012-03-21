@@ -301,9 +301,15 @@ bvsplitu64to8 e = (BVExtract 63 56 () e,BVExtract 55 48 () e,BVExtract 47 40 () 
 forAll :: (Args a,Unit (ArgAnnotation a)) => (a -> SMTExpr Bool) -> SMTExpr Bool
 forAll = Forall unit
 
+forAllAnn :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
+forAllAnn = Forall
+
 -- | If the supplied function returns true for at least one possible value, the exists quantification returns true.
 exists :: (Args a,Unit (ArgAnnotation a)) => (a -> SMTExpr Bool) -> SMTExpr Bool
 exists = Exists unit
+
+existsAnn :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
+existsAnn = Exists
 
 -- | Binds an expression to a variable.
 --   Can be used to prevent blowups in the command stream if expressions are used multiple times.
