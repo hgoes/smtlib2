@@ -590,6 +590,9 @@ instance Extractable (BitS.Bitstream BitS.Left) (BitS.Bitstream BitS.Left) where
 instance Extractable (BitS.Bitstream BitS.Right) (BitS.Bitstream BitS.Right) where
     extract' _ _ u l _ = BitstreamLen (fromIntegral $ u-l+1)
 
+instance Extractable (BitS.Bitstream BitS.Left) Word8 where
+    extract' _ _ _ _ _ = ()
+
 instance SMTBV (BitS.Bitstream BitS.Left)
 instance SMTBV (BitS.Bitstream BitS.Right)
 

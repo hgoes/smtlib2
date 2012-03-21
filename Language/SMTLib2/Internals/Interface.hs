@@ -14,6 +14,7 @@ import qualified Data.AttoLisp as L
 import Data.Unit
 import Data.Word
 import Data.List (genericReplicate)
+import qualified Data.Bitstream as BitS
 
 -- | Create a new named variable
 varNamed :: (SMTType t,Typeable t,Unit (SMTAnnotation t)) => Text -> SMT (SMTExpr t)
@@ -275,6 +276,13 @@ bvconcats = BVConcats
 
 bvextract :: (SMTType t,Extractable t t) => Integer -> Integer -> SMTExpr t -> SMTExpr t
 bvextract u l e = withUndef $ \un -> BVExtract u l (extract' un un u l (extractAnnotation e)) e
+    where
+      withUndef :: (t -> SMTExpr t) -> SMTExpr t
+      withUndef f = f undefined
+
+bvextractUnsafe :: (SMTType t1,SMTType t2,Extractable t1 t2) => Integer -> Integer -> SMTExpr t1 -> SMTExpr t2
+bvextractUnsafe u l e = withUndef $ \un ->
+                        BVExtract u l (extract' (getUndef e) un u l (extractAnnotation e)) e
     where
       withUndef :: (t -> SMTExpr t) -> SMTExpr t
       withUndef f = f undefined
