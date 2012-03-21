@@ -126,9 +126,9 @@ fun = do
   (c,decl,mp) <- get
   put (c+1,decl,mp)
   let name = T.pack $ "fun"++show c
-      res = Fun name
+      res = Fun name unit unit
       
-      (au,bu,rtp) = getFunUndef res
+      (au,rtp) = getFunUndef res
       
       assertEq :: x -> x -> y -> y
       assertEq _ _ p = p

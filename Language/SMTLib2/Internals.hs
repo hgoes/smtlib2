@@ -110,7 +110,7 @@ data SMTExpr t where
   Forall :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
   Exists :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
   Let :: (Args a) => ArgAnnotation a -> a -> (a -> SMTExpr b) -> SMTExpr b
-  Fun :: (Args a,SMTType r) => Text -> SMTExpr (SMTFun a r)
+  Fun :: (Args a,SMTType r) => Text -> ArgAnnotation a -> SMTAnnotation r -> SMTExpr (SMTFun a r)
   App :: (Args a,SMTType r) => SMTExpr (SMTFun a r) -> a -> SMTExpr r
   ConTest :: SMTType a => Constructor a -> SMTExpr a -> SMTExpr Bool
   FieldSel :: (SMTType a,SMTType f) => Field a f -> SMTExpr a -> SMTExpr f
@@ -281,10 +281,9 @@ firstJust (act:acts) = do
 getUndef :: SMTExpr t -> t
 getUndef _ = error "Don't evaluate the result of 'getUndef'"
 
-getFunUndef :: Args a => SMTExpr (SMTFun a r) -> (a,Unpacked a,r)
+getFunUndef :: Args a => SMTExpr (SMTFun a r) -> (a,r)
 getFunUndef _ = (error "Don't evaluate the first result of 'getFunUndef'",
-                 error "Don't evaluate the second result of 'getFunUndef'",
-                 error "Don't evaluate the third result of 'getFunUndef'")
+                 error "Don't evaluate the second result of 'getFunUndef'")
 
 getArrayUndef :: Args i => SMTExpr (SMTArray i v) -> (i,Unpacked i,v)
 getArrayUndef _ = (undefined,undefined,undefined)
@@ -388,6 +387,7 @@ clearInput = do
 
 putRequest :: L.Lisp -> SMT ()
 putRequest e = do
+  clearInput
   (hin,_) <- ask
   liftIO $ toByteStringIO (BS.hPutStr hin) (mappend (L.fromLispExpr e) flush)
   liftIO $ BS.hPutStrLn hin ""
@@ -516,9 +516,8 @@ foldExpr f x (Exists ann g) = let g' = foldExpr f x . g
 foldExpr f x (Let ann arg g) = let g' = foldExpr f x1 . g
                                    (x1,e1) = foldExprs (\st e ann -> f st e) x arg ann
                                in f (fst $ g' $ allOf Undefined) (Let ann e1 (snd . g'))
-foldExpr f x (App g arg) = let (x1,e1) = foldExpr f x g
-                               (x2,e2) = foldExprs (\st e ann -> f st e) x1 arg undefined
-                           in f x2 (App e1 e2)
+foldExpr f x (App (Fun name arg_ann res_ann) arg) = let (x1,e1) = foldExprs (\st e ann -> f st e) x arg arg_ann
+                                                 in f x1 (App (Fun name arg_ann res_ann) e1)
 foldExpr f x (ConTest c e) = let (x1,e1) = foldExpr f x e
                              in f x1 (ConTest c e1)
 foldExpr f x (FieldSel g e) = let (x1,e1) = foldExpr f x e

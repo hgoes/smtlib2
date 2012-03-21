@@ -229,10 +229,9 @@ exprToLisp (Let ann x f) c = let (arg,tps,nc) = createArgs ann c
                              in (L.List [L.Symbol "let"
                                         ,L.List [L.List [L.Symbol name,lisp] | ((name,_),lisp) <- Prelude.zip tps arg' ]
                                         ,arg''],nc'')
-exprToLisp (Fun name) c = (L.Symbol name,c)
-exprToLisp (App f x) c = let ~(f',c') = exprToLisp f c
-                             ~(x',c'') = unpackArgs (\e _ i -> exprToLisp e i) x undefined c
-                         in (L.List $ f':x',c'')
+exprToLisp (Fun name _ _) c = (L.Symbol name,c)
+exprToLisp (App (Fun name arg_ann res_ann) x) c = let ~(x',c') = unpackArgs (\e _ i -> exprToLisp e i) x arg_ann c
+                                                  in (L.List $ (L.Symbol name):x',c')
 exprToLisp (ConTest (Constructor name) e) c = let (e',c') = exprToLisp e c
                                               in (L.List [L.Symbol $ T.append "is-" name
                                                          ,e'],c')
@@ -333,22 +332,22 @@ fnToExpr f g fn args = case splitTyConApp $ g fn of
     (_,rargs) -> case rargs of
       [] -> let [a0] = args in withUndef targs $ \t0' -> do
         p0 <- lispToExprT () g a0
-        f $ asType res' $ App (Fun fn) (asType t0' p0)
+        f $ asType res' $ App (Fun fn undefined undefined) (asType t0' p0)
       [t0,t1] -> let [a0,a1] = args in withUndef t0 $ \t0' ->
         withUndef t1 $ \t1' -> do
           p0 <- lispToExprT () g a0
           p1 <- lispToExprT () g a1
-          f $ asType res' $ App (Fun fn) (asType t0' p0,
-                                          asType t1' p1)
+          f $ asType res' $ App (Fun fn undefined undefined) (asType t0' p0,
+                                                              asType t1' p1)
       [t0,t1,t2] -> let [a0,a1,a2] = args in withUndef t0 $ \t0' ->
         withUndef t1 $ \t1' -> 
         withUndef t2 $ \t2' -> do
           p0 <- lispToExprT () g a0
           p1 <- lispToExprT () g a1
           p2 <- lispToExprT () g a2
-          f $ asType res' $ App (Fun fn) (asType t0' p0,
-                                          asType t1' p1,
-                                          asType t2' p2)
+          f $ asType res' $ App (Fun fn undefined undefined) (asType t0' p0,
+                                                              asType t1' p1,
+                                                              asType t2' p2)
 
 fgcast :: (Typeable a,Typeable b) => L.Lisp -> c a -> c b
 fgcast l x = case gcast x of

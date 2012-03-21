@@ -45,6 +45,7 @@ module Language.SMTLib2
          -- * Expressions
          var,varNamed,varNamedAnn,varAnn,argVars,argVarsAnn,
          constant,constantAnn,
+         extractAnnotation,
          let',lets,
          named,
          -- ** Basic logic
