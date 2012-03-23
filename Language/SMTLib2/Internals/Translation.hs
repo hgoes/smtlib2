@@ -142,10 +142,10 @@ exprToLisp (Not expr) c = let (expr',c') = exprToLisp expr c
 exprToLisp (Select arr idx) c = let (arr',c') = exprToLisp arr c
                                     (idx',c'') = unpackArgs (\e _ i -> exprToLisp e i) idx undefined c'
                                 in (L.List (L.Symbol "select":arr':idx'),c'')
-exprToLisp (Store arr idx val) c = let (arr',c') = exprToLisp arr c
-                                       (idx',c'') = unpackArgs (\e _ i -> exprToLisp e i) idx undefined c''
-                                       (val',c''') = exprToLisp val c'''
-                                   in (L.List (L.Symbol "store":arr':idx'++[val']),c''')
+exprToLisp (Store arr idx val) c = let (arr',c1) = exprToLisp arr c
+                                       (idx',c2) = unpackArgs (\e _ i -> exprToLisp e i) idx undefined c1
+                                       (val',c3) = exprToLisp val c2
+                                   in (L.List (L.Symbol "store":arr':idx'++[val']),c3)
 exprToLisp (AsArray f) c = let (f',c') = exprToLisp f c
                            in (L.List [L.Symbol "_",L.Symbol "as-array",f'],c')
 exprToLisp (BVAdd l r) c = let (l',c') = exprToLisp l c
