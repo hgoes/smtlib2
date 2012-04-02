@@ -325,6 +325,9 @@ existsAnn = Exists
 let' :: (Args a,Unit (ArgAnnotation a)) => a -> (a -> SMTExpr b) -> SMTExpr b
 let' = Let unit
 
+letAnn :: Args a => ArgAnnotation a -> a -> (a -> SMTExpr b) -> SMTExpr b
+letAnn = Let
+
 -- | Like 'let'', but can define multiple variables of the same type.
 lets :: (Args a,Unit (ArgAnnotation a)) => [a] -> ([a] -> SMTExpr b) -> SMTExpr b
 lets xs = Let (fmap (const unit) xs) xs

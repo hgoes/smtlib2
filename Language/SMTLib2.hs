@@ -46,7 +46,7 @@ module Language.SMTLib2
          var,varNamed,varNamedAnn,varAnn,argVars,argVarsAnn,
          constant,constantAnn,
          extractAnnotation,
-         let',lets,
+         let',lets,letAnn,
          named,
          -- ** Basic logic
          (.==.),
