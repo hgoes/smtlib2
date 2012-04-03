@@ -60,14 +60,11 @@ defFunAnn ann_arg ann_res f = do
   let name = T.pack $ "fun"++show c
       res = Fun name ann_arg ann_res
       
-      (au,rtp) = getFunUndef res
+      (_,rtp) = getFunUndef res
       
-      sorts = argSorts au ann_arg
-      --tps = Prelude.zipWith (\sort num -> (T.pack $ "arg"++show num,sort)) sorts [0..]
-
-      (au2,tps,c1) = createArgs ann_arg (c+1)
+      (au,tps,c1) = createArgs ann_arg (c+1)
       
-      (expr',c2) = exprToLisp (f au2) c1
+      (expr',c2) = exprToLisp (f au) c1
   put (c2,decl,mp)
   defineFun name tps (getSort rtp ann_res) expr'
   return res
