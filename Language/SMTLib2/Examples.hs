@@ -238,3 +238,14 @@ datatypeTest = do
   r1 <- getValue v1
   r2 <- getValue v2
   return (r1,r2)
+
+newtype MyInt = MyInt Integer deriving (Eq,Typeable,Show)
+
+$(deriveSMT ''MyInt)
+
+datatypeTest2 :: SMT MyInt
+datatypeTest2 = do
+  v1 <- var
+  assert $ v1 .==. (constant (MyInt 42))
+  checkSat
+  getValue v1
