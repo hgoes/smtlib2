@@ -27,7 +27,7 @@ deriveSMT name = do
   pat <- newName "u"
   let decls = [instanceD (cxt []) (appT (conT ''SMTType) (conT name))
                [funD 'getSort [clause [wildP,wildP] (normalB $ generateSortExpr name) []],
-                funD 'declareType [clause [varP pat] (normalB $ generateDeclExpr name tp pat) []],
+                funD 'declareType [clause [varP pat,wildP] (normalB $ generateDeclExpr name tp pat) []],
                 tySynInstD ''SMTAnnotation [conT name] (tupleT 0)
                ],
                instanceD (cxt []) (appT (conT ''SMTValue) (conT name))
