@@ -1,9 +1,11 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings,TemplateHaskell,TypeFamilies,DeriveDataTypeable #-}
 module Language.SMTLib2.Examples where
 
 import Control.Monad
 import Control.Monad.Trans
 import Language.SMTLib2
+import Language.SMTLib2.TH
+import Data.Typeable
 import Data.Array
 import Data.Word
 import Data.Int
@@ -217,3 +219,22 @@ arrayExample2 = do
   assert $ forAll $ \(i,j) -> select arr (i,j) .==. select arr (j,i)
   checkSat
   sequence [ sequence [ getValue (select arr (constant i,constant j)) | j <- [0..9] ] | i <- [0..9] ]
+
+data Coordinate = Position { posX :: Integer
+                           , posY :: Integer
+                           }
+                | Unknown
+                deriving (Eq,Typeable,Show)
+
+$(deriveSMT ''Coordinate)
+
+datatypeTest :: SMT (Coordinate,Coordinate)
+datatypeTest = do
+  v1 <- var
+  v2 <- var
+  assert $ ((v1 .# $(field 'posX)) + (v2 .# $(field 'posX))) .==. 5
+  assert $ ((v1 .# $(field 'posY)) * (v2 .# $(field 'posY))) .==. 12
+  checkSat
+  r1 <- getValue v1
+  r2 <- getValue v2
+  return (r1,r2)
