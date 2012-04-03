@@ -17,7 +17,7 @@ import Data.Typeable
 import Data.List as List
 import Data.Maybe (catMaybes)
 
-type ExtrType = [(Name,[(Name,Type)])]
+type ExtrType = Either [(Name,[(Name,Type)])] (Name,Name,Type)
 
 -- | Given a data-type, this function derives an instance of both 'SMTType' and 'SMTValue' for it.
 --   Example: @ $(deriveSMT 'MyType) @
@@ -25,9 +25,10 @@ deriveSMT :: Name -> Q [Dec]
 deriveSMT name = do
   tp <- extractDataType name
   pat <- newName "u"
+  ann <- newName "ann"
   let decls = [instanceD (cxt []) (appT (conT ''SMTType) (conT name))
-               [funD 'getSort [clause [wildP,wildP] (normalB $ generateSortExpr name) []],
-                funD 'declareType [clause [varP pat,wildP] (normalB $ generateDeclExpr name tp pat) []],
+               [funD 'getSort [clause [wildP,varP ann] (normalB $ generateSortExpr name tp ann) []],
+                funD 'declareType [clause [varP pat,varP ann] (normalB $ generateDeclExpr name tp pat ann) []],
                 tySynInstD ''SMTAnnotation [conT name] (tupleT 0)
                ],
                instanceD (cxt []) (appT (conT ''SMTValue) (conT name))
@@ -60,18 +61,21 @@ extractDataType name = do
   inf <- reify name
   return $ case inf of
     TyConI (DataD _ _ _ cons _)
-      -> fmap (\con -> case con of
-                  RecC n vars -> (n,fmap (\(vn,_,tp) -> (vn,tp)) vars)
-                  NormalC n [] -> (n,[])
-                  _ -> error $ "Can't derive SMT classes for constructor "++show con
-              ) cons
+      -> Left $ fmap (\con -> case con of
+                         RecC n vars -> (n,fmap (\(vn,_,tp) -> (vn,tp)) vars)
+                         NormalC n [] -> (n,[])
+                         _ -> error $ "Can't derive SMT classes for constructor "++show con
+                     ) cons
+    TyConI (NewtypeD _ name _ (NormalC con [(_,tp)]) _)
+      -> Right (name,con,tp)
     _ -> error $ "Can't derive SMT classes for "++show inf
 
-generateSortExpr :: Name -> Q Exp
-generateSortExpr name = [| L.Symbol $(stringE $ nameBase name) |]
+generateSortExpr :: Name -> ExtrType -> Name -> Q Exp
+generateSortExpr name (Left _) ann = [| L.Symbol $(stringE $ nameBase name) |]
+generateSortExpr name (Right (name',con,tp)) ann = [| getSort (undefined :: $(return tp)) $(varE ann) |]
 
-generateDeclExpr :: Name -> ExtrType -> Name -> Q Exp
-generateDeclExpr dname cons pat
+generateDeclExpr :: Name -> ExtrType -> Name -> Name -> Q Exp
+generateDeclExpr dname (Left cons) pat ann
   = Prelude.foldl (\cur tp -> [| $(cur) ++ declareType (undefined :: $(return tp)) $(tupE []) |])
     [| [(typeOf $(varE pat),declareDatatypes [] [(T.pack $(stringE $ nameBase dname),
                                                   $(listE [ tupE [ [| T.pack $(stringE $ nameBase cname) |],  
@@ -88,9 +92,11 @@ generateDeclExpr dname cons pat
     | (_,fields) <- cons, 
       (_,tp) <- fields
     ]
+generateDeclExpr dname (Right (name,con_name,tp)) pat ann
+  = [| declareType (undefined :: $(return tp)) $(varE ann) |]
 
 generateMangleFun :: ExtrType -> Q Dec
-generateMangleFun cons
+generateMangleFun (Left cons)
   = funD 'mangle [ do
     vars <- mapM (const $ newName "f") fields
     clause [conP cname (fmap varP vars),wildP]
@@ -102,9 +108,15 @@ generateMangleFun cons
                             |])) []
     | (cname,fields) <- cons
     ]
+generateMangleFun (Right (name,con,tp))
+  = funD 'mangle [ do
+    var <- newName "f"
+    ann <- newName "ann"
+    clause [ conP con [varP var], varP ann ] (normalB [| mangle $(varE var) $(varE ann) |]) []
+    ]
 
 generateUnmangleFun :: ExtrType -> Q Dec
-generateUnmangleFun cons
+generateUnmangleFun (Left cons)
   = funD 'unmangle 
     [do
        vars <- mapM (const $ do
@@ -120,6 +132,17 @@ generateUnmangleFun cons
                                  [ noBindS $ appsE [[| return |],appsE [ [| Just |],appsE $ (conE cname):(fmap (varE . snd) vars)] ]]) []
     | (cname,fields) <- cons
     ]
+generateUnmangleFun (Right (name,con,tp))
+  = funD 'unmangle
+    [do
+       arg <- newName "f"
+       ann <- newName "ann"
+       res <- newName "r"
+       clause [varP arg,varP ann] (normalB $ doE $ [ bindS (varP res) (appsE [ [| unmangle |],varE arg,varE ann ])
+                                                   , noBindS [| return (case $(varE res) of { Nothing -> Nothing ; Just r -> Just ($(conE con) r) }) |]
+                                                   ]) []
+    ]
+                                                                          
 
 matches :: Q Exp -> Q Pat -> Q Exp
 matches exp pat = do
