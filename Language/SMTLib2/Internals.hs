@@ -100,6 +100,7 @@ data SMTExpr t where
   BVSLT :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
   BVSGE :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
   BVSGT :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
+  BVSHL :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr t
   BVExtract :: (SMTType t1,SMTType t2,Extractable t1 t2) => Integer -> Integer -> SMTAnnotation t2 -> SMTExpr t1 -> SMTExpr t2
   BVConcat :: (Concatable t1 t2,t3 ~ ConcatResult t1 t2)
               => SMTExpr t1 -> SMTExpr t2 -> SMTExpr t3
@@ -107,6 +108,7 @@ data SMTExpr t where
                => [SMTExpr t1] -> SMTExpr t2
   BVXor :: SMTExpr t -> SMTExpr t -> SMTExpr t
   BVAnd :: SMTExpr t -> SMTExpr t -> SMTExpr t
+  BVOr :: SMTExpr t -> SMTExpr t -> SMTExpr t
   Forall :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
   Exists :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
   Let :: (Args a) => ArgAnnotation a -> a -> (a -> SMTExpr b) -> SMTExpr b
@@ -167,11 +169,13 @@ instance Eq a => Eq (SMTExpr a) where
     (==) (BVSLT l1 r1) (BVSLT l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
     (==) (BVSGE l1 r1) (BVSGE l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
     (==) (BVSGT l1 r1) (BVSGT l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
+    (==) (BVSHL l1 r1) (BVSHL l2 r2) = l1 == l2 && r1 == r2
     (==) (BVExtract l1 u1 ann1 e1) (BVExtract l2 u2 ann2 e2) = l1 == l2 && u1 == u2 && eqExpr e1 e2
     (==) (BVConcat l1 r1) (BVConcat l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
     (==) (BVConcats x) (BVConcats y) = eqExprs x y
     (==) (BVXor l1 r1) (BVXor l2 r2) = l1 == l2 && r1 == r2
     (==) (BVAnd l1 r1) (BVAnd l2 r2) = l1 == l2 && r1 == r2
+    (==) (BVOr l1 r1) (BVOr l2 r2) = l1 == l2 && r1 == r2
     (==) (ConTest c1 e1) (ConTest c2 e2) = eqExpr c1 c2 && eqExpr e1 e2
     (==) (FieldSel (Field f1) e1) (FieldSel (Field f2) e2) = f1 == f2 && eqExpr e1 e2
     (==) (Head x) (Head y) = x == y
@@ -509,6 +513,23 @@ foldExpr f x (BVSGE l r) = let (x1,e1) = foldExpr f x l
 foldExpr f x (BVSGT l r) = let (x1,e1) = foldExpr f x l
                                (x2,e2) = foldExpr f x1 r
                            in f x2 (BVSGT e1 e2)
+foldExpr f x (BVSHL l r) = let (x1,e1) = foldExpr f x l
+                               (x2,e2) = foldExpr f x1 r
+                           in f x2 (BVSHL e1 e2)
+foldExpr f x (BVConcat l r) = let (x1,e1) = foldExpr f x l
+                                  (x2,e2) = foldExpr f x1 r
+                              in f x2 (BVConcat e1 e2)
+{-foldExpr f x (BVConcats cs) = let (cs',nx) = List.mapAccumL (foldExpr f) x cs
+                              in f nx (BVConcats cs')-}
+foldExpr f x (BVXor l r) = let (x1,e1) = foldExpr f x l
+                               (x2,e2) = foldExpr f x1 r
+                           in f x2 (BVXor e1 e2)
+foldExpr f x (BVAnd l r) = let (x1,e1) = foldExpr f x l
+                               (x2,e2) = foldExpr f x1 r
+                           in f x2 (BVAnd e1 e2)
+foldExpr f x (BVOr l r) = let (x1,e1) = foldExpr f x l
+                              (x2,e2) = foldExpr f x1 r
+                          in f x2 (BVOr e1 e2)
 foldExpr f x (Forall ann g) = let g' = foldExpr f x . g
                               in f (fst $ g' $ allOf Undefined) (Forall ann (snd . g'))
 foldExpr f x (Exists ann g) = let g' = foldExpr f x . g

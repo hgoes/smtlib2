@@ -265,6 +265,10 @@ bvsge = BVSGE
 bvsgt :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
 bvsgt = BVSGT
 
+-- | Bitvector shift left
+bvshl :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
+bvshl = BVSHL
+
 -- | Bitvector concat
 bvconcat :: (Concatable t1 t2,t3 ~ ConcatResult t1 t2)
             => SMTExpr t1 -> SMTExpr t2 -> SMTExpr t3

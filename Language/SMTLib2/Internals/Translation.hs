@@ -184,6 +184,9 @@ exprToLisp (BVSGE l r) c = let (l',c') = exprToLisp l c
 exprToLisp (BVSGT l r) c = let (l',c') = exprToLisp l c
                                (r',c'') = exprToLisp r c'
                            in (L.List [L.Symbol "bvsgt",l',r'],c'')
+exprToLisp (BVSHL l r) c = let (l',c') = exprToLisp l c
+                               (r',c'') = exprToLisp r c'
+                           in (L.List [L.Symbol "bvshl",l',r'],c'')
 exprToLisp (BVExtract i j ann v) c = let (v',c') = exprToLisp v c
                                      in (L.List [L.List [L.Symbol "_"
                                                         ,L.Symbol "extract"
@@ -207,6 +210,11 @@ exprToLisp (BVAnd v1 v2) c = let (v1',c') = exprToLisp v1 c
                              in (L.List [L.Symbol "bvand"
                                         ,v1'
                                         ,v2'],c'')
+exprToLisp (BVOr v1 v2) c = let (v1',c') = exprToLisp v1 c
+                                (v2',c'') = exprToLisp v2 c'
+                            in (L.List [L.Symbol "bvor"
+                                       ,v1'
+                                       ,v2'],c'')
 exprToLisp (Forall ann f) c = let (arg,tps,nc) = createArgs ann c
                                   (arg',nc') = exprToLisp (f arg) nc
                               in (L.List [L.Symbol "forall"
@@ -504,8 +512,10 @@ extractAnnotation (BVSLE _ _) = ()
 extractAnnotation (BVSLT _ _) = ()
 extractAnnotation (BVSGE _ _) = ()
 extractAnnotation (BVSGT _ _) = ()
+extractAnnotation (BVSHL x _) = extractAnnotation x
 extractAnnotation (BVXor x _) = extractAnnotation x
 extractAnnotation (BVAnd x _) = extractAnnotation x
+extractAnnotation (BVOr x _) = extractAnnotation x
 extractAnnotation (Forall _ _) = ()
 extractAnnotation (Exists _ _) = ()
 extractAnnotation (Let _ x f) = extractAnnotation (f x)
