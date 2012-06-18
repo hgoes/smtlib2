@@ -352,7 +352,7 @@ stack act = do
 comment :: String -> SMT ()
 comment msg = do
   (hin,_) <- ask
-  liftIO $ IO.hPutStrLn hin $ ';':msg
+  liftIO $ IO.hPutStr hin $ Prelude.unlines (fmap (';':) (Prelude.lines msg))
 
 -- | Spawn a shell command that is used as a SMT solver via stdin/-out to process the given SMT operation.
 withSMTSolver :: String -- ^ The shell command to execute
