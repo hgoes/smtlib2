@@ -177,10 +177,10 @@ getBVValue' len (L.List [L.Symbol "_",L.Symbol val,L.Number (L.I bits)])
     else Nothing
 getBVValue' _ _ = Nothing
 
-putBVValue :: (Bits a,Ord a,Integral a) => a -> b -> L.Lisp
+putBVValue :: (Bits a,Ord a,Integral a,Show a) => a -> b -> L.Lisp
 putBVValue x _ = putBVValue' (fromIntegral $ bitSize x) x
 
-putBVValue' :: (Bits a,Ord a,Integral a) => Int -> a -> L.Lisp
+putBVValue' :: (Bits a,Ord a,Integral a,Show a) => Int -> a -> L.Lisp
 putBVValue' len x
   | len `mod` 4 == 0 = let v' = if x < 0
                                 then complement (x-1)
