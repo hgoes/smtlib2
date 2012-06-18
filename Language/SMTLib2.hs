@@ -23,6 +23,7 @@ module Language.SMTLib2
        (-- * Data types
          SMT(),
          SMTType,
+         SMTAnnotation,
          SMTValue,
          SMTArith,
          SMTOrd(..),
