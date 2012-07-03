@@ -15,11 +15,8 @@ import Data.Unit
 instance L.ToLisp (SMTExpr t) where
   toLisp e = fst $ exprToLisp e 0
 
---instance SMTValue t => Eq (SMTExpr t) where
---  (==) x y = (L.toLisp x) == (L.toLisp y)
-
---instance Show (SMTExpr t) where
---  show x = show (L.toLisp x)
+instance Show (SMTExpr t) where
+  show x = show $ fst (exprToLisp x 0)
 
 -- | After a successful 'checkSat' call, extract values from the generated model.
 --   The 'ProduceModels' option must be enabled for this.

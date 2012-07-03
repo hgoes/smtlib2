@@ -125,9 +125,6 @@ data SMTExpr t where
   Undefined :: SMTExpr a
   deriving Typeable
 
-instance Show (SMTExpr a) where
-    show expr = "<smt-expr>"
-
 instance Eq a => Eq (SMTExpr a) where
     (==) (Var v1 _) (Var v2 _) = v1 == v2
     (==) (Const v1 _) (Const v2 _) = v1 == v2
