@@ -72,7 +72,7 @@ module Language.SMTLib2
          bvsplitu32to16,bvsplitu32to8,
          bvsplitu64to32,bvsplitu64to16,bvsplitu64to8,
          -- ** Functions
-         fun,app,defFun,defFunAnn,
+         fun,app,defFun,defConst,defFunAnn,defConstAnn,
          -- ** Data types
          is,(.#),
          -- ** Lists

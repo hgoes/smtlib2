@@ -50,6 +50,17 @@ getRawValue expr = do
 defFun :: (Args a,SMTType r,Unit (ArgAnnotation a),Unit (SMTAnnotation r)) => (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a r))
 defFun = defFunAnn unit unit
 
+-- | Define a new constant
+defConst :: (SMTType r,Unit (SMTAnnotation r)) => SMTExpr r -> SMT (SMTExpr r)
+defConst = defConstAnn unit
+
+-- | Define a new constant with a type annotation.
+defConstAnn :: (SMTType r) => SMTAnnotation r -> SMTExpr r -> SMT (SMTExpr r)
+defConstAnn ann e = do
+  f <- defFunAnn () ann (const e)
+  return $ App f ()
+
+-- | Define a new function with a body and custom type annotations for arguments and result.
 defFunAnn :: (Args a,SMTType r) => ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a r))
 defFunAnn ann_arg ann_res f = do
   (c,decl,mp) <- get
@@ -233,7 +244,9 @@ exprToLisp (Let ann x f) c = let (arg,tps,nc) = createArgs ann c
                                         ,arg''],nc'')
 exprToLisp (Fun name _ _) c = (L.Symbol name,c)
 exprToLisp (App (Fun name arg_ann res_ann) x) c = let ~(x',c') = unpackArgs (\e _ i -> exprToLisp e i) x arg_ann c
-                                                  in (L.List $ (L.Symbol name):x',c')
+                                                  in if Prelude.null x'
+                                                     then (L.Symbol name,c')
+                                                     else (L.List $ (L.Symbol name):x',c')
 exprToLisp (ConTest (Constructor name) e) c = let (e',c') = exprToLisp e c
                                               in (L.List [L.Symbol $ T.append "is-" name
                                                          ,e'],c')
