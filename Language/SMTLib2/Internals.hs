@@ -363,6 +363,7 @@ withSMTSolver solver f = do
                           , std_out = CreatePipe
                           , std_err = Inherit
                           , close_fds = False
+                          , create_group = False
                           }
   (Just hin,Just hout,_,handle) <- createProcess cmd
   res <- evalStateT (runReaderT (do
