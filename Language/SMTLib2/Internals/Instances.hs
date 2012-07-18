@@ -2,6 +2,7 @@
 module Language.SMTLib2.Internals.Instances where
 
 import Language.SMTLib2.Internals
+import Language.SMTLib2.Internals.SMTMonad
 import qualified Data.AttoLisp as L
 import qualified Data.Attoparsec.Number as L
 import Data.Word

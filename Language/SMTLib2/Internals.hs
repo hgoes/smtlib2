@@ -17,8 +17,7 @@ import Data.Map as Map hiding (assocs)
 import Data.Set as Set
 import Data.List as List (mapAccumL)
 
--- | The SMT monad used for communating with the SMT solver
-type SMT = ReaderT (Handle,Handle) (StateT (Integer,[TypeRep],Map T.Text TypeRep) IO)
+import Language.SMTLib2.Internals.SMTMonad
 
 -- | Haskell types which can be represented in SMT
 class (Eq t,Typeable t) => SMTType t where
