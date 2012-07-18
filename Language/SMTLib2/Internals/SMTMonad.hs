@@ -59,6 +59,9 @@ modifySMT f = SMT $ modify f
 class Monad m => MonadSMT m where
   liftSMT :: SMT a -> m a
 
+instance MonadSMT SMT where
+  liftSMT = id
+
 instance MonadSMT m => MonadSMT (ContT r m) where
   liftSMT = lift . liftSMT
 
