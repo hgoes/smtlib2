@@ -120,25 +120,34 @@ interpolationGroup = do
   let name = T.pack $ "interp"++show c
   return (InterpolationGroup name)
 
--- | Create a new uninterpreted function
-fun :: (Args a,SMTType r,SMTAnnotation r ~ (),Unit (ArgAnnotation a)) => SMT (SMTExpr (SMTFun a r))
-fun = do
+-- | Create a new uninterpreted function with annotation for
+-- the argument and the return type.
+funAnn :: (Args a, SMTType r) => ArgAnnotation a -> SMTAnnotation r -> SMT (SMTExpr (SMTFun a r))
+funAnn annArg annRet = do
   (c,decl,mp) <- get
   put (c+1,decl,mp)
   let name = T.pack $ "fun"++show c
-      res = Fun name unit unit
+      res = Fun name annArg annRet
       
       (au,rtp) = getFunUndef res
       
       assertEq :: x -> x -> y -> y
       assertEq _ _ p = p
       
-      (au2,tps,_) = createArgs unit 0
+      (au2,tps,_) = createArgs annArg 0
       
   assertEq au au2 $ return ()
-  declareFun name [ l | (_,l) <- tps ] (getSort rtp ())
+  declareFun name [ l | (_,l) <- tps ] (getSort rtp annRet)
   return res
-    
+
+-- | funAnn with an annotation only for the return type.
+funAnnRet :: (Args a, SMTType r, Unit (ArgAnnotation a)) => SMTAnnotation r -> SMT (SMTExpr (SMTFun a r))
+funAnnRet = funAnn unit
+
+-- | Create a new uninterpreted function.
+fun :: (Args a,SMTType r,SMTAnnotation r ~ (),Unit (ArgAnnotation a)) => SMT (SMTExpr (SMTFun a r))
+fun = funAnn unit unit
+
 -- | Apply a function to an argument
 app :: (Args a,SMTType r) => SMTExpr (SMTFun a r) -> a -> SMTExpr r
 app = App
