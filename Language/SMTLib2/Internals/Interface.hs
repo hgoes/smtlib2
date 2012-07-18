@@ -28,14 +28,14 @@ varNamed' :: (SMTType t,Typeable t) => t -> Text -> SMTAnnotation t -> SMT (SMTE
 varNamed' u name ann = do
   let sort = getSort u ann
       tps = declareType u ann
-  modify $ \(c,decl,mp) -> (c,decl,Map.insert name (typeOf u) mp)
+  modifySMT $ \(c,decl,mp) -> (c,decl,Map.insert name (typeOf u) mp)
   mapM_ (\(tp,act) -> do
-            (c,decl,_) <- get
+            (c,decl,_) <- getSMT
             if Prelude.elem tp decl
               then return ()
               else (do
                        act
-                       modify (\(c',decl',mp') -> (c',tp:decl',mp'))
+                       modifySMT (\(c',decl',mp') -> (c',tp:decl',mp'))
                    )
         ) (Prelude.reverse tps)
   declareFun name [] sort
@@ -45,28 +45,28 @@ varNamed' u name ann = do
 -- | Create a annotated variable
 varAnn :: (SMTType t,Typeable t) => SMTAnnotation t -> SMT (SMTExpr t)
 varAnn ann = do
-  (c,decl,mp) <- get
-  put (c+1,decl,mp)
+  (c,decl,mp) <- getSMT
+  putSMT (c+1,decl,mp)
   let name = T.pack $ "var"++show c
   varNamedAnn name ann
 
 -- | Create a fresh new variable
 var :: (SMTType t,Typeable t,Unit (SMTAnnotation t)) => SMT (SMTExpr t)
 var = do
-  (c,decl,mp) <- get
-  put (c+1,decl,mp)
+  (c,decl,mp) <- getSMT
+  putSMT (c+1,decl,mp)
   let name = T.pack $ "var"++show c
   varNamed name
 
 argVarsAnn :: Args a => ArgAnnotation a -> SMT a
 argVarsAnn ann = do
-  (c,decl,mp) <- get
+  (c,decl,mp) <- getSMT
   let ((nc,act),res) = foldExprs 
                        (\(cc,act) u ann' 
                             -> let name = T.pack $ "var"++show cc
                                in ((cc+1,act >> varNamed' (getUndef u) name ann' >> return ())
                                   ,Var name ann')) (c,return ()) undefined ann
-  put (nc,decl,mp)
+  putSMT (nc,decl,mp)
   act
   return res
 
@@ -116,8 +116,8 @@ setOption opt = putRequest $ L.List $ [L.Symbol "set-option"]
 -- | Create a new interpolation group
 interpolationGroup :: SMT InterpolationGroup
 interpolationGroup = do
-  (c,decl,mp) <- get
-  put (c+1,decl,mp)
+  (c,decl,mp) <- getSMT
+  putSMT (c+1,decl,mp)
   let name = T.pack $ "interp"++show c
   return (InterpolationGroup name)
 
@@ -125,8 +125,8 @@ interpolationGroup = do
 -- the argument and the return type.
 funAnn :: (Args a, SMTType r) => ArgAnnotation a -> SMTAnnotation r -> SMT (SMTExpr (SMTFun a r))
 funAnn annArg annRet = do
-  (c,decl,mp) <- get
-  put (c+1,decl,mp)
+  (c,decl,mp) <- getSMT
+  putSMT (c+1,decl,mp)
   let name = T.pack $ "fun"++show c
       res = Fun name annArg annRet
       
@@ -384,8 +384,8 @@ setLogic name = putRequest $ L.List [L.Symbol "set-logic"
 -- | Given an arbitrary expression, this creates a named version of it and a name to reference it later on.
 named :: (SMTType a,SMTAnnotation a ~ ()) => SMTExpr a -> SMT (SMTExpr a,SMTExpr a)
 named expr = do
-  (c,decl,mp) <- get
-  put (c+1,decl,mp)
+  (c,decl,mp) <- getSMT
+  putSMT (c+1,decl,mp)
   let name = T.pack $ "named"++show c
   return (Named expr name,Var name ())
 
@@ -393,7 +393,7 @@ named expr = do
 --   Note that not all SMT solvers support this.
 getInterpolants :: [SMTExpr Bool] -> SMT [SMTExpr Bool]
 getInterpolants exprs = do
-  (_,_,mp) <- get
+  (_,_,mp) <- getSMT
   putRequest (L.List (L.Symbol "get-interpolants":fmap (\e -> let (r,_) = exprToLisp e 0 in r) exprs))
   L.List res <- parseResponse
   mapM (lispToExprT () (\name -> mp Map.! name)) res
@@ -401,7 +401,7 @@ getInterpolants exprs = do
 -- | After an unsuccessful 'checkSat' this method extracts a proof from the SMT solver that the instance is unsatisfiable.
 getProof :: SMT (SMTExpr Bool)
 getProof = do
-  (_,_,mp) <- get
+  (_,_,mp) <- getSMT
   let mp' = Map.union mp commonTheorems
   putRequest (L.List [L.Symbol "get-proof"])
   res <- parseResponse

@@ -1,26 +1,59 @@
-module Language.SMTLib2.Internals.SMTMonad where
+module Language.SMTLib2.Internals.SMTMonad (
+  SMT(..), askSMT, getSMT, putSMT, modifySMT, MonadSMT(..)
+  ) where
 
 import System.IO (Handle)
 
 import Data.Map (Map)
 import Data.Text as T (Text)
 import Data.Typeable (TypeRep)
-
 import Data.Monoid (Monoid)
+
 import Control.Monad.Trans.Class (lift)
+import Control.Monad.IO.Class
 import Control.Monad.Cont (ContT)
 import Control.Monad.Error (ErrorT, Error)
 import Control.Monad.Trans.Identity (IdentityT)
 import Control.Monad.List (ListT)
 import Control.Monad.Trans.Maybe (MaybeT)
-import Control.Monad.Reader (ReaderT)
+import Control.Monad.Reader (ReaderT, MonadReader(..))
+import Control.Monad.State (MonadState(..), modify)
 import Control.Monad.State.Lazy as Lazy (StateT)
 import Control.Monad.State.Strict as Strict (StateT)
 import Control.Monad.Writer.Lazy as Lazy (WriterT)
 import Control.Monad.Writer.Strict as Strict (WriterT)
+import Control.Monad.Fix (MonadFix(..))
+
+type SMTRead = (Handle, Handle)
+type SMTState = (Integer,[TypeRep],Map T.Text TypeRep)
 
 -- | The SMT monad used for communating with the SMT solver
-type SMT = ReaderT (Handle,Handle) (Lazy.StateT (Integer,[TypeRep],Map T.Text TypeRep) IO)
+newtype SMT a = SMT { runSMT :: ReaderT SMTRead (Lazy.StateT SMTState IO) a }
+
+instance Functor SMT where
+  fmap f = SMT . fmap f . runSMT
+
+instance Monad SMT where
+  return = SMT . return
+  m >>= f = SMT $ (runSMT m) >>= runSMT . f
+
+instance MonadIO SMT where
+  liftIO = SMT . liftIO
+
+instance MonadFix SMT where
+  mfix f = SMT $ mfix (runSMT . f)
+
+askSMT :: SMT SMTRead
+askSMT = SMT ask
+
+getSMT :: SMT SMTState
+getSMT = SMT get
+
+putSMT :: SMTState -> SMT ()
+putSMT = SMT . put
+
+modifySMT :: (SMTState -> SMTState) -> SMT ()
+modifySMT f = SMT $ modify f
 
 -- | Lift an SMT action into an arbitrary monad (like liftIO).
 class Monad m => MonadSMT m where

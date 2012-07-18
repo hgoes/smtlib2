@@ -324,7 +324,7 @@ args xs = L.List xs
 -- | Check if the model is satisfiable (e.g. if there is a value for each variable so that every assertion holds)
 checkSat :: SMT Bool
 checkSat = do
-  (_,hout) <- ask
+  (_,hout) <- askSMT
   clearInput
   putRequest (L.List [L.Symbol "check-sat"])
   res <- liftIO $ BS.hGetLine hout
@@ -347,7 +347,7 @@ stack act = do
 --   If you aren't looking at the command stream for debugging, this will do nothing.
 comment :: String -> SMT ()
 comment msg = do
-  (hin,_) <- ask
+  (hin,_) <- askSMT
   liftIO $ IO.hPutStr hin $ Prelude.unlines (fmap (';':) (Prelude.lines msg))
 
 -- | Spawn a shell command that is used as a SMT solver via stdin/-out to process the given SMT operation.
@@ -365,7 +365,7 @@ withSMTSolver solver f = do
                           , create_group = False
                           }
   (Just hin,Just hout,_,handle) <- createProcess cmd
-  res <- evalStateT (runReaderT (do
+  res <- evalStateT (runReaderT (runSMT $ do
                                  res <- f
                                  putRequest (L.List [L.Symbol "exit"])
                                  return res
@@ -378,7 +378,7 @@ withSMTSolver solver f = do
 
 clearInput :: SMT ()
 clearInput = do
-  (_,hout) <- ask
+  (_,hout) <- askSMT
   r <- liftIO $ hReady hout
   if r
     then (do
@@ -389,14 +389,14 @@ clearInput = do
 putRequest :: L.Lisp -> SMT ()
 putRequest e = do
   clearInput
-  (hin,_) <- ask
+  (hin,_) <- askSMT
   liftIO $ toByteStringIO (BS.hPutStr hin) (mappend (L.fromLispExpr e) flush)
   liftIO $ BS.hPutStrLn hin ""
   liftIO $ hFlush hin
 
 parseResponse :: SMT L.Lisp
 parseResponse = do
-  (_,hout) <- ask
+  (_,hout) <- askSMT
   str <- liftIO $ BS.hGetLine hout
   let continue (Done _ r) = return r
       continue res@(Partial _) = do

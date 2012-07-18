@@ -10,7 +10,7 @@ import Data.Typeable
 import Data.Text as T
 import Data.Word
 import Data.Array
-import Control.Monad.State
+
 import Data.Unit
 
 instance L.ToLisp (SMTExpr t) where
@@ -64,7 +64,7 @@ defConstAnn ann e = do
 -- | Define a new function with a body and custom type annotations for arguments and result.
 defFunAnn :: (Args a,SMTType r) => ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a r))
 defFunAnn ann_arg ann_res f = do
-  (c,decl,mp) <- get
+  (c,decl,mp) <- getSMT
 
   let name = T.pack $ "fun"++show c
       res = Fun name ann_arg ann_res
@@ -74,7 +74,7 @@ defFunAnn ann_arg ann_res f = do
       (au,tps,c1) = createArgs ann_arg (c+1)
       
       (expr',c2) = exprToLisp (f au) c1
-  put (c2,decl,mp)
+  putSMT (c2,decl,mp)
   defineFun name tps (getSort rtp ann_res) expr'
   return res
 
