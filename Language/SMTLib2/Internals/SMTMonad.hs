@@ -23,6 +23,8 @@ import Control.Monad.State.Strict as Strict (StateT)
 import Control.Monad.Writer.Lazy as Lazy (WriterT)
 import Control.Monad.Writer.Strict as Strict (WriterT)
 import Control.Monad.Fix (MonadFix(..))
+import Control.Applicative (Applicative(..))
+import Control.Monad (ap)
 
 type SMTRead = (Handle, Handle)
 type SMTState = (Integer,[TypeRep],Map T.Text TypeRep)
@@ -42,6 +44,10 @@ instance MonadIO SMT where
 
 instance MonadFix SMT where
   mfix f = SMT $ mfix (runSMT . f)
+
+instance Applicative SMT where
+  pure = return
+  (<*>) = ap
 
 askSMT :: SMT SMTRead
 askSMT = SMT ask
