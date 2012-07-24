@@ -23,7 +23,7 @@ import Language.SMTLib2.Internals.SMTMonad
 class (Eq t,Typeable t) => SMTType t where
   type SMTAnnotation t
   getSort :: t -> SMTAnnotation t -> L.Lisp
-  declareType :: t -> SMTAnnotation t -> [(TypeRep,SMT ())]
+  declareType :: t -> SMTAnnotation t -> SMT ()
   additionalConstraints :: t -> SMTAnnotation t -> SMTExpr t -> [SMTExpr Bool]
   additionalConstraints _ _ _ = []
 
@@ -255,8 +255,28 @@ unpackArgs f x ann i = fst $ foldExprs (\(res,ci) e ann' -> let (p,ni) = f e ann
                                                             in ((res++[p],ni),e)
                                        ) ([],i) x ann
 
-declareArgTypes :: Args a => a -> ArgAnnotation a -> [(TypeRep,SMT ())]
-declareArgTypes arg ann = fst $ foldExprs (\decls e ann -> (decls++(declareType (getUndef e) ann),e)) [] arg ann
+declareArgTypes :: Args a => a -> ArgAnnotation a -> SMT ()
+declareArgTypes arg ann
+  = fst $ foldExprs (\act e ann -> (act >> declareType (getUndef e) ann,e)) (return ()) arg ann
+
+declareType' :: TypeRep -> SMT () -> SMT () -> SMT ()
+declareType' rep act_st act_rec = do
+  let (con,args) = splitTyConApp rep
+  (c,decls,mp) <- getSMT
+  case Map.lookup con decls of
+    Nothing -> do
+      putSMT (c,Map.insert con Set.empty decls,mp)
+      act_st
+    Just done_args -> return ()
+  (c',decls',mp') <- getSMT
+  case Map.lookup con decls' of
+    Nothing -> error $ "Internal error: "++show con++" has been removed from declared types"
+    Just done_args -> if Set.member args done_args
+                      then return ()
+                      else (do
+                               putSMT (c',Map.insert con (Set.insert args done_args) decls',mp')
+                               act_rec)
+      
 
 createArgs :: Args a => ArgAnnotation a -> Integer -> (a,[(Text,L.Lisp)],Integer)
 createArgs ann i = let ((tps,ni),res) = foldExprs (\(tps,ci) e ann' -> let name = T.pack $ "arg"++show ci
@@ -369,7 +389,7 @@ withSMTSolver solver f = do
                                  res <- f
                                  putRequest (L.List [L.Symbol "exit"])
                                  return res
-                                ) (hin,hout)) (0,[],Map.empty)
+                                ) (hin,hout)) (0,Map.empty,Map.empty)
   hClose hin
   hClose hout
   terminateProcess handle

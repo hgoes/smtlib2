@@ -20,7 +20,7 @@ import qualified Data.Bitstream as BitS
 instance SMTType Bool where
   type SMTAnnotation Bool = ()
   getSort _ _ = L.Symbol "Bool"
-  declareType u _ = [(typeOf u,return ())]
+  declareType u _ = return ()
 
 instance SMTValue Bool where
   unmangle (L.Symbol "true") _ = return $ Just True
@@ -34,7 +34,7 @@ instance SMTValue Bool where
 instance SMTType Integer where
   type SMTAnnotation Integer = ()
   getSort _ _ = L.Symbol "Int"
-  declareType u _ = [(typeOf u,return ())]
+  declareType u _ = return ()
 
 instance SMTValue Integer where
   unmangle (L.Number (L.I v)) _ = return $ Just v
@@ -68,7 +68,7 @@ instance SMTOrd Integer where
 instance SMTType (Ratio Integer) where
   type SMTAnnotation (Ratio Integer) = ()
   getSort _ _ = L.Symbol "Real"
-  declareType u _ = [(typeOf u,return ())]
+  declareType u _ = return ()
 
 instance SMTValue (Ratio Integer) where
   unmangle (L.Number (L.I v)) _ = return $ Just $ fromInteger v
@@ -121,9 +121,9 @@ instance (Args idx,SMTType val) => SMTType (SMTArray idx val) where
       getIdx _ = undefined
       getVal :: SMTArray i v -> v
       getVal _ = undefined
-  declareType u (anni,annv) = [(mkTyConApp (mkTyCon "Data.Array.Array") [],return ())] ++
-                              declareArgTypes (getIdx u) anni ++
-                              declareType (getVal u) annv
+  declareType u (anni,annv) = do
+      declareArgTypes (getIdx u) anni
+      declareType (getVal u) annv
     where
       getIdx :: SMTArray i v -> i
       getIdx _ = undefined
@@ -140,12 +140,12 @@ bv n = L.List [L.Symbol "_"
 instance SMTType Word8 where
   type SMTAnnotation Word8 = ()
   getSort _ _ = bv 8
-  declareType u _ = [(typeOf u,return ())]
+  declareType u _ = return ()
 
 instance SMTType Int8 where
   type SMTAnnotation Int8 = ()
   getSort _ _ = bv 8
-  declareType u _ = [(typeOf u,return ())]
+  declareType u _ = return ()
 
 withUndef1 :: (a -> g a) -> g a
 withUndef1 f = f undefined
@@ -220,12 +220,12 @@ instance SMTOrd Int8 where
 instance SMTType Word16 where
   type SMTAnnotation Word16 = ()
   getSort _ _ = bv 16
-  declareType u _ = [(typeOf u,return ())]
+  declareType u _ = return ()
 
 instance SMTType Int16 where
   type SMTAnnotation Int16 = ()
   getSort _ _ = bv 16
-  declareType u _ = [(typeOf u,return ())]
+  declareType u _ = return ()
 
 instance SMTValue Word16 where
   unmangle = getBVValue
@@ -253,12 +253,12 @@ instance SMTOrd Int16 where
 instance SMTType Word32 where
   type SMTAnnotation Word32 = ()
   getSort _ _ = bv 32
-  declareType u _ = [(typeOf u,return ())]
+  declareType u _ = return ()
 
 instance SMTType Int32 where
   type SMTAnnotation Int32 = ()
   getSort _ _ = bv 32
-  declareType u _ = [(typeOf u,return ())]
+  declareType u _ = return ()
 
 instance SMTValue Word32 where
   unmangle = getBVValue
@@ -286,12 +286,12 @@ instance SMTOrd Int32 where
 instance SMTType Word64 where
   type SMTAnnotation Word64 = ()
   getSort _ _ = bv 64
-  declareType u _ = [(typeOf u,return ())]
+  declareType u _ = return ()
   
 instance SMTType Int64 where
   type SMTAnnotation Int64 = ()
   getSort _ _ = bv 64
-  declareType u _ = [(typeOf u,return ())]
+  declareType u _ = return ()
 
 instance SMTValue Word64 where
   unmangle = getBVValue
@@ -443,10 +443,9 @@ instance SMTType a => SMTType (Maybe a) where
     where
       undef :: Maybe a -> a
       undef _ = undefined
-  declareType u ann = let rec = declareType (undef u) ann
-                      in [(mkTyConApp (mkTyCon "Maybe") [],
-                           declareDatatypes ["a"] [("Maybe",[("Nothing",[]),("Just",[("fromJust",L.Symbol "a")])])])] ++
-                                        rec
+  declareType u ann = declareType' (typeOf u)
+                      (declareDatatypes ["a"] [("Maybe",[("Nothing",[]),("Just",[("fromJust",L.Symbol "a")])])])
+                      (declareType (undef u) ann)
     where
       undef :: Maybe a -> a
       undef _ = undefined
@@ -473,7 +472,7 @@ undefArg _ = undefined
 instance (Typeable a,SMTType a) => SMTType [a] where
   type SMTAnnotation [a] = SMTAnnotation a
   getSort u ann = L.List [L.Symbol "List",getSort (undefArg u) ann]
-  declareType u ann = (typeOf u,return ()):declareType (undefArg u) ann
+  declareType u ann = declareType (undefArg u) ann
 
 instance (Typeable a,SMTValue a) => SMTValue [a] where
   unmangle (L.Symbol "nil") _ = return $ Just []
@@ -496,7 +495,7 @@ newtype ByteStringLen = ByteStringLen Int deriving (Show,Eq,Ord,Num)
 instance SMTType BS.ByteString where
     type SMTAnnotation BS.ByteString = ByteStringLen
     getSort _ (ByteStringLen l) = bv (l*8)
-    declareType u _ = [(typeOf u,return ())]
+    declareType u _ = return ()
 
 instance SMTValue BS.ByteString where
     unmangle v (ByteStringLen l) = return $ fmap (int2bs l) (getBVValue' (l*8) v)
@@ -520,12 +519,12 @@ newtype BitstreamLen = BitstreamLen Int deriving (Show,Eq,Ord,Num)
 instance SMTType (BitS.Bitstream BitS.Left) where
     type SMTAnnotation (BitS.Bitstream BitS.Left) = BitstreamLen
     getSort _ (BitstreamLen l) = bv l
-    declareType u _ = [(typeOf u,return ())]
+    declareType u _ = return ()
 
 instance SMTType (BitS.Bitstream BitS.Right) where
     type SMTAnnotation (BitS.Bitstream BitS.Right) = BitstreamLen
     getSort _ (BitstreamLen l) = bv l
-    declareType u _ = [(typeOf u,return ())]
+    declareType u _ = return ()
 
 instance SMTValue (BitS.Bitstream BitS.Left) where
     unmangle v (BitstreamLen l) = return $ fmap (BitS.fromNBits l) (getBVValue' l v :: Maybe Integer)

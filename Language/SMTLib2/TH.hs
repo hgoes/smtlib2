@@ -17,7 +17,8 @@ import Data.Typeable
 import Data.List as List
 import Data.Maybe (catMaybes)
 
-type ExtrType = Either [(Name,[(Name,Type)])] (Name,Name,Type)
+data ExtrType = ExtrType { extrArguments :: [Name]
+                         , extrContent :: Either [(Name,[(Name,Type)])] (Name,Name,Type) }
 
 -- | Given a data-type, this function derives an instance of both 'SMTType' and 'SMTValue' for it.
 --   Example: @ $(deriveSMT 'MyType) @
@@ -26,12 +27,15 @@ deriveSMT name = do
   tp <- extractDataType name
   pat <- newName "u"
   ann <- newName "ann"
-  let decls = [instanceD (cxt []) (appT (conT ''SMTType) (conT name))
+  let fullType = List.foldl appT (conT name) (fmap (\n -> varT n) (extrArguments tp))
+      decls = [instanceD (cxt $ List.concat [[classP ''SMTType [varT n]
+                                             ,equalP ((conT ''SMTAnnotation) `appT` (varT n)) (tupleT 0)] | n <- extrArguments tp ]) (appT (conT ''SMTType) fullType)
                [funD 'getSort [clause [wildP,varP ann] (normalB $ generateSortExpr name tp ann) []],
                 funD 'declareType [clause [varP pat,varP ann] (normalB $ generateDeclExpr name tp pat ann) []],
-                tySynInstD ''SMTAnnotation [conT name] (tupleT 0)
+                tySynInstD ''SMTAnnotation [fullType] (generateAnnotationType tp)
                ],
-               instanceD (cxt []) (appT (conT ''SMTValue) (conT name))
+               instanceD (cxt $ List.concat [[classP ''SMTValue [varT n]
+                                             ,equalP ((conT ''SMTAnnotation) `appT` (varT n)) (tupleT 0)] | n <- extrArguments tp]) (appT (conT ''SMTValue) fullType)
                [generateMangleFun tp,
                 generateUnmangleFun tp]
               ]
@@ -60,43 +64,46 @@ extractDataType :: Name -> Q ExtrType
 extractDataType name = do
   inf <- reify name
   return $ case inf of
-    TyConI (DataD _ _ _ cons _)
-      -> Left $ fmap (\con -> case con of
-                         RecC n vars -> (n,fmap (\(vn,_,tp) -> (vn,tp)) vars)
-                         NormalC n [] -> (n,[])
-                         _ -> error $ "Can't derive SMT classes for constructor "++show con
-                     ) cons
+    TyConI (DataD _ _ vars cons _)
+      -> ExtrType { extrArguments = fmap getTyVar vars
+                  , extrContent = Left $ fmap (\con -> case con of
+                                                  RecC n vars -> (n,fmap (\(vn,_,tp) -> (vn,tp)) vars)
+                                                  NormalC n [] -> (n,[])
+                                                  _ -> error $ "Can't derive SMT classes for constructor "++show con
+                                              ) cons }
     TyConI (NewtypeD _ name _ (NormalC con [(_,tp)]) _)
-      -> Right (name,con,tp)
+      -> ExtrType { extrArguments = []
+                  , extrContent = Right (name,con,tp) }
     _ -> error $ "Can't derive SMT classes for "++show inf
+  where
+    getTyVar :: TyVarBndr -> Name
+    getTyVar (PlainTV n) = n
+    getTyVar (KindedTV n _) = n
 
 generateSortExpr :: Name -> ExtrType -> Name -> Q Exp
-generateSortExpr name (Left _) ann = [| L.Symbol $(stringE $ nameBase name) |]
-generateSortExpr name (Right (name',con,tp)) ann = [| getSort (undefined :: $(return tp)) $(varE ann) |]
+generateSortExpr name (ExtrType { extrContent = Left _ }) ann = [| L.Symbol $(stringE $ nameBase name) |]
+generateSortExpr name (ExtrType { extrContent = Right (name',con,tp) }) ann = [| getSort (undefined :: $(return tp)) $(varE ann) |]
 
 generateDeclExpr :: Name -> ExtrType -> Name -> Name -> Q Exp
-generateDeclExpr dname (Left cons) pat ann
-  = Prelude.foldl (\cur tp -> [| $(cur) ++ declareType (undefined :: $(return tp)) $(tupE []) |])
-    [| [(typeOf $(varE pat),declareDatatypes [] [(T.pack $(stringE $ nameBase dname),
-                                                  $(listE [ tupE [ [| T.pack $(stringE $ nameBase cname) |],  
-                                                                   listE [ tupE [ stringE $ nameBase sname,
-                                                                                  appsE [ [| getSort |],
-                                                                                          [| (undefined :: $(return tp)) |],
-                                                                                          tupE [] ]
-                                                                                ] 
-                                                                         | (sname,tp) <- sels ]
-                                                                 ]
-                                                          | (cname,sels) <- cons ])
-                                                 )])] |]
-    [ tp
-    | (_,fields) <- cons, 
-      (_,tp) <- fields
-    ]
-generateDeclExpr dname (Right (name,con_name,tp)) pat ann
+generateDeclExpr dname (ExtrType { extrContent = Left cons }) pat ann
+  = [| declareType' (typeOf $(varE pat))
+       (declareDatatypes [] [(T.pack $(stringE $ nameBase dname),
+                              $(listE [ tupE [ [| T.pack $(stringE $ nameBase cname) |],  
+                                               listE [ tupE [ stringE $ nameBase sname,
+                                                              appsE [ [| getSort |],
+                                                                      [| (undefined :: $(return tp)) |],
+                                                                      tupE [] ]
+                                                            ] 
+                                                     | (sname,tp) <- sels ]
+                                             ]
+                                      | (cname,sels) <- cons ])
+                             )])
+       $(doE [ noBindS [| declareType (undefined :: $(return tp)) $(tupE []) |] | (_,fields) <- cons, (_,tp) <- fields ]) |]
+generateDeclExpr dname (ExtrType { extrContent = Right (name,con_name,tp) }) pat ann
   = [| declareType (undefined :: $(return tp)) $(varE ann) |]
 
 generateMangleFun :: ExtrType -> Q Dec
-generateMangleFun (Left cons)
+generateMangleFun (ExtrType { extrContent = Left cons })
   = funD 'mangle [ do
     vars <- mapM (const $ newName "f") fields
     clause [conP cname (fmap varP vars),wildP]
@@ -108,7 +115,7 @@ generateMangleFun (Left cons)
                             |])) []
     | (cname,fields) <- cons
     ]
-generateMangleFun (Right (name,con,tp))
+generateMangleFun (ExtrType { extrContent = Right (name,con,tp) })
   = funD 'mangle [ do
     var <- newName "f"
     ann <- newName "ann"
@@ -116,7 +123,7 @@ generateMangleFun (Right (name,con,tp))
     ]
 
 generateUnmangleFun :: ExtrType -> Q Dec
-generateUnmangleFun (Left cons)
+generateUnmangleFun (ExtrType { extrContent = Left cons })
   = funD 'unmangle 
     [do
        vars <- mapM (const $ do
@@ -132,7 +139,7 @@ generateUnmangleFun (Left cons)
                                  [ noBindS $ appsE [[| return |],appsE [ [| Just |],appsE $ (conE cname):(fmap (varE . snd) vars)] ]]) []
     | (cname,fields) <- cons
     ]
-generateUnmangleFun (Right (name,con,tp))
+generateUnmangleFun (ExtrType { extrContent = Right (name,con,tp) })
   = funD 'unmangle
     [do
        arg <- newName "f"

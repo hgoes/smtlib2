@@ -5,8 +5,9 @@ module Language.SMTLib2.Internals.SMTMonad (
 import System.IO (Handle)
 
 import Data.Map (Map)
+import Data.Set (Set)
 import Data.Text as T (Text)
-import Data.Typeable (TypeRep)
+import Data.Typeable (TypeRep,TyCon)
 import Data.Monoid (Monoid)
 
 import Control.Monad.Trans.Class (lift)
@@ -27,7 +28,7 @@ import Control.Applicative (Applicative(..))
 import Control.Monad (ap)
 
 type SMTRead = (Handle, Handle)
-type SMTState = (Integer,[TypeRep],Map T.Text TypeRep)
+type SMTState = (Integer,Map TyCon (Set [TypeRep]),Map T.Text TypeRep)
 
 -- | The SMT monad used for communating with the SMT solver
 newtype SMT a = SMT { runSMT :: ReaderT SMTRead (Lazy.StateT SMTState IO) a }

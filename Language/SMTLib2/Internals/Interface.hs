@@ -27,17 +27,7 @@ varNamedAnn name ann = mfix (\e -> varNamed' (getUndef e) name ann)
 varNamed' :: (SMTType t,Typeable t) => t -> Text -> SMTAnnotation t -> SMT (SMTExpr t)
 varNamed' u name ann = do
   let sort = getSort u ann
-      tps = declareType u ann
-  modifySMT $ \(c,decl,mp) -> (c,decl,Map.insert name (typeOf u) mp)
-  mapM_ (\(tp,act) -> do
-            (c,decl,_) <- getSMT
-            if Prelude.elem tp decl
-              then return ()
-              else (do
-                       act
-                       modifySMT (\(c',decl',mp') -> (c',tp:decl',mp'))
-                   )
-        ) (Prelude.reverse tps)
+  declareType u ann
   declareFun name [] sort
   mapM_ assert $ additionalConstraints u ann (Var name ann)
   return (Var name ann)
