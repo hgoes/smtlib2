@@ -32,7 +32,7 @@ deriveSMT name = do
                                              ,equalP ((conT ''SMTAnnotation) `appT` (varT n)) (tupleT 0)] | n <- extrArguments tp ]) (appT (conT ''SMTType) fullType)
                [funD 'getSort [clause [wildP,varP ann] (normalB $ generateSortExpr name tp ann) []],
                 funD 'declareType [clause [varP pat,varP ann] (normalB $ generateDeclExpr name tp pat ann) []],
-                tySynInstD ''SMTAnnotation [fullType] (generateAnnotationType tp)
+                tySynInstD ''SMTAnnotation [fullType] (tupleT 0)
                ],
                instanceD (cxt $ List.concat [[classP ''SMTValue [varT n]
                                              ,equalP ((conT ''SMTAnnotation) `appT` (varT n)) (tupleT 0)] | n <- extrArguments tp]) (appT (conT ''SMTValue) fullType)
@@ -149,7 +149,6 @@ generateUnmangleFun (ExtrType { extrContent = Right (name,con,tp) })
                                                    , noBindS [| return (case $(varE res) of { Nothing -> Nothing ; Just r -> Just ($(conE con) r) }) |]
                                                    ]) []
     ]
-                                                                          
 
 matches :: Q Exp -> Q Pat -> Q Exp
 matches exp pat = do
