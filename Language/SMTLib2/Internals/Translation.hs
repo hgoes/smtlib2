@@ -224,6 +224,16 @@ exprToLisp (BVOr v1 v2) c = let (v1',c') = exprToLisp v1 c
                             in (L.List [L.Symbol "bvor"
                                        ,v1'
                                        ,v2'],c'')
+exprToLisp (BVURem v1 v2) c = let (v1',c') = exprToLisp v1 c
+                                  (v2',c'') = exprToLisp v2 c'
+                              in (L.List [L.Symbol "bvurem"
+                                         ,v1'
+                                         ,v2'],c'')
+exprToLisp (BVSRem v1 v2) c = let (v1',c') = exprToLisp v1 c
+                                  (v2',c'') = exprToLisp v2 c'
+                              in (L.List [L.Symbol "bvsrem"
+                                         ,v1'
+                                         ,v2'],c'')
 exprToLisp (Forall ann f) c = let (arg,tps,nc) = createArgs ann c
                                   (arg',nc') = exprToLisp (f arg) nc
                               in (L.List [L.Symbol "forall"
