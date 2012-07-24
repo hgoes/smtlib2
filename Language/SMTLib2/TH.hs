@@ -123,9 +123,25 @@ generateMangleFun (ExtrType { extrContent = Right (name,con,tp) })
     ]
 
 generateUnmangleFun :: ExtrType -> Q Dec
-generateUnmangleFun (ExtrType { extrContent = Left cons })
-  = funD 'unmangle 
+generateUnmangleFun (ExtrType { extrContent = Left cons }) =
+  do clauses <- genClauses cons
+     let defaultPat = [WildP, WildP]
+     nothing <- [|return Nothing|]
+     return $ FunD 'unmangle (clauses ++ [Clause defaultPat (NormalB nothing) []])
+generateUnmangleFun (ExtrType { extrContent = Right (name,con,tp) })
+  = funD 'unmangle
     [do
+       arg <- newName "f"
+       ann <- newName "ann"
+       res <- newName "r"
+       clause [varP arg,varP ann] (normalB $ doE $ [ bindS (varP res) (appsE [ [| unmangle |],varE arg,varE ann ])
+                                                   , noBindS [| return (case $(varE res) of { Nothing -> Nothing ; Just r -> Just ($(conE con) r) }) |]
+                                                   ]) []
+    ]
+
+genClauses :: [(Name, [(Name, Type)])] -> Q [Clause]
+genClauses cons = sequence $
+     [do
        vars <- mapM (const $ do
                                v1 <- newName "f"
                                v2 <- newName "r"
@@ -138,16 +154,6 @@ generateUnmangleFun (ExtrType { extrContent = Left cons })
                 (normalB $ doE $ [ bindS (conP 'Just [varP r]) (appsE [ [| unmangle |],varE v,tupE [] ]) | (v,r) <- vars ]++
                                  [ noBindS $ appsE [[| return |],appsE [ [| Just |],appsE $ (conE cname):(fmap (varE . snd) vars)] ]]) []
     | (cname,fields) <- cons
-    ]
-generateUnmangleFun (ExtrType { extrContent = Right (name,con,tp) })
-  = funD 'unmangle
-    [do
-       arg <- newName "f"
-       ann <- newName "ann"
-       res <- newName "r"
-       clause [varP arg,varP ann] (normalB $ doE $ [ bindS (varP res) (appsE [ [| unmangle |],varE arg,varE ann ])
-                                                   , noBindS [| return (case $(varE res) of { Nothing -> Nothing ; Just r -> Just ($(conE con) r) }) |]
-                                                   ]) []
     ]
 
 matches :: Q Exp -> Q Pat -> Q Exp
