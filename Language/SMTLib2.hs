@@ -33,7 +33,7 @@ module Language.SMTLib2
          SMTArray,
          Constructor,
          Field,
-         Args(..),LiftArgs(..),ArgAnnotation,Unpacked,
+         Args(..),LiftArgs(..),
          -- * Environment
          withSMTSolver,
          setOption,setLogic,

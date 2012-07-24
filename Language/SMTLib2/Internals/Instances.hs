@@ -20,7 +20,7 @@ import qualified Data.Bitstream as BitS
 instance SMTType Bool where
   type SMTAnnotation Bool = ()
   getSort _ _ = L.Symbol "Bool"
-  declareType u _ = return ()
+  declareType _ _ = return ()
 
 instance SMTValue Bool where
   unmangle (L.Symbol "true") _ = return $ Just True
@@ -34,13 +34,13 @@ instance SMTValue Bool where
 instance SMTType Integer where
   type SMTAnnotation Integer = ()
   getSort _ _ = L.Symbol "Int"
-  declareType u _ = return ()
+  declareType _ _ = return ()
 
 instance SMTValue Integer where
   unmangle (L.Number (L.I v)) _ = return $ Just v
   unmangle (L.List [L.Symbol "-"
                    ,L.Number (L.I v)]) _ = return $ Just $ - v
-  unmangle e _ = return Nothing
+  unmangle _ _ = return Nothing
   mangle v _
     | v < 0 = L.List [L.Symbol "-"
                      ,L.toLisp (-v)]
@@ -68,7 +68,7 @@ instance SMTOrd Integer where
 instance SMTType (Ratio Integer) where
   type SMTAnnotation (Ratio Integer) = ()
   getSort _ _ = L.Symbol "Real"
-  declareType u _ = return ()
+  declareType _ _ = return ()
 
 instance SMTValue (Ratio Integer) where
   unmangle (L.Number (L.I v)) _ = return $ Just $ fromInteger v
@@ -140,12 +140,12 @@ bv n = L.List [L.Symbol "_"
 instance SMTType Word8 where
   type SMTAnnotation Word8 = ()
   getSort _ _ = bv 8
-  declareType u _ = return ()
+  declareType _ _ = return ()
 
 instance SMTType Int8 where
   type SMTAnnotation Int8 = ()
   getSort _ _ = bv 8
-  declareType u _ = return ()
+  declareType _ _ = return ()
 
 withUndef1 :: (a -> g a) -> g a
 withUndef1 f = f undefined
@@ -220,12 +220,12 @@ instance SMTOrd Int8 where
 instance SMTType Word16 where
   type SMTAnnotation Word16 = ()
   getSort _ _ = bv 16
-  declareType u _ = return ()
+  declareType _ _ = return ()
 
 instance SMTType Int16 where
   type SMTAnnotation Int16 = ()
   getSort _ _ = bv 16
-  declareType u _ = return ()
+  declareType _ _ = return ()
 
 instance SMTValue Word16 where
   unmangle = getBVValue
@@ -253,12 +253,12 @@ instance SMTOrd Int16 where
 instance SMTType Word32 where
   type SMTAnnotation Word32 = ()
   getSort _ _ = bv 32
-  declareType u _ = return ()
+  declareType _ _ = return ()
 
 instance SMTType Int32 where
   type SMTAnnotation Int32 = ()
   getSort _ _ = bv 32
-  declareType u _ = return ()
+  declareType _ _ = return ()
 
 instance SMTValue Word32 where
   unmangle = getBVValue
@@ -286,12 +286,12 @@ instance SMTOrd Int32 where
 instance SMTType Word64 where
   type SMTAnnotation Word64 = ()
   getSort _ _ = bv 64
-  declareType u _ = return ()
+  declareType _ _ = return ()
   
 instance SMTType Int64 where
   type SMTAnnotation Int64 = ()
   getSort _ _ = bv 64
-  declareType u _ = return ()
+  declareType _ _ = return ()
 
 instance SMTValue Word64 where
   unmangle = getBVValue
@@ -322,7 +322,7 @@ instance Num (SMTExpr Word8) where
   (-) = BVSub
   (*) = BVMul
   abs x = x
-  signum x = Const 1 ()
+  signum _ = Const 1 ()
 
 instance Num (SMTExpr Int8) where
   fromInteger x = Const (fromInteger x) ()
@@ -338,7 +338,7 @@ instance Num (SMTExpr Word16) where
   (-) = BVSub
   (*) = BVMul
   abs x = x
-  signum x = Const 1 ()
+  signum _ = Const 1 ()
 
 instance Num (SMTExpr Int16) where
   fromInteger x = Const (fromInteger x) ()
@@ -354,7 +354,7 @@ instance Num (SMTExpr Word32) where
   (-) = BVSub
   (*) = BVMul
   abs x = x
-  signum x = Const 1 ()
+  signum _ = Const 1 ()
 
 instance Num (SMTExpr Int32) where
   fromInteger x = Const (fromInteger x) ()
@@ -370,7 +370,7 @@ instance Num (SMTExpr Word64) where
   (-) = BVSub
   (*) = BVMul
   abs x = x
-  signum x = Const 1 ()
+  signum _ = Const 1 ()
 
 instance Num (SMTExpr Int64) where
   fromInteger x = Const (fromInteger x) ()
@@ -422,7 +422,7 @@ instance (LiftArgs a,LiftArgs b,LiftArgs c) => LiftArgs (a,b,c) where
 
 instance Args a => Args [a] where
   type ArgAnnotation [a] = [ArgAnnotation a]
-  foldExprs f s _ [] = (s,[])
+  foldExprs _ s _ [] = (s,[])
   foldExprs f s ~(x:xs) (ann:anns) = let (s',x') = foldExprs f s x ann
                                          (s'',xs') = foldExprs f s' xs anns
                                      in (s'',x':xs')
@@ -495,17 +495,17 @@ newtype ByteStringLen = ByteStringLen Int deriving (Show,Eq,Ord,Num)
 instance SMTType BS.ByteString where
     type SMTAnnotation BS.ByteString = ByteStringLen
     getSort _ (ByteStringLen l) = bv (l*8)
-    declareType u _ = return ()
+    declareType _ _ = return ()
 
 instance SMTValue BS.ByteString where
-    unmangle v (ByteStringLen l) = return $ fmap (int2bs l) (getBVValue' (l*8) v)
+    unmangle v (ByteStringLen l) = return $ fmap int2bs (getBVValue' (l*8) v)
         where
-          int2bs :: Int -> Integer -> BS.ByteString
-          int2bs l v = BS.pack $ fmap (\i -> fromInteger $ v `shiftR` i) (reverse [0..(l-1)])
+          int2bs :: Integer -> BS.ByteString
+          int2bs cv = BS.pack $ fmap (\i -> fromInteger $ cv `shiftR` i) (reverse [0..(l-1)])
     mangle v (ByteStringLen l) = putBVValue' (l*8) (bs2int v)
         where
           bs2int :: BS.ByteString -> Integer
-          bs2int = BS.foldl (\v w -> (v `shiftL` 8) .|. (fromIntegral w)) 0
+          bs2int = BS.foldl (\cv w -> (cv `shiftL` 8) .|. (fromIntegral w)) 0
 
 instance Concatable BS.ByteString BS.ByteString where
     type ConcatResult BS.ByteString BS.ByteString = BS.ByteString
@@ -519,12 +519,12 @@ newtype BitstreamLen = BitstreamLen Int deriving (Show,Eq,Ord,Num)
 instance SMTType (BitS.Bitstream BitS.Left) where
     type SMTAnnotation (BitS.Bitstream BitS.Left) = BitstreamLen
     getSort _ (BitstreamLen l) = bv l
-    declareType u _ = return ()
+    declareType _ _ = return ()
 
 instance SMTType (BitS.Bitstream BitS.Right) where
     type SMTAnnotation (BitS.Bitstream BitS.Right) = BitstreamLen
     getSort _ (BitstreamLen l) = bv l
-    declareType u _ = return ()
+    declareType _ _ = return ()
 
 instance SMTValue (BitS.Bitstream BitS.Left) where
     unmangle v (BitstreamLen l) = return $ fmap (BitS.fromNBits l) (getBVValue' l v :: Maybe Integer)

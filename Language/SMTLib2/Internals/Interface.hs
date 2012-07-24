@@ -15,7 +15,6 @@ import qualified Data.AttoLisp as L
 import Data.Unit
 import Data.Word
 import Data.List (genericReplicate)
-import qualified Data.Bitstream as BitS
 
 -- | Create a new named variable
 varNamed :: (SMTType t,Typeable t,Unit (SMTAnnotation t)) => Text -> SMT (SMTExpr t)
@@ -52,9 +51,9 @@ argVarsAnn :: Args a => ArgAnnotation a -> SMT a
 argVarsAnn ann = do
   (c,decl,mp) <- getSMT
   let ((nc,act),res) = foldExprs 
-                       (\(cc,act) u ann' 
+                       (\(cc,act') u ann' 
                             -> let name = T.pack $ "var"++show cc
-                               in ((cc+1,act >> varNamed' (getUndef u) name ann' >> return ())
+                               in ((cc+1,act' >> varNamed' (getUndef u) name ann' >> return ())
                                   ,Var name ann')) (c,return ()) undefined ann
   putSMT (nc,decl,mp)
   act

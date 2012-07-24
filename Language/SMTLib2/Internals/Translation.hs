@@ -92,7 +92,7 @@ exprsToLisp (e:es) c = let (e',c') = exprToLisp e c
                        in (e':es',c'')
 
 exprToLisp :: SMTExpr t -> Integer -> (L.Lisp,Integer)
-exprToLisp (Var name ann) c = (L.Symbol name,c)
+exprToLisp (Var name _) c = (L.Symbol name,c)
 exprToLisp (Const x ann) c = (mangle x ann,c)
 exprToLisp (Eq l r) c = let (l',c') = exprToLisp l c
                             (r',c'') = exprToLisp r c'
@@ -196,12 +196,12 @@ exprToLisp (BVSGT l r) c = let (l',c') = exprToLisp l c
 exprToLisp (BVSHL l r) c = let (l',c') = exprToLisp l c
                                (r',c'') = exprToLisp r c'
                            in (L.List [L.Symbol "bvshl",l',r'],c'')
-exprToLisp (BVExtract i j ann v) c = let (v',c') = exprToLisp v c
-                                     in (L.List [L.List [L.Symbol "_"
-                                                        ,L.Symbol "extract"
-                                                        ,L.toLisp i
-                                                        ,L.toLisp j]
-                                                ,v'],c')
+exprToLisp (BVExtract i j _ v) c = let (v',c') = exprToLisp v c
+                                   in (L.List [L.List [L.Symbol "_"
+                                                      ,L.Symbol "extract"
+                                                      ,L.toLisp i
+                                                      ,L.toLisp j]
+                                              ,v'],c')
 exprToLisp (BVConcat v1 v2) c = let (v1',c') = exprToLisp v1 c
                                     (v2',c'') = exprToLisp v2 c'
                                 in (L.List [L.Symbol "concat"
@@ -237,17 +237,18 @@ exprToLisp (Exists ann f) c = let (arg,tps,nc) = createArgs ann c
                                                   | (name,tp) <- tps ]
                                          ,arg'],nc')
 exprToLisp (Let ann x f) c = let (arg,tps,nc) = createArgs ann c
-                                 (arg',nc') = unpackArgs (\e ann' cc -> exprToLisp e cc
+                                 (arg',nc') = unpackArgs (\e _ cc -> exprToLisp e cc
                                                          ) x ann nc
                                  (arg'',nc'') = exprToLisp (f arg) nc'
                              in (L.List [L.Symbol "let"
                                         ,L.List [L.List [L.Symbol name,lisp] | ((name,_),lisp) <- Prelude.zip tps arg' ]
                                         ,arg''],nc'')
 exprToLisp (Fun name _ _) c = (L.Symbol name,c)
-exprToLisp (App (Fun name arg_ann res_ann) x) c = let ~(x',c') = unpackArgs (\e _ i -> exprToLisp e i) x arg_ann c
-                                                  in if Prelude.null x'
-                                                     then (L.Symbol name,c')
-                                                     else (L.List $ (L.Symbol name):x',c')
+exprToLisp (App (Fun name arg_ann _) x) c = let ~(x',c') = unpackArgs (\e _ i -> exprToLisp e i) x arg_ann c
+                                            in if Prelude.null x'
+                                               then (L.Symbol name,c')
+                                               else (L.List $ (L.Symbol name):x',c')
+exprToLisp (App _ _) c = error "Internal smtlib2 error: Left hand side of function application is not a function"
 exprToLisp (ConTest (Constructor name) e) c = let (e',c') = exprToLisp e c
                                               in (L.List [L.Symbol $ T.append "is-" name
                                                          ,e'],c')
@@ -327,6 +328,7 @@ lispToExprU f g l
                 L.List [L.Symbol "bvsge",lhs,rhs] -> fmap Just $ binBV BVSGE g lhs rhs >>= f
                 L.List [L.Symbol "bvsgt",lhs,rhs] -> fmap Just $ binBV BVSGT g lhs rhs >>= f
                 L.List (L.Symbol fn:args) -> fmap Just $ fnToExpr f g fn args
+                _ -> return Nothing
               ]
 
 asBV :: Typeable a => (forall b. (SMTBV b,Typeable b) => SMTExpr b -> c) -> SMTExpr a -> c
@@ -469,7 +471,7 @@ lispToExprT ann g l = do
         replSymbol name name' (L.List xs) = L.List (fmap (replSymbol name name') xs)
         replSymbol _ _ x = x
       
-        letToExpr g (L.List [L.Symbol name,expr]:rest) arg
+        letToExpr g' (L.List [L.Symbol name,expr]:rest) arg
           = do
             res <- lispToExprU (\expr' -> do
                                    rest' <- letToExpr (\txt -> if txt==name
@@ -478,10 +480,12 @@ lispToExprT ann g l = do
                                    return $ Let (extractAnnotation expr') expr' (\var@(Var name' _) -> replaceName (\n -> if n==name 
                                                                                                                           then name' 
                                                                                                                           else n) rest')
-                               ) g expr
+                               ) g' expr
             case res of
               Just r -> return r
+              Nothing -> error $ "Unparseable expression "++show expr++" in let expression"
         letToExpr g [] arg = lispToExprT ann g arg
+        letToExpr _ (x:xs) _ = error $ "Unparseable entry "++show x++" in let expression"
 
 extractAnnotation :: SMTExpr a -> SMTAnnotation a
 extractAnnotation (Var _ ann) = ann

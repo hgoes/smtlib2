@@ -11,7 +11,6 @@ import Data.Monoid
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Text as T
-import Data.Bits
 import Data.Typeable
 import Data.Map as Map hiding (assocs)
 import Data.Set as Set
@@ -166,7 +165,7 @@ instance Eq a => Eq (SMTExpr a) where
     (==) (BVSGE l1 r1) (BVSGE l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
     (==) (BVSGT l1 r1) (BVSGT l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
     (==) (BVSHL l1 r1) (BVSHL l2 r2) = l1 == l2 && r1 == r2
-    (==) (BVExtract l1 u1 ann1 e1) (BVExtract l2 u2 ann2 e2) = l1 == l2 && u1 == u2 && eqExpr e1 e2
+    (==) (BVExtract l1 u1 _ e1) (BVExtract l2 u2 _ e2) = l1 == l2 && u1 == u2 && eqExpr e1 e2
     (==) (BVConcat l1 r1) (BVConcat l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
     (==) (BVConcats x) (BVConcats y) = eqExprs x y
     (==) (BVXor l1 r1) (BVXor l2 r2) = l1 == l2 && r1 == r2
@@ -225,6 +224,7 @@ instance SMTInfo SMTSolverName where
     res <- parseResponse
     case res of
       L.List [L.Symbol ":name",L.String name] -> return $ T.unpack name
+      _ -> error "Invalid solver response to 'get-info' name query"
 
 -- | The version of the SMT solver
 data SMTSolverVersion = SMTSolverVersion deriving (Show,Eq,Ord)
@@ -236,6 +236,7 @@ instance SMTInfo SMTSolverVersion where
     res <- parseResponse
     case res of
       L.List [L.Symbol ":version",L.String name] -> return $ T.unpack name
+      _ -> error "Invalid solver response to 'get-info' version query"
 
 -- | Instances of this class may be used as arguments for constructed functions and quantifiers.
 class (Eq a,Typeable a) => Args a where
@@ -257,33 +258,33 @@ unpackArgs f x ann i = fst $ foldExprs (\(res,ci) e ann' -> let (p,ni) = f e ann
 
 declareArgTypes :: Args a => a -> ArgAnnotation a -> SMT ()
 declareArgTypes arg ann
-  = fst $ foldExprs (\act e ann -> (act >> declareType (getUndef e) ann,e)) (return ()) arg ann
+  = fst $ foldExprs (\act e ann' -> (act >> declareType (getUndef e) ann',e)) (return ()) arg ann
 
 declareType' :: TypeRep -> SMT () -> SMT () -> SMT ()
 declareType' rep act_st act_rec = do
-  let (con,args) = splitTyConApp rep
+  let (con,cargs) = splitTyConApp rep
   (c,decls,mp) <- getSMT
   case Map.lookup con decls of
     Nothing -> do
       putSMT (c,Map.insert con Set.empty decls,mp)
       act_st
-    Just done_args -> return ()
+    Just _ -> return ()
   (c',decls',mp') <- getSMT
   case Map.lookup con decls' of
     Nothing -> error $ "Internal error: "++show con++" has been removed from declared types"
-    Just done_args -> if Set.member args done_args
+    Just done_args -> if Set.member cargs done_args
                       then return ()
                       else (do
-                               putSMT (c',Map.insert con (Set.insert args done_args) decls',mp')
+                               putSMT (c',Map.insert con (Set.insert cargs done_args) decls',mp')
                                act_rec)
       
 
 createArgs :: Args a => ArgAnnotation a -> Integer -> (a,[(Text,L.Lisp)],Integer)
-createArgs ann i = let ((tps,ni),res) = foldExprs (\(tps,ci) e ann' -> let name = T.pack $ "arg"++show ci
-                                                                           sort = getSort (getUndef e) ann'
-                                                                       in ((tps++[(name,sort)],ci+1),Var name ann')
+createArgs ann i = let ((tps,ni),res) = foldExprs (\(tps',ci) e ann' -> let name = T.pack $ "arg"++show ci
+                                                                            sort' = getSort (getUndef e) ann'
+                                                                        in ((tps'++[(name,sort')],ci+1),Var name ann')
                                                   ) ([],i) (error "Evaluated the argument to createArgs") ann
-               in (res,tps,ni)
+                   in (res,tps,ni)
 
 class Args a => LiftArgs a where
   type Unpacked a
@@ -333,8 +334,8 @@ declareDatatypes params dts
                            ++ [ L.List $ [L.Symbol conName] 
                                 ++ [ L.List [L.Symbol fieldName,tp]
                                    | (fieldName,tp) <- fields ]
-                              | (conName,fields) <- cons ]
-                         | (name,cons) <- dts ]
+                              | (conName,fields) <- constructor ]
+                         | (name,constructor) <- dts ]
                         ]
 
 args :: [L.Lisp] -> L.Lisp
@@ -393,7 +394,7 @@ withSMTSolver solver f = do
   hClose hin
   hClose hout
   terminateProcess handle
-  waitForProcess handle
+  _ <- waitForProcess handle
   return res
 
 clearInput :: SMT ()
@@ -402,7 +403,7 @@ clearInput = do
   r <- liftIO $ hReady hout
   if r
     then (do
-             liftIO $ BS.hGetSome hout 1024
+             _ <- liftIO $ BS.hGetSome hout 1024
              clearInput)
     else return ()
 
@@ -420,9 +421,9 @@ parseResponse = do
   str <- liftIO $ BS.hGetLine hout
   let continue (Done _ r) = return r
       continue res@(Partial _) = do
-        str <- BS.hGetLine hout
-        continue (feed res str)
-      continue (Fail str ctx msg) = error $ "Error parsing "++show str++" response in "++show ctx++": "++msg
+        line <- BS.hGetLine hout
+        continue (feed res line)
+      continue (Fail str' ctx msg) = error $ "Error parsing "++show str'++" response in "++show ctx++": "++msg
   liftIO $ continue $ parse L.lisp str
 
 -- | Declare a new sort with a specified arity
@@ -482,11 +483,11 @@ foldExpr f x (Implies l r) = let (x1,e1) = foldExpr f x l
 foldExpr f x (Not l) = let (x1,e1) = foldExpr f x l
                        in f x1 (Not e1)
 foldExpr f x (Select l r) = let (x1,e1) = foldExpr f x l
-                                (x2,e2) = foldExprs (\st e ann -> f st e)
+                                (x2,e2) = foldExprs (\st e _ -> f st e)
                                           x1 r undefined
                             in f x2 (Select e1 e2)
 foldExpr f x (Store l r c) = let (x1,e1) = foldExpr f x l
-                                 (x2,e2) = foldExprs (\st e ann -> f st e) x1 r undefined
+                                 (x2,e2) = foldExprs (\st e _ -> f st e) x1 r undefined
                                  (x3,e3) = foldExpr f x2 c
                              in f x3 (Store e1 e2 e3)
 foldExpr f x (AsArray fun) = let (x',fun') = foldExpr f x fun
@@ -552,9 +553,9 @@ foldExpr f x (Forall ann g) = let g' = foldExpr f x . g
 foldExpr f x (Exists ann g) = let g' = foldExpr f x . g
                               in f (fst $ g' $ allOf Undefined) (Exists ann (snd . g'))
 foldExpr f x (Let ann arg g) = let g' = foldExpr f x1 . g
-                                   (x1,e1) = foldExprs (\st e ann -> f st e) x arg ann
+                                   (x1,e1) = foldExprs (\st e _ -> f st e) x arg ann
                                in f (fst $ g' $ allOf Undefined) (Let ann e1 (snd . g'))
-foldExpr f x (App (Fun name arg_ann res_ann) arg) = let (x1,e1) = foldExprs (\st e ann -> f st e) x arg arg_ann
+foldExpr f x (App (Fun name arg_ann res_ann) arg) = let (x1,e1) = foldExprs (\st e _ -> f st e) x arg arg_ann
                                                  in f x1 (App (Fun name arg_ann res_ann) e1)
 foldExpr f x (ConTest c e) = let (x1,e1) = foldExpr f x e
                              in f x1 (ConTest c e1)
