@@ -208,7 +208,7 @@ exprToLisp (BVConcat v1 v2) c = let (v1',c') = exprToLisp v1 c
                                            ,v1'
                                            ,v2'],c'')
 exprToLisp (BVConcats v) c = let (v',c') = exprsToLisp v c
-                             in (L.List (L.Symbol "concat":v'),c')
+                             in (Prelude.foldl1 (\cur nxt -> L.List [L.Symbol "concat",cur,nxt]) v',c')
 exprToLisp (BVXor v1 v2) c = let (v1',c') = exprToLisp v1 c
                                  (v2',c'') = exprToLisp v2 c'
                              in (L.List [L.Symbol "bvxor"
