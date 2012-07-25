@@ -30,7 +30,7 @@ deriveSMT name = do
   let fullType = List.foldl appT (conT name) (fmap (\n -> varT n) (extrArguments tp))
       decls = [instanceD (cxt $ List.concat [[classP ''SMTType [varT n]
                                              ,equalP ((conT ''SMTAnnotation) `appT` (varT n)) (tupleT 0)] | n <- extrArguments tp ]) (appT (conT ''SMTType) fullType)
-               [funD 'getSort [clause [wildP,varP ann] (normalB $ generateSortExpr name tp ann) []],
+               [genGetSort name tp pat ann,
                 funD 'declareType [clause [varP pat,varP ann] (normalB $ generateDeclExpr name tp pat ann) []],
                 tySynInstD ''SMTAnnotation [fullType] (tupleT 0)
                ],
@@ -40,6 +40,24 @@ deriveSMT name = do
                 generateUnmangleFun tp]
               ]
   sequence decls
+
+genGetSort :: Name -> ExtrType -> Name -> Name -> Q Dec
+genGetSort name tp pat ann =
+  do let tVars = extrArguments tp
+         t = List.foldl AppT (ConT name) . fmap VarT $ tVars
+     (witnessCreator, wCDecl) <- fmap unzip $ mapM (genWitnessCreatorDecl t) tVars
+     sortE <- generateSortExpr name tp pat ann witnessCreator
+     return $ FunD 'getSort [Clause [VarP pat, VarP ann] (NormalB $ sortE) (List.concat wCDecl)]
+  where
+     genWitnessCreatorName :: Name -> Q Name
+     genWitnessCreatorName n = newName ("getUndef" ++ nameBase n)
+     genWitnessCreatorDecl :: Type -> Name -> Q (Name, [Dec])
+     genWitnessCreatorDecl t n =
+       do wCName <- genWitnessCreatorName n
+          undef <- [| undefined |]
+          let decl = [SigD wCName (AppT (AppT ArrowT t) (VarT n)) ,
+                      FunD wCName [Clause [WildP] (NormalB undef) []]]
+          return (wCName, decl)
 
 endType :: Type -> Type
 endType (AppT _ tp) = endType tp
@@ -80,9 +98,13 @@ extractDataType name = do
     getTyVar (PlainTV n) = n
     getTyVar (KindedTV n _) = n
 
-generateSortExpr :: Name -> ExtrType -> Name -> Q Exp
-generateSortExpr name (ExtrType { extrContent = Left _ }) ann = [| L.Symbol $(stringE $ nameBase name) |]
-generateSortExpr name (ExtrType { extrContent = Right (name',con,tp) }) ann = [| getSort (undefined :: $(return tp)) $(varE ann) |]
+generateSortExpr :: Name -> ExtrType -> Name -> Name -> [Name] -> Q Exp
+generateSortExpr name (ExtrType { extrContent = Left _ }) pat ann witnessGens =
+  case witnessGens of
+    [] -> [| L.Symbol $(stringE $ nameBase name) |]
+    gens -> appE [| L.List |] (listE ([| L.Symbol $(stringE $ nameBase name) |] : (mkSorts pat witnessGens)))
+  where mkSorts p = fmap (`appE` varE ann) . fmap ([| getSort |] `appE`) . fmap ((`appE` varE p) . varE)
+generateSortExpr name (ExtrType { extrContent = Right (name',con,tp) }) pat ann _ = [| getSort (undefined :: $(return tp)) $(varE ann) |]
 
 data FlatApp = FlatApp Name [FlatApp] | NormalType Type
 

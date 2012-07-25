@@ -311,9 +311,6 @@ data ReusingRecord a = ReusingRecord { someF :: MyTuple (Maybe a) Integer } deri
 $(deriveSMT ''MyTuple)
 $(deriveSMT ''ReusingRecord)
 
--- FIXME: this does not work since the instantiation
--- of a type constructor does not respect the
--- type parameter!
 datatypeTest4 :: SMT (ReusingRecord Integer)
 datatypeTest4 = do
   -- FIXME: this example should work without this.
