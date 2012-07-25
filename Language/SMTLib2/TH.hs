@@ -84,21 +84,47 @@ generateSortExpr :: Name -> ExtrType -> Name -> Q Exp
 generateSortExpr name (ExtrType { extrContent = Left _ }) ann = [| L.Symbol $(stringE $ nameBase name) |]
 generateSortExpr name (ExtrType { extrContent = Right (name',con,tp) }) ann = [| getSort (undefined :: $(return tp)) $(varE ann) |]
 
+data FlatApp = FlatApp Name [FlatApp] | NormalType Type
+
 generateDeclExpr :: Name -> ExtrType -> Name -> Name -> Q Exp
-generateDeclExpr dname (ExtrType { extrContent = Left cons }) pat ann
+generateDeclExpr dname et@(ExtrType { extrContent = Left cons }) pat ann
   = [| declareType' (typeOf $(varE pat))
-       (declareDatatypes [] [(T.pack $(stringE $ nameBase dname),
+       (declareDatatypes $(listE (List.map (stringE . nameBase) $ extrArguments et))
+        [(T.pack $(stringE $ nameBase dname),
                               $(listE [ tupE [ [| T.pack $(stringE $ nameBase cname) |],  
                                                listE [ tupE [ stringE $ nameBase sname,
-                                                              appsE [ [| getSort |],
-                                                                      [| (undefined :: $(return tp)) |],
-                                                                      tupE [] ]
-                                                            ] 
+                                                              fieldSort tp
+                                                             ]
                                                      | (sname,tp) <- sels ]
                                              ]
                                       | (cname,sels) <- cons ])
                              )])
        $(doE [ noBindS [| declareType (undefined :: $(return tp)) $(tupE []) |] | (_,fields) <- cons, (_,tp) <- fields ]) |]
+  where
+    fieldSort :: Type -> ExpQ
+    fieldSort tp =
+      case tp of
+        VarT tpName -> [| L.Symbol $(stringE $ nameBase tpName) |]
+        a@(AppT _ _) -> genAppExpr $ flattenApps a
+        _ -> appsE [ [| getSort |], [| (undefined :: $(return tp)) |], tupE [] ]
+
+    flattenApps :: Type -> FlatApp
+    -- Handles T a
+    flattenApps (AppT (ConT cons) t) = FlatApp cons [flattenApps t]
+    -- Handles T t1 t2 ... = ((T t1) t2) ...
+    flattenApps (AppT t1 t2) =
+      case flattenApps t1 of
+        FlatApp cons tsL -> FlatApp cons (tsL ++ [flattenApps t2])
+        NormalType _ -> error "Can only handle plain type constructors in a type application like T a b .."
+    flattenApps t = NormalType t
+
+    genAppExpr :: FlatApp -> ExpQ
+    genAppExpr (NormalType t) = fieldSort t
+    genAppExpr (FlatApp cons ts) =
+      let ts' = fmap genAppExpr ts
+          cons' = appsE [ [| L.Symbol |], (stringE $ nameBase cons) ]
+      in appsE [ [| L.List |], listE (cons' : ts')]
+
 generateDeclExpr dname (ExtrType { extrContent = Right (name,con_name,tp) }) pat ann
   = [| declareType (undefined :: $(return tp)) $(varE ann) |]
 

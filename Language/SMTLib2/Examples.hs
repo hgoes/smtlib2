@@ -5,6 +5,7 @@ import Control.Monad
 import Control.Monad.Trans
 import Language.SMTLib2
 import Language.SMTLib2.TH
+import Language.SMTLib2.Internals (declareType)
 import Data.Typeable
 import Data.Array
 import Data.Word
@@ -249,3 +250,78 @@ datatypeTest2 = do
   assert $ v1 .==. (constant (MyInt 42))
   checkSat
   getValue v1
+
+-- The following example does not work atm: we have to check for recursion.
+--
+-- After discussion at the office we concluded the
+-- following.
+-- There a two possibilities:
+-- 1. direct recursion as in: T a = T { f :: T a } | ..
+-- 2. mutual recursion as in:
+--    T a = T { f :: S a } | ..
+--    S a = S { g :: T a, h :: Int } | ..
+-- The first case only works if (T a) is used directly and not as subexpression.
+-- The second case requires that a graph of the types is build. The nodes
+-- are the involved type constructors. The edges are then labeled by the bound
+-- parameters. Then we partition the graph into strongly connected components.
+-- One component has to be declared as a single declare-datatypes. The restriction
+-- is that all edges in such a component have the same label.
+-- That means that all type parameters are used in the same way.
+-- A further check on the edges going out of a component is needed:
+--  no such edge should mention any node from that component as parameter. This
+--  would lead to an indirect recursion such as T a = T { f :: Maybe (T a)) },
+--  which is not allowed.
+-- Note that the second case entails the first, since in 1. T would be a component
+-- with one loop to itself.
+--
+
+data BinNode a =
+  BinNode { nodeVal :: a, subTree :: BinTree a }
+  | TerminalBinNode
+    deriving (Eq, Show, Typeable)
+
+data BinTree a = BinTree
+                   { leftBranch :: BinNode a
+                   , rightBranch :: BinNode a
+                   }
+                 deriving (Eq, Show, Typeable)
+
+$(deriveSMT ''BinNode)
+$(deriveSMT ''BinTree)
+
+datatypeTest3 :: SMT (BinNode Integer)
+datatypeTest3 = do
+  v <- var
+  assert $ v .==. (constant tree)
+  checkSat
+  getValue v
+  where
+    tree :: BinNode Integer
+    tree = BinNode 1 $ BinTree
+           (BinNode 2 $ BinTree
+            (BinNode 3 $ BinTree
+             (BinNode 4 $ BinTree TerminalBinNode TerminalBinNode)
+             TerminalBinNode)
+            (BinNode 5 $ BinTree TerminalBinNode TerminalBinNode))
+           (BinNode 6 $ BinTree TerminalBinNode TerminalBinNode)
+
+data MyTuple a b = MyTuple { myFst :: a, mySnd :: b } deriving (Eq, Show, Typeable)
+data ReusingRecord a = ReusingRecord { someF :: MyTuple (Maybe a) Integer } deriving (Eq, Show, Typeable)
+
+$(deriveSMT ''MyTuple)
+$(deriveSMT ''ReusingRecord)
+
+-- FIXME: this does not work since the instantiation
+-- of a type constructor does not respect the
+-- type parameter!
+datatypeTest4 :: SMT (ReusingRecord Integer)
+datatypeTest4 = do
+  -- FIXME: this example should work without this.
+  -- The declarations have to be generated depth first.
+  declareType (undefined :: Maybe Integer) undefined
+  declareType (undefined :: MyTuple Integer Integer) undefined
+  v <- var
+  assert $ v .==. (constant r)
+  checkSat
+  getValue v
+  where r = ReusingRecord $ MyTuple (Just 1) 2
