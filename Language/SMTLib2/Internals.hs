@@ -22,6 +22,8 @@ import Language.SMTLib2.Internals.SMTMonad
 class (Eq t,Typeable t) => SMTType t where
   type SMTAnnotation t
   getSort :: t -> SMTAnnotation t -> L.Lisp
+  getSort u _ = getSortBase u
+  getSortBase :: t -> L.Lisp
   declareType :: t -> SMTAnnotation t -> SMT ()
   additionalConstraints :: t -> SMTAnnotation t -> SMTExpr t -> [SMTExpr Bool]
   additionalConstraints _ _ _ = []
@@ -260,24 +262,15 @@ declareArgTypes :: Args a => a -> ArgAnnotation a -> SMT ()
 declareArgTypes arg ann
   = fst $ foldExprs (\act e ann' -> (act >> declareType (getUndef e) ann',e)) (return ()) arg ann
 
-declareType' :: TypeRep -> SMT () -> SMT () -> SMT ()
-declareType' rep act_st act_rec = do
+declareType' :: TypeRep -> SMT () -> SMT ()
+declareType' rep act = do
   let (con,cargs) = splitTyConApp rep
   (c,decls,mp) <- getSMT
-  case Map.lookup con decls of
-    Nothing -> do
-      putSMT (c,Map.insert con Set.empty decls,mp)
-      act_st
-    Just _ -> return ()
-  (c',decls',mp') <- getSMT
-  case Map.lookup con decls' of
-    Nothing -> error $ "Internal error: "++show con++" has been removed from declared types"
-    Just done_args -> if Set.member cargs done_args
-                      then return ()
-                      else (do
-                               putSMT (c',Map.insert con (Set.insert cargs done_args) decls',mp')
-                               act_rec)
-      
+  if Set.member con decls
+    then return ()
+    else (do
+             putSMT (c,Set.insert con decls,mp)
+             act)      
 
 createArgs :: Args a => ArgAnnotation a -> Integer -> (a,[(Text,L.Lisp)],Integer)
 createArgs ann i = let ((tps,ni),res) = foldExprs (\(tps',ci) e ann' -> let name = T.pack $ "arg"++show ci
@@ -390,7 +383,7 @@ withSMTSolver solver f = do
                                  res <- f
                                  putRequest (L.List [L.Symbol "exit"])
                                  return res
-                                ) (hin,hout)) (0,Map.empty,Map.empty)
+                                ) (hin,hout)) (0,Set.empty,Map.empty)
   hClose hin
   hClose hout
   terminateProcess handle

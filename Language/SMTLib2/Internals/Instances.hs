@@ -19,7 +19,7 @@ import qualified Data.Bitstream as BitS
 
 instance SMTType Bool where
   type SMTAnnotation Bool = ()
-  getSort _ _ = L.Symbol "Bool"
+  getSortBase _ = L.Symbol "Bool"
   declareType _ _ = return ()
 
 instance SMTValue Bool where
@@ -33,7 +33,7 @@ instance SMTValue Bool where
 
 instance SMTType Integer where
   type SMTAnnotation Integer = ()
-  getSort _ _ = L.Symbol "Int"
+  getSortBase _ = L.Symbol "Int"
   declareType _ _ = return ()
 
 instance SMTValue Integer where
@@ -67,7 +67,7 @@ instance SMTOrd Integer where
 
 instance SMTType (Ratio Integer) where
   type SMTAnnotation (Ratio Integer) = ()
-  getSort _ _ = L.Symbol "Real"
+  getSortBase _ = L.Symbol "Real"
   declareType _ _ = return ()
 
 instance SMTValue (Ratio Integer) where
@@ -121,6 +121,7 @@ instance (Args idx,SMTType val) => SMTType (SMTArray idx val) where
       getIdx _ = undefined
       getVal :: SMTArray i v -> v
       getVal _ = undefined
+  getSortBase _ = L.Symbol "Array"
   declareType u (anni,annv) = do
       declareArgTypes (getIdx u) anni
       declareType (getVal u) annv
@@ -139,12 +140,12 @@ bv n = L.List [L.Symbol "_"
 
 instance SMTType Word8 where
   type SMTAnnotation Word8 = ()
-  getSort _ _ = bv 8
+  getSortBase _ = bv 8
   declareType _ _ = return ()
 
 instance SMTType Int8 where
   type SMTAnnotation Int8 = ()
-  getSort _ _ = bv 8
+  getSortBase _ = bv 8
   declareType _ _ = return ()
 
 withUndef1 :: (a -> g a) -> g a
@@ -219,12 +220,12 @@ instance SMTOrd Int8 where
 
 instance SMTType Word16 where
   type SMTAnnotation Word16 = ()
-  getSort _ _ = bv 16
+  getSortBase _ = bv 16
   declareType _ _ = return ()
 
 instance SMTType Int16 where
   type SMTAnnotation Int16 = ()
-  getSort _ _ = bv 16
+  getSortBase _ = bv 16
   declareType _ _ = return ()
 
 instance SMTValue Word16 where
@@ -252,12 +253,12 @@ instance SMTOrd Int16 where
 
 instance SMTType Word32 where
   type SMTAnnotation Word32 = ()
-  getSort _ _ = bv 32
+  getSortBase _ = bv 32
   declareType _ _ = return ()
 
 instance SMTType Int32 where
   type SMTAnnotation Int32 = ()
-  getSort _ _ = bv 32
+  getSortBase _ = bv 32
   declareType _ _ = return ()
 
 instance SMTValue Word32 where
@@ -285,12 +286,12 @@ instance SMTOrd Int32 where
 
 instance SMTType Word64 where
   type SMTAnnotation Word64 = ()
-  getSort _ _ = bv 64
+  getSortBase _ = bv 64
   declareType _ _ = return ()
   
 instance SMTType Int64 where
   type SMTAnnotation Int64 = ()
-  getSort _ _ = bv 64
+  getSortBase _ = bv 64
   declareType _ _ = return ()
 
 instance SMTValue Word64 where
@@ -443,9 +444,12 @@ instance SMTType a => SMTType (Maybe a) where
     where
       undef :: Maybe a -> a
       undef _ = undefined
+  getSortBase _ = L.Symbol "Maybe"
   declareType u ann = declareType' (typeOf u)
-                      (declareDatatypes ["a"] [("Maybe",[("Nothing",[]),("Just",[("fromJust",L.Symbol "a")])])])
-                      (declareType (undef u) ann)
+                      (do
+                          declareDatatypes ["a"] [("Maybe",[("Nothing",[]),("Just",[("fromJust",L.Symbol "a")])])]
+                          declareType (undef u) ann
+                      )
     where
       undef :: Maybe a -> a
       undef _ = undefined
