@@ -13,28 +13,34 @@ import Data.Int
 import qualified Data.ByteString as BS
 import qualified Data.Bitstream as BitS
 
-funTest :: SMT Integer
+funTest :: SMT (Maybe Integer)
 funTest = do
   f <- fun :: SMT (SMTExpr (SMTFun (SMTExpr Integer,SMTExpr Integer) Integer))
   g <- defFun (\x -> f `app` (x,x))
   q <- var
   assert $ forAll $ \x -> g `app` x .==. 2
   assert $ q .==. (f `app` (3,3))
-  checkSat
-  vq <- getValue q
-  return vq
+  r <- checkSat
+  if r
+    then (do
+             vq <- getValue q
+             return $ Just vq)
+    else return Nothing
 
-quantifierTest :: SMT Integer
+quantifierTest :: SMT (Maybe Integer)
 quantifierTest = do
   setOption (PrintSuccess False)
   setOption (ProduceModels True)
   v1 <- var :: SMT (SMTExpr Integer)
   assert $ forAll $ \(x,y) -> v1 * x .==. v1 * y
-  checkSat
-  r1 <- getValue v1
-  return r1
+  r <- checkSat
+  if r
+    then (do
+             r1 <- getValue v1
+             return $ Just r1)
+    else return Nothing
 
-bvTest :: SMT Word8
+bvTest :: SMT (Maybe Word8)
 bvTest = do
   v1 <- var
   v2 <- var
@@ -42,10 +48,12 @@ bvTest = do
   assert $ v1 .==. 16
   assert $ v2 .==. 35
   assert $ v3 .==. v1 + v2
-  checkSat
-  getValue v3
+  r <- checkSat
+  if r
+    then fmap Just $ getValue v3
+    else return Nothing
 
-bvTest2 :: SMT (BitS.Bitstream BitS.Left)
+bvTest2 :: SMT (Maybe (BitS.Bitstream BitS.Left))
 bvTest2 = do
   v1 <- var :: SMT (SMTExpr Word8)
   v2 <- var
@@ -55,8 +63,10 @@ bvTest2 = do
   assert $ not' $ v2 .==. 0
   assert $ v3 .==. bvadd v1 v2
   assert $ res .==. bvconcats [v1,v2,v3]
-  checkSat
-  getValue res
+  r <- checkSat
+  if r
+    then fmap Just $ getValue res
+    else return Nothing
 
 transposeTest :: SMT ([Integer],Bool)
 transposeTest = do
@@ -79,6 +89,7 @@ transposeTest = do
   -----
   MONEY -}
 
+add :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer -> SMT ()
 add x y c r rc = assert (ite 
                          ((plus [x,y,c]) .>=. 10)
                          (and'
@@ -130,7 +141,7 @@ sendMoreMoney = do
 type Problem = [[Maybe Int8]]
 
 emptyProblem :: Problem
-emptyProblem = [ [ Nothing | i <- [0..8] ] | j <- [0..8] ]
+emptyProblem = replicate 9 (replicate 9 Nothing)
 
 puzzle1 :: Problem
 puzzle1 = [ [ Nothing, Just 6 , Nothing, Nothing, Nothing, Nothing, Nothing, Just 1 , Nothing ]
@@ -143,35 +154,37 @@ puzzle1 = [ [ Nothing, Just 6 , Nothing, Nothing, Nothing, Nothing, Nothing, Jus
           , [ Nothing, Nothing, Nothing, Just 7 , Just 9 , Just 4 , Nothing, Nothing, Nothing ]
           , [ Nothing, Just 5 , Nothing, Nothing, Nothing, Nothing, Nothing, Just 7 , Nothing ] ]
 
-sudoku :: Problem -> SMT [[Int8]]
+sudoku :: Problem -> SMT (Maybe [[Int8]])
 sudoku prob = do
   setOption (PrintSuccess False)
   setOption (ProduceModels True)
-  field <- mapM (\line -> mapM (\col -> var) [0..8]) [0..8]
-  mapM_ (mapM_ (\v -> assert $ and' [ v .<. 10, v .>. 0])) field
-  mapM_ (\line -> assert $ distinct line) field
-  mapM_ (\i -> assert $ distinct [ line!!i | line <- field ]) [0..8]
-  assert $ distinct [ field!!i!!j | i <- [0..2],j <- [0..2] ]
-  assert $ distinct [ field!!i!!j | i <- [0..2],j <- [3..5] ]
-  assert $ distinct [ field!!i!!j | i <- [0..2],j <- [6..8] ]
+  myfield <- mapM (\_ -> mapM (\_ -> var) [0..8]) [0..8]
+  mapM_ (mapM_ (\v -> assert $ and' [ v .<. 10, v .>. 0])) myfield
+  mapM_ (\line -> assert $ distinct line) myfield
+  mapM_ (\i -> assert $ distinct [ line!!i | line <- myfield ]) [0..8]
+  assert $ distinct [ myfield!!i!!j | i <- [0..2],j <- [0..2] ]
+  assert $ distinct [ myfield!!i!!j | i <- [0..2],j <- [3..5] ]
+  assert $ distinct [ myfield!!i!!j | i <- [0..2],j <- [6..8] ]
 
-  assert $ distinct [ field!!i!!j | i <- [3..5],j <- [0..2] ]
-  assert $ distinct [ field!!i!!j | i <- [3..5],j <- [3..5] ]
-  assert $ distinct [ field!!i!!j | i <- [3..5],j <- [6..8] ]
+  assert $ distinct [ myfield!!i!!j | i <- [3..5],j <- [0..2] ]
+  assert $ distinct [ myfield!!i!!j | i <- [3..5],j <- [3..5] ]
+  assert $ distinct [ myfield!!i!!j | i <- [3..5],j <- [6..8] ]
 
-  assert $ distinct [ field!!i!!j | i <- [6..8],j <- [0..2] ]
-  assert $ distinct [ field!!i!!j | i <- [6..8],j <- [3..5] ]
-  assert $ distinct [ field!!i!!j | i <- [6..8],j <- [6..8] ]
+  assert $ distinct [ myfield!!i!!j | i <- [6..8],j <- [0..2] ]
+  assert $ distinct [ myfield!!i!!j | i <- [6..8],j <- [3..5] ]
+  assert $ distinct [ myfield!!i!!j | i <- [6..8],j <- [6..8] ]
 
   sequence_ [ sequence_ [ case el of
                             Nothing -> return ()
-                            Just n -> assert $ field!!i!!j .==. (constant n)
+                            Just n -> assert $ myfield!!i!!j .==. (constant n)
                           | (el,j) <- zip line [0..8]
                         ] 
               | (line,i) <- zip prob [0..8] ]
 
-  checkSat
-  mapM (mapM getValue) field
+  res <- checkSat
+  if res 
+    then fmap Just $ mapM (mapM getValue) myfield
+    else return Nothing
 
 displaySolution :: [[Int8]] -> String
 displaySolution = displayLines . fmap displayLine
@@ -180,7 +193,7 @@ displaySolution = displayLines . fmap displayLine
       displayLine [a,b,c,d,e,f,g,h,i] = show a ++ show b ++ show c ++ " " ++ show d ++ show e ++ show f ++ " " ++ show g ++ show h ++ show i
 
 -- Bitvector concat example
-concatExample :: SMT Word16
+concatExample :: SMT (Maybe Word16)
 concatExample = do
   x1 <- var :: SMT (SMTExpr Word8)
   x2 <- var :: SMT (SMTExpr Word8)
@@ -188,10 +201,12 @@ concatExample = do
   assert $ res .==. bvconcat x1 x2
   assert $ x1 .>. 2
   assert $ x2 .>. 8
-  checkSat
-  getValue res
+  r <- checkSat
+  if r
+    then fmap Just $ getValue res
+    else return Nothing
 
-concatExample2 :: SMT BS.ByteString
+concatExample2 :: SMT (Maybe BS.ByteString)
 concatExample2 = do
   v1 <- varAnn 2
   v2 <- varAnn 1
@@ -199,27 +214,33 @@ concatExample2 = do
   assert $ v1 .==. (constantAnn (BS.pack [0xAA,0xBB]) 2)
   assert $ v2 .==. (constantAnn (BS.pack [0x01]) 1)
   assert $ res .==. bvconcat v1 v2
-  checkSat
-  getValue res
+  r <- checkSat
+  if r
+    then fmap Just $ getValue res
+    else return Nothing
 
-arrayExample :: SMT Integer
+arrayExample :: SMT (Maybe Integer)
 arrayExample = do
   f <- fun
   v <- var
   assert $ forAll $ \i -> (f `app` i) .==. (i*2)
   assert $ v .==. select (asArray f) 4
-  checkSat
-  getValue v
+  r <- checkSat
+  if r
+    then fmap Just $ getValue v
+    else return Nothing
 
-arrayExample2 :: SMT [[Integer]]
+arrayExample2 :: SMT (Maybe [[Integer]])
 arrayExample2 = do
   arr <- var :: SMT (SMTExpr (SMTArray (SMTExpr Integer,SMTExpr Integer) Integer))
   assert $ select arr (0,1) .==. 9
   assert $ select arr (2,4) .==. 7
   assert $ select arr (3,5) .==. 2
   assert $ forAll $ \(i,j) -> select arr (i,j) .==. select arr (j,i)
-  checkSat
-  sequence [ sequence [ getValue (select arr (constant i,constant j)) | j <- [0..9] ] | i <- [0..9] ]
+  r <- checkSat
+  if r
+    then fmap Just $ sequence [ sequence [ getValue (select arr (constant i,constant j)) | j <- [0..9] ] | i <- [0..9] ]
+    else return Nothing
 
 data Coordinate = Position { posX :: Integer
                            , posY :: Integer
@@ -229,51 +250,19 @@ data Coordinate = Position { posX :: Integer
 
 $(deriveSMT ''Coordinate)
 
-datatypeTest :: SMT (Coordinate,Coordinate)
+datatypeTest :: SMT (Maybe (Coordinate,Coordinate))
 datatypeTest = do
   v1 <- var
   v2 <- var
   assert $ ((v1 .# $(field 'posX)) + (v2 .# $(field 'posX))) .==. 5
   assert $ ((v1 .# $(field 'posY)) * (v2 .# $(field 'posY))) .==. 12
-  checkSat
-  r1 <- getValue v1
-  r2 <- getValue v2
-  return (r1,r2)
-
-newtype MyInt = MyInt Integer deriving (Eq,Typeable,Show)
-
-$(deriveSMT ''MyInt)
-
-datatypeTest2 :: SMT MyInt
-datatypeTest2 = do
-  v1 <- var
-  assert $ v1 .==. (constant (MyInt 42))
-  checkSat
-  getValue v1
-
--- The following example does not work atm: we have to check for recursion.
---
--- After discussion at the office we concluded the
--- following.
--- There a two possibilities:
--- 1. direct recursion as in: T a = T { f :: T a } | ..
--- 2. mutual recursion as in:
---    T a = T { f :: S a } | ..
---    S a = S { g :: T a, h :: Int } | ..
--- The first case only works if (T a) is used directly and not as subexpression.
--- The second case requires that a graph of the types is build. The nodes
--- are the involved type constructors. The edges are then labeled by the bound
--- parameters. Then we partition the graph into strongly connected components.
--- One component has to be declared as a single declare-datatypes. The restriction
--- is that all edges in such a component have the same label.
--- That means that all type parameters are used in the same way.
--- A further check on the edges going out of a component is needed:
---  no such edge should mention any node from that component as parameter. This
---  would lead to an indirect recursion such as T a = T { f :: Maybe (T a)) },
---  which is not allowed.
--- Note that the second case entails the first, since in 1. T would be a component
--- with one loop to itself.
---
+  r <- checkSat
+  if r
+    then (do
+             r1 <- getValue v1
+             r2 <- getValue v2
+             return $ Just (r1,r2))
+    else return Nothing
 
 data BinNode a =
   BinNode { nodeVal :: a, subTree :: BinTree a }
@@ -286,11 +275,11 @@ data BinTree a = BinTree
                    }
                  deriving (Eq, Show, Typeable)
 
-$(deriveSMT ''BinNode)
+-- $(deriveSMT ''BinNode)
 $(deriveSMT ''BinTree)
 
-datatypeTest3 :: SMT (BinNode Integer)
-datatypeTest3 = do
+datatypeTest2 :: SMT (BinNode Integer)
+datatypeTest2 = do
   v <- var
   assert $ v .==. (constant tree)
   checkSat
@@ -311,11 +300,8 @@ data ReusingRecord a = ReusingRecord { someF :: MyTuple (Maybe a) Integer } deri
 $(deriveSMT ''MyTuple)
 $(deriveSMT ''ReusingRecord)
 
--- FIXME: this does not work since the instantiation
--- of a type constructor does not respect the
--- type parameter!
-datatypeTest4 :: SMT (ReusingRecord Integer)
-datatypeTest4 = do
+datatypeTest3 :: SMT (ReusingRecord Integer)
+datatypeTest3 = do
   -- FIXME: this example should work without this.
   -- The declarations have to be generated depth first.
   declareType (undefined :: Maybe Integer) undefined
