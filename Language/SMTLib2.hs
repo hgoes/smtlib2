@@ -65,7 +65,7 @@ module Language.SMTLib2
          bvadd,bvsub,bvmul,bvurem,bvsrem,
          bvule,bvult,bvuge,bvugt,
          bvsle,bvslt,bvsge,bvsgt,
-         bvshl,
+         bvshl,bvlshr,bvashr,
          ByteStringLen(..),BitstreamLen(..),
          bvconcat,bvconcats,bvextract,bvextractUnsafe,
          bvsplitu16to8,

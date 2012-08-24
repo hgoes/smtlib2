@@ -196,6 +196,12 @@ exprToLisp (BVSGT l r) c = let (l',c') = exprToLisp l c
 exprToLisp (BVSHL l r) c = let (l',c') = exprToLisp l c
                                (r',c'') = exprToLisp r c'
                            in (L.List [L.Symbol "bvshl",l',r'],c'')
+exprToLisp (BVLSHR l r) c = let (l',c') = exprToLisp l c
+                                (r',c'') = exprToLisp r c'
+                            in (L.List [L.Symbol "bvlshr",l',r'],c'')
+exprToLisp (BVASHR l r) c = let (l',c') = exprToLisp l c
+                                (r',c'') = exprToLisp r c'
+                            in (L.List [L.Symbol "bvashr",l',r'],c'')
 exprToLisp (BVExtract i j _ v) c = let (v',c') = exprToLisp v c
                                    in (L.List [L.List [L.Symbol "_"
                                                       ,L.Symbol "extract"

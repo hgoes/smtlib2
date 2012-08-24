@@ -101,6 +101,8 @@ data SMTExpr t where
   BVSGE :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
   BVSGT :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
   BVSHL :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr t
+  BVLSHR :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr t
+  BVASHR :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr t
   BVExtract :: (SMTType t1,SMTType t2,Extractable t1 t2) => Integer -> Integer -> SMTAnnotation t2 -> SMTExpr t1 -> SMTExpr t2
   BVConcat :: (Concatable t1 t2,t3 ~ ConcatResult t1 t2)
               => SMTExpr t1 -> SMTExpr t2 -> SMTExpr t3

@@ -268,6 +268,14 @@ bvsgt = BVSGT
 bvshl :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
 bvshl = BVSHL
 
+-- | Bitvector logical right shift
+bvlshr :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
+bvlshr = BVLSHR
+
+-- | Bitvector arithmetical right shift
+bvashr :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
+bvashr = BVASHR
+
 -- | Bitvector concat
 bvconcat :: (Concatable t1 t2,t3 ~ ConcatResult t1 t2)
             => SMTExpr t1 -> SMTExpr t2 -> SMTExpr t3
