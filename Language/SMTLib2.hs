@@ -60,13 +60,14 @@ module Language.SMTLib2
          -- ** Arithmetic
          plus,minus,mult,div',mod',neg,divide,
          -- ** Arrays
-         select,store,arrayConst,unmangleArray,asArray,
+         select,store,arrayEquals,unmangleArray,asArray,constArray,
          -- ** Bitvectors
          bvadd,bvsub,bvmul,bvurem,bvsrem,
          bvule,bvult,bvuge,bvugt,
          bvsle,bvslt,bvsge,bvsgt,
          bvshl,bvlshr,bvashr,
-         ByteStringLen(..),BitstreamLen(..),
+         BitVector(..),
+         ByteStringLen(..),
          bvconcat,bvconcats,bvextract,bvextractUnsafe,
          bvsplitu16to8,
          bvsplitu32to16,bvsplitu32to8,

@@ -11,7 +11,6 @@ import Data.Array
 import Data.Word
 import Data.Int
 import qualified Data.ByteString as BS
-import qualified Data.Bitstream as BitS
 
 funTest :: SMT (Maybe Integer)
 funTest = do
@@ -53,7 +52,7 @@ bvTest = do
     then fmap Just $ getValue v3
     else return Nothing
 
-bvTest2 :: SMT (Maybe (BitS.Bitstream BitS.Left))
+bvTest2 :: SMT (Maybe BitVector)
 bvTest2 = do
   v1 <- var :: SMT (SMTExpr Word8)
   v2 <- var

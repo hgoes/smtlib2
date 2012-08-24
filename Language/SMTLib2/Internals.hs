@@ -53,7 +53,7 @@ data SMTArray i v = SMTArray deriving (Eq,Typeable)
 
 class (SMTType a,SMTType b,SMTType (ConcatResult a b)) => Concatable a b where
     type ConcatResult a b
-    concat' :: a -> b -> ConcatResult a b
+    concat' :: a -> SMTAnnotation a -> b -> SMTAnnotation b -> ConcatResult a b
     concatAnn :: a -> b -> SMTAnnotation a -> SMTAnnotation b -> SMTAnnotation (ConcatResult a b)
 
 class Extractable a b where

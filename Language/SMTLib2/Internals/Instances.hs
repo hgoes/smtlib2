@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances,OverloadedStrings,MultiParamTypeClasses,TemplateHaskell,RankNTypes,TypeFamilies,GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleInstances,OverloadedStrings,MultiParamTypeClasses,TemplateHaskell,RankNTypes,TypeFamilies,GeneralizedNewtypeDeriving,DeriveDataTypeable #-}
 module Language.SMTLib2.Internals.Instances where
 
 import Language.SMTLib2.Internals
@@ -13,7 +13,7 @@ import qualified Data.Text as T
 import Data.Ratio
 import Data.Typeable
 import qualified Data.ByteString as BS
-import qualified Data.Bitstream as BitS
+import Data.List (genericLength,genericReplicate)
 
 -- Bool
 
@@ -133,7 +133,7 @@ instance (Args idx,SMTType val) => SMTType (SMTArray idx val) where
 
 -- BitVectors
 
-bv :: Int -> L.Lisp
+bv :: Integral i => i -> L.Lisp
 bv n = L.List [L.Symbol "_"
               ,L.Symbol "BitVec"
               ,L.Number $ L.I (fromIntegral n)]
@@ -154,10 +154,10 @@ withUndef1 f = f undefined
 getBVValue :: (Num a,Bits a,Read a) => L.Lisp -> b -> SMT (Maybe a)
 getBVValue arg _ = return $ withUndef1 $ \u -> getBVValue' (fromIntegral $ bitSize u) arg
 
-getBVValue' :: (Num a,Bits a,Read a) => Int -> L.Lisp -> Maybe a
+getBVValue' :: (Num a,Bits a,Read a,Integral i) => i -> L.Lisp -> Maybe a
 getBVValue' _ (L.Number (L.I v)) = Just (fromInteger v)
 getBVValue' len (L.Symbol s) = case T.unpack s of
-  '#':'b':rest -> if Prelude.length rest == len
+  '#':'b':rest -> if genericLength rest == len
                   then (case readInt 2
                                  (\x -> x=='0' || x=='1')
                                  (\x -> if x=='0' then 0 else 1) 
@@ -165,7 +165,7 @@ getBVValue' len (L.Symbol s) = case T.unpack s of
                           [(v,_)] -> Just v
                           _ -> Nothing)
                   else Nothing
-  '#':'x':rest -> if (Prelude.length rest,0) == (len `divMod` 4)
+  '#':'x':rest -> if (genericLength rest,0) == (len `divMod` 4)
                   then (case readHex rest of
                           [(v,_)] -> Just v
                           _ -> Nothing)
@@ -182,15 +182,15 @@ getBVValue' _ _ = Nothing
 putBVValue :: (Bits a,Ord a,Integral a,Show a) => a -> b -> L.Lisp
 putBVValue x _ = putBVValue' (fromIntegral $ bitSize x) x
 
-putBVValue' :: (Bits a,Ord a,Integral a,Show a) => Int -> a -> L.Lisp
+putBVValue' :: (Bits a,Ord a,Integral a,Show a,Integral i) => i -> a -> L.Lisp
 putBVValue' len x
   | len `mod` 4 == 0 = let v' = if x < 0
                                 then complement (x-1)
                                 else x
                            enc = showHex v' "" 
-                           l = Prelude.length enc
-                       in L.Symbol $ T.pack $ '#':'x':((Prelude.replicate ((len `div` 4)-l) '0')++enc)
-  | otherwise = L.Symbol (T.pack ('#':'b':[ if testBit x i
+                           l = genericLength enc
+                       in L.Symbol $ T.pack $ '#':'x':((genericReplicate ((len `div` 4)-l) '0')++enc)
+  | otherwise = L.Symbol (T.pack ('#':'b':[ if testBit x (fromIntegral i)
                                             then '1'
                                             else '0'
                                             | i <- Prelude.reverse [0..(len-1)] ]))
@@ -513,123 +513,94 @@ instance SMTValue BS.ByteString where
 
 instance Concatable BS.ByteString BS.ByteString where
     type ConcatResult BS.ByteString BS.ByteString = BS.ByteString
-    concat' b1 b2 = BS.append b1 b2
+    concat' b1 _ b2 _ = BS.append b1 b2
     concatAnn _ _ = (+)
 
--- BitStream implementation
+-- BitVector implementation
 
-newtype BitstreamLen = BitstreamLen Int deriving (Show,Eq,Ord,Num)
+newtype BitVector = BitVector Integer deriving (Eq,Ord,Num,Show,Typeable)
 
-instance SMTType (BitS.Bitstream BitS.Left) where
-    type SMTAnnotation (BitS.Bitstream BitS.Left) = BitstreamLen
-    getSort _ (BitstreamLen l) = bv l
-    declareType _ _ = return ()
+instance SMTType BitVector where
+  type SMTAnnotation BitVector = Integer
+  getSort _ l = bv l
+  declareType _ _ = return ()
 
-instance SMTType (BitS.Bitstream BitS.Right) where
-    type SMTAnnotation (BitS.Bitstream BitS.Right) = BitstreamLen
-    getSort _ (BitstreamLen l) = bv l
-    declareType _ _ = return ()
+instance SMTValue BitVector where
+  unmangle v l = return $ fmap BitVector $ getBVValue' l v
+  mangle (BitVector v) l = putBVValue' l v
 
-instance SMTValue (BitS.Bitstream BitS.Left) where
-    unmangle v (BitstreamLen l) = return $ fmap (BitS.fromNBits l) (getBVValue' l v :: Maybe Integer)
-    mangle v (BitstreamLen l) = putBVValue' l (BitS.toBits v :: Integer)
+instance Concatable BitVector BitVector where
+  type ConcatResult BitVector BitVector = BitVector
+  concat' (BitVector x) l1 (BitVector y) l2 = BitVector $ (x `shiftL` (fromIntegral l2)) .|. y
+  concatAnn _ _ = (+)
 
-instance SMTValue (BitS.Bitstream BitS.Right) where
-    unmangle v (BitstreamLen l) = return $ fmap (BitS.fromNBits l) (getBVValue' l v :: Maybe Integer)
-    mangle v (BitstreamLen l) = putBVValue' l (BitS.toBits v :: Integer)
+instance Concatable BitVector Word8 where
+  type ConcatResult BitVector Word8 = BitVector
+  concat' (BitVector x) l w () = BitVector $ (x `shiftL` 8) .|. (fromIntegral w)
+  concatAnn _ _ l () = l+8
 
-instance Concatable (BitS.Bitstream BitS.Left) (BitS.Bitstream BitS.Left) where
-    type ConcatResult (BitS.Bitstream BitS.Left) (BitS.Bitstream BitS.Left) = BitS.Bitstream BitS.Left
-    concat' = BitS.append
-    concatAnn _ _ = (+)
+instance Concatable BitVector Word16 where
+  type ConcatResult BitVector Word16 = BitVector
+  concat' (BitVector x) l w () = BitVector $ (x `shiftL` 16) .|. (fromIntegral w)
+  concatAnn _ _ l () = l+16
 
-instance Concatable (BitS.Bitstream BitS.Right) (BitS.Bitstream BitS.Right) where
-    type ConcatResult (BitS.Bitstream BitS.Right) (BitS.Bitstream BitS.Right) = BitS.Bitstream BitS.Right
-    concat' = BitS.append
-    concatAnn _ _ = (+)
+instance Concatable BitVector Word32 where
+  type ConcatResult BitVector Word32 = BitVector
+  concat' (BitVector x) l w () = BitVector $ (x `shiftL` 32) .|. (fromIntegral w)
+  concatAnn _ _ l () = l+32
 
-instance Concatable (BitS.Bitstream BitS.Left) Word8 where
-    type ConcatResult (BitS.Bitstream BitS.Left) Word8 = BitS.Bitstream BitS.Left
-    concat' x y = BitS.append x (BitS.fromBits y)
-    concatAnn _ _ (BitstreamLen l) _ = BitstreamLen (l+8)
+instance Concatable BitVector Word64 where
+  type ConcatResult BitVector Word64 = BitVector
+  concat' (BitVector x) l w () = BitVector $ (x `shiftL` 64) .|. (fromIntegral w)
+  concatAnn _ _ l () = l+64
 
-instance Concatable (BitS.Bitstream BitS.Left) Word16 where
-    type ConcatResult (BitS.Bitstream BitS.Left) Word16 = BitS.Bitstream BitS.Left
-    concat' x y = BitS.append x (BitS.fromBits y)
-    concatAnn _ _ (BitstreamLen l) _ = BitstreamLen (l+16)
+instance Extractable BitVector BitVector where
+  extract' _ _ u l _ = u-l+1
 
-instance Concatable (BitS.Bitstream BitS.Left) Word32 where
-    type ConcatResult (BitS.Bitstream BitS.Left) Word32 = BitS.Bitstream BitS.Left
-    concat' x y = BitS.append x (BitS.fromBits y)
-    concatAnn _ _ (BitstreamLen l) _ = BitstreamLen (l+32)
+instance Extractable BitVector Word8 where
+  extract' _ _ _ _ _ = ()
 
-instance Concatable (BitS.Bitstream BitS.Left) Word64 where
-    type ConcatResult (BitS.Bitstream BitS.Left) Word64 = BitS.Bitstream BitS.Left
-    concat' x y = BitS.append x (BitS.fromBits y)
-    concatAnn _ _ (BitstreamLen l) _ = BitstreamLen (l+64)
+instance Extractable BitVector Word16 where
+  extract' _ _ _ _ _ = ()
 
-instance Concatable (BitS.Bitstream BitS.Right) Word8 where
-    type ConcatResult (BitS.Bitstream BitS.Right) Word8 = BitS.Bitstream BitS.Right
-    concat' x y = BitS.append x (BitS.fromBits y)
-    concatAnn _ _ (BitstreamLen l) _ = BitstreamLen (l+8)
+instance Extractable BitVector Word32 where
+  extract' _ _ _ _ _ = ()
 
-instance Concatable (BitS.Bitstream BitS.Right) Word16 where
-    type ConcatResult (BitS.Bitstream BitS.Right) Word16 = BitS.Bitstream BitS.Right
-    concat' x y = BitS.append x (BitS.fromBits y)
-    concatAnn _ _ (BitstreamLen l) _ = BitstreamLen (l+16)
+instance Extractable BitVector Word64 where
+  extract' _ _ _ _ _ = ()
 
-instance Concatable (BitS.Bitstream BitS.Right) Word32 where
-    type ConcatResult (BitS.Bitstream BitS.Right) Word32 = BitS.Bitstream BitS.Right
-    concat' x y = BitS.append x (BitS.fromBits y)
-    concatAnn _ _ (BitstreamLen l) _ = BitstreamLen (l+32)
-
-instance Concatable (BitS.Bitstream BitS.Right) Word64 where
-    type ConcatResult (BitS.Bitstream BitS.Right) Word64 = BitS.Bitstream BitS.Right
-    concat' x y = BitS.append x (BitS.fromBits y)
-    concatAnn _ _ (BitstreamLen l) _ = BitstreamLen (l+64)
-
-
-instance Extractable (BitS.Bitstream BitS.Left) (BitS.Bitstream BitS.Left) where
-    extract' _ _ u l _ = BitstreamLen (fromIntegral $ u-l+1)
-instance Extractable (BitS.Bitstream BitS.Right) (BitS.Bitstream BitS.Right) where
-    extract' _ _ u l _ = BitstreamLen (fromIntegral $ u-l+1)
-
-instance Extractable (BitS.Bitstream BitS.Left) Word8 where
-    extract' _ _ _ _ _ = ()
-
-instance SMTBV (BitS.Bitstream BitS.Left)
-instance SMTBV (BitS.Bitstream BitS.Right)
+instance SMTBV BitVector
 
 -- Concat instances
 
 instance Concatable Word8 Word8 where
     type ConcatResult Word8 Word8 = Word16
-    concat' x y = ((fromIntegral x) `shiftL` 8) .|. (fromIntegral y)
+    concat' x _ y _ = ((fromIntegral x) `shiftL` 8) .|. (fromIntegral y)
     concatAnn _ _ _ _ = ()
 
 instance Concatable Int8 Word8 where
     type ConcatResult Int8 Word8 = Int16
-    concat' x y = ((fromIntegral x) `shiftL` 8) .|. (fromIntegral y)
+    concat' x _ y _ = ((fromIntegral x) `shiftL` 8) .|. (fromIntegral y)
     concatAnn _ _ _ _ = ()
 
 instance Concatable Word16 Word16 where
     type ConcatResult Word16 Word16 = Word32
-    concat' x y = ((fromIntegral x) `shiftL` 16) .|. (fromIntegral y)
+    concat' x _ y _ = ((fromIntegral x) `shiftL` 16) .|. (fromIntegral y)
     concatAnn _ _ _ _ = ()
 
 instance Concatable Int16 Word16 where
     type ConcatResult Int16 Word16 = Int32
-    concat' x y = ((fromIntegral x) `shiftL` 16) .|. (fromIntegral y)
+    concat' x _ y _ = ((fromIntegral x) `shiftL` 16) .|. (fromIntegral y)
     concatAnn _ _ _ _ = ()
 
 instance Concatable Word32 Word32 where
     type ConcatResult Word32 Word32 = Word64
-    concat' x y = ((fromIntegral x) `shiftL` 32) .|. (fromIntegral y)
+    concat' x _ y _ = ((fromIntegral x) `shiftL` 32) .|. (fromIntegral y)
     concatAnn _ _ _ _ = ()
 
 instance Concatable Int32 Word32 where
     type ConcatResult Int32 Word32 = Int64
-    concat' x y = ((fromIntegral x) `shiftL` 32) .|. (fromIntegral y)
+    concat' x _ y _ = ((fromIntegral x) `shiftL` 32) .|. (fromIntegral y)
     concatAnn _ _ _ _ = ()
 
 -- Extract instances
