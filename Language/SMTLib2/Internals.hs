@@ -85,6 +85,7 @@ data SMTExpr t where
   Select :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v
   Store :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v -> SMTExpr (SMTArray i v)
   AsArray :: (Args i,SMTType v) => SMTExpr (SMTFun i v) -> SMTExpr (SMTArray i v)
+  ConstArray :: (Args i,SMTType v) => SMTExpr v -> ArgAnnotation i -> SMTExpr (SMTArray i v)
   BVAdd :: SMTExpr t -> SMTExpr t -> SMTExpr t
   BVSub :: SMTExpr t -> SMTExpr t -> SMTExpr t
   BVMul :: SMTExpr t -> SMTExpr t -> SMTExpr t
@@ -153,6 +154,7 @@ instance Eq a => Eq (SMTExpr a) where
                                                             Just i2' -> i1 == i2')
     (==) (Store a1 i1 v1) (Store a2 i2 v2) = a1==a2 && i1 == i2 && v1 == v2
     (==) (AsArray f1) (AsArray f2) = eqExpr f1 f2
+    (==) (ConstArray c1 _) (ConstArray c2 _) = eqExpr c1 c2
     (==) (BVAdd l1 r1) (BVAdd l2 r2) = l1 == l2 && r1 == r2
     (==) (BVSub l1 r1) (BVSub l2 r2) = l1 == l2 && r1 == r2
     (==) (BVMul l1 r1) (BVMul l2 r2) = l1 == l2 && r1 == r2

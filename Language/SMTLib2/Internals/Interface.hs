@@ -82,9 +82,9 @@ or' [x] = x
 or' xs = Or xs
 
 -- | Create a boolean expression that encodes that the array is equal to the supplied constant array.
-arrayConst :: (LiftArgs i,SMTValue v,Ix (Unpacked i),Unit (ArgAnnotation i),Unit (SMTAnnotation v)) => SMTExpr (SMTArray i v) -> Array (Unpacked i) v -> SMTExpr Bool
-arrayConst expr arr = and' [(select expr (liftArgs i unit)) .==. (constant v)
-                           | (i,v) <- assocs arr ]
+arrayEquals :: (LiftArgs i,SMTValue v,Ix (Unpacked i),Unit (ArgAnnotation i),Unit (SMTAnnotation v)) => SMTExpr (SMTArray i v) -> Array (Unpacked i) v -> SMTExpr Bool
+arrayEquals expr arr = and' [(select expr (liftArgs i unit)) .==. (constant v)
+                            | (i,v) <- assocs arr ]
 
 -- | Asserts that a boolean expression is true
 assert :: SMTExpr Bool -> SMT ()
@@ -211,6 +211,9 @@ store = Store
 
 asArray :: (Args i,SMTType v) => SMTExpr (SMTFun i v) -> SMTExpr (SMTArray i v)
 asArray = AsArray
+
+constArray :: (Args i,SMTType v) => SMTExpr v -> ArgAnnotation i -> SMTExpr (SMTArray i v)
+constArray = ConstArray
 
 -- | Bitvector addition
 bvadd :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t

@@ -74,8 +74,8 @@ transposeTest = do
   v1 <- var :: SMT (SMTExpr (SMTArray (SMTExpr Integer) Integer))
   v2 <- var :: SMT (SMTExpr (SMTArray (SMTExpr Integer) Integer))
   v3 <- var :: SMT (SMTExpr (SMTArray (SMTExpr Integer) Integer))
-  assert $ arrayConst v1 c1
-  assert $ arrayConst v2 c2
+  assert $ arrayEquals v1 c1
+  assert $ arrayEquals v2 c2
   mapM_ (\i -> assert $ (select v3 (constant i)) .<. 10) [0..9]
   mapM_ (\i -> assert $ (select v3 (constant i)) .>=. 0) [0..9]
   mapM_ (\i -> assert $ (select v1 (constant i)) .==. (select v2 (select v3 (constant i)))) [0..9]

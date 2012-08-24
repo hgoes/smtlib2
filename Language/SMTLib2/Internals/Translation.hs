@@ -154,6 +154,11 @@ exprToLisp (Store arr idx val) c = let (arr',c1) = exprToLisp arr c
                                    in (L.List (L.Symbol "store":arr':idx'++[val']),c3)
 exprToLisp (AsArray f) c = let (f',c') = exprToLisp f c
                            in (L.List [L.Symbol "_",L.Symbol "as-array",f'],c')
+exprToLisp expr@(ConstArray v ann) c = let (v',c') = exprToLisp v c
+                                           (ui,_,uv) = getArrayUndef expr
+                                       in (L.List [L.List [L.Symbol "as",L.Symbol "const",
+                                                           L.List ((L.Symbol "Array"):(argSorts ui ann)++[getSort uv (extractAnnotation v)])]
+                                                  ,v'],c')
 exprToLisp (BVAdd l r) c = let (l',c') = exprToLisp l c
                                (r',c'') = exprToLisp r c'
                            in (L.List [L.Symbol "bvadd",l',r'],c'')
