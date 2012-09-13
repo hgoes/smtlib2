@@ -12,7 +12,6 @@ Library
   Exposed-Modules:
     Language.SMTLib2
     Language.SMTLib2.Solver
-    Language.SMTLib2.Examples
     Language.SMTLib2.TH
     Language.SMTLib2.Internals
     Language.SMTLib2.Internals.SMTMonad
