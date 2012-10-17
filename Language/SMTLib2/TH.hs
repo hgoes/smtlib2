@@ -285,13 +285,12 @@ generateMangleFun dec
                      alias <- newName "alias"
                      ann <- newName "ann"
                      clause [asP alias (conP cname (fmap varP vars)),varP ann]
-                            (normalB ([| L.List [ L.Symbol (T.pack "as") 
-                                                , $(if Prelude.null vars
+                            (normalB (if Prelude.null vars
                                                     then [| L.Symbol $(stringE $ nameBase cname) |]
                                                     else [| L.List $ [L.Symbol $(stringE $ nameBase cname)] ++
                                                                      $(listE [ appsE [ [| mangle |], varE v, tupE [] ]
                                                                              | v <- vars ]) |]
-                                                    ),getSort $(varE alias) $(varE ann)]|])) []
+                                                    )) []
                  | con <- case dec of
                             DataD _ _ _ cons _ -> cons
                             NewtypeD _ _ _ con _ -> [con]
