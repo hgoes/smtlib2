@@ -31,30 +31,36 @@ data TypeGraph = TypeGraph { typeNodes :: Map Name Node
 
 getTypeGraph :: Name -> Q TypeGraph
 getTypeGraph tp = do
-  (nd,gr) <- getTypeGraph' tp (TypeGraph { typeNodes = Map.empty
-                                         , typeGraph = Gr.empty })
+  (_,gr) <- getTypeGraph' tp (TypeGraph { typeNodes = Map.empty
+                                        , typeGraph = Gr.empty })
   return gr
   where
     getTypeGraph' tp gr = case Map.lookup tp (typeNodes gr) of
-      Just nd -> return (nd,gr)
+      Just nd -> return (Just nd,gr)
       Nothing -> do
         inf <- reify tp
         case inf of
-          TyConI dec -> let [nd] = newNodes 1 (typeGraph gr)
-                            ngr = TypeGraph { typeNodes = Map.insert tp nd (typeNodes gr)
-                                            , typeGraph = insNode (nd,dec) (typeGraph gr) }
-                        in do
-                          ngr2 <- addDependencies nd dec ngr
-                          return (nd,ngr2)
-    addDependencies nd (DataD ctx name tyvars (con:cons) derives) gr = case con of
-      RecC con_name fields -> do
-        ngr <- foldlM (\cgr (_,_,tp) -> fieldDependencies nd tyvars tp cgr) gr fields
-        addDependencies nd (DataD ctx name tyvars cons derives) ngr
-      NormalC con_name fields -> do
-        ngr <- foldlM (\cgr (_,tp) -> fieldDependencies nd tyvars tp cgr) gr fields
-        addDependencies nd (DataD ctx name tyvars cons derives) ngr
+          TyConI dec -> do
+            replace_tp <- [t| Integer |]
+            i <- isInstance ''SMTType [replaceVars replace_tp (typeFromDec dec)] -- XXX: This works around a bug in TH by replacing type variables with Integer.
+                                                                                -- It isn't 100% right, but does the trick unless you do something strange.
+                                                                                -- ...don't do something strange... please.
+            if i
+              then return (Nothing,gr)
+              else (do
+                       let [nd] = newNodes 1 (typeGraph gr)
+                           ngr = TypeGraph { typeNodes = Map.insert tp nd (typeNodes gr)
+                                           , typeGraph = insNode (nd,dec) (typeGraph gr) }
+                       ngr2 <- addDependencies nd dec ngr
+                       return (Just nd,ngr2))
+    addDependencies nd (DataD ctx name tyvars (con:cons) derives) gr = do
+      ngr <- addDependenciesCon nd tyvars con gr
+      addDependencies nd (DataD ctx name tyvars cons derives) ngr
     addDependencies nd (DataD ctx name tyvars [] derives) gr = return gr
-    
+    addDependencies nd (NewtypeD ctx name tyvars con derives) gr = addDependenciesCon nd tyvars con gr
+    addDependenciesCon nd tyvars (RecC con_name fields) gr = foldlM (\cgr (_,_,tp) -> fieldDependencies nd tyvars tp cgr) gr fields
+    addDependenciesCon nd tyvars (NormalC con_name fields) gr = foldlM (\cgr (_,tp) -> fieldDependencies nd tyvars tp cgr) gr fields
+      
     unpackType :: Type -> Maybe (Name,[Type])
     unpackType (AppT t1 t2) = fmap (\(con,pars) -> (con,pars++[t2])) (unpackType t1)
     unpackType (ConT name) = Just (name,[])
@@ -65,6 +71,14 @@ getTypeGraph tp = do
     replaceVars with (VarT name) = with
     replaceVars with (AppT t1 t2) = AppT (replaceVars with t1) (replaceVars with t2)
     replaceVars with x = x
+
+    typeFromDec :: Dec -> Type
+    typeFromDec (DataD _ name tyvar _ _) = foldl (\t tyv -> AppT t (case tyv of
+                                                                       PlainTV n -> VarT n
+                                                                       KindedTV n _ -> VarT n)) (ConT name) tyvar
+    typeFromDec (NewtypeD _ name tyvar _ _) = foldl (\t tyv -> AppT t (case tyv of
+                                                                       PlainTV n -> VarT n
+                                                                       KindedTV n _ -> VarT n)) (ConT name) tyvar
     
     resolvePar :: [TyVarBndr] -> Type -> Either Int Type
     resolvePar tyvars (VarT name) = case findIndex (\tyvar -> case tyvar of
@@ -74,18 +88,14 @@ getTypeGraph tp = do
                                       Just idx -> Left idx
     resolvePar _ tp = Right tp
     
-    fieldDependencies nd tyvars tp gr = do
-      replace_tp <- [t| Integer |]
-      i <- isInstance ''SMTType [replaceVars replace_tp tp] -- XXX: This works around a bug in TH by replacing type variables with Integer.
-                                                            -- It isn't 100% right, but does the trick unless you do something strange.
-                                                            -- ...don't do something strange... please.
-      if i 
-        then return gr
-        else (case unpackType tp of
-                 Nothing -> return gr
-                 Just (con,pars) -> do
-                   (nd',ngr) <- getTypeGraph' con gr
-                   return $ ngr { typeGraph = insEdge (nd,nd',fmap (resolvePar tyvars) pars) (typeGraph ngr) })
+    fieldDependencies nd tyvars tp gr = case unpackType tp of
+      Nothing -> return gr
+      Just (con,pars) -> do
+        (nd',ngr) <- getTypeGraph' con gr
+        ngr2 <- foldlM (\cgr par -> fieldDependencies nd tyvars par cgr) ngr pars
+        return $ case nd' of
+                      Nothing -> ngr2
+                      Just nd'' -> ngr2 { typeGraph = insEdge (nd,nd'',fmap (resolvePar tyvars) pars) (typeGraph ngr2) }
 
 getDeclGroups :: TypeGraph -> [[Dec]]
 getDeclGroups gr = if all (\grp -> checkGroup grp grp Nothing) comps
@@ -167,10 +177,12 @@ splitType _ = Nothing
 
 declStructure :: [Name] -> Dec -> (String,[(String,[(String,ExpQ)])])
 declStructure allNames (DataD _ name tyvars cons _) = (nameBase name,fmap (declStructureCon allNames tyvars) cons)
+declStructure allNames (NewtypeD _ name tyvars con _) = (nameBase name,[declStructureCon allNames tyvars con])
 
 declStructureCon :: [Name] -> [TyVarBndr] -> Con -> (String,[(String,ExpQ)])
 declStructureCon allNames tyvars (RecC name fields) = (nameBase name,fmap (\(name,_,tp) -> (nameBase name,declStructureType allNames tyvars tp)) fields)
 declStructureCon allNames tyvars (NormalC name []) = (nameBase name,[])
+declStructureCon allNames tyvars c = error $ "declStructureCon unimplemented for "++show c
 
 declStructureType :: [Name] -> [TyVarBndr] -> Type -> ExpQ
 declStructureType allNames tyvars tp
@@ -282,6 +294,7 @@ generateMangleFun dec
                                                     ),getSort $(varE alias) $(varE ann)]|])) []
                  | con <- case dec of
                             DataD _ _ _ cons _ -> cons
+                            NewtypeD _ _ _ con _ -> [con]
                  ]
 
 generateUnmangleFun :: Dec -> Q Dec
@@ -291,6 +304,7 @@ generateUnmangleFun dec
     ann <- newName "ann"
     let cons = case dec of
           DataD _ _ _ c _ -> c
+          NewtypeD _ _ _ c _ -> [c]
         cl = fmap genClause cons
         asClause = clause [conP 'L.List [ listP [ [p| L.Symbol "as" |],varP p,wildP] ],varP ann] (normalB $ [| unmangle |] `appE` (varE p) `appE` (varE ann)) []
     funD 'unmangle (cl++[asClause,clause [wildP,wildP] (normalB [| return Nothing |]) []])
