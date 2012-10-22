@@ -29,6 +29,7 @@ getValue expr = do
         _ -> error "Can't use getValue on complex expressions. Use getValue' instead."
   getValue' ann expr
   
+-- | Extract values of compound expressions from the generated model.
 getValue' :: SMTValue t => SMTAnnotation t -> SMTExpr t -> SMT t
 getValue' ann expr = do
   res <- getRawValue expr

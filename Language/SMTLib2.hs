@@ -40,7 +40,7 @@ module Language.SMTLib2
          SMTInfo(),SMTSolverName(..),SMTSolverVersion(..),
          assert,stack,
          checkSat,
-         getValue,
+         getValue,getValue',
          comment,
          getInterpolants,getProof,
          -- * Expressions
