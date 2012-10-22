@@ -77,7 +77,7 @@ module Language.SMTLib2
          -- ** Data types
          is,(.#),
          -- ** Lists
-         head',tail',insert'
+         head',tail',insert',isNil,isInsert
        )
        where
 

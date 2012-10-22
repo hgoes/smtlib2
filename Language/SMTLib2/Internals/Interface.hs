@@ -376,6 +376,14 @@ tail' = Tail
 insert' :: SMTExpr a -> SMTExpr [a] -> SMTExpr [a]
 insert' = Insert
 
+-- | Checks if a list is empty.
+isNil :: SMTType a => SMTExpr [a] -> SMTExpr Bool
+isNil e = is e (Constructor "nil")
+
+-- | Checks if a list is non-empty.
+isInsert :: SMTType a => SMTExpr [a] -> SMTExpr Bool
+isInsert e = is e (Constructor "insert")
+
 -- | Sets the logic used for the following program (Not needed for many solvers).
 setLogic :: Text -> SMT ()
 setLogic name = putRequest $ L.List [L.Symbol "set-logic"
