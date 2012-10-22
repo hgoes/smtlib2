@@ -201,10 +201,10 @@ eqExpr lhs rhs = case gcast rhs of
 
 -- | Represents a constructor of a datatype /a/
 --   Can be obtained by using the template haskell extension module
-data Constructor a = Constructor Text deriving (Eq)
+data Constructor a = Constructor Text deriving (Eq,Show)
 
 -- | Represents a field of the datatype /a/ of the type /f/
-data Field a f = Field Text deriving (Eq)
+data Field a f = Field Text deriving (Eq,Show)
 
 newtype InterpolationGroup = InterpolationGroup Text
 
