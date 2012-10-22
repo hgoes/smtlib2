@@ -1,6 +1,13 @@
+{- | This module is used to express the fact that any tuple which is composed
+     only from empty tuples holds the same amount of information as an empty
+     tuple. -}
 module Data.Unit where
 
+{- | The unit class expresses the fact that all tuples composed from only empty
+     tuples hold the same amount of information as the empty tuple and can thus
+     all be constructed by a call to 'unit'. -}
 class Unit t where
+    -- | Constructs a unit type
     unit :: t
 
 instance Unit () where
