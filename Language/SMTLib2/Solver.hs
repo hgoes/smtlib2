@@ -6,7 +6,7 @@ import Language.SMTLib2
 
 -- | Z3 is a solver by Microsoft <http://research.microsoft.com/en-us/um/redmond/projects/z3>.
 withZ3 :: SMT a -> IO a
-withZ3 = withSMTSolver "z3 -smt2 -in -m"
+withZ3 = withSMTSolver "z3 -smt2 -in"
 
 -- | MathSAT <http://mathsat.fbk.eu>.
 withMathSat :: SMT a -> IO a
