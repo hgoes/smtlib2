@@ -79,7 +79,6 @@ defFunAnnNamed name ann_arg ann_res f = do
       (au,tps,c_args') = createArgs ann_arg (c_args+1)
       
       (expr',c_args'') = exprToLisp (f au) c_args'
-  putSMT (Map.insert "arg" c_args'' names,decl,mp)
   defineFun fname tps (getSort rtp ann_res) expr'
   return res
 
