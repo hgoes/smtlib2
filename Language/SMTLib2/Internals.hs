@@ -277,7 +277,7 @@ declareType' rep act = do
              act)      
 
 createArgs :: Args a => ArgAnnotation a -> Integer -> (a,[(Text,L.Lisp)],Integer)
-createArgs ann i = let ((tps,ni),res) = foldExprs (\(tps',ci) e ann' -> let name = T.pack $ "arg"++show ci
+createArgs ann i = let ((tps,ni),res) = foldExprs (\(tps',ci) e ann' -> let name = T.pack $ "arg_"++show ci
                                                                             sort' = getSort (getUndef e) ann'
                                                                         in ((tps'++[(name,sort')],ci+1),Var name ann')
                                                   ) ([],i) (error "Evaluated the argument to createArgs") ann
@@ -387,7 +387,7 @@ withSMTSolver solver f = do
                                  res <- f
                                  putRequest (L.List [L.Symbol "exit"])
                                  return res
-                                ) (hin,hout)) (0,Set.empty,Map.empty)
+                                ) (hin,hout)) (Map.empty,Set.empty,Map.empty)
   hClose hin
   hClose hout
   terminateProcess handle
@@ -578,3 +578,19 @@ replaceName :: (T.Text -> T.Text) -> SMTExpr a -> SMTExpr a
 replaceName f = snd . foldExpr (\_ expr -> ((),case expr of
                                                Var n ann -> Var (f n) ann
                                                _ -> expr)) ()
+
+escapeName :: String -> String
+escapeName [] = []
+escapeName ('_':xs) = '_':'_':escapeName xs
+escapeName (x:xs) = x:escapeName xs
+
+freeName :: String -> SMT Text
+freeName name = do
+  (names,decl,mp) <- getSMT
+  let c = case Map.lookup name names of
+        Nothing -> 0
+        Just c' -> c'
+  putSMT (Map.insert name (c+1) names,decl,mp)
+  return $ T.pack $ (escapeName name)++(case c of
+                                           0 -> ""
+                                           _ -> "_"++show c)

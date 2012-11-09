@@ -17,45 +17,42 @@ import Data.Word
 import Data.List (genericReplicate)
 
 -- | Create a new named variable
-varNamed :: (SMTType t,Typeable t,Unit (SMTAnnotation t)) => Text -> SMT (SMTExpr t)
+varNamed :: (SMTType t,Typeable t,Unit (SMTAnnotation t)) => String -> SMT (SMTExpr t)
 varNamed name = varNamedAnn name unit
 
-varNamedAnn :: (SMTType t,Typeable t) => Text -> SMTAnnotation t -> SMT (SMTExpr t)
-varNamedAnn name ann = mfix (\e -> varNamed' (getUndef e) name ann)
-
-varNamed' :: (SMTType t,Typeable t) => t -> Text -> SMTAnnotation t -> SMT (SMTExpr t)
-varNamed' u name ann = do
-  let sort = getSort u ann
-  declareType u ann
-  declareFun name [] sort
-  mapM_ assert $ additionalConstraints u ann (Var name ann)
-  return (Var name ann)
+varNamedAnn :: (SMTType t,Typeable t) => String -> SMTAnnotation t -> SMT (SMTExpr t)
+varNamedAnn = argVarsAnnNamed
 
 -- | Create a annotated variable
 varAnn :: (SMTType t,Typeable t) => SMTAnnotation t -> SMT (SMTExpr t)
-varAnn ann = do
-  (c,decl,mp) <- getSMT
-  putSMT (c+1,decl,mp)
-  let name = T.pack $ "var"++show c
-  varNamedAnn name ann
+varAnn ann = varNamedAnn "var" ann
 
 -- | Create a fresh new variable
 var :: (SMTType t,Typeable t,Unit (SMTAnnotation t)) => SMT (SMTExpr t)
-var = do
-  (c,decl,mp) <- getSMT
-  putSMT (c+1,decl,mp)
-  let name = T.pack $ "var"++show c
-  varNamed name
+var = varNamed "var"
 
 argVarsAnn :: Args a => ArgAnnotation a -> SMT a
-argVarsAnn ann = do
-  (c,decl,mp) <- getSMT
-  let ((nc,act),res) = foldExprs 
-                       (\(cc,act') u ann' 
-                            -> let name = T.pack $ "var"++show cc
-                               in ((cc+1,act' >> varNamed' (getUndef u) name ann' >> return ())
-                                  ,Var name ann')) (c,return ()) undefined ann
-  putSMT (nc,decl,mp)
+argVarsAnn = argVarsAnnNamed "var"
+
+argVarsAnnNamed :: Args a => String -> ArgAnnotation a -> SMT a
+argVarsAnnNamed name ann = do
+  (names,decl,mp) <- getSMT
+  let ename = escapeName name
+      namec = case Map.lookup name names of
+        Nothing -> 0
+        Just c -> c
+      ((nc,act),res) = foldExprs
+                       (\(cc,act') u ann'
+                         -> let rname = T.pack $ case cc of
+                                  0 -> ename
+                                  _ -> ename++"_"++show cc
+                                sort = getSort (getUndef u) ann'
+                            in ((cc+1,act' >> (do
+                                                  declareType (getUndef u) ann'
+                                                  declareFun rname [] sort
+                                                  mapM_ assert $ additionalConstraints (getUndef u) ann' (Var rname ann')))
+                                ,Var rname ann')) (namec,return ()) undefined ann
+  putSMT (Map.insert name nc names,decl,mp)
   act
   return res
 
@@ -105,19 +102,25 @@ setOption opt = putRequest $ L.List $ [L.Symbol "set-option"]
 -- | Create a new interpolation group
 interpolationGroup :: SMT InterpolationGroup
 interpolationGroup = do
-  (c,decl,mp) <- getSMT
-  putSMT (c+1,decl,mp)
-  let name = T.pack $ "interp"++show c
-  return (InterpolationGroup name)
+  rname <- freeName "interp"
+  return (InterpolationGroup rname)
 
--- | Create a new uninterpreted function with annotation for
--- the argument and the return type.
 funAnn :: (Args a, SMTType r) => ArgAnnotation a -> SMTAnnotation r -> SMT (SMTExpr (SMTFun a r))
-funAnn annArg annRet = do
-  (c,decl,mp) <- getSMT
-  putSMT (c+1,decl,mp)
-  let name = T.pack $ "fun"++show c
-      res = Fun name annArg annRet
+funAnn = funAnnNamed "fun"
+
+-- | Create a new uninterpreted named function with annotation for
+--   the argument and the return type.
+funAnnNamed :: (Args a, SMTType r) => String -> ArgAnnotation a -> SMTAnnotation r -> SMT (SMTExpr (SMTFun a r))
+funAnnNamed name annArg annRet = do
+  (names,decl,mp) <- getSMT
+  let func = case Map.lookup name names of
+        Nothing -> 0
+        Just c -> c
+  putSMT (Map.insert name (func+1) names,decl,mp)
+  let rname = T.pack $ (escapeName name)++(case func of
+                                              0 -> ""
+                                              _ -> "_"++show func)
+      res = Fun rname annArg annRet
       
       (au,rtp) = getFunUndef res
       
@@ -127,7 +130,7 @@ funAnn annArg annRet = do
       (au2,tps,_) = createArgs annArg 0
       
   assertEq au au2 $ return ()
-  declareFun name [ l | (_,l) <- tps ] (getSort rtp annRet)
+  declareFun rname [ l | (_,l) <- tps ] (getSort rtp annRet)
   return res
 
 -- | funAnn with an annotation only for the return type.
@@ -390,12 +393,13 @@ setLogic name = putRequest $ L.List [L.Symbol "set-logic"
                                     ,L.Symbol name]
 
 -- | Given an arbitrary expression, this creates a named version of it and a name to reference it later on.
-named :: (SMTType a,SMTAnnotation a ~ ()) => SMTExpr a -> SMT (SMTExpr a,SMTExpr a)
-named expr = do
-  (c,decl,mp) <- getSMT
-  putSMT (c+1,decl,mp)
-  let name = T.pack $ "named"++show c
-  return (Named expr name,Var name ())
+named :: (SMTType a,SMTAnnotation a ~ ()) => String -> SMTExpr a -> SMT (SMTExpr a,SMTExpr a)
+named name expr = do
+  rname <- freeName name
+  return (Named expr rname,Var rname ())
+
+named' :: (SMTType a,SMTAnnotation a ~ ()) => SMTExpr a -> SMT (SMTExpr a,SMTExpr a)
+named' = named "named"
 
 -- | Perform craig interpolation (<http://en.wikipedia.org/wiki/Craig_interpolation>) on the given terms and returns interpolants for them.
 --   Note that not all SMT solvers support this.
