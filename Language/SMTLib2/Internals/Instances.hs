@@ -421,6 +421,24 @@ instance (LiftArgs a,LiftArgs b,LiftArgs c) => LiftArgs (a,b,c) where
     rz <- unliftArgs z
     return (rx,ry,rz)
 
+instance (Args a,Args b,Args c,Args d) => Args (a,b,c,d) where
+  type ArgAnnotation (a,b,c,d) = (ArgAnnotation a,ArgAnnotation b,ArgAnnotation c,ArgAnnotation d)
+  foldExprs f s ~(e1,e2,e3,e4) ~(ann1,ann2,ann3,ann4) = let ~(s1,e1') = foldExprs f s e1 ann1
+                                                            ~(s2,e2') = foldExprs f s1 e2 ann2
+                                                            ~(s3,e3') = foldExprs f s2 e3 ann3
+                                                            ~(s4,e4') = foldExprs f s3 e4 ann4
+                                                        in (s4,(e1',e2',e3',e4'))
+
+instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d) => LiftArgs (a,b,c,d) where
+  type Unpacked (a,b,c,d) = (Unpacked a,Unpacked b,Unpacked c,Unpacked d)
+  liftArgs (x1,x2,x3,x4) ~(a1,a2,a3,a4) = (liftArgs x1 a1,liftArgs x2 a2,liftArgs x3 a3,liftArgs x4 a4)
+  unliftArgs (x1,x2,x3,x4) = do
+    r1 <- unliftArgs x1
+    r2 <- unliftArgs x2
+    r3 <- unliftArgs x3
+    r4 <- unliftArgs x4
+    return (r1,r2,r3,r4)
+
 instance Args a => Args [a] where
   type ArgAnnotation [a] = [ArgAnnotation a]
   foldExprs _ s _ [] = (s,[])
