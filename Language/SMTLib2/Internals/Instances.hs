@@ -13,7 +13,9 @@ import qualified Data.Text as T
 import Data.Ratio
 import Data.Typeable
 import qualified Data.ByteString as BS
+import Data.Map
 import Data.List (genericLength,genericReplicate)
+import Data.Traversable
 
 -- Bool
 
@@ -455,6 +457,15 @@ instance LiftArgs a => LiftArgs [a] where
     x' <- unliftArgs x
     xs' <- unliftArgs xs
     return (x':xs')
+
+instance (Ord a,Typeable a,Args b) => Args (Map a b) where
+  type ArgAnnotation (Map a b) = Map a (ArgAnnotation b)
+  foldExprs f s mp anns = mapAccumWithKey (\s1 key ann -> foldExprs f s1 (mp!key) ann) s anns
+
+instance (Ord a,Typeable a,LiftArgs b) => LiftArgs (Map a b) where
+  type Unpacked (Map a b) = Map a (Unpacked b)
+  liftArgs mp anns = mapWithKey (\key ann -> liftArgs (mp!key) ann) anns
+  unliftArgs = Data.Traversable.mapM unliftArgs
 
 instance SMTType a => SMTType (Maybe a) where
   type SMTAnnotation (Maybe a) = SMTAnnotation a
