@@ -17,6 +17,7 @@ import Data.Set as Set
 import Data.List as List (mapAccumL)
 
 import Language.SMTLib2.Internals.SMTMonad
+import qualified Language.SMTLib2.Internals.Connection as Conn
 
 -- | Haskell types which can be represented in SMT
 class (Eq t,Typeable t) => SMTType t where
@@ -373,25 +374,13 @@ withSMTSolver :: String -- ^ The shell command to execute
                  -> SMT a -- ^ The SMT operation to perform
                  -> IO a
 withSMTSolver solver f = do
-  let cmd = CreateProcess { cmdspec = ShellCommand solver
-                          , cwd = Nothing
-                          , env = Nothing
-                          , std_in = CreatePipe
-                          , std_out = CreatePipe
-                          , std_err = Inherit
-                          , close_fds = False
-                          , create_group = False
-                          }
-  (Just hin,Just hout,_,handle) <- createProcess cmd
-  res <- evalStateT (runReaderT (runSMT $ do
-                                 res <- f
-                                 putRequest (L.List [L.Symbol "exit"])
-                                 return res
-                                ) (hin,hout)) (0,Set.empty,Map.empty)
-  hClose hin
-  hClose hout
-  terminateProcess handle
-  _ <- waitForProcess handle
+  conn <- Conn.open solver
+  res <- Conn.performSMT conn (do
+                                  r <- f
+                                  putRequest (L.List [L.Symbol "exit"])
+                                  return r
+                              )
+  Conn.close conn
   return res
 
 clearInput :: SMT ()

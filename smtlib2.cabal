@@ -18,5 +18,6 @@ Library
     Language.SMTLib2.Internals.Instances
     Language.SMTLib2.Internals.Translation
     Language.SMTLib2.Internals.Interface
+    Language.SMTLib2.Internals.Connection
     Data.Unit
     

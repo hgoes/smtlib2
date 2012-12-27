@@ -445,11 +445,10 @@ instance SMTType a => SMTType (Maybe a) where
       undef :: Maybe a -> a
       undef _ = undefined
   getSortBase _ = L.Symbol "Maybe"
-  declareType u ann = declareType' (typeOf u)
-                      (do
-                          declareDatatypes ["a"] [("Maybe",[("Nothing",[]),("Just",[("fromJust",L.Symbol "a")])])]
-                          declareType (undef u) ann
-                      )
+  declareType u ann = do
+    declareType (undef u) ann
+    declareType' (typeOf u)
+      (declareDatatypes ["a"] [("Maybe",[("Nothing",[]),("Just",[("fromJust",L.Symbol "a")])])])
     where
       undef :: Maybe a -> a
       undef _ = undefined

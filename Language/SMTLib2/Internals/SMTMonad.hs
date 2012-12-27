@@ -1,5 +1,5 @@
 module Language.SMTLib2.Internals.SMTMonad (
-  SMT(..), askSMT, getSMT, putSMT, modifySMT, MonadSMT(..)
+  SMT(..), askSMT, getSMT, putSMT, modifySMT, MonadSMT(..), SMTState
   ) where
 
 import System.IO (Handle)
