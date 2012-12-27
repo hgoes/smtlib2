@@ -10,6 +10,7 @@ import Data.Typeable
 import Data.Text as T
 import Data.Word
 import Data.Array
+import qualified Data.Map as Map (lookup,insert)
 
 import Data.Unit
 
@@ -29,6 +30,7 @@ getValue expr = do
         _ -> error "Can't use getValue on complex expressions. Use getValue' instead."
   getValue' ann expr
   
+-- | Extract values of compound expressions from the generated model.
 getValue' :: SMTValue t => SMTAnnotation t -> SMTExpr t -> SMT t
 getValue' ann expr = do
   res <- getRawValue expr
@@ -62,21 +64,26 @@ defConstAnn ann e = do
   return $ App f ()
 
 -- | Define a new function with a body and custom type annotations for arguments and result.
-defFunAnn :: (Args a,SMTType r) => ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a r))
-defFunAnn ann_arg ann_res f = do
-  (c,decl,mp) <- getSMT
+defFunAnnNamed :: (Args a,SMTType r) => String -> ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a r))
+defFunAnnNamed name ann_arg ann_res f = do
+  fname <- freeName name
+  (names,decl,mp) <- getSMT
+  let c_args = case Map.lookup "arg" names of
+        Nothing -> 0
+        Just n -> n
 
-  let name = T.pack $ "fun"++show c
-      res = Fun name ann_arg ann_res
+      res = Fun fname ann_arg ann_res
       
       (_,rtp) = getFunUndef res
       
-      (au,tps,c1) = createArgs ann_arg (c+1)
+      (au,tps,c_args') = createArgs ann_arg (c_args+1)
       
-      (expr',c2) = exprToLisp (f au) c1
-  putSMT (c2,decl,mp)
-  defineFun name tps (getSort rtp ann_res) expr'
+      (expr',c_args'') = exprToLisp (f au) c_args'
+  defineFun fname tps (getSort rtp ann_res) expr'
   return res
+
+defFunAnn :: (Args a,SMTType r) => ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a r))
+defFunAnn = defFunAnnNamed "fun"
 
 -- | Extract all values of an array by giving the range of indices.
 unmangleArray :: (LiftArgs i,Ix (Unpacked i),SMTValue v,Unit (SMTAnnotation (Unpacked i)),Unit (ArgAnnotation i)) => (Unpacked i,Unpacked i) -> SMTExpr (SMTArray i v) -> SMT (Array (Unpacked i) v)

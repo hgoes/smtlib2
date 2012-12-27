@@ -28,7 +28,7 @@ import Control.Applicative (Applicative(..))
 import Control.Monad (ap)
 
 type SMTRead = (Handle, Handle)
-type SMTState = (Integer,Set TyCon,Map T.Text TypeRep)
+type SMTState = (Map String Integer,Set TyCon,Map T.Text TypeRep)
 
 -- | The SMT monad used for communating with the SMT solver
 newtype SMT a = SMT { runSMT :: ReaderT SMTRead (Lazy.StateT SMTState IO) a }

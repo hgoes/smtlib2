@@ -40,15 +40,15 @@ module Language.SMTLib2
          SMTInfo(),SMTSolverName(..),SMTSolverVersion(..),
          assert,stack,
          checkSat,
-         getValue,
+         getValue,getValue',
          comment,
          getInterpolants,getProof,
          -- * Expressions
-         var,varNamed,varNamedAnn,varAnn,argVars,argVarsAnn,
+         var,varNamed,varNamedAnn,varAnn,argVars,argVarsAnn,argVarsAnnNamed,
          constant,constantAnn,
          extractAnnotation,
          let',lets,letAnn,
-         named,
+         named,named',
          -- ** Basic logic
          (.==.),
          distinct,
@@ -73,11 +73,11 @@ module Language.SMTLib2
          bvsplitu32to16,bvsplitu32to8,
          bvsplitu64to32,bvsplitu64to16,bvsplitu64to8,
          -- ** Functions
-         funAnn, funAnnRet,fun,app,defFun,defConst,defFunAnn,defConstAnn,
+         funAnn,funAnnNamed,funAnnRet,fun,app,defFun,defConst,defFunAnn,defFunAnnNamed,defConstAnn,
          -- ** Data types
          is,(.#),
          -- ** Lists
-         head',tail',insert'
+         head',tail',insert',isNil,isInsert
        )
        where
 

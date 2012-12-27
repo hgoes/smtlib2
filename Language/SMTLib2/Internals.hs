@@ -202,10 +202,10 @@ eqExpr lhs rhs = case gcast rhs of
 
 -- | Represents a constructor of a datatype /a/
 --   Can be obtained by using the template haskell extension module
-data Constructor a = Constructor Text deriving (Eq)
+data Constructor a = Constructor Text deriving (Eq,Show)
 
 -- | Represents a field of the datatype /a/ of the type /f/
-data Field a f = Field Text deriving (Eq)
+data Field a f = Field Text deriving (Eq,Show)
 
 newtype InterpolationGroup = InterpolationGroup Text
 
@@ -278,7 +278,7 @@ declareType' rep act = do
              act)      
 
 createArgs :: Args a => ArgAnnotation a -> Integer -> (a,[(Text,L.Lisp)],Integer)
-createArgs ann i = let ((tps,ni),res) = foldExprs (\(tps',ci) e ann' -> let name = T.pack $ "arg"++show ci
+createArgs ann i = let ((tps,ni),res) = foldExprs (\(tps',ci) e ann' -> let name = T.pack $ "arg_"++show ci
                                                                             sort' = getSort (getUndef e) ann'
                                                                         in ((tps'++[(name,sort')],ci+1),Var name ann')
                                                   ) ([],i) (error "Evaluated the argument to createArgs") ann
@@ -374,13 +374,25 @@ withSMTSolver :: String -- ^ The shell command to execute
                  -> SMT a -- ^ The SMT operation to perform
                  -> IO a
 withSMTSolver solver f = do
-  conn <- Conn.open solver
-  res <- Conn.performSMT conn (do
-                                  r <- f
-                                  putRequest (L.List [L.Symbol "exit"])
-                                  return r
-                              )
-  Conn.close conn
+  let cmd = CreateProcess { cmdspec = ShellCommand solver
+                          , cwd = Nothing
+                          , env = Nothing
+                          , std_in = CreatePipe
+                          , std_out = CreatePipe
+                          , std_err = Inherit
+                          , close_fds = False
+                          , create_group = False
+                          }
+  (Just hin,Just hout,_,handle) <- createProcess cmd
+  res <- evalStateT (runReaderT (runSMT $ do
+                                 res <- f
+                                 putRequest (L.List [L.Symbol "exit"])
+                                 return res
+                                ) (hin,hout)) (Map.empty,Set.empty,Map.empty)
+  hClose hin
+  hClose hout
+  terminateProcess handle
+  _ <- waitForProcess handle
   return res
 
 clearInput :: SMT ()
@@ -567,3 +579,19 @@ replaceName :: (T.Text -> T.Text) -> SMTExpr a -> SMTExpr a
 replaceName f = snd . foldExpr (\_ expr -> ((),case expr of
                                                Var n ann -> Var (f n) ann
                                                _ -> expr)) ()
+
+escapeName :: String -> String
+escapeName [] = []
+escapeName ('_':xs) = '_':'_':escapeName xs
+escapeName (x:xs) = x:escapeName xs
+
+freeName :: String -> SMT Text
+freeName name = do
+  (names,decl,mp) <- getSMT
+  let c = case Map.lookup name names of
+        Nothing -> 0
+        Just c' -> c'
+  putSMT (Map.insert name (c+1) names,decl,mp)
+  return $ T.pack $ (escapeName name)++(case c of
+                                           0 -> ""
+                                           _ -> "_"++show c)
