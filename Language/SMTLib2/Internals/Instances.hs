@@ -505,6 +505,7 @@ instance (Typeable a,SMTType a) => SMTType [a] where
   type SMTAnnotation [a] = SMTAnnotation a
   getSort u ann = L.List [L.Symbol "List",getSort (undefArg u) ann]
   declareType u ann = declareType (undefArg u) ann
+  getSortBase _ = L.Symbol "List"
 
 instance (Typeable a,SMTValue a) => SMTValue [a] where
   unmangle (L.Symbol "nil") _ = return $ Just []
