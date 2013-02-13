@@ -82,6 +82,7 @@ defFunAnnNamed name ann_arg ann_res f = do
   defineFun fname tps (getSort rtp ann_res) expr'
   return res
 
+-- | Like `defFunAnnNamed`, but defaults the function name to "fun".
 defFunAnn :: (Args a,SMTType r) => ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a r))
 defFunAnn = defFunAnnNamed "fun"
 
@@ -515,6 +516,7 @@ lispToExprT ann g l = do
         letToExpr g [] arg = lispToExprT ann g arg
         letToExpr _ (x:xs) _ = error $ "Unparseable entry "++show x++" in let expression"
 
+-- | Reconstruct the type annotation for a given SMT expression.
 extractAnnotation :: SMTExpr a -> SMTAnnotation a
 extractAnnotation (Var _ ann) = ann
 extractAnnotation (Const _ ann) = ann

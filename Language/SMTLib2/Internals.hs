@@ -50,6 +50,7 @@ class (SMTType t) => SMTOrd t where
 -- | Represents a function in the SMT solver. /a/ is the argument of the function in SMT terms, /b/ is the argument in haskell types and /r/ is the result type of the function.
 data SMTFun a r = SMTFun deriving (Eq,Typeable)
 
+-- | An array which maps indices of type /i/ to elements of type /v/.
 data SMTArray i v = SMTArray deriving (Eq,Typeable)
 
 class (SMTType a,SMTType b,SMTType (ConcatResult a b)) => Concatable a b where
@@ -284,9 +285,12 @@ createArgs ann i = let ((tps,ni),res) = foldExprs (\(tps',ci) e ann' -> let name
                                                   ) ([],i) (error "Evaluated the argument to createArgs") ann
                    in (res,tps,ni)
 
+-- | An extension of the `Args` class: Instances of this class can be represented as native haskell data types.
 class Args a => LiftArgs a where
   type Unpacked a
+  -- | Converts a haskell value into its SMT representation.
   liftArgs :: Unpacked a -> ArgAnnotation a -> a
+  -- | Converts a SMT representation back into a haskell value.
   unliftArgs :: a -> SMT (Unpacked a)
 
 firstJust :: Monad m => [m (Maybe a)] -> m (Maybe a)

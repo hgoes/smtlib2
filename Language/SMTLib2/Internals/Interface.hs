@@ -20,6 +20,7 @@ import Data.List (genericReplicate)
 varNamed :: (SMTType t,Typeable t,Unit (SMTAnnotation t)) => String -> SMT (SMTExpr t)
 varNamed name = varNamedAnn name unit
 
+-- | Create a named and annotated variable.
 varNamedAnn :: (SMTType t,Typeable t) => String -> SMTAnnotation t -> SMT (SMTExpr t)
 varNamedAnn = argVarsAnnNamed
 
@@ -31,9 +32,12 @@ varAnn ann = varNamedAnn "var" ann
 var :: (SMTType t,Typeable t,Unit (SMTAnnotation t)) => SMT (SMTExpr t)
 var = varNamed "var"
 
+-- | Like `argVarsAnnNamed`, but defaults the name to "var"
 argVarsAnn :: Args a => ArgAnnotation a -> SMT a
 argVarsAnn = argVarsAnnNamed "var"
 
+-- | Create annotated named SMT variables of the `Args` class.
+--   If more than one variable is needed, they get a numerical suffix.
 argVarsAnnNamed :: Args a => String -> ArgAnnotation a -> SMT a
 argVarsAnnNamed name ann = do
   (names,decl,mp) <- getSMT
@@ -56,13 +60,15 @@ argVarsAnnNamed name ann = do
   act
   return res
 
+-- | Like `argVarsAnn`, but can only be used for unit type annotations.
 argVars :: (Args a,Unit (ArgAnnotation a)) => SMT a
 argVars = argVarsAnn unit
 
--- | A constant expression
+-- | A constant expression.
 constant :: (SMTValue t,Unit (SMTAnnotation t)) => t -> SMTExpr t
 constant x = Const x unit
 
+-- | An annotated constant expression.
 constantAnn :: SMTValue t => t -> SMTAnnotation t -> SMTExpr t
 constantAnn x ann = Const x ann
 
@@ -105,6 +111,8 @@ interpolationGroup = do
   rname <- freeName "interp"
   return (InterpolationGroup rname)
 
+-- | Create a new uniterpreted function with annotations for
+--   the argument and the return type.
 funAnn :: (Args a, SMTType r) => ArgAnnotation a -> SMTAnnotation r -> SMT (SMTExpr (SMTFun a r))
 funAnn = funAnnNamed "fun"
 
@@ -212,10 +220,15 @@ select = Select
 store :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v -> SMTExpr (SMTArray i v)
 store = Store
 
+-- | Interpret a function /f/ from /i/ to /v/ as an array with indices /i/ and elements /v/.
+--   Such that: @f \`app\` j .==. select (asArray f) j@ for all indices j.
 asArray :: (Args i,SMTType v) => SMTExpr (SMTFun i v) -> SMTExpr (SMTArray i v)
 asArray = AsArray
 
-constArray :: (Args i,SMTType v) => SMTExpr v -> ArgAnnotation i -> SMTExpr (SMTArray i v)
+-- | Create an array where each element is the same.
+constArray :: (Args i,SMTType v) => SMTExpr v -- ^ This element will be at every index of the array
+           -> ArgAnnotation i -- ^ Annotations of the index type
+           -> SMTExpr (SMTArray i v)
 constArray = ConstArray
 
 -- | Bitvector addition
@@ -282,21 +295,27 @@ bvlshr = BVLSHR
 bvashr :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
 bvashr = BVASHR
 
--- | Bitvector concat
+-- | Concats two bitvectors into one.
 bvconcat :: (Concatable t1 t2,t3 ~ ConcatResult t1 t2)
             => SMTExpr t1 -> SMTExpr t2 -> SMTExpr t3
 bvconcat = BVConcat
 
+-- | Concat a list of bitvectors into one.
 bvconcats :: (SMTType t1,SMTType t2,Concatable t2 t1,t2 ~ ConcatResult t2 t1)
             => [SMTExpr t1] -> SMTExpr t2
 bvconcats = BVConcats
 
-bvextract :: (SMTType t,Extractable t t) => Integer -> Integer -> SMTExpr t -> SMTExpr t
+-- | Extract a sub-vector out of a given bitvector.
+bvextract :: (SMTType t,Extractable t t) => Integer -- ^ The upper bound of the extracted region
+          -> Integer -- ^ The lower bound of the extracted region
+          -> SMTExpr t -- ^ The bitvector to extract from
+          -> SMTExpr t
 bvextract u l e = withUndef $ \un -> BVExtract u l (extract' un un u l (extractAnnotation e)) e
     where
       withUndef :: (t -> SMTExpr t) -> SMTExpr t
       withUndef f = f undefined
 
+-- | A more general variant of `bvextract` which can fail if the bounds are invalid.
 bvextractUnsafe :: (SMTType t1,SMTType t2,Extractable t1 t2) => Integer -> Integer -> SMTExpr t1 -> SMTExpr t2
 bvextractUnsafe u l e = withUndef $ \un ->
                         BVExtract u l (extract' (getUndef e) un u l (extractAnnotation e)) e
@@ -304,21 +323,27 @@ bvextractUnsafe u l e = withUndef $ \un ->
       withUndef :: (t -> SMTExpr t) -> SMTExpr t
       withUndef f = f undefined
 
+-- | Safely split a 16-bit bitvector into two 8-bit bitvectors.
 bvsplitu16to8 :: SMTExpr Word16 -> (SMTExpr Word8,SMTExpr Word8)
 bvsplitu16to8 e = (BVExtract 15 8 () e,BVExtract 7 0 () e)
 
+-- | Safely split a 32-bit bitvector into two 16-bit bitvectors.
 bvsplitu32to16 :: SMTExpr Word32 -> (SMTExpr Word16,SMTExpr Word16)
 bvsplitu32to16 e = (BVExtract 31 16 () e,BVExtract 15 0 () e)
 
+-- | Safely split a 32-bit bitvector into four 8-bit bitvectors.
 bvsplitu32to8 :: SMTExpr Word32 -> (SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8)
 bvsplitu32to8 e = (BVExtract 31 24 () e,BVExtract 23 16 () e,BVExtract 15 8 () e,BVExtract 7 0 () e)
 
+-- | Safely split a 64-bit bitvector into two 32-bit bitvectors.
 bvsplitu64to32 :: SMTExpr Word64 -> (SMTExpr Word32,SMTExpr Word32)
 bvsplitu64to32 e = (BVExtract 63 32 () e,BVExtract 31 0 () e)
 
+-- | Safely split a 64-bit bitvector into four 16-bit bitvectors.
 bvsplitu64to16 :: SMTExpr Word64 -> (SMTExpr Word16,SMTExpr Word16,SMTExpr Word16,SMTExpr Word16)
 bvsplitu64to16 e = (BVExtract 63 48 () e,BVExtract 47 32 () e,BVExtract 31 16 () e,BVExtract 15 0 () e)
 
+-- | Safely split a 64-bit bitvector into eight 8-bit bitvectors.
 bvsplitu64to8 :: SMTExpr Word64 -> (SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8)
 bvsplitu64to8 e = (BVExtract 63 56 () e,BVExtract 55 48 () e,BVExtract 47 40 () e,BVExtract 39 32 () e,BVExtract 31 24 () e,BVExtract 23 16 () e,BVExtract 15 8 () e,BVExtract 7 0 () e)
 
@@ -326,6 +351,7 @@ bvsplitu64to8 e = (BVExtract 63 56 () e,BVExtract 55 48 () e,BVExtract 47 40 () 
 forAll :: (Args a,Unit (ArgAnnotation a)) => (a -> SMTExpr Bool) -> SMTExpr Bool
 forAll = Forall unit
 
+-- | An annotated version of `forAll`.
 forAllAnn :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
 forAllAnn = Forall
 
@@ -333,6 +359,7 @@ forAllAnn = Forall
 exists :: (Args a,Unit (ArgAnnotation a)) => (a -> SMTExpr Bool) -> SMTExpr Bool
 exists = Exists unit
 
+-- | An annotated version of `exists`.
 existsAnn :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
 existsAnn = Exists
 
@@ -342,6 +369,7 @@ existsAnn = Exists
 let' :: (Args a,Unit (ArgAnnotation a)) => a -> (a -> SMTExpr b) -> SMTExpr b
 let' = Let unit
 
+-- | Like `let'`, but can be given an additional type annotation for the argument of the function.
 letAnn :: Args a => ArgAnnotation a -> a -> (a -> SMTExpr b) -> SMTExpr b
 letAnn = Let
 
@@ -349,13 +377,16 @@ letAnn = Let
 lets :: (Args a,Unit (ArgAnnotation a)) => [a] -> ([a] -> SMTExpr b) -> SMTExpr b
 lets xs = Let (fmap (const unit) xs) xs
 
--- | Like 'forAll', but can quantify over more than one variable (of the same type)
+-- | Like 'forAll', but can quantify over more than one variable (of the same type).
 forAllList :: (Args a,Unit (ArgAnnotation a)) => Integer -- ^ Number of variables to quantify
               -> ([a] -> SMTExpr Bool) -- ^ Function which takes a list of the quantified variables
               -> SMTExpr Bool
 forAllList l = Forall (genericReplicate l unit)
 
-existsList :: (Args a,Unit (ArgAnnotation a)) => Integer -> ([a] -> SMTExpr Bool) -> SMTExpr Bool
+-- | Like `exists`, but can quantify over more than one variable (of the same type).
+existsList :: (Args a,Unit (ArgAnnotation a)) => Integer -- ^ Number of variables to quantify
+           -> ([a] -> SMTExpr Bool) -- ^ Function which takes a list of the quantified variables
+           -> SMTExpr Bool
 existsList l = Exists (genericReplicate l unit)
 
 
@@ -398,6 +429,7 @@ named name expr = do
   rname <- freeName name
   return (Named expr rname,Var rname ())
 
+-- | Like `named`, but defaults the name to "named".
 named' :: (SMTType a,SMTAnnotation a ~ ()) => SMTExpr a -> SMT (SMTExpr a,SMTExpr a)
 named' = named "named"
 

@@ -523,6 +523,8 @@ instance (Typeable a,SMTValue a) => SMTValue [a] where
                              ,mangle xs ann]
 
 -- Bitvector implementations for ByteString
+
+-- | Encodes the length of a `ByteString` to be used as a type annotation.
 newtype ByteStringLen = ByteStringLen Int deriving (Show,Eq,Ord,Num)
 
 instance SMTType BS.ByteString where
@@ -547,6 +549,8 @@ instance Concatable BS.ByteString BS.ByteString where
 
 -- BitVector implementation
 
+-- | A bitvector is a list of bits which can be used to represent binary numbers.
+--   It is represented as an `Integer`, which represents the value of the bitvector.
 newtype BitVector = BitVector Integer deriving (Eq,Ord,Num,Show,Typeable)
 
 instance SMTType BitVector where
