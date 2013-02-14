@@ -16,7 +16,7 @@ import qualified Data.AttoLisp as L
 import qualified Data.Text as T
 import Data.Typeable
 import Data.Maybe (catMaybes)
-import Data.Graph.Inductive as Gr
+import qualified Data.Graph.Inductive as Gr
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -24,8 +24,8 @@ import Data.Foldable
 import Prelude hiding (foldl,concat,elem,all)
 import Data.List (findIndex)
 
-data TypeGraph = TypeGraph { typeNodes :: Map Name Node
-                           , typeGraph :: Gr Dec [Either Int Type] }
+data TypeGraph = TypeGraph { typeNodes :: Map Name Gr.Node
+                           , typeGraph :: Gr.Gr Dec [Either Int Type] }
                  deriving Show
 
 getTypeGraph :: Name -> Q TypeGraph
@@ -47,9 +47,9 @@ getTypeGraph tp = do
             if i
               then return (Nothing,gr)
               else (do
-                       let [nd] = newNodes 1 (typeGraph gr)
+                       let [nd] = Gr.newNodes 1 (typeGraph gr)
                            ngr = TypeGraph { typeNodes = Map.insert tp' nd (typeNodes gr)
-                                           , typeGraph = insNode (nd,dec) (typeGraph gr) }
+                                           , typeGraph = Gr.insNode (nd,dec) (typeGraph gr) }
                        ngr2 <- addDependencies nd dec ngr
                        return (Just nd,ngr2))
     addDependencies nd (DataD ctx name tyvars (con:cons) derives) gr = do
@@ -94,16 +94,16 @@ getTypeGraph tp = do
         ngr2 <- foldlM (\cgr par -> fieldDependencies nd tyvars par cgr) ngr pars
         return $ case nd' of
                       Nothing -> ngr2
-                      Just nd'' -> ngr2 { typeGraph = insEdge (nd,nd'',fmap (resolvePar tyvars) pars) (typeGraph ngr2) }
+                      Just nd'' -> ngr2 { typeGraph = Gr.insEdge (nd,nd'',fmap (resolvePar tyvars) pars) (typeGraph ngr2) }
 
 getDeclGroups :: TypeGraph -> [[Dec]]
 getDeclGroups gr = if all (\grp -> checkGroup grp grp Nothing) comps
-                   then fmap (fmap (\nd -> let Just dec = lab (typeGraph gr) nd
+                   then fmap (fmap (\nd -> let Just dec = Gr.lab (typeGraph gr) nd
                                            in dec)) comps
                    else error "Datatypes invalid for deriving"
   where
     checkGroup [] _ _ = True
-    checkGroup (x:xs) grp cur = case checkGroup' (lsuc (typeGraph gr) x) grp cur of
+    checkGroup (x:xs) grp cur = case checkGroup' (Gr.lsuc (typeGraph gr) x) grp cur of
       Nothing -> False
       Just ncur -> checkGroup xs grp ncur
     
@@ -115,7 +115,7 @@ getDeclGroups gr = if all (\grp -> checkGroup grp grp Nothing) comps
                                                                 then checkGroup' lnks grp (Just rcur)
                                                                 else Nothing)
                                           else checkGroup' lnks grp cur
-    comps = scc (typeGraph gr)
+    comps = Gr.scc (typeGraph gr)
 
 getDecInfo :: Dec -> (Name,[TyVarBndr])
 getDecInfo (DataD _ n vars _ _) = (n,vars)
@@ -337,14 +337,21 @@ genClause (RecC cname fields) = do
   vars <- mapM (const $ do
                    v1 <- newName "f"
                    v2 <- newName "r"
-                   return (v1,v2)) fields
+                   v3 <- newName "q"
+                   return (v1,v2,v3)) fields
+  let genRet e [] = appsE [[| return |],appsE [[| Just |],e]]
+      genRet e ((v,r,q):vs) = doE [ bindS (varP r) (appsE [ [| unmangle |],varE v,tupE [] ]) 
+                                  , noBindS $ caseE (varE r)
+                                              [ match (conP 'Just [varP q]) (normalB (genRet e vs)) []
+                                              , match (conP 'Nothing []) (normalB [| return Nothing |]) []
+                                              ]
+                                  ]
   clause [(if Prelude.null fields
            then conP 'L.Symbol [litP $ stringL $ nameBase cname]
            else conP 'L.List [listP $ [conP 'L.Symbol [litP $ stringL $ nameBase cname]]++
-                                      (fmap (varP . fst) vars)])
+                                      (fmap (\(v,_,_) -> varP v) vars)])
          ,wildP]
-    (normalB $ doE $ [ bindS (conP 'Just [varP r]) (appsE [ [| unmangle |],varE v,tupE [] ]) | (v,r) <- vars ]++
-                     [ noBindS $ appsE [[| return |],appsE [ [| Just |],appsE $ (conE cname):(fmap (varE . snd) vars)] ]]) []
+    (normalB $ genRet (appsE $ (conE cname):(fmap (\(_,_,q) -> varE q) vars)) vars) []
 
 constructorType :: Type -> TypeQ
 constructorType (AppT _ tp) = constructorType tp
