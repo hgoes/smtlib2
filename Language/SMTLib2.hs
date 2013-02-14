@@ -25,6 +25,7 @@ module Language.SMTLib2
          SMTType,
          SMTAnnotation,
          SMTValue,
+         SMTRecordType,
          SMTArith,
          SMTOrd(..),
          SMTExpr,

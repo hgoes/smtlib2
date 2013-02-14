@@ -6,7 +6,6 @@ import Language.SMTLib2.Internals.SMTMonad
 import Language.SMTLib2.Internals.Instances ()
 import Language.SMTLib2.Internals.Translation
 
-import Control.Monad.State
 import Data.Typeable
 import Data.Text as T
 import Data.Map as Map hiding (assocs)
@@ -310,18 +309,18 @@ bvextract :: (SMTType t,Extractable t t) => Integer -- ^ The upper bound of the 
           -> Integer -- ^ The lower bound of the extracted region
           -> SMTExpr t -- ^ The bitvector to extract from
           -> SMTExpr t
-bvextract u l e = withUndef $ \un -> BVExtract u l (extract' un un u l (extractAnnotation e)) e
+bvextract u l e = withUndef' $ \un -> BVExtract u l (extract' un un u l (extractAnnotation e)) e
     where
-      withUndef :: (t -> SMTExpr t) -> SMTExpr t
-      withUndef f = f undefined
+      withUndef' :: (t -> SMTExpr t) -> SMTExpr t
+      withUndef' f = f undefined
 
 -- | A more general variant of `bvextract` which can fail if the bounds are invalid.
 bvextractUnsafe :: (SMTType t1,SMTType t2,Extractable t1 t2) => Integer -> Integer -> SMTExpr t1 -> SMTExpr t2
-bvextractUnsafe u l e = withUndef $ \un ->
+bvextractUnsafe u l e = withUndef' $ \un ->
                         BVExtract u l (extract' (getUndef e) un u l (extractAnnotation e)) e
     where
-      withUndef :: (t -> SMTExpr t) -> SMTExpr t
-      withUndef f = f undefined
+      withUndef' :: (t -> SMTExpr t) -> SMTExpr t
+      withUndef' f = f undefined
 
 -- | Safely split a 16-bit bitvector into two 8-bit bitvectors.
 bvsplitu16to8 :: SMTExpr Word16 -> (SMTExpr Word8,SMTExpr Word8)
@@ -395,7 +394,7 @@ is :: SMTType a => SMTExpr a -> Constructor a -> SMTExpr Bool
 is e con = ConTest con e
 
 -- | Access a field of an expression
-(.#) :: (SMTType a,SMTType f) => SMTExpr a -> Field a f -> SMTExpr f
+(.#) :: (SMTRecordType a,SMTType f) => SMTExpr a -> Field a f -> SMTExpr f
 (.#) e f = FieldSel f e
 
 -- | Takes the first element of a list

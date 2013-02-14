@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell,OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell,OverloadedStrings,FlexibleContexts #-}
 {- | This module can be used to automatically lift haskell data-types into the SMT realm.
  -}
 module Language.SMTLib2.TH 
@@ -19,7 +19,6 @@ import Data.Maybe (catMaybes)
 import Data.Graph.Inductive as Gr
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Foldable
 import Prelude hiding (foldl,concat,elem,all)
@@ -35,10 +34,10 @@ getTypeGraph tp = do
                                         , typeGraph = Gr.empty })
   return gr
   where
-    getTypeGraph' tp gr = case Map.lookup tp (typeNodes gr) of
+    getTypeGraph' tp' gr = case Map.lookup tp' (typeNodes gr) of
       Just nd -> return (Just nd,gr)
       Nothing -> do
-        inf <- reify tp
+        inf <- reify tp'
         case inf of
           TyConI dec -> do
             replace_tp <- [t| Integer |]
@@ -49,7 +48,7 @@ getTypeGraph tp = do
               then return (Nothing,gr)
               else (do
                        let [nd] = newNodes 1 (typeGraph gr)
-                           ngr = TypeGraph { typeNodes = Map.insert tp nd (typeNodes gr)
+                           ngr = TypeGraph { typeNodes = Map.insert tp' nd (typeNodes gr)
                                            , typeGraph = insNode (nd,dec) (typeGraph gr) }
                        ngr2 <- addDependencies nd dec ngr
                        return (Just nd,ngr2))
@@ -242,12 +241,25 @@ generateDeclareType decl decls = do
                       ])
 
 getUndefFun :: Name -> [TyVarBndr] -> TyVarBndr -> ExpQ -> ExpQ
-getUndefFun con tyvars tvar udef = [| (const undefined :: $(foldl appT (conT con) (fmap (varT.tyVarName) tyvars)) -> $(varT (tyVarName tvar))) $(udef) |]
+getUndefFun con tyvars tvar udef 
+  = do
+    appE 
+      (tupE 
+         [sigE [| const undefined |]
+               (forallT tyvars (cxt []) $ 
+                appT 
+                 (appT arrowT 
+                       (foldl appT (conT con) (fmap (varT.tyVarName) tyvars)))
+                 (varT (tyVarName tvar)))]
+      ) udef
+    
+--[| (const undefined :: $(foldl appT (conT con) (fmap (varT.tyVarName) tyvars)) -> $(varT (tyVarName tvar))) $(udef) |]
 
 sortExpr :: Name -> [TyVarBndr] -> ExpQ -> ExpQ
 sortExpr con [] _ = [| L.Symbol (T.pack $(stringE (nameBase con))) |]
 sortExpr con tyvars udef = [| L.List |] `appE` (listE $ [ [| L.Symbol (T.pack $(stringE (nameBase con))) |] ]
-                                                ++ [ [| getSort |] `appE` (getUndefFun con tyvars tv udef) `appE` (tupE []) | tv <- tyvars ])
+                                                ++ [ [| getSort |] `appE` (getUndefFun con tyvars tv udef) 
+                                                                   `appE` (tupE []) | tv <- tyvars ])
 
 -- | Given a data-type, this function derives an instance of both 'SMTType' and 'SMTValue' for it.
 --   Example: @ $(deriveSMT 'MyType) @
@@ -256,13 +268,15 @@ deriveSMT name = do
   tg <- getTypeGraph name
   pat <- newName "u"
   ann <- newName "ann"
+  field <- newName "field"
   let grps = getDeclGroups tg
       res = fmap (\grp -> fmap (\dec -> let (dec_name,tyvars) = getDecInfo dec
                                             fullType = foldl appT (conT dec_name) (fmap (\n -> varT (tyVarName n)) tyvars)
                                         in [instanceD (cxt $ concat [[classP ''SMTType [varT n]
                                                                      ,equalP ((conT ''SMTAnnotation) `appT` (varT n)) (tupleT 0)] | n <- fmap tyVarName tyvars ])
                                             (appT (conT ''SMTType) fullType)
-                                            [funD 'getSort [clause [varP pat,varP ann] (normalB $ sortExpr dec_name tyvars (varE pat)) []],
+                                            [funD 'getSort [clause [varP pat,wildP] 
+                                               (normalB $ sortExpr dec_name tyvars (varE pat)) []],
                                              funD 'getSortBase [clause [varP pat] (normalB $ [| L.Symbol (T.pack $(stringE $ nameBase dec_name)) |]) []],
                                              generateDeclareType dec grp,
                                              tySynInstD ''SMTAnnotation [fullType] (tupleT 0)
@@ -271,9 +285,18 @@ deriveSMT name = do
                                                                      ,equalP ((conT ''SMTAnnotation) `appT` (varT n)) (tupleT 0)] | n <- fmap tyVarName tyvars ])
                                             (appT (conT ''SMTValue) fullType)
                                             [generateMangleFun dec
-                                            ,generateUnmangleFun dec]
+                                            ,generateUnmangleFun dec],
+                                            instanceD (cxt $ concat [[classP ''SMTType [varT n]
+                                                                     ,equalP ((conT ''SMTAnnotation) `appT` (varT n)) (tupleT 0)] | n <- fmap tyVarName tyvars ])
+                                            (appT (conT ''SMTRecordType) fullType)
+                                            [funD 'getFieldAnn [clause [varP field,wildP] (normalB [| castField $(varE field) () |]) []]]
                                            ]) grp) grps
   sequence $ concat $ concat res
+
+castField :: (Typeable (SMTAnnotation f),Typeable g,SMTType f) => Field a f -> g -> SMTAnnotation f
+castField (Field name) ann = case cast ann of
+  Nothing -> error $ "Internal smtlib2 error: Invalid type access for field "++show name
+  Just r -> r
 
 generateMangleFun :: Dec -> DecQ
 generateMangleFun dec

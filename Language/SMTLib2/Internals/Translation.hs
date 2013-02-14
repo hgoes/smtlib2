@@ -10,7 +10,7 @@ import Data.Typeable
 import Data.Text as T
 import Data.Word
 import Data.Array
-import qualified Data.Map as Map (lookup,insert)
+import qualified Data.Map as Map (lookup)
 
 import Data.Unit
 
@@ -67,7 +67,7 @@ defConstAnn ann e = do
 defFunAnnNamed :: (Args a,SMTType r) => String -> ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a r))
 defFunAnnNamed name ann_arg ann_res f = do
   fname <- freeName name
-  (names,decl,mp) <- getSMT
+  (names,_,_) <- getSMT
   let c_args = case Map.lookup "arg" names of
         Nothing -> 0
         Just n -> n
@@ -78,7 +78,7 @@ defFunAnnNamed name ann_arg ann_res f = do
       
       (au,tps,c_args') = createArgs ann_arg (c_args+1)
       
-      (expr',c_args'') = exprToLisp (f au) c_args'
+      (expr',_) = exprToLisp (f au) c_args'
   defineFun fname tps (getSort rtp ann_res) expr'
   return res
 
@@ -277,7 +277,7 @@ exprToLisp (App (Fun name arg_ann _) x) c = let ~(x',c') = unpackArgs (\e _ i ->
                                             in if Prelude.null x'
                                                then (L.Symbol name,c')
                                                else (L.List $ (L.Symbol name):x',c')
-exprToLisp (App _ _) c = error "Internal smtlib2 error: Left hand side of function application is not a function"
+exprToLisp (App _ _) _ = error "Internal smtlib2 error: Left hand side of function application is not a function"
 exprToLisp (ConTest (Constructor name) e) c = let (e',c') = exprToLisp e c
                                               in (L.List [L.Symbol $ T.append "is-" name
                                                          ,e'],c')
@@ -292,7 +292,8 @@ exprToLisp (Insert x xs) c = let (x',c') = exprToLisp x c
                              in (L.List [L.Symbol "insert",x',xs'],c'')
 exprToLisp (Named expr name) c = let (expr',c') = exprToLisp expr c
                                  in (L.List [L.Symbol "!",expr',L.Symbol ":named",L.Symbol name],c')
-exprToLisp (InternalFun args) c = (L.List (L.Symbol "_":args),c)
+exprToLisp (InternalFun arguments) c = (L.List (L.Symbol "_":arguments),c)
+exprToLisp Undefined _ = error "Language.SMTLib2.Internals.Translation.exprToLisp: Called on Undefined expression."
 
 withUndef :: TypeRep -> (forall a. (SMTValue a,Typeable a,SMTAnnotation a ~ ()) => a -> b) -> b
 withUndef rep f
@@ -334,19 +335,19 @@ lispToExprU f g l
                   case lhs' of
                     Just r -> return $ Just r
                     Nothing -> lispToExprU (\rhs' -> do
-                                               lhs' <- lispToExprT (extractAnnotation rhs') g lhs
-                                               f (Eq lhs' rhs')) g rhs
+                                               lhs'' <- lispToExprT (extractAnnotation rhs') g lhs
+                                               f (Eq lhs'' rhs')) g rhs
                 L.List [L.Symbol ">",lhs,rhs] -> binT f (Gt::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) g lhs rhs
                 L.List [L.Symbol ">=",lhs,rhs] -> binT f (Ge::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) g lhs rhs
                 L.List [L.Symbol "<",lhs,rhs] -> binT f (Lt::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) g lhs rhs
                 L.List [L.Symbol "<=",lhs,rhs] -> binT f (Le::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) g lhs rhs
-                L.List (L.Symbol "+":args) -> fmap Just $ mapM (lispToExprT () g) args >>= f . (Plus::[SMTExpr Integer] -> SMTExpr Integer)
+                L.List (L.Symbol "+":arg) -> fmap Just $ mapM (lispToExprT () g) arg >>= f . (Plus::[SMTExpr Integer] -> SMTExpr Integer)
                 L.List [L.Symbol "-",lhs,rhs] -> binT f (Minus::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer) g lhs rhs
-                L.List (L.Symbol "*":args) -> fmap Just $ mapM (lispToExprT () g) args >>= f . (Mult::[SMTExpr Integer] -> SMTExpr Integer)
+                L.List (L.Symbol "*":arg) -> fmap Just $ mapM (lispToExprT () g) arg >>= f . (Mult::[SMTExpr Integer] -> SMTExpr Integer)
                 L.List [L.Symbol "/",lhs,rhs] -> binT f Div g lhs rhs
                 L.List [L.Symbol "mod",lhs,rhs] -> binT f Mod g lhs rhs
-                L.List (L.Symbol "and":args) -> fmap Just $ mapM (lispToExprT () g) args >>= f . And
-                L.List (L.Symbol "or":args) -> fmap Just $ mapM (lispToExprT () g) args >>= f . Or
+                L.List (L.Symbol "and":arg) -> fmap Just $ mapM (lispToExprT () g) arg >>= f . And
+                L.List (L.Symbol "or":arg) -> fmap Just $ mapM (lispToExprT () g) arg >>= f . Or
                 L.List [L.Symbol "not",arg] -> fmap Just $ (lispToExprT () g arg :: SMT (SMTExpr Bool)) >>= f
                 L.List [L.Symbol "bvule",lhs,rhs] -> fmap Just $ binBV BVULE g lhs rhs >>= f
                 L.List [L.Symbol "bvult",lhs,rhs] -> fmap Just $ binBV BVULT g lhs rhs >>= f
@@ -356,7 +357,7 @@ lispToExprU f g l
                 L.List [L.Symbol "bvslt",lhs,rhs] -> fmap Just $ binBV BVSLT g lhs rhs >>= f
                 L.List [L.Symbol "bvsge",lhs,rhs] -> fmap Just $ binBV BVSGE g lhs rhs >>= f
                 L.List [L.Symbol "bvsgt",lhs,rhs] -> fmap Just $ binBV BVSGT g lhs rhs >>= f
-                L.List (L.Symbol fn:args) -> fmap Just $ fnToExpr f g fn args
+                L.List (L.Symbol fn:arg) -> fmap Just $ fnToExpr f g fn arg
                 _ -> return Nothing
               ]
 
@@ -374,27 +375,28 @@ asBV f e = case (gcast e :: Maybe (SMTExpr Word8)) of
 fnToExpr :: (forall a. (SMTValue a,Typeable a,SMTAnnotation a ~ ()) => SMTExpr a -> SMT b)
             -> (T.Text -> TypeRep)
             -> T.Text -> [L.Lisp] -> SMT b
-fnToExpr f g fn args = case splitTyConApp $ g fn of
+fnToExpr f g fn arg = case splitTyConApp $ g fn of
   (_,[targs,res]) -> withUndef res $ \res' -> case splitTyConApp targs of
     (_,rargs) -> case rargs of
-      [] -> let [a0] = args in withUndef targs $ \t0' -> do
+      [] -> let [a0] = arg in withUndef targs $ \t0' -> do
         p0 <- lispToExprT () g a0
         f $ asType res' $ App (Fun fn undefined undefined) (asType t0' p0)
-      [t0,t1] -> let [a0,a1] = args in withUndef t0 $ \t0' ->
+      [t0,t1] -> let [a0,a1] = arg in withUndef t0 $ \t0' ->
         withUndef t1 $ \t1' -> do
           p0 <- lispToExprT () g a0
           p1 <- lispToExprT () g a1
-          f $ asType res' $ App (Fun fn undefined undefined) (asType t0' p0,
-                                                              asType t1' p1)
-      [t0,t1,t2] -> let [a0,a1,a2] = args in withUndef t0 $ \t0' ->
+          f $ asType res' $ App (Fun fn undefined undefined) (asType t0' p0,asType t1' p1)
+      [t0,t1,t2] -> let [a0,a1,a2] = arg in withUndef t0 $ \t0' ->
         withUndef t1 $ \t1' -> 
         withUndef t2 $ \t2' -> do
           p0 <- lispToExprT () g a0
           p1 <- lispToExprT () g a1
           p2 <- lispToExprT () g a2
           f $ asType res' $ App (Fun fn undefined undefined) (asType t0' p0,
-                                                              asType t1' p1,
-                                                              asType t2' p2)
+                                              asType t1' p1,
+                                              asType t2' p2)
+      _ -> error "Language.SMTLib2.Internals.Translation.fnToExpr: Invalid number of function arguments given (more than 3)."
+  _ -> error $ "Language.SMTLib2.Internals.Translation.fnToExpr: Invalid function type "++(show $ g fn)++" given."
 
 fgcast :: (Typeable a,Typeable b) => L.Lisp -> c a -> c b
 fgcast l x = case gcast x of
@@ -433,8 +435,8 @@ lispToExprT ann g l = do
           Just r -> return r
           Nothing -> do
             rhs' <- lispToExprU (\rhs' -> do
-                                    lhs' <- lispToExprT (extractAnnotation rhs') g lhs
-                                    return $ fgcast l $ Eq lhs' rhs') g rhs
+                                    lhs'' <- lispToExprT (extractAnnotation rhs') g lhs
+                                    return $ fgcast l $ Eq lhs'' rhs') g rhs
             case rhs' of
               Just r -> return r
               Nothing -> error $ "Failed to parse expression "++show l
@@ -454,16 +456,16 @@ lispToExprT ann g l = do
         l' <- lispToExprT () g lhs
         r' <- lispToExprT () g rhs
         return $ fgcast l $ Le (l' :: SMTExpr Integer) r'
-      L.List (L.Symbol "+":args) -> do
-        args' <- mapM (lispToExprT () g) args
-        return $ fgcast l $ Plus (args' :: [SMTExpr Integer])
+      L.List (L.Symbol "+":arg) -> do
+        arg' <- mapM (lispToExprT () g) arg
+        return $ fgcast l $ Plus (arg' :: [SMTExpr Integer])
       L.List [L.Symbol "-",lhs,rhs] -> do
         l' <- lispToExprT () g lhs
         r' <- lispToExprT () g rhs
         return $ fgcast l $ Minus (l' :: SMTExpr Integer) r'
-      L.List (L.Symbol "*":args) -> do
-        args' <- mapM (lispToExprT () g) args
-        return $ fgcast l $ Mult (args' :: [SMTExpr Integer])
+      L.List (L.Symbol "*":arg) -> do
+        arg' <- mapM (lispToExprT () g) arg
+        return $ fgcast l $ Mult (arg' :: [SMTExpr Integer])
       L.List [L.Symbol "/",lhs,rhs] -> do
         l' <- lispToExprT () g lhs
         r' <- lispToExprT () g rhs
@@ -472,12 +474,12 @@ lispToExprT ann g l = do
         l' <- lispToExprT () g lhs
         r' <- lispToExprT () g rhs
         return $ fgcast l $ Mod l' r'
-      L.List (L.Symbol "and":args) -> do
-        args' <- mapM (lispToExprT () g) args
-        return $ fgcast l $ And args'
-      L.List (L.Symbol "or":args) -> do
-        args' <- mapM (lispToExprT () g) args
-        return $ fgcast l $ Or args'
+      L.List (L.Symbol "and":arg) -> do
+        arg' <- mapM (lispToExprT () g) arg
+        return $ fgcast l $ And arg'
+      L.List (L.Symbol "or":arg) -> do
+        arg' <- mapM (lispToExprT () g) arg
+        return $ fgcast l $ Or arg'
       L.List [L.Symbol "not",arg] -> lispToExprT () g arg >>= return . fgcast l . Not
       L.List [L.Symbol "let",L.List syms,arg] -> letToExpr g syms arg
       L.List [L.Symbol "bvule",lhs,rhs] -> fgcast l $ binBV BVULE g lhs rhs
@@ -488,33 +490,27 @@ lispToExprT ann g l = do
       L.List [L.Symbol "bvslt",lhs,rhs] -> fgcast l $ binBV BVSLT g lhs rhs
       L.List [L.Symbol "bvsge",lhs,rhs] -> fgcast l $ binBV BVSGE g lhs rhs
       L.List [L.Symbol "bvsgt",lhs,rhs] -> fgcast l $ binBV BVSGT g lhs rhs
-      L.List (L.Symbol fn:args) -> fnToExpr (return . fgcast l) g fn args
-      L.List [L.List (L.Symbol "_":args),expr] -> do
+      L.List (L.Symbol fn:arg) -> fnToExpr (return . fgcast l) g fn arg
+      L.List [L.List (L.Symbol "_":arg),expr] -> do
         expr' <- lispToExprT () g expr
-        return $ fgcast l $ App (InternalFun args) expr'
+        return $ fgcast l $ App (InternalFun arg) expr'
       _ -> error $ "Cannot parse "++show l
       where
-        replSymbol name name' (L.Symbol x)
-          | x == name = L.Symbol name'
-          | otherwise = L.Symbol x
-        replSymbol name name' (L.List xs) = L.List (fmap (replSymbol name name') xs)
-        replSymbol _ _ x = x
-      
         letToExpr g' (L.List [L.Symbol name,expr]:rest) arg
           = do
             res <- lispToExprU (\expr' -> do
                                    rest' <- letToExpr (\txt -> if txt==name
                                                                then typeOf expr'
                                                                else g txt) rest arg
-                                   return $ Let (extractAnnotation expr') expr' (\var@(Var name' _) -> replaceName (\n -> if n==name 
+                                   return $ Let (extractAnnotation expr') expr' (\(Var name' _) -> replaceName (\n -> if n==name 
                                                                                                                           then name' 
                                                                                                                           else n) rest')
                                ) g' expr
             case res of
               Just r -> return r
               Nothing -> error $ "Unparseable expression "++show expr++" in let expression"
-        letToExpr g [] arg = lispToExprT ann g arg
-        letToExpr _ (x:xs) _ = error $ "Unparseable entry "++show x++" in let expression"
+        letToExpr g' [] arg = lispToExprT ann g' arg
+        letToExpr _ (x:_) _ = error $ "Unparseable entry "++show x++" in let expression"
 
 -- | Reconstruct the type annotation for a given SMT expression.
 extractAnnotation :: SMTExpr a -> SMTAnnotation a
@@ -522,12 +518,15 @@ extractAnnotation (Var _ ann) = ann
 extractAnnotation (Const _ ann) = ann
 extractAnnotation (Eq _ _) = ()
 extractAnnotation (Ge _ _) = ()
+extractAnnotation (Gt _ _) = ()
 extractAnnotation (Le _ _) = ()
 extractAnnotation (Lt _ _) = ()
 extractAnnotation (Distinct _) = ()
 extractAnnotation (Plus (x:_)) = extractAnnotation x
+extractAnnotation (Plus []) = error "Internal smtlib2 error: Can't extract annotation from empty Plus."
 extractAnnotation (Minus x _) = extractAnnotation x
 extractAnnotation (Mult (x:_)) = extractAnnotation x
+extractAnnotation (Mult []) = error "Internal smtlib2 error: Can't extract annotation from empty Mult."
 extractAnnotation (Div _ _) = ()
 extractAnnotation (Mod _ _) = ()
 extractAnnotation (Divide _ _) = ()
@@ -540,6 +539,9 @@ extractAnnotation (Implies _ _) = ()
 extractAnnotation (Not _) = ()
 extractAnnotation (Select arr _) = snd (extractAnnotation arr)
 extractAnnotation (Store arr _ _) = extractAnnotation arr
+extractAnnotation (AsArray (Fun _ iann eann)) = (iann,eann)
+extractAnnotation (AsArray _) = error "Internal smtlib2 error: Argument to AsArray isn't a function."
+extractAnnotation (ConstArray e ann) = (ann,extractAnnotation e)
 extractAnnotation (BVAdd x _) = extractAnnotation x
 extractAnnotation (BVSub x _) = extractAnnotation x
 extractAnnotation (BVMul x _) = extractAnnotation x
@@ -558,6 +560,8 @@ extractAnnotation (BVSLT _ _) = ()
 extractAnnotation (BVSGE _ _) = ()
 extractAnnotation (BVSGT _ _) = ()
 extractAnnotation (BVSHL x _) = extractAnnotation x
+extractAnnotation (BVLSHR x _) = extractAnnotation x
+extractAnnotation (BVASHR x _) = extractAnnotation x
 extractAnnotation (BVXor x _) = extractAnnotation x
 extractAnnotation (BVAnd x _) = extractAnnotation x
 extractAnnotation (BVOr x _) = extractAnnotation x
@@ -569,7 +573,12 @@ extractAnnotation (Head x) = extractAnnotation x
 extractAnnotation (Tail x) = extractAnnotation x
 extractAnnotation (Insert _ x) = extractAnnotation x
 extractAnnotation (Named x _) = extractAnnotation x
-extractAnnotation (InterpolationGrp _ _) = ()
+extractAnnotation (Fun _ _ _) = error "Internal smtlib2 error: extractAnnotation called on Fun, which isn't a SMTType instance."
+extractAnnotation (InternalFun _) = error "Internal smtlib2 error: extractAnnotation called on Fun, which isn't a SMTType instance."
+extractAnnotation (App (Fun _ _ ann) _) = ann
+extractAnnotation (App _ _) = error "Internal smtlib2 error: First argument to App isn't a function."
+extractAnnotation Undefined = error "Internal smtlib2 error: extractAnnotation called on Undefined."
+extractAnnotation (FieldSel field expr) = getFieldAnn field (extractAnnotation expr)
 
 instance (SMTValue a) => LiftArgs (SMTExpr a) where
   type Unpacked (SMTExpr a) = a

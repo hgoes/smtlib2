@@ -142,19 +142,19 @@ bv n = L.List [L.Symbol "_"
 
 instance SMTType Word8 where
   type SMTAnnotation Word8 = ()
-  getSortBase _ = bv 8
+  getSortBase _ = bv (8::Integer)
   declareType _ _ = return ()
 
 instance SMTType Int8 where
   type SMTAnnotation Int8 = ()
-  getSortBase _ = bv 8
+  getSortBase _ = bv (8::Integer)
   declareType _ _ = return ()
 
 withUndef1 :: (a -> g a) -> g a
 withUndef1 f = f undefined
 
 getBVValue :: (Num a,Bits a,Read a) => L.Lisp -> b -> SMT (Maybe a)
-getBVValue arg _ = return $ withUndef1 $ \u -> getBVValue' (fromIntegral $ bitSize u) arg
+getBVValue arg _ = return $ withUndef1 $ \u -> getBVValue' (bitSize u) arg
 
 getBVValue' :: (Num a,Bits a,Read a,Integral i) => i -> L.Lisp -> Maybe a
 getBVValue' _ (L.Number (L.I v)) = Just (fromInteger v)
@@ -182,7 +182,7 @@ getBVValue' len (L.List [L.Symbol "_",L.Symbol val,L.Number (L.I bits)])
 getBVValue' _ _ = Nothing
 
 putBVValue :: (Bits a,Ord a,Integral a,Show a) => a -> b -> L.Lisp
-putBVValue x _ = putBVValue' (fromIntegral $ bitSize x) x
+putBVValue x _ = putBVValue' (bitSize x) x
 
 putBVValue' :: (Bits a,Ord a,Integral a,Show a,Integral i) => i -> a -> L.Lisp
 putBVValue' len x
@@ -222,12 +222,12 @@ instance SMTOrd Int8 where
 
 instance SMTType Word16 where
   type SMTAnnotation Word16 = ()
-  getSortBase _ = bv 16
+  getSortBase _ = bv (16::Integer)
   declareType _ _ = return ()
 
 instance SMTType Int16 where
   type SMTAnnotation Int16 = ()
-  getSortBase _ = bv 16
+  getSortBase _ = bv (16::Integer)
   declareType _ _ = return ()
 
 instance SMTValue Word16 where
@@ -255,12 +255,12 @@ instance SMTOrd Int16 where
 
 instance SMTType Word32 where
   type SMTAnnotation Word32 = ()
-  getSortBase _ = bv 32
+  getSortBase _ = bv (32::Integer)
   declareType _ _ = return ()
 
 instance SMTType Int32 where
   type SMTAnnotation Int32 = ()
-  getSortBase _ = bv 32
+  getSortBase _ = bv (32::Integer)
   declareType _ _ = return ()
 
 instance SMTValue Word32 where
@@ -288,12 +288,12 @@ instance SMTOrd Int32 where
 
 instance SMTType Word64 where
   type SMTAnnotation Word64 = ()
-  getSortBase _ = bv 64
+  getSortBase _ = bv (64::Integer)
   declareType _ _ = return ()
   
 instance SMTType Int64 where
   type SMTAnnotation Int64 = ()
-  getSortBase _ = bv 64
+  getSortBase _ = bv (64::Integer)
   declareType _ _ = return ()
 
 instance SMTValue Word64 where
@@ -525,11 +525,12 @@ instance (Typeable a,SMTValue a) => SMTValue [a] where
 -- Bitvector implementations for ByteString
 
 -- | Encodes the length of a `ByteString` to be used as a type annotation.
-newtype ByteStringLen = ByteStringLen Int deriving (Show,Eq,Ord,Num)
+newtype ByteStringLen = ByteStringLen Int deriving (Show,Eq,Ord,Num,Typeable)
 
 instance SMTType BS.ByteString where
     type SMTAnnotation BS.ByteString = ByteStringLen
     getSort _ (ByteStringLen l) = bv (l*8)
+    getSortBase _ = error "smtlib2: No getSortBase implementation for ByteString"
     declareType _ _ = return ()
 
 instance SMTValue BS.ByteString where
@@ -556,6 +557,7 @@ newtype BitVector = BitVector Integer deriving (Eq,Ord,Num,Show,Typeable)
 instance SMTType BitVector where
   type SMTAnnotation BitVector = Integer
   getSort _ l = bv l
+  getSortBase _ = error "smtlib2: No getSortBase implementation for BitVector"
   declareType _ _ = return ()
 
 instance SMTValue BitVector where
@@ -564,27 +566,27 @@ instance SMTValue BitVector where
 
 instance Concatable BitVector BitVector where
   type ConcatResult BitVector BitVector = BitVector
-  concat' (BitVector x) l1 (BitVector y) l2 = BitVector $ (x `shiftL` (fromIntegral l2)) .|. y
+  concat' (BitVector x) _ (BitVector y) l2 = BitVector $ (x `shiftL` (fromIntegral l2)) .|. y
   concatAnn _ _ = (+)
 
 instance Concatable BitVector Word8 where
   type ConcatResult BitVector Word8 = BitVector
-  concat' (BitVector x) l w () = BitVector $ (x `shiftL` 8) .|. (fromIntegral w)
+  concat' (BitVector x) _ w () = BitVector $ (x `shiftL` 8) .|. (fromIntegral w)
   concatAnn _ _ l () = l+8
 
 instance Concatable BitVector Word16 where
   type ConcatResult BitVector Word16 = BitVector
-  concat' (BitVector x) l w () = BitVector $ (x `shiftL` 16) .|. (fromIntegral w)
+  concat' (BitVector x) _ w () = BitVector $ (x `shiftL` 16) .|. (fromIntegral w)
   concatAnn _ _ l () = l+16
 
 instance Concatable BitVector Word32 where
   type ConcatResult BitVector Word32 = BitVector
-  concat' (BitVector x) l w () = BitVector $ (x `shiftL` 32) .|. (fromIntegral w)
+  concat' (BitVector x) _ w () = BitVector $ (x `shiftL` 32) .|. (fromIntegral w)
   concatAnn _ _ l () = l+32
 
 instance Concatable BitVector Word64 where
   type ConcatResult BitVector Word64 = BitVector
-  concat' (BitVector x) l w () = BitVector $ (x `shiftL` 64) .|. (fromIntegral w)
+  concat' (BitVector x) _ w () = BitVector $ (x `shiftL` 64) .|. (fromIntegral w)
   concatAnn _ _ l () = l+64
 
 instance Extractable BitVector BitVector where

@@ -17,10 +17,9 @@ import Data.Set as Set
 import Data.List as List (mapAccumL)
 
 import Language.SMTLib2.Internals.SMTMonad
-import qualified Language.SMTLib2.Internals.Connection as Conn
 
 -- | Haskell types which can be represented in SMT
-class (Eq t,Typeable t) => SMTType t where
+class (Eq t,Typeable t,Typeable (SMTAnnotation t)) => SMTType t where
   type SMTAnnotation t
   getSort :: t -> SMTAnnotation t -> L.Lisp
   getSort u _ = getSortBase u
@@ -33,6 +32,10 @@ class (Eq t,Typeable t) => SMTType t where
 class SMTType t => SMTValue t where
   unmangle :: L.Lisp -> SMTAnnotation t -> SMT (Maybe t)
   mangle :: t -> SMTAnnotation t -> L.Lisp
+
+-- | All records which can be expressed in SMT
+class SMTType t => SMTRecordType t where
+  getFieldAnn :: (SMTType f,Typeable (SMTAnnotation f)) => Field t f -> SMTAnnotation t -> SMTAnnotation f
 
 -- | A type class for all types which support arithmetic operations in SMT
 class (SMTValue t,Num t) => SMTArith t
@@ -120,12 +123,11 @@ data SMTExpr t where
   Fun :: (Args a,SMTType r) => Text -> ArgAnnotation a -> SMTAnnotation r -> SMTExpr (SMTFun a r)
   App :: (Args a,SMTType r) => SMTExpr (SMTFun a r) -> a -> SMTExpr r
   ConTest :: SMTType a => Constructor a -> SMTExpr a -> SMTExpr Bool
-  FieldSel :: (SMTType a,SMTType f) => Field a f -> SMTExpr a -> SMTExpr f
+  FieldSel :: (SMTRecordType a,SMTType f) => Field a f -> SMTExpr a -> SMTExpr f
   Head :: SMTExpr [a] -> SMTExpr a
   Tail :: SMTExpr [a] -> SMTExpr [a]
   Insert :: SMTExpr a -> SMTExpr [a] -> SMTExpr [a]
   Named :: SMTExpr a -> Text -> SMTExpr a
-  InterpolationGrp :: SMTExpr Bool -> Text -> SMTExpr Bool
   InternalFun :: [L.Lisp] -> SMTExpr (SMTFun (SMTExpr Bool) Bool)
   Undefined :: SMTExpr a
   deriving Typeable
@@ -186,7 +188,6 @@ instance Eq a => Eq (SMTExpr a) where
     -- This doesn't work for unknown reasons
     --(==) (Insert x xs) (Insert y ys) = x == y && xs == ys
     (==) (Named e1 n1) (Named e2 n2) = e1==e2 && n1==n2
-    (==) (InterpolationGrp e1 n1) (InterpolationGrp e2 n2) = e1 == e2 && n1 == n2
     (==) (InternalFun arg1) (InternalFun arg2) = arg1 == arg2
     (==) Undefined Undefined = True
     (==) _ _ = False
@@ -247,7 +248,7 @@ instance SMTInfo SMTSolverVersion where
       _ -> error "Invalid solver response to 'get-info' version query"
 
 -- | Instances of this class may be used as arguments for constructed functions and quantifiers.
-class (Eq a,Typeable a) => Args a where
+class (Eq a,Typeable a,Typeable (ArgAnnotation a)) => Args a where
   type ArgAnnotation a
   foldExprs :: (forall t. SMTType t => s -> SMTExpr t -> SMTAnnotation t -> (s,SMTExpr t)) -> s -> a -> ArgAnnotation a -> (s,a)
 
@@ -270,7 +271,7 @@ declareArgTypes arg ann
 
 declareType' :: TypeRep -> SMT () -> SMT ()
 declareType' rep act = do
-  let (con,cargs) = splitTyConApp rep
+  let (con,_) = splitTyConApp rep
   (c,decls,mp) <- getSMT
   if Set.member con decls
     then return ()
