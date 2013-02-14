@@ -269,9 +269,10 @@ declareArgTypes :: Args a => a -> ArgAnnotation a -> SMT ()
 declareArgTypes arg ann
   = fst $ foldExprs (\act e ann' -> (act >> declareType (getUndef e) ann',e)) (return ()) arg ann
 
-declareType' :: TypeRep -> SMT () -> SMT ()
-declareType' rep act = do
-  let (con,_) = splitTyConApp rep
+declareType' :: Typeable a => a -> SMT () -> SMT ()
+declareType' u act = do
+  let rep = typeOf u
+      (con,_) = splitTyConApp rep
   (c,decls,mp) <- getSMT
   if Set.member con decls
     then return ()

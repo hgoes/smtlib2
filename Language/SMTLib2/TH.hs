@@ -174,25 +174,24 @@ splitType (AppT tp1 tp2) = case splitType tp1 of
 splitType (TupleT n) = Just (tupleDataName n,[])
 splitType _ = Nothing
 
-declStructure :: [Name] -> Dec -> (String,[(String,[(String,ExpQ)])])
-declStructure allNames (DataD _ name tyvars cons _) = (nameBase name,fmap (declStructureCon allNames tyvars) cons)
-declStructure allNames (NewtypeD _ name tyvars con _) = (nameBase name,[declStructureCon allNames tyvars con])
+declStructure :: ExpQ -> [Name] -> Dec -> (String,[(String,[(String,ExpQ)])])
+declStructure undef allNames (DataD _ name tyvars cons _) = (nameBase name,fmap (declStructureCon undef allNames tyvars) cons)
+declStructure undef allNames (NewtypeD _ name tyvars con _) = (nameBase name,[declStructureCon undef allNames tyvars con])
 
-declStructureCon :: [Name] -> [TyVarBndr] -> Con -> (String,[(String,ExpQ)])
-declStructureCon allNames tyvars (RecC name fields) = (nameBase name,fmap (\(name,_,tp) -> (nameBase name,declStructureType allNames tyvars tp)) fields)
-declStructureCon allNames tyvars (NormalC name []) = (nameBase name,[])
-declStructureCon allNames tyvars c = error $ "declStructureCon unimplemented for "++show c
+declStructureCon :: ExpQ -> [Name] -> [TyVarBndr] -> Con -> (String,[(String,ExpQ)])
+declStructureCon undef allNames tyvars (RecC name fields)
+  = (nameBase name,
+     fmap (\(name,_,tp) -> (nameBase name,
+                           declStructureType undef allNames tyvars (\e -> appE (varE name) e) tp)) fields)
+declStructureCon undef allNames tyvars (NormalC name []) = (nameBase name,[])
+declStructureCon undef allNames tyvars c = error $ "declStructureCon unimplemented for "++show c
 
-declStructureType :: [Name] -> [TyVarBndr] -> Type -> ExpQ
-declStructureType allNames tyvars tp
+declStructureType :: ExpQ -> [Name] -> [TyVarBndr] -> (ExpQ -> ExpQ) -> Type -> ExpQ
+declStructureType undef allNames tyvars accessor tp
   = case splitType tp of
     Just (con,args) -> if con `elem` allNames
                        then [| L.Symbol (T.pack $(stringE (nameBase con))) |]
-                       else (let symb = [| getSortBase (undefined :: $(return tp)) |]
-                             in if null args
-                             then symb
-                             else [| L.List |] `appE` (listE $ [ symb ]
-                                                 ++ (fmap (declStructureType allNames tyvars) args)))
+                       else (appsE [[| getSort |],accessor undef,[| () |]])
     Nothing -> case tp of
       VarT name -> case findIndex (\tv -> case tv of
                                       PlainTV name' -> name == name'
@@ -212,20 +211,13 @@ generateDeclareType decl decls = do
       decls <- newName "decls"
       mp <- newName "mp"
       con <- newName "con"
-      doE $ [ noBindS $ [| declareType |] `appE` e `appE` [| () |] | (e,tp) <- allFields pat decl 
-                                                                   , case getTyCon tp of
-                                                                       Nothing -> True
-                                                                       Just tycon -> not $ tycon `elem` all_names
-                                                                   ]
-            ++ [letS [valD (tupP [varP con,wildP]) (normalB [| splitTyConApp (typeOf $pat) |]) []]
-               ,bindS (tupP [varP c,varP decls,varP mp]) [| getSMT |]
-               ,noBindS $ condE [| Set.member $(varE con) $(varE decls) |]
-                                [| return () |]
-                                (doE [noBindS [| putSMT ($(varE c),Set.insert $(varE con) $(varE decls),$(varE mp)) |]
-                                     ,noBindS dataDecl
-                                     ])
-               ]
-    dataDecl = [| declareDatatypes |] `appE` 
+      appE (appE [| declareType' |] pat)
+           (doE $ [ noBindS $ [| declareType |] `appE` e `appE` [| () |] | (e,tp) <- allFields pat decl 
+                                                                        , case getTyCon tp of
+                                                                            Nothing -> True
+                                                                            Just tycon -> not $ tycon `elem` all_names
+                  ] ++ [ noBindS (dataDecl pat) ])
+    dataDecl p = [| declareDatatypes |] `appE` 
                (listE [ stringE $ "tv"++show n | (n,tv) <- zip [0..] tyvars ]) `appE`
                (listE [ tupE [ [| T.pack |] `appE` (stringE dname)  -- The datatype name
                              , listE [ tupE [ [| T.pack |] `appE` (stringE cname) -- The constructor name
@@ -237,7 +229,7 @@ generateDeclareType decl decls = do
                                      | (cname,fields) <- cons
                                      ]
                              ]
-                      | (dname,cons) <- fmap (declStructure all_names) decls
+                      | (dname,cons) <- fmap (declStructure p all_names) decls
                       ])
 
 getUndefFun :: Name -> [TyVarBndr] -> TyVarBndr -> ExpQ -> ExpQ
