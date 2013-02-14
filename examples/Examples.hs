@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings,TemplateHaskell,TypeFamilies,DeriveDataTypeable #-}
-module Language.SMTLib2.Examples where
+module Examples where
 
 import Control.Monad
 import Control.Monad.Trans
@@ -249,6 +249,9 @@ data Coordinate = Position { posX :: Integer
 
 $(deriveSMT ''Coordinate)
 
+main = print "Blubb"
+
+
 datatypeTest :: SMT (Maybe (Coordinate,Coordinate))
 datatypeTest = do
   v1 <- var
@@ -263,16 +266,15 @@ datatypeTest = do
              return $ Just (r1,r2))
     else return Nothing
 
-data BinNode a =
-  BinNode { nodeVal :: a, subTree :: BinTree a }
-  | TerminalBinNode
-    deriving (Eq, Show, Typeable)
+data BinNode a = BinNode { nodeVal :: a, subTree :: BinTree a }
+               | TerminalBinNode
+               deriving (Eq, Show, Typeable)
 
 data BinTree a = BinTree
-                   { leftBranch :: BinNode a
-                   , rightBranch :: BinNode a
-                   }
-                 deriving (Eq, Show, Typeable)
+                 { leftBranch :: BinNode a
+                 , rightBranch :: BinNode a
+                 }
+               deriving (Eq, Show, Typeable)
 
 -- $(deriveSMT ''BinNode)
 $(deriveSMT ''BinTree)
@@ -296,15 +298,11 @@ datatypeTest2 = do
 data MyTuple a b = MyTuple { myFst :: a, mySnd :: b } deriving (Eq, Show, Typeable)
 data ReusingRecord a = ReusingRecord { someF :: MyTuple (Maybe a) Integer } deriving (Eq, Show, Typeable)
 
-$(deriveSMT ''MyTuple)
+-- $(deriveSMT ''MyTuple)
 $(deriveSMT ''ReusingRecord)
 
 datatypeTest3 :: SMT (ReusingRecord Integer)
 datatypeTest3 = do
-  -- FIXME: this example should work without this.
-  -- The declarations have to be generated depth first.
-  declareType (undefined :: Maybe Integer) undefined
-  declareType (undefined :: MyTuple Integer Integer) undefined
   v <- var
   assert $ v .==. (constant r)
   checkSat
