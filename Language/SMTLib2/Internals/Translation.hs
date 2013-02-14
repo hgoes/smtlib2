@@ -33,7 +33,7 @@ getValue expr = do
 -- | Extract values of compound expressions from the generated model.
 getValue' :: SMTValue t => SMTAnnotation t -> SMTExpr t -> SMT t
 getValue' ann expr = do
-  res <- getRawValue expr
+  res <- fmap removeLets $ getRawValue expr
   rres <- unmangle res ann
   case rres of
     Nothing -> error $ "Couldn't unmangle "++show res

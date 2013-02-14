@@ -600,3 +600,18 @@ freeName name = do
   return $ T.pack $ (escapeName name)++(case c of
                                            0 -> ""
                                            _ -> "_"++show c)
+
+removeLets :: L.Lisp -> L.Lisp
+removeLets = removeLets' Map.empty
+  where
+    removeLets' mp (L.List [L.Symbol "let",L.List decls,body])
+      = let nmp = Map.union mp 
+                  (Map.fromList
+                   [ (name,removeLets' nmp expr)
+                   | L.List [L.Symbol name,expr] <- decls ])
+        in removeLets' nmp body
+    removeLets' mp (L.Symbol sym) = case Map.lookup sym mp of
+      Nothing -> L.Symbol sym
+      Just r -> r
+    removeLets' mp (L.List entrs) = L.List $ fmap (removeLets' mp) entrs
+    removeLets' _ x = x
