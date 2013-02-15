@@ -9,7 +9,6 @@ Library
                         attoparsec,atto-lisp >= 0.2,array,template-haskell,
                         containers, transformers, fgl
   GHC-Options: -fwarn-unused-imports -Wall
-  Extensions: Trustworthy
   Exposed-Modules:
     Language.SMTLib2
     Language.SMTLib2.Solver
