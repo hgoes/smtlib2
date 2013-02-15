@@ -1,3 +1,5 @@
+{- | Implements various instance declarations for 'Language.SMTLib2.SMTType',
+     'Language.SMTLib2.SMTValue', etc. -}
 {-# LANGUAGE FlexibleInstances,OverloadedStrings,MultiParamTypeClasses,TemplateHaskell,RankNTypes,TypeFamilies,GeneralizedNewtypeDeriving,DeriveDataTypeable #-}
 module Language.SMTLib2.Internals.Instances where
 
@@ -135,7 +137,9 @@ instance (Args idx,SMTType val) => SMTType (SMTArray idx val) where
 
 -- BitVectors
 
-bv :: Integral i => i -> L.Lisp
+-- | Create a SMT representation of a bitvector type with /n/ bits.
+bv :: Integral i => i -- ^ The number of bits (/n/)
+      -> L.Lisp
 bv n = L.List [L.Symbol "_"
               ,L.Symbol "BitVec"
               ,L.Number $ L.I (fromIntegral n)]
@@ -150,13 +154,20 @@ instance SMTType Int8 where
   getSortBase _ = bv (8::Integer)
   declareType _ _ = return ()
 
+-- | Helper function which applies a given function to the 'undefined' value.
 withUndef1 :: (a -> g a) -> g a
 withUndef1 f = f undefined
 
-getBVValue :: (Num a,Bits a,Read a) => L.Lisp -> b -> SMT (Maybe a)
+-- | Parses a given SMT bitvector value into a numerical value within the SMT monad.
+getBVValue :: (Num a,Bits a,Read a) => L.Lisp -- ^ The SMT expression
+              -> b -- ^ Ignored
+              -> SMT (Maybe a)
 getBVValue arg _ = return $ withUndef1 $ \u -> getBVValue' (bitSize u) arg
 
-getBVValue' :: (Num a,Bits a,Read a,Integral i) => i -> L.Lisp -> Maybe a
+-- | Parses a given SMT bitvector value into a numerical value.
+getBVValue' :: (Num a,Bits a,Read a,Integral i) => i -- ^ The number of bits of the value.
+               -> L.Lisp -- ^ The SMT expression representing the value.
+               -> Maybe a
 getBVValue' _ (L.Number (L.I v)) = Just (fromInteger v)
 getBVValue' len (L.Symbol s) = case T.unpack s of
   '#':'b':rest -> if genericLength rest == len
@@ -181,10 +192,15 @@ getBVValue' len (L.List [L.Symbol "_",L.Symbol val,L.Number (L.I bits)])
     else Nothing
 getBVValue' _ _ = Nothing
 
+-- | Helper function to help the formulation of 'Language.SMTLib2.Internals.mangle' functions for bitvectors.
 putBVValue :: (Bits a,Ord a,Integral a,Show a) => a -> b -> L.Lisp
 putBVValue x _ = putBVValue' (bitSize x) x
 
-putBVValue' :: (Bits a,Ord a,Integral a,Show a,Integral i) => i -> a -> L.Lisp
+-- | Convert a numerical value into its SMT bitvector representation
+putBVValue' :: (Bits a,Ord a,Integral a,Show a,Integral i) 
+               => i -- ^ The number of bits used for the representation
+               -> a -- ^ The numerical value
+               -> L.Lisp
 putBVValue' len x
   | len `mod` 4 == 0 = let v' = if x < 0
                                 then complement (x-1)
@@ -498,6 +514,7 @@ instance SMTValue a => SMTValue (Maybe a) where
   mangle (Just x) ann = L.List [L.Symbol "Just"
                                ,mangle x ann]
 
+-- | Get an undefined value of the type argument of a type.
 undefArg :: b a -> a
 undefArg _ = undefined
 

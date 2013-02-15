@@ -1,3 +1,4 @@
+{- | Defines the user-accessible interface of the smtlib2 library -}
 {-# LANGUAGE TypeFamilies,OverloadedStrings,FlexibleContexts #-}
 module Language.SMTLib2.Internals.Interface where
 
@@ -453,6 +454,7 @@ getProof = do
                              Just n -> n
                  ) res
 
+-- | A map which contains signatures for a few common theorems which can be used in the proofs which 'getProof' returns.
 commonTheorems :: Map T.Text TypeRep
 commonTheorems = Map.fromList
   [(T.pack "|unit-resolution|",typeOf (undefined :: (Bool,Bool,Bool) -> Bool))

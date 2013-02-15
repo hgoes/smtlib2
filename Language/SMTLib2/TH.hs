@@ -371,6 +371,7 @@ field name = do
     getExp (ForallT tyvars ctx rec) = fmap (forallT tyvars (return ctx)) (getExp rec)
     getExp _ = Nothing
 
+-- | Checks whether a given SMT expression matches a pattern.
 matches :: Q Exp -> Q Pat -> Q Exp
 matches exp pat = do
   p <- pat
