@@ -216,6 +216,7 @@ data SMTOption
      = PrintSuccess Bool -- ^ Whether or not to print \"success\" after each operation
      | ProduceModels Bool -- ^ Produce a satisfying assignment after each successful checkSat
      | ProduceProofs Bool -- ^ Produce a proof of unsatisfiability after each failed checkSat
+     | ProduceUnsatCores Bool -- ^ Enable the querying of unsatisfiable cores after a failed checkSat
      deriving (Show,Eq,Ord)
 
 -- | A piece of information of type /r/ that can be obtained by the SMT solver

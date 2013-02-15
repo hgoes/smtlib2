@@ -103,7 +103,10 @@ setOption opt = putRequest $ L.List $ [L.Symbol "set-option"]
                       ProduceModels v -> [L.Symbol ":produce-models"
                                          ,L.Symbol $ if v then "true" else "false"]
                       ProduceProofs v -> [L.Symbol ":produce-proofs"
-                                         ,L.Symbol $ if v then "true" else "false"])
+                                         ,L.Symbol $ if v then "true" else "false"]
+                      ProduceUnsatCores v -> [L.Symbol ":produce-unsat-cores"
+                                             ,L.Symbol $ if v then "true" else "false"]
+                  )
 
 -- | Create a new interpolation group
 interpolationGroup :: SMT InterpolationGroup
@@ -453,6 +456,21 @@ getProof = do
                              Nothing -> error $ "Failed to find a definition for "++show name
                              Just n -> n
                  ) res
+
+-- | After an unsuccessful 'checkSat', return a list of names of named
+--   expression which make the instance unsatisfiable.
+getUnsatCore :: SMT [String]
+getUnsatCore = do
+  putRequest (L.List [L.Symbol "get-unsat-core"])
+  res <- parseResponse
+  case res of
+    L.List names -> return $
+                    fmap (\name -> case name of
+                             L.Symbol s -> T.unpack s
+                             _ -> error $ "Language.SMTLib2.getUnsatCore: Unknown expression "
+                                  ++show name++" in core list."
+                         ) names
+    _ -> error $ "Language.SMTLib2.getUnsatCore: Unknown response "++show res++" to query."
 
 -- | A map which contains signatures for a few common theorems which can be used in the proofs which 'getProof' returns.
 commonTheorems :: Map T.Text TypeRep

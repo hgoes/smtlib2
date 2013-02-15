@@ -308,3 +308,23 @@ datatypeTest3 = do
   checkSat
   getValue v
   where r = ReusingRecord $ MyTuple (Just 1) 2
+
+unsatCoreTest :: SMT [String]
+unsatCoreTest = do
+  setOption (ProduceUnsatCores True)
+  x <- var :: SMT (SMTExpr Integer)
+  y1 <- var
+  y2 <- var
+  z <- var
+  (a1,_) <- named "First" (x .==. y1)
+  (a2,_) <- named "Second" (not' $ z .<. 0)
+  (a3,_) <- named "Third" (y1 .==. z)
+  b <- defConst (and' [x.==.y2,not' $ y2 .==. z])
+  
+  assert a1
+  assert a2
+  assert a3
+  assert b
+  
+  checkSat
+  getUnsatCore
