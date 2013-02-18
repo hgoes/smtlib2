@@ -196,11 +196,11 @@ neg = Neg
 
 -- | Convert an integer expression to a real expression
 toReal :: SMTExpr Integer -> SMTExpr Rational
-toReal = toReal
+toReal = ToReal
 
 -- | Convert a real expression into an integer expression
 toInt :: SMTExpr Rational -> SMTExpr Integer
-toInt = toInt
+toInt = ToInt
 
 -- | If-then-else construct
 ite :: (SMTType a) => SMTExpr Bool -- ^ If this expression is true
