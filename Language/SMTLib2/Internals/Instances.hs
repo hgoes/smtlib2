@@ -58,7 +58,7 @@ instance Num (SMTExpr Integer) where
   (-) = Minus
   (*) x y = Mult [x,y]
   negate = Neg
-  abs x = Abs
+  abs = Abs
   signum x = ITE (Ge x (Const 0 ())) (Const 1 ()) (Const (-1) ())
 
 instance SMTOrd Integer where
