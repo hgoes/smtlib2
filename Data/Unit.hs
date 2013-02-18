@@ -24,3 +24,6 @@ instance (Unit a,Unit b,Unit c,Unit d) => Unit (a,b,c,d) where
 
 instance (Unit a,Unit b,Unit c,Unit d,Unit e) => Unit (a,b,c,d,e) where
     unit = (unit,unit,unit,unit,unit)
+
+instance (Unit a,Unit b,Unit c,Unit d,Unit e,Unit f) => Unit (a,b,c,d,e,f) where
+    unit = (unit,unit,unit,unit,unit,unit)
