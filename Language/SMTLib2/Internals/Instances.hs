@@ -80,7 +80,7 @@ instance Enum (SMTExpr Integer) where
     Const inc' _ -> case x of
       Const x' _ -> fmap (\i -> Const i ()) (enumFromThen x' inc')
       _ -> x:[ x + (Const (n*inc') ()) | n <- [1..]]
-    _ -> [ Prelude.foldl (+) x (genericReplicate n inc) | n <- [0..]]
+    _ -> [ Prelude.foldl (+) x (genericReplicate n inc) | n <- [(0::Integer)..]]
   enumFromThenTo (Const x _) (Const inc _) (Const lim _)
     = fmap (\i -> Const i ()) (enumFromThenTo x inc lim)
   enumFromThenTo _ _ _ = error $ "smtlib2: Can't use enumFromThenTo on non-constant SMTExprs"
