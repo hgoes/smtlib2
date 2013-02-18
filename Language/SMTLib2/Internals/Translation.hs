@@ -339,19 +339,43 @@ lispToExprU f g l
                     Nothing -> lispToExprU (\rhs' -> do
                                                lhs'' <- lispToExprT (extractAnnotation rhs') g lhs
                                                f (Eq lhs'' rhs')) g rhs
-                L.List [L.Symbol ">",lhs,rhs] -> binT f (Gt::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) g lhs rhs
                 L.List [L.Symbol ">=",lhs,rhs] -> binT f (Ge::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) g lhs rhs
-                L.List [L.Symbol "<",lhs,rhs] -> binT f (Lt::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) g lhs rhs
+                L.List [L.Symbol ">",lhs,rhs] -> binT f (Gt::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) g lhs rhs
                 L.List [L.Symbol "<=",lhs,rhs] -> binT f (Le::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) g lhs rhs
+                L.List [L.Symbol "<",lhs,rhs] -> binT f (Lt::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) g lhs rhs
+                L.List (L.Symbol "distinct":first:rest)
+                  -> lispToExprU (\first' -> do
+                                     rest' <- mapM (lispToExprT (extractAnnotation first') g) rest
+                                     f $ Distinct (first':rest')) g first
                 L.List (L.Symbol "+":arg) -> fmap Just $ mapM (lispToExprT () g) arg >>= f . (Plus::[SMTExpr Integer] -> SMTExpr Integer)
                 L.List [L.Symbol "-",lhs,rhs] -> binT f (Minus::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer) g lhs rhs
                 L.List (L.Symbol "*":arg) -> fmap Just $ mapM (lispToExprT () g) arg >>= f . (Mult::[SMTExpr Integer] -> SMTExpr Integer)
-                L.List [L.Symbol "/",lhs,rhs] -> binT f Div g lhs rhs
+                L.List [L.Symbol "div",lhs,rhs] -> binT f Div g lhs rhs
                 L.List [L.Symbol "mod",lhs,rhs] -> binT f Mod g lhs rhs
+                L.List [L.Symbol "/",lhs,rhs] -> binT f Divide g lhs rhs
+                L.List [L.Symbol "-",arg] -> fmap Just $ (lispToExprT () g arg :: SMT (SMTExpr Integer)) >>= f . Neg
+                L.List [L.Symbol "abs",arg] -> fmap Just $ (lispToExprT () g arg :: SMT (SMTExpr Integer)) >>= f . Abs
+                L.List [L.Symbol "ite",cond,lhs,rhs] -> do
+                  cond' <- lispToExprT () g cond
+                  lhs' <- lispToExprU (\lhs' -> do
+                                          rhs' <- lispToExprT (extractAnnotation lhs') g rhs
+                                          f (ITE cond' lhs' rhs')) g lhs
+                  case lhs' of
+                    Just r -> return $ Just r
+                    Nothing -> lispToExprU (\rhs' -> do
+                                               lhs'' <- lispToExprT (extractAnnotation rhs') g lhs
+                                               f (ITE cond' lhs'' rhs')) g rhs
                 L.List (L.Symbol "and":arg) -> fmap Just $ mapM (lispToExprT () g) arg >>= f . And
                 L.List (L.Symbol "or":arg) -> fmap Just $ mapM (lispToExprT () g) arg >>= f . Or
-                L.List [L.Symbol "not",arg] -> fmap Just $ (lispToExprT () g arg :: SMT (SMTExpr Bool)) >>= f
-                L.List [L.Symbol "abs",arg] -> fmap Just $ (lispToExprT () g arg :: SMT (SMTExpr Integer)) >>= f
+                L.List [L.Symbol "xor",lhs,rhs] -> do
+                  lhs' <- lispToExprT () g lhs
+                  rhs' <- lispToExprT () g rhs
+                  fmap Just $ f (XOr lhs' rhs')
+                L.List [L.Symbol "=>",lhs,rhs] -> do
+                  lhs' <- lispToExprT () g lhs
+                  rhs' <- lispToExprT () g rhs
+                  fmap Just $ f (Implies lhs' rhs')
+                L.List [L.Symbol "not",arg] -> fmap Just $ (lispToExprT () g arg :: SMT (SMTExpr Bool)) >>= f . Not
                 L.List [L.Symbol "bvule",lhs,rhs] -> fmap Just $ binBV BVULE g lhs rhs >>= f
                 L.List [L.Symbol "bvult",lhs,rhs] -> fmap Just $ binBV BVULT g lhs rhs >>= f
                 L.List [L.Symbol "bvuge",lhs,rhs] -> fmap Just $ binBV BVUGE g lhs rhs >>= f
