@@ -50,6 +50,8 @@ class (SMTType t) => SMTOrd t where
   (.>.) :: SMTExpr t -> SMTExpr t -> SMTExpr Bool
   (.<=.) :: SMTExpr t -> SMTExpr t -> SMTExpr Bool
 
+infix 4 .<., .<=., .>=., .>.
+
 -- | Represents a function in the SMT solver. /a/ is the argument of the function in SMT terms, /b/ is the argument in haskell types and /r/ is the result type of the function.
 data SMTFun a r = SMTFun deriving (Eq,Typeable)
 
