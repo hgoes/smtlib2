@@ -125,6 +125,8 @@ exprToLisp (Mod l r) c = let (l',c') = exprToLisp l c
                          in (L.List [L.Symbol "mod",l',r'],c'')
 exprToLisp (Neg e) c = let (e',c') = exprToLisp e c
                        in (L.List [L.Symbol "-",e'],c')
+exprToLisp (Abs e) c = let (e',c') = exprToLisp e c
+                       in (L.List [L.Symbol "abs",e'],c')
 exprToLisp (ITE cond tt ff) c = let (cond',c') = exprToLisp cond c
                                     (tt',c'') = exprToLisp tt c'
                                     (ff',c''') = exprToLisp ff c''
@@ -349,6 +351,7 @@ lispToExprU f g l
                 L.List (L.Symbol "and":arg) -> fmap Just $ mapM (lispToExprT () g) arg >>= f . And
                 L.List (L.Symbol "or":arg) -> fmap Just $ mapM (lispToExprT () g) arg >>= f . Or
                 L.List [L.Symbol "not",arg] -> fmap Just $ (lispToExprT () g arg :: SMT (SMTExpr Bool)) >>= f
+                L.List [L.Symbol "abs",arg] -> fmap Just $ (lispToExprT () g arg :: SMT (SMTExpr Integer)) >>= f
                 L.List [L.Symbol "bvule",lhs,rhs] -> fmap Just $ binBV BVULE g lhs rhs >>= f
                 L.List [L.Symbol "bvult",lhs,rhs] -> fmap Just $ binBV BVULT g lhs rhs >>= f
                 L.List [L.Symbol "bvuge",lhs,rhs] -> fmap Just $ binBV BVUGE g lhs rhs >>= f
