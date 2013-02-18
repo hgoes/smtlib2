@@ -246,6 +246,18 @@ constArray :: (Args i,SMTType v) => SMTExpr v -- ^ This element will be at every
            -> SMTExpr (SMTArray i v)
 constArray = ConstArray
 
+-- | Bitvector and
+bvand :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
+bvand = BVAnd
+
+-- | Bitvector or
+bvor :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
+bvor = BVOr
+
+-- | Bitvector not
+bvnot :: SMTBV t => SMTExpr t -> SMTExpr t
+bvnot = BVNot
+
 -- | Bitvector addition
 bvadd :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
 bvadd = BVAdd

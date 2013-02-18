@@ -123,6 +123,7 @@ data SMTExpr t where
   BVXor :: SMTExpr t -> SMTExpr t -> SMTExpr t
   BVAnd :: SMTExpr t -> SMTExpr t -> SMTExpr t
   BVOr :: SMTExpr t -> SMTExpr t -> SMTExpr t
+  BVNot :: SMTExpr t -> SMTExpr t
   Forall :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
   Exists :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
   Let :: (Args a) => ArgAnnotation a -> a -> (a -> SMTExpr b) -> SMTExpr b
@@ -191,6 +192,7 @@ instance Eq a => Eq (SMTExpr a) where
     (==) (BVXor l1 r1) (BVXor l2 r2) = l1 == l2 && r1 == r2
     (==) (BVAnd l1 r1) (BVAnd l2 r2) = l1 == l2 && r1 == r2
     (==) (BVOr l1 r1) (BVOr l2 r2) = l1 == l2 && r1 == r2
+    (==) (BVNot x) (BVNot y) = x == y
     (==) (ConTest c1 e1) (ConTest c2 e2) = eqExpr c1 c2 && eqExpr e1 e2
     (==) (FieldSel (Field f1) e1) (FieldSel (Field f2) e2) = f1 == f2 && eqExpr e1 e2
     (==) (Head x) (Head y) = x == y
@@ -572,6 +574,8 @@ foldExpr f x (BVAnd l r) = let (x1,e1) = foldExpr f x l
 foldExpr f x (BVOr l r) = let (x1,e1) = foldExpr f x l
                               (x2,e2) = foldExpr f x1 r
                           in f x2 (BVOr e1 e2)
+foldExpr f x (BVNot l) = let (x1,e1) = foldExpr f x l
+                         in f x1 (BVNot e1)
 foldExpr f x (Forall ann g) = let g' = foldExpr f x . g
                               in f (fst $ g' $ allOf Undefined) (Forall ann (snd . g'))
 foldExpr f x (Exists ann g) = let g' = foldExpr f x . g

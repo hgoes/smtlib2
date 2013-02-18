@@ -252,6 +252,8 @@ exprToLisp (BVOr v1 v2) c = let (v1',c') = exprToLisp v1 c
                             in (L.List [L.Symbol "bvor"
                                        ,v1'
                                        ,v2'],c'')
+exprToLisp (BVNot expr) c = let (expr',c') = exprToLisp expr c
+                            in (L.List [L.Symbol "bvnot",expr'],c')
 exprToLisp (BVURem v1 v2) c = let (v1',c') = exprToLisp v1 c
                                   (v2',c'') = exprToLisp v2 c'
                               in (L.List [L.Symbol "bvurem"
