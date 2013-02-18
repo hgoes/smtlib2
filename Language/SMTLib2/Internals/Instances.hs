@@ -58,7 +58,7 @@ instance Num (SMTExpr Integer) where
   (-) = Minus
   (*) x y = Mult [x,y]
   negate = Neg
-  abs x = ITE (Ge x (Const 0 ())) x (Neg x)
+  abs x = Abs
   signum x = ITE (Ge x (Const 0 ())) (Const 1 ()) (Const (-1) ())
 
 instance SMTOrd Integer where
@@ -66,6 +66,24 @@ instance SMTOrd Integer where
   (.<=.) = Le
   (.>.) = Gt
   (.>=.) = Ge
+
+instance Enum (SMTExpr Integer) where
+  succ x = x + 1
+  pred x = x - 1
+  toEnum x = constant $ fromIntegral x
+  fromEnum (Const x _) = fromIntegral x
+  fromEnum _ = error $ "smtlib2: Can't use fromEnum on non-constant SMTExpr (use getValue to extract values from the solver)"
+  enumFrom x = case x of
+    Const x' _ -> fmap constant (enumFrom x')
+    _ -> x:[ x+(constant n) | n <- [1..] ]
+  enumFromThen x inc = case inc of
+    Const inc' _ -> case x of
+      Const x' _ -> fmap constant (enumFromThen x' inc')
+      _ -> x:[ x + constant (n*inc') | n <- [1..]]
+    _ -> [ foldl (+) x (genericReplicate n inc') | n <- [0..]]
+  enumFromThenTo (Const x _) (Const inc _) (Const lim _)
+    = fmap constant (enumFromThenTo x inc lim)
+  enumFromThenTo _ _ _ = error $ "smtlib2: Can't use enumFromThenTo on non-constant SMTExprs"
 
 -- Real
 
