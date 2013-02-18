@@ -70,19 +70,19 @@ instance SMTOrd Integer where
 instance Enum (SMTExpr Integer) where
   succ x = x + 1
   pred x = x - 1
-  toEnum x = constant $ fromIntegral x
+  toEnum x = Const (fromIntegral x) ()
   fromEnum (Const x _) = fromIntegral x
   fromEnum _ = error $ "smtlib2: Can't use fromEnum on non-constant SMTExpr (use getValue to extract values from the solver)"
   enumFrom x = case x of
-    Const x' _ -> fmap constant (enumFrom x')
-    _ -> x:[ x+(constant n) | n <- [1..] ]
+    Const x' _ -> fmap (\i -> Const i ()) (enumFrom x')
+    _ -> x:[ x+(Const n ()) | n <- [1..] ]
   enumFromThen x inc = case inc of
     Const inc' _ -> case x of
-      Const x' _ -> fmap constant (enumFromThen x' inc')
-      _ -> x:[ x + constant (n*inc') | n <- [1..]]
-    _ -> [ foldl (+) x (genericReplicate n inc') | n <- [0..]]
+      Const x' _ -> fmap (\i -> Const i ()) (enumFromThen x' inc')
+      _ -> x:[ x + (Const (n*inc') ()) | n <- [1..]]
+    _ -> [ Prelude.foldl (+) x (genericReplicate n inc) | n <- [0..]]
   enumFromThenTo (Const x _) (Const inc _) (Const lim _)
-    = fmap constant (enumFromThenTo x inc lim)
+    = fmap (\i -> Const i ()) (enumFromThenTo x inc lim)
   enumFromThenTo _ _ _ = error $ "smtlib2: Can't use enumFromThenTo on non-constant SMTExprs"
 
 -- Real
