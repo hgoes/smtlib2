@@ -59,7 +59,7 @@ module Language.SMTLib2
          forAllAnn,existsAnn,
          forAllList,existsList,
          -- ** Arithmetic
-         plus,minus,mult,div',mod',neg,divide,toReal,toInt,
+         plus,minus,mult,div',mod',rem',neg,divide,toReal,toInt,
          -- ** Arrays
          select,store,arrayEquals,unmangleArray,asArray,constArray,
          -- ** Bitvectors

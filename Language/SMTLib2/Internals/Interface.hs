@@ -186,6 +186,10 @@ div' = Div
 mod' :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
 mod' = Mod
 
+-- | Calculate the remainder of the division of two integer expressions
+rem' :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
+rem' = Rem
+
 -- | Divide a rational expression by another one
 divide :: SMTExpr Rational -> SMTExpr Rational -> SMTExpr Rational
 divide = Divide

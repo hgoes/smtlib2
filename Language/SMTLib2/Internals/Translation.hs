@@ -123,6 +123,9 @@ exprToLisp (Divide l r) c = let (l',c') = exprToLisp l c
 exprToLisp (Mod l r) c = let (l',c') = exprToLisp l c
                              (r',c'') = exprToLisp r c'
                          in (L.List [L.Symbol "mod",l',r'],c'')
+exprToLisp (Rem l r) c = let (l',c') = exprToLisp l c
+                             (r',c'') = exprToLisp r c'
+                         in (L.List [L.Symbol "rem",l',r'],c'')
 exprToLisp (Neg e) c = let (e',c') = exprToLisp e c
                        in (L.List [L.Symbol "-",e'],c')
 exprToLisp (Abs e) c = let (e',c') = exprToLisp e c
@@ -356,6 +359,7 @@ lispToExprU f g l
                 L.List (L.Symbol "*":arg) -> fmap Just $ mapM (lispToExprT () g) arg >>= f . (Mult::[SMTExpr Integer] -> SMTExpr Integer)
                 L.List [L.Symbol "div",lhs,rhs] -> binT f Div g lhs rhs
                 L.List [L.Symbol "mod",lhs,rhs] -> binT f Mod g lhs rhs
+                L.List [L.Symbol "rem",lhs,rhs] -> binT f Rem g lhs rhs
                 L.List [L.Symbol "/",lhs,rhs] -> binT f Divide g lhs rhs
                 L.List [L.Symbol "-",arg] -> fmap Just $ (lispToExprT () g arg :: SMT (SMTExpr Integer)) >>= f . Neg
                 L.List [L.Symbol "abs",arg] -> fmap Just $ (lispToExprT () g arg :: SMT (SMTExpr Integer)) >>= f . Abs
@@ -511,6 +515,10 @@ lispToExprT ann g l = do
         l' <- lispToExprT () g lhs
         r' <- lispToExprT () g rhs
         return $ fgcast l $ Mod l' r'
+      L.List [L.Symbol "rem",lhs,rhs] -> do
+        l' <- lispToExprT () g lhs
+        r' <- lispToExprT () g rhs
+        return $ fgcast l $ Rem l' r'
       L.List [L.Symbol "to_real",arg] -> do
         arg' <- lispToExprT () g arg
         return $ fgcast l $ ToReal arg'
@@ -572,6 +580,7 @@ extractAnnotation (Mult (x:_)) = extractAnnotation x
 extractAnnotation (Mult []) = error "Internal smtlib2 error: Can't extract annotation from empty Mult."
 extractAnnotation (Div _ _) = ()
 extractAnnotation (Mod _ _) = ()
+extractAnnotation (Rem _ _) = ()
 extractAnnotation (Divide _ _) = ()
 extractAnnotation (Neg x) = extractAnnotation x
 extractAnnotation (ITE _ x _) = extractAnnotation x

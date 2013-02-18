@@ -81,6 +81,7 @@ data SMTExpr t where
   Mult :: SMTArith t => [SMTExpr t] -> SMTExpr t
   Div :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
   Mod :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
+  Rem :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
   Divide :: SMTExpr Rational -> SMTExpr Rational -> SMTExpr Rational
   Neg :: SMTArith t => SMTExpr t -> SMTExpr t
   Abs :: SMTExpr Integer -> SMTExpr Integer
@@ -150,6 +151,7 @@ instance Eq a => Eq (SMTExpr a) where
     (==) (Mult x1) (Mult x2) = eqExprs x1 x2
     (==) (Div l1 r1) (Div l2 r2) = l1 == l2 && r1 == r2
     (==) (Mod l1 r1) (Mod l2 r2) = l1 == l2 && r1 == r2
+    (==) (Rem l1 r1) (Rem l2 r2) = l1 == l2 && r1 == r2
     (==) (Divide l1 r1) (Divide l2 r2) = l1 == l2 && r1 == r2
     (==) (Neg x) (Neg y) = x == y
     (==) (Abs x) (Abs y) = x == y
@@ -474,6 +476,9 @@ foldExpr f x (Div l r) = let (x1,e1) = foldExpr f x l
 foldExpr f x (Mod l r) = let (x1,e1) = foldExpr f x l
                              (x2,e2) = foldExpr f x1 r
                          in f x2 (Mod e1 e2)
+foldExpr f x (Rem l r) = let (x1,e1) = foldExpr f x l
+                             (x2,e2) = foldExpr f x1 r
+                         in f x2 (Rem e1 e2)
 foldExpr f x (Divide l r) = let (x1,e1) = foldExpr f x l
                                 (x2,e2) = foldExpr f x1 r
                             in f x2 (Divide e1 e2)
