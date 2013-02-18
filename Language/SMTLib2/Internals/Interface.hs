@@ -194,6 +194,14 @@ divide = Divide
 neg :: SMTArith a => SMTExpr a -> SMTExpr a
 neg = Neg
 
+-- | Convert an integer expression to a real expression
+toReal :: SMTExpr Integer -> SMTExpr Rational
+toReal = toReal
+
+-- | Convert a real expression into an integer expression
+toInt :: SMTExpr Rational -> SMTExpr Integer
+toInt = toInt
+
 -- | If-then-else construct
 ite :: (SMTType a) => SMTExpr Bool -- ^ If this expression is true
        -> SMTExpr a -- ^ Then return this expression

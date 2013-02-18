@@ -127,6 +127,10 @@ exprToLisp (Neg e) c = let (e',c') = exprToLisp e c
                        in (L.List [L.Symbol "-",e'],c')
 exprToLisp (Abs e) c = let (e',c') = exprToLisp e c
                        in (L.List [L.Symbol "abs",e'],c')
+exprToLisp (ToReal e) c = let (e',c') = exprToLisp e c
+                          in (L.List [L.Symbol "to_real",e'],c')
+exprToLisp (ToInt e) c = let (e',c') = exprToLisp e c
+                         in (L.List [L.Symbol "to_int",e'],c')
 exprToLisp (ITE cond tt ff) c = let (cond',c') = exprToLisp cond c
                                     (tt',c'') = exprToLisp tt c'
                                     (ff',c''') = exprToLisp ff c''
@@ -355,6 +359,8 @@ lispToExprU f g l
                 L.List [L.Symbol "/",lhs,rhs] -> binT f Divide g lhs rhs
                 L.List [L.Symbol "-",arg] -> fmap Just $ (lispToExprT () g arg :: SMT (SMTExpr Integer)) >>= f . Neg
                 L.List [L.Symbol "abs",arg] -> fmap Just $ (lispToExprT () g arg :: SMT (SMTExpr Integer)) >>= f . Abs
+                L.List [L.Symbol "to_real",arg] -> fmap Just $ (lispToExprT () g arg :: SMT (SMTExpr Integer)) >>= f . ToReal
+                L.List [L.Symbol "to_int",arg] -> fmap Just $ (lispToExprT () g arg :: SMT (SMTExpr Rational)) >>= f . ToInt
                 L.List [L.Symbol "ite",cond,lhs,rhs] -> do
                   cond' <- lispToExprT () g cond
                   lhs' <- lispToExprU (\lhs' -> do
@@ -497,10 +503,20 @@ lispToExprT ann g l = do
         l' <- lispToExprT () g lhs
         r' <- lispToExprT () g rhs
         return $ fgcast l $ Div l' r'
+      L.List [L.Symbol "div",lhs,rhs] -> do
+        l' <- lispToExprT () g lhs
+        r' <- lispToExprT () g rhs
+        return $ fgcast l $ Div l' r'
       L.List [L.Symbol "mod",lhs,rhs] -> do
         l' <- lispToExprT () g lhs
         r' <- lispToExprT () g rhs
         return $ fgcast l $ Mod l' r'
+      L.List [L.Symbol "to_real",arg] -> do
+        arg' <- lispToExprT () g arg
+        return $ fgcast l $ ToReal arg'
+      L.List [L.Symbol "to_int",arg] -> do
+        arg' <- lispToExprT () g arg
+        return $ fgcast l $ ToInt arg'
       L.List (L.Symbol "and":arg) -> do
         arg' <- mapM (lispToExprT () g) arg
         return $ fgcast l $ And arg'
