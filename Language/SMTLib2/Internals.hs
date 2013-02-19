@@ -129,7 +129,7 @@ data SMTExpr t where
   Let :: (Args a) => ArgAnnotation a -> a -> (a -> SMTExpr b) -> SMTExpr b
   Fun :: (Args a,SMTType r) => Text -> ArgAnnotation a -> SMTAnnotation r -> SMTExpr (SMTFun a r)
   App :: (Args a,SMTType r) => SMTExpr (SMTFun a r) -> a -> SMTExpr r
-  Map :: (Mapable a i,SMTAnnotation (SMTArray i r) ~ (ArgAnnotation i,SMTAnnotation r)) => SMTExpr (SMTFun a r) -> ArgAnnotation i -> SMTExpr (SMTFun (MapArgument a i) (SMTArray i r))
+  Map :: (Mapable a i,SMTAnnotation (SMTArray i r) ~ (ArgAnnotation i,SMTAnnotation r),Typeable r) => SMTExpr (SMTFun a r) -> ArgAnnotation i -> SMTExpr (SMTFun (MapArgument a i) (SMTArray i r))
   ConTest :: SMTType a => Constructor a -> SMTExpr a -> SMTExpr Bool
   FieldSel :: (SMTRecordType a,SMTType f) => Field a f -> SMTExpr a -> SMTExpr f
   Head :: SMTExpr [a] -> SMTExpr a
@@ -203,6 +203,15 @@ instance Eq a => Eq (SMTExpr a) where
     (==) (Named e1 n1) (Named e2 n2) = e1==e2 && n1==n2
     (==) (InternalFun arg1) (InternalFun arg2) = arg1 == arg2
     (==) Undefined Undefined = True
+    (==) (App f1 arg1) (App f2 arg2) = case gcast f2 of
+      Nothing -> False
+      Just f2' -> case cast arg2 of
+        Nothing -> False
+        Just arg2' -> f1 == f2' && arg1 == arg2'
+    (==) (Fun name1 _ _) (Fun name2 _ _) = name1 == name2
+    (==) (Map f1 _) (Map f2 _) = case gcast f2 of
+      Nothing -> False
+      Just f2' -> f1 == f2'
     (==) _ _ = False
   
 eqExprs :: (Eq a,Typeable a,Typeable b) => [SMTExpr a] -> [SMTExpr b] -> Bool
@@ -588,8 +597,12 @@ foldExpr f x (Exists ann g) = let g' = foldExpr f x . g
 foldExpr f x (Let ann arg g) = let g' = foldExpr f x1 . g
                                    (x1,e1) = foldExprs (\st e _ -> f st e) x arg ann
                                in f (fst $ g' $ allOf Undefined) (Let ann e1 (snd . g'))
-foldExpr f x (App (Fun name arg_ann res_ann) arg) = let (x1,e1) = foldExprs (\st e _ -> f st e) x arg arg_ann
-                                                 in f x1 (App (Fun name arg_ann res_ann) e1)
+foldExpr f x (App fun arg) = let (_,arg_ann,_) = getFunAnn fun
+                                 (x1,arg') = foldExprs (\st e _ -> f st e) x arg arg_ann
+                                 (x2,fun') = foldExpr f x1 fun
+                             in f x2 (App fun' arg')
+foldExpr f x (Map fun ann) = let (x1,fun') = foldExpr f x fun
+                             in f x1 (Map fun' ann)
 foldExpr f x (ConTest c e) = let (x1,e1) = foldExpr f x e
                              in f x1 (ConTest c e1)
 foldExpr f x (FieldSel g e) = let (x1,e1) = foldExpr f x e
