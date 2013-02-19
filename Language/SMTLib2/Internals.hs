@@ -129,6 +129,7 @@ data SMTExpr t where
   Let :: (Args a) => ArgAnnotation a -> a -> (a -> SMTExpr b) -> SMTExpr b
   Fun :: (Args a,SMTType r) => Text -> ArgAnnotation a -> SMTAnnotation r -> SMTExpr (SMTFun a r)
   App :: (Args a,SMTType r) => SMTExpr (SMTFun a r) -> a -> SMTExpr r
+  Map :: (Mapable a i,SMTAnnotation (SMTArray i r) ~ (ArgAnnotation i,SMTAnnotation r)) => SMTExpr (SMTFun a r) -> ArgAnnotation i -> SMTExpr (SMTFun (MapArgument a i) (SMTArray i r))
   ConTest :: SMTType a => Constructor a -> SMTExpr a -> SMTExpr Bool
   FieldSel :: (SMTRecordType a,SMTType f) => Field a f -> SMTExpr a -> SMTExpr f
   Head :: SMTExpr [a] -> SMTExpr a
@@ -264,6 +265,10 @@ instance SMTInfo SMTSolverVersion where
 class (Eq a,Typeable a,Typeable (ArgAnnotation a)) => Args a where
   type ArgAnnotation a
   foldExprs :: (forall t. SMTType t => s -> SMTExpr t -> SMTAnnotation t -> (s,SMTExpr t)) -> s -> a -> ArgAnnotation a -> (s,a)
+
+class (Args (MapArgument a i),Args i,Args a) => Mapable a i where
+  type MapArgument a i
+  getMapArgumentAnn :: a -> i -> ArgAnnotation a -> ArgAnnotation i -> ArgAnnotation (MapArgument a i)
 
 argSorts :: Args a => a -> ArgAnnotation a -> [L.Lisp]
 argSorts arg ann = Prelude.reverse res
@@ -599,6 +604,14 @@ foldExpr f x (Insert l r) = let (x1,e1) = foldExpr f x l
 foldExpr f x (Named e n) = let (x1,e1) = foldExpr f x e
                            in f x1 (Named e1 n)
 foldExpr f x e = f x e
+
+getFunAnn :: SMTExpr (SMTFun a r) -> (L.Lisp,ArgAnnotation a,SMTAnnotation r)
+getFunAnn (Fun name arg_ann res_ann) = (L.Symbol name,arg_ann,res_ann)
+getFunAnn p@(Map f i_ann) = let (name,arg_ann,res_ann) = getFunAnn f
+                                (arg_u,_) = getFunUndef f
+                                getUdefIdx :: SMTExpr (SMTFun a (SMTArray i r)) -> i
+                                getUdefIdx _ = undefined
+                            in (L.List [L.Symbol "_",L.Symbol "map",name],getMapArgumentAnn arg_u (getUdefIdx p) arg_ann i_ann,(i_ann,res_ann))
 
 getVars :: SMTExpr a -> Set T.Text
 getVars = fst . foldExpr (\s expr -> (case expr of

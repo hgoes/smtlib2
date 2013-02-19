@@ -156,6 +156,10 @@ fun = funAnn unit unit
 app :: (Args a,SMTType r) => SMTExpr (SMTFun a r) -> a -> SMTExpr r
 app = App
 
+-- | Lift a function to arrays
+map' :: (Mapable a i,Unit (ArgAnnotation i)) => SMTExpr (SMTFun a r) -> SMTExpr (SMTFun (MapArgument a i) (SMTArray i r))
+map' f = Map f unit
+
 -- | Two expressions shall be equal
 (.==.) :: SMTType a => SMTExpr a -> SMTExpr a -> SMTExpr Bool
 (.==.) = Eq

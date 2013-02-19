@@ -153,6 +153,18 @@ instance (Args idx,SMTType val) => SMTType (SMTArray idx val) where
       getVal :: SMTArray i v -> v
       getVal _ = undefined
 
+instance (SMTType a,Args i) => Mapable (SMTExpr a) i where
+  type MapArgument (SMTExpr a) i = SMTExpr (SMTArray i a)
+  getMapArgumentAnn _ _ a_ann i_ann = (i_ann,a_ann)
+
+instance (SMTType a,SMTType b,Args i) => Mapable (SMTExpr a,SMTExpr b) i where
+  type MapArgument (SMTExpr a,SMTExpr b) i = (SMTExpr (SMTArray i a),SMTExpr (SMTArray i b))
+  getMapArgumentAnn _ _ (a_ann,b_ann) i_ann = ((i_ann,a_ann),(i_ann,b_ann))
+
+instance (SMTType a,SMTType b,SMTType c,Args i) => Mapable (SMTExpr a,SMTExpr b,SMTExpr c) i where
+  type MapArgument (SMTExpr a,SMTExpr b,SMTExpr c) i = (SMTExpr (SMTArray i a),SMTExpr (SMTArray i b),SMTExpr (SMTArray i c))
+  getMapArgumentAnn _ _ (a_ann,b_ann,c_ann) i_ann = ((i_ann,a_ann),(i_ann,b_ann),(i_ann,c_ann))
+
 -- BitVectors
 
 -- | Create a SMT representation of a bitvector type with /n/ bits.

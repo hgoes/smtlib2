@@ -284,11 +284,11 @@ exprToLisp (Let ann x f) c = let (arg,tps,nc) = createArgs ann c
                                         ,L.List [L.List [L.Symbol name,lisp] | ((name,_),lisp) <- Prelude.zip tps arg' ]
                                         ,arg''],nc'')
 exprToLisp (Fun name _ _) c = (L.Symbol name,c)
-exprToLisp (App (Fun name arg_ann _) x) c = let ~(x',c') = unpackArgs (\e _ i -> exprToLisp e i) x arg_ann c
-                                            in if Prelude.null x'
-                                               then (L.Symbol name,c')
-                                               else (L.List $ (L.Symbol name):x',c')
-exprToLisp (App _ _) _ = error "Internal smtlib2 error: Left hand side of function application is not a function"
+exprToLisp (App fun x) c = let (l,arg_ann,_) = getFunAnn fun
+                               ~(x',c') = unpackArgs (\e _ i -> exprToLisp e i) x arg_ann c
+                           in if Prelude.null x'
+                              then (l,c')
+                              else (L.List $ l:x',c')
 exprToLisp (ConTest (Constructor name) e) c = let (e',c') = exprToLisp e c
                                               in (L.List [L.Symbol $ T.append "is-" name
                                                          ,e'],c')
