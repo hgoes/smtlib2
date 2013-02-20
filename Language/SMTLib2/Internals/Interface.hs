@@ -471,7 +471,7 @@ getInterpolants exprs = do
   (_,_,mp) <- getSMT
   putRequest (L.List (L.Symbol "get-interpolants":fmap (\e -> let (r,_) = exprToLisp e 0 in r) exprs))
   L.List res <- parseResponse
-  mapM (lispToExprT () (\name -> mp Map.! name)) res
+  return $ fmap (lispToExprT () (\name -> mp Map.! name)) res
   
 -- | After an unsuccessful 'checkSat' this method extracts a proof from the SMT solver that the instance is unsatisfiable.
 getProof :: SMT (SMTExpr Bool)
@@ -480,10 +480,10 @@ getProof = do
   let mp' = Map.union mp commonTheorems
   putRequest (L.List [L.Symbol "get-proof"])
   res <- parseResponse
-  lispToExprT () (\name -> case Map.lookup name mp' of
-                             Nothing -> error $ "Failed to find a definition for "++show name
-                             Just n -> n
-                 ) res
+  return $ lispToExprT () (\name -> case Map.lookup name mp' of
+                              Nothing -> error $ "Failed to find a definition for "++show name
+                              Just n -> n
+                          ) res
 
 -- | After an unsuccessful 'checkSat', return a list of names of named
 --   expression which make the instance unsatisfiable.

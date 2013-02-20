@@ -34,8 +34,7 @@ getValue expr = do
 getValue' :: SMTValue t => SMTAnnotation t -> SMTExpr t -> SMT t
 getValue' ann expr = do
   res <- fmap removeLets $ getRawValue expr
-  rres <- unmangle res ann
-  case rres of
+  case unmangle res ann of
     Nothing -> error $ "Couldn't unmangle "++show res
     Just r -> return r
 
@@ -319,85 +318,80 @@ withUndef rep f
 asType :: a -> g a -> g a
 asType = const id
 
-binT :: (SMTValue b1,Typeable b1,SMTValue b2,Typeable b2,SMTValue c,Typeable c,SMTAnnotation b1 ~ (),SMTAnnotation b2 ~ (),SMTAnnotation c ~ ()) => (forall a. (SMTValue a,Typeable a,SMTAnnotation a ~ ()) => SMTExpr a -> SMT d)
-        -> (SMTExpr b1 -> SMTExpr b2 -> SMTExpr c) -> (T.Text -> TypeRep) -> L.Lisp -> L.Lisp -> SMT (Maybe d)
-binT f con g lhs rhs = do
-  lhs' <- lispToExprT () g lhs
-  rhs' <- lispToExprT () g rhs
-  res <- f (con lhs' rhs')
-  return $ Just res
+binT :: (SMTValue b1,Typeable b1,SMTValue b2,Typeable b2,SMTValue c,Typeable c,SMTAnnotation b1 ~ (),SMTAnnotation b2 ~ (),SMTAnnotation c ~ ()) => (forall a. (SMTValue a,Typeable a,SMTAnnotation a ~ ()) => SMTExpr a -> d)
+        -> (SMTExpr b1 -> SMTExpr b2 -> SMTExpr c) -> (T.Text -> TypeRep) -> L.Lisp -> L.Lisp -> Maybe d
+binT f con g lhs rhs 
+  = let lhs' = lispToExprT () g lhs
+        rhs' = lispToExprT () g rhs
+    in Just $ f (con lhs' rhs')
 
-lispToExprU :: (forall a. (SMTValue a,Typeable a) => SMTExpr a -> SMT b)
+lispToExprU :: (forall a. (SMTValue a,Typeable a) => SMTExpr a -> b)
                -> (T.Text -> TypeRep)
-               -> L.Lisp -> SMT (Maybe b)
+               -> L.Lisp -> Maybe b
 lispToExprU f g l
-  = firstJust [(unmangle l () :: SMT (Maybe Bool)) >>= maybe (return Nothing) (fmap Just . f . flip Const unit)
-              ,(unmangle l () :: SMT (Maybe Integer)) >>= maybe (return Nothing) (fmap Just . f . flip Const unit)
-              ,(unmangle l () :: SMT (Maybe Word8)) >>= maybe (return Nothing) (fmap Just . f . flip Const unit)
-              ,(unmangle l () :: SMT (Maybe Word16)) >>= maybe (return Nothing) (fmap Just . f . flip Const unit)
-              ,(unmangle l () :: SMT (Maybe Word32)) >>= maybe (return Nothing) (fmap Just . f . flip Const unit)
-              ,(unmangle l () :: SMT (Maybe Word64)) >>= maybe (return Nothing) (fmap Just . f . flip Const unit)
+  = firstJust [fmap (f . flip Const unit) (unmangle l () :: Maybe Bool)
+              ,fmap (f . flip Const unit) (unmangle l () :: Maybe Integer)
+              ,fmap (f . flip Const unit) (unmangle l () :: Maybe Word8)
+              ,fmap (f . flip Const unit) (unmangle l () :: Maybe Word16)
+              ,fmap (f . flip Const unit) (unmangle l () :: Maybe Word32)
+              ,fmap (f . flip Const unit) (unmangle l () :: Maybe Word64)
               ,case l of
-                L.Symbol name -> withUndef (g name) $ \u -> fmap Just $ f $ asType u (Var name ())
-                L.List [L.Symbol "=",lhs,rhs] -> do
-                  lhs' <- lispToExprU (\lhs' -> do
-                                          rhs' <- lispToExprT (extractAnnotation lhs') g rhs
-                                          f (Eq lhs' rhs')) g lhs
-                  case lhs' of
-                    Just r -> return $ Just r
-                    Nothing -> lispToExprU (\rhs' -> do
-                                               lhs'' <- lispToExprT (extractAnnotation rhs') g lhs
-                                               f (Eq lhs'' rhs')) g rhs
+                L.Symbol name -> withUndef (g name) $ \u -> Just $ f $ asType u (Var name ())
+                L.List [L.Symbol "=",lhs,rhs] 
+                  -> let lhs' = lispToExprU (\lhs' -> let rhs' = lispToExprT (extractAnnotation lhs') g rhs
+                                                      in f (Eq lhs' rhs')) g lhs
+                     in case lhs' of
+                       Just r -> Just r
+                       Nothing -> lispToExprU (\rhs' -> let lhs'' = lispToExprT (extractAnnotation rhs') g lhs
+                                                        in f (Eq lhs'' rhs')) g rhs
                 L.List [L.Symbol ">=",lhs,rhs] -> binT f (Ge::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) g lhs rhs
                 L.List [L.Symbol ">",lhs,rhs] -> binT f (Gt::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) g lhs rhs
                 L.List [L.Symbol "<=",lhs,rhs] -> binT f (Le::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) g lhs rhs
                 L.List [L.Symbol "<",lhs,rhs] -> binT f (Lt::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) g lhs rhs
                 L.List (L.Symbol "distinct":first:rest)
-                  -> lispToExprU (\first' -> do
-                                     rest' <- mapM (lispToExprT (extractAnnotation first') g) rest
-                                     f $ Distinct (first':rest')) g first
-                L.List (L.Symbol "+":arg) -> fmap Just $ mapM (lispToExprT () g) arg >>= f . (Plus::[SMTExpr Integer] -> SMTExpr Integer)
+                  -> lispToExprU (\first' -> let rest' = fmap (lispToExprT (extractAnnotation first') g) rest
+                                             in f $ Distinct (first':rest')) g first
+                L.List (L.Symbol "+":arg) -> Just $ f $ (Plus::[SMTExpr Integer] -> SMTExpr Integer) $ 
+                                             fmap (lispToExprT () g) arg
                 L.List [L.Symbol "-",lhs,rhs] -> binT f (Minus::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer) g lhs rhs
-                L.List (L.Symbol "*":arg) -> fmap Just $ mapM (lispToExprT () g) arg >>= f . (Mult::[SMTExpr Integer] -> SMTExpr Integer)
+                L.List (L.Symbol "*":arg) -> Just $ f $ (Mult::[SMTExpr Integer] -> SMTExpr Integer) $
+                                             fmap (lispToExprT () g) arg
                 L.List [L.Symbol "div",lhs,rhs] -> binT f Div g lhs rhs
                 L.List [L.Symbol "mod",lhs,rhs] -> binT f Mod g lhs rhs
                 L.List [L.Symbol "rem",lhs,rhs] -> binT f Rem g lhs rhs
                 L.List [L.Symbol "/",lhs,rhs] -> binT f Divide g lhs rhs
-                L.List [L.Symbol "-",arg] -> fmap Just $ (lispToExprT () g arg :: SMT (SMTExpr Integer)) >>= f . Neg
-                L.List [L.Symbol "abs",arg] -> fmap Just $ (lispToExprT () g arg :: SMT (SMTExpr Integer)) >>= f . Abs
-                L.List [L.Symbol "to_real",arg] -> fmap Just $ (lispToExprT () g arg :: SMT (SMTExpr Integer)) >>= f . ToReal
-                L.List [L.Symbol "to_int",arg] -> fmap Just $ (lispToExprT () g arg :: SMT (SMTExpr Rational)) >>= f . ToInt
-                L.List [L.Symbol "ite",cond,lhs,rhs] -> do
-                  cond' <- lispToExprT () g cond
-                  lhs' <- lispToExprU (\lhs' -> do
-                                          rhs' <- lispToExprT (extractAnnotation lhs') g rhs
-                                          f (ITE cond' lhs' rhs')) g lhs
-                  case lhs' of
-                    Just r -> return $ Just r
-                    Nothing -> lispToExprU (\rhs' -> do
-                                               lhs'' <- lispToExprT (extractAnnotation rhs') g lhs
-                                               f (ITE cond' lhs'' rhs')) g rhs
-                L.List (L.Symbol "and":arg) -> fmap Just $ mapM (lispToExprT () g) arg >>= f . And
-                L.List (L.Symbol "or":arg) -> fmap Just $ mapM (lispToExprT () g) arg >>= f . Or
-                L.List [L.Symbol "xor",lhs,rhs] -> do
-                  lhs' <- lispToExprT () g lhs
-                  rhs' <- lispToExprT () g rhs
-                  fmap Just $ f (XOr lhs' rhs')
-                L.List [L.Symbol "=>",lhs,rhs] -> do
-                  lhs' <- lispToExprT () g lhs
-                  rhs' <- lispToExprT () g rhs
-                  fmap Just $ f (Implies lhs' rhs')
-                L.List [L.Symbol "not",arg] -> fmap Just $ (lispToExprT () g arg :: SMT (SMTExpr Bool)) >>= f . Not
-                L.List [L.Symbol "bvule",lhs,rhs] -> fmap Just $ binBV BVULE g lhs rhs >>= f
-                L.List [L.Symbol "bvult",lhs,rhs] -> fmap Just $ binBV BVULT g lhs rhs >>= f
-                L.List [L.Symbol "bvuge",lhs,rhs] -> fmap Just $ binBV BVUGE g lhs rhs >>= f
-                L.List [L.Symbol "bvugt",lhs,rhs] -> fmap Just $ binBV BVUGT g lhs rhs >>= f
-                L.List [L.Symbol "bvsle",lhs,rhs] -> fmap Just $ binBV BVSLE g lhs rhs >>= f
-                L.List [L.Symbol "bvslt",lhs,rhs] -> fmap Just $ binBV BVSLT g lhs rhs >>= f
-                L.List [L.Symbol "bvsge",lhs,rhs] -> fmap Just $ binBV BVSGE g lhs rhs >>= f
-                L.List [L.Symbol "bvsgt",lhs,rhs] -> fmap Just $ binBV BVSGT g lhs rhs >>= f
-                L.List (L.Symbol fn:arg) -> fmap Just $ fnToExpr f g fn arg
-                _ -> return Nothing
+                L.List [L.Symbol "-",arg] -> Just $ f $ Neg (lispToExprT () g arg :: SMTExpr Integer)
+                L.List [L.Symbol "abs",arg] -> Just $ f $ Abs (lispToExprT () g arg :: SMTExpr Integer)
+                L.List [L.Symbol "to_real",arg] -> Just $ f $ ToReal (lispToExprT () g arg :: SMTExpr Integer)
+                L.List [L.Symbol "to_int",arg] -> Just $ f $ ToInt (lispToExprT () g arg :: SMTExpr Rational)
+                L.List [L.Symbol "ite",cond,lhs,rhs]
+                  -> let cond' = lispToExprT () g cond
+                     in case lispToExprU (\lhs' -> let rhs' = lispToExprT (extractAnnotation lhs') g rhs
+                                                   in f (ITE cond' lhs' rhs')) g lhs of
+                          Just r -> Just r
+                          Nothing -> lispToExprU (\rhs' -> let lhs'' = lispToExprT (extractAnnotation rhs') g lhs
+                                                           in f (ITE cond' lhs'' rhs')) g rhs
+                L.List (L.Symbol "and":arg) -> Just $ f $ And $ fmap (lispToExprT () g) arg
+                L.List (L.Symbol "or":arg) -> Just $ f $ Or $ fmap (lispToExprT () g) arg
+                L.List [L.Symbol "xor",lhs,rhs] 
+                  -> let lhs' = lispToExprT () g lhs
+                         rhs' = lispToExprT () g rhs
+                     in Just $ f (XOr lhs' rhs')
+                L.List [L.Symbol "=>",lhs,rhs] 
+                  -> let lhs' = lispToExprT () g lhs
+                         rhs' = lispToExprT () g rhs
+                     in Just $ f (Implies lhs' rhs')
+                L.List [L.Symbol "not",arg] -> Just $ f $ Not (lispToExprT () g arg :: SMTExpr Bool)
+                L.List [L.Symbol "bvule",lhs,rhs] -> Just $ f $ binBV BVULE g lhs rhs
+                L.List [L.Symbol "bvult",lhs,rhs] -> Just $ f $ binBV BVULT g lhs rhs
+                L.List [L.Symbol "bvuge",lhs,rhs] -> Just $ f $ binBV BVUGE g lhs rhs
+                L.List [L.Symbol "bvugt",lhs,rhs] -> Just $ f $ binBV BVUGT g lhs rhs
+                L.List [L.Symbol "bvsle",lhs,rhs] -> Just $ f $ binBV BVSLE g lhs rhs
+                L.List [L.Symbol "bvslt",lhs,rhs] -> Just $ f $ binBV BVSLT g lhs rhs
+                L.List [L.Symbol "bvsge",lhs,rhs] -> Just $ f $ binBV BVSGE g lhs rhs
+                L.List [L.Symbol "bvsgt",lhs,rhs] -> Just $ f $ binBV BVSGT g lhs rhs
+                L.List (L.Symbol fn:arg) -> Just $ fnToExpr f g fn arg
+                _ -> Nothing
               ]
 
 asBV :: Typeable a => (forall b. (SMTBV b,Typeable b) => SMTExpr b -> c) -> SMTExpr a -> c
@@ -411,29 +405,29 @@ asBV f e = case (gcast e :: Maybe (SMTExpr Word8)) of
         Just r -> f r
         Nothing -> error $ "Cannot treat expression of type "++show (typeOf e)++" as bitvector"
 
-fnToExpr :: (forall a. (SMTValue a,Typeable a,SMTAnnotation a ~ ()) => SMTExpr a -> SMT b)
+fnToExpr :: (forall a. (SMTValue a,Typeable a,SMTAnnotation a ~ ()) => SMTExpr a -> b)
             -> (T.Text -> TypeRep)
-            -> T.Text -> [L.Lisp] -> SMT b
+            -> T.Text -> [L.Lisp] -> b
 fnToExpr f g fn arg = case splitTyConApp $ g fn of
   (_,[targs,res]) -> withUndef res $ \res' -> case splitTyConApp targs of
     (_,rargs) -> case rargs of
-      [] -> let [a0] = arg in withUndef targs $ \t0' -> do
-        p0 <- lispToExprT () g a0
-        f $ asType res' $ App (Fun fn undefined undefined) (asType t0' p0)
-      [t0,t1] -> let [a0,a1] = arg in withUndef t0 $ \t0' ->
-        withUndef t1 $ \t1' -> do
-          p0 <- lispToExprT () g a0
-          p1 <- lispToExprT () g a1
-          f $ asType res' $ App (Fun fn undefined undefined) (asType t0' p0,asType t1' p1)
-      [t0,t1,t2] -> let [a0,a1,a2] = arg in withUndef t0 $ \t0' ->
-        withUndef t1 $ \t1' -> 
-        withUndef t2 $ \t2' -> do
-          p0 <- lispToExprT () g a0
-          p1 <- lispToExprT () g a1
-          p2 <- lispToExprT () g a2
-          f $ asType res' $ App (Fun fn undefined undefined) (asType t0' p0,
-                                              asType t1' p1,
-                                              asType t2' p2)
+      [] -> let [a0] = arg 
+            in withUndef targs $ 
+               \t0' -> f $ asType res' $ App (Fun fn undefined undefined) (asType t0' $ lispToExprT () g a0)
+      [t0,t1] -> let [a0,a1] = arg 
+                 in withUndef t0 $ 
+                    \t0' -> withUndef t1 $ 
+                            \t1' -> let p0 = lispToExprT () g a0
+                                        p1 = lispToExprT () g a1
+                                    in f $ asType res' $ App (Fun fn undefined undefined) (asType t0' p0,asType t1' p1)
+      [t0,t1,t2] -> let [a0,a1,a2] = arg 
+                    in withUndef t0 $ 
+                       \t0' -> withUndef t1 $ 
+                               \t1' -> withUndef t2 $ 
+                                       \t2' -> let p0 = lispToExprT () g a0
+                                                   p1 = lispToExprT () g a1
+                                                   p2 = lispToExprT () g a2
+                                               in f $ asType res' $ App (Fun fn undefined undefined) (asType t0' p0,asType t1' p1,asType t2' p2)
       _ -> error "Language.SMTLib2.Internals.Translation.fnToExpr: Invalid number of function arguments given (more than 3)."
   _ -> error $ "Language.SMTLib2.Internals.Translation.fnToExpr: Invalid function type "++(show $ g fn)++" given."
 
@@ -442,98 +436,75 @@ fgcast l x = case gcast x of
   Just r -> r
   Nothing -> error $ "Type error in expression "++show l
 
-binBV :: (forall a. (SMTBV a,Typeable a) => SMTExpr a -> SMTExpr a -> SMTExpr b) -> (T.Text -> TypeRep) -> L.Lisp -> L.Lisp -> SMT (SMTExpr b)
-binBV f g lhs rhs = do
-  r0 <- lispToExprU (asBV (\lhs0 -> do
-                              rhs0 <- lispToExprT (extractAnnotation lhs0) g rhs
-                              return $ f lhs0 rhs0
-                          )) g lhs
-  case r0 of
-    Just r -> return r
-    Nothing -> do
-      r1 <- lispToExprU (asBV (\rhs1 -> do
-                                  lhs1 <- lispToExprT (extractAnnotation rhs1) g lhs
-                                  return $ f lhs1 rhs1
-                              )) g rhs
-      case r1 of
-        Just r -> return r
-        Nothing -> error $ "Parsing bitvector expression failed"
+binBV :: (forall a. (SMTBV a,Typeable a) => SMTExpr a -> SMTExpr a -> SMTExpr b) -> (T.Text -> TypeRep) -> L.Lisp -> L.Lisp -> SMTExpr b
+binBV f g lhs rhs 
+  = let r0 = lispToExprU (asBV (\lhs0 -> let rhs0 = lispToExprT (extractAnnotation lhs0) g rhs
+                                         in f lhs0 rhs0
+                               )) g lhs
+    in case r0 of
+      Just r -> r
+      Nothing -> let r1 = lispToExprU (asBV (\rhs1 -> let lhs1 = lispToExprT (extractAnnotation rhs1) g lhs
+                                                      in f lhs1 rhs1
+                                            )) g rhs
+                 in case r1 of
+                   Just r -> r
+                   Nothing -> error $ "Parsing bitvector expression failed"
 
-lispToExprT :: (SMTValue a,Typeable a) => SMTAnnotation a -> (T.Text -> TypeRep) -> L.Lisp -> SMT (SMTExpr a)
-lispToExprT ann g l = do
-  ll <- unmangle l ann
-  case ll of
-    Just v -> return $ Const v ann
+lispToExprT :: (SMTValue a,Typeable a) => SMTAnnotation a -> (T.Text -> TypeRep) -> L.Lisp -> SMTExpr a
+lispToExprT ann g l = case unmangle l ann of
+    Just v -> Const v ann
     Nothing -> case l of
-      L.Symbol name -> return $ Var name ann
-      L.List [L.Symbol "=",lhs,rhs] -> do
-        lhs' <- lispToExprU (\lhs' -> do
-                                rhs' <- lispToExprT (extractAnnotation lhs') g rhs
-                                return $ fgcast l $ Eq lhs' rhs') g lhs
-        case lhs' of
-          Just r -> return r
-          Nothing -> do
-            rhs' <- lispToExprU (\rhs' -> do
-                                    lhs'' <- lispToExprT (extractAnnotation rhs') g lhs
-                                    return $ fgcast l $ Eq lhs'' rhs') g rhs
-            case rhs' of
-              Just r -> return r
-              Nothing -> error $ "Failed to parse expression "++show l
-      L.List [L.Symbol ">",lhs,rhs] -> do
-        l' <- lispToExprT () g lhs
-        r' <- lispToExprT () g rhs
-        return $ fgcast l $ Gt (l' :: SMTExpr Integer) r'
-      L.List [L.Symbol ">=",lhs,rhs] -> do
-        l' <- lispToExprT () g lhs
-        r' <- lispToExprT () g rhs
-        return $ fgcast l $ Ge (l' :: SMTExpr Integer) r'
-      L.List [L.Symbol "<",lhs,rhs] -> do
-        l' <- lispToExprT () g lhs
-        r' <- lispToExprT () g rhs
-        return $ fgcast l $ Lt (l' :: SMTExpr Integer) r'
-      L.List [L.Symbol "<=",lhs,rhs] -> do
-        l' <- lispToExprT () g lhs
-        r' <- lispToExprT () g rhs
-        return $ fgcast l $ Le (l' :: SMTExpr Integer) r'
-      L.List (L.Symbol "+":arg) -> do
-        arg' <- mapM (lispToExprT () g) arg
-        return $ fgcast l $ Plus (arg' :: [SMTExpr Integer])
-      L.List [L.Symbol "-",lhs,rhs] -> do
-        l' <- lispToExprT () g lhs
-        r' <- lispToExprT () g rhs
-        return $ fgcast l $ Minus (l' :: SMTExpr Integer) r'
-      L.List (L.Symbol "*":arg) -> do
-        arg' <- mapM (lispToExprT () g) arg
-        return $ fgcast l $ Mult (arg' :: [SMTExpr Integer])
-      L.List [L.Symbol "/",lhs,rhs] -> do
-        l' <- lispToExprT () g lhs
-        r' <- lispToExprT () g rhs
-        return $ fgcast l $ Div l' r'
-      L.List [L.Symbol "div",lhs,rhs] -> do
-        l' <- lispToExprT () g lhs
-        r' <- lispToExprT () g rhs
-        return $ fgcast l $ Div l' r'
-      L.List [L.Symbol "mod",lhs,rhs] -> do
-        l' <- lispToExprT () g lhs
-        r' <- lispToExprT () g rhs
-        return $ fgcast l $ Mod l' r'
-      L.List [L.Symbol "rem",lhs,rhs] -> do
-        l' <- lispToExprT () g lhs
-        r' <- lispToExprT () g rhs
-        return $ fgcast l $ Rem l' r'
-      L.List [L.Symbol "to_real",arg] -> do
-        arg' <- lispToExprT () g arg
-        return $ fgcast l $ ToReal arg'
-      L.List [L.Symbol "to_int",arg] -> do
-        arg' <- lispToExprT () g arg
-        return $ fgcast l $ ToInt arg'
-      L.List (L.Symbol "and":arg) -> do
-        arg' <- mapM (lispToExprT () g) arg
-        return $ fgcast l $ And arg'
-      L.List (L.Symbol "or":arg) -> do
-        arg' <- mapM (lispToExprT () g) arg
-        return $ fgcast l $ Or arg'
-      L.List [L.Symbol "not",arg] -> lispToExprT () g arg >>= return . fgcast l . Not
+      L.Symbol name -> Var name ann
+      L.List [L.Symbol "=",lhs,rhs] 
+        -> let lhs' = lispToExprU (\lhs' -> let rhs' = lispToExprT (extractAnnotation lhs') g rhs
+                                            in fgcast l $ Eq lhs' rhs') g lhs
+           in case lhs' of
+             Just r -> r
+             Nothing -> let rhs' = lispToExprU (\rhs' -> let lhs'' = lispToExprT (extractAnnotation rhs') g lhs
+                                                         in fgcast l $ Eq lhs'' rhs') g rhs
+                        in case rhs' of
+                          Just r -> r
+                          Nothing -> error $ "Failed to parse expression "++show l
+      L.List [L.Symbol ">",lhs,rhs] -> let l' = lispToExprT () g lhs
+                                           r' = lispToExprT () g rhs
+                                       in fgcast l $ Gt (l' :: SMTExpr Integer) r'
+      L.List [L.Symbol ">=",lhs,rhs] -> let l' = lispToExprT () g lhs
+                                            r' = lispToExprT () g rhs
+                                        in fgcast l $ Ge (l' :: SMTExpr Integer) r'
+      L.List [L.Symbol "<",lhs,rhs] -> let l' = lispToExprT () g lhs
+                                           r' = lispToExprT () g rhs
+                                       in fgcast l $ Lt (l' :: SMTExpr Integer) r'
+      L.List [L.Symbol "<=",lhs,rhs] -> let l' = lispToExprT () g lhs
+                                            r' = lispToExprT () g rhs
+                                        in fgcast l $ Le (l' :: SMTExpr Integer) r'
+      L.List (L.Symbol "+":arg) -> let arg' = fmap (lispToExprT () g) arg
+                                   in  fgcast l $ Plus (arg' :: [SMTExpr Integer])
+      L.List [L.Symbol "-",lhs,rhs] -> let l' = lispToExprT () g lhs
+                                           r' = lispToExprT () g rhs
+                                       in fgcast l $ Minus (l' :: SMTExpr Integer) r'
+      L.List (L.Symbol "*":arg) -> let arg' = fmap (lispToExprT () g) arg
+                                   in fgcast l $ Mult (arg' :: [SMTExpr Integer])
+      L.List [L.Symbol "/",lhs,rhs] -> let l' = lispToExprT () g lhs
+                                           r' = lispToExprT () g rhs
+                                       in fgcast l $ Div l' r'
+      L.List [L.Symbol "div",lhs,rhs] -> let l' = lispToExprT () g lhs
+                                             r' = lispToExprT () g rhs
+                                         in fgcast l $ Div l' r'
+      L.List [L.Symbol "mod",lhs,rhs] -> let l' = lispToExprT () g lhs
+                                             r' = lispToExprT () g rhs
+                                         in fgcast l $ Mod l' r'
+      L.List [L.Symbol "rem",lhs,rhs] -> let l' = lispToExprT () g lhs
+                                             r' = lispToExprT () g rhs
+                                         in fgcast l $ Rem l' r'
+      L.List [L.Symbol "to_real",arg] -> let arg' = lispToExprT () g arg
+                                         in fgcast l $ ToReal arg'
+      L.List [L.Symbol "to_int",arg] -> let arg' = lispToExprT () g arg
+                                        in fgcast l $ ToInt arg'
+      L.List (L.Symbol "and":arg) -> let arg' = fmap (lispToExprT () g) arg
+                                     in fgcast l $ And arg'
+      L.List (L.Symbol "or":arg) -> let arg' = fmap (lispToExprT () g) arg
+                                    in fgcast l $ Or arg'
+      L.List [L.Symbol "not",arg] -> fgcast l $ Not $ lispToExprT () g arg
       L.List [L.Symbol "let",L.List syms,arg] -> letToExpr g syms arg
       L.List [L.Symbol "bvule",lhs,rhs] -> fgcast l $ binBV BVULE g lhs rhs
       L.List [L.Symbol "bvult",lhs,rhs] -> fgcast l $ binBV BVULT g lhs rhs
@@ -543,24 +514,23 @@ lispToExprT ann g l = do
       L.List [L.Symbol "bvslt",lhs,rhs] -> fgcast l $ binBV BVSLT g lhs rhs
       L.List [L.Symbol "bvsge",lhs,rhs] -> fgcast l $ binBV BVSGE g lhs rhs
       L.List [L.Symbol "bvsgt",lhs,rhs] -> fgcast l $ binBV BVSGT g lhs rhs
-      L.List (L.Symbol fn:arg) -> fnToExpr (return . fgcast l) g fn arg
-      L.List [L.List (L.Symbol "_":arg),expr] -> do
-        expr' <- lispToExprT () g expr
-        return $ fgcast l $ App (InternalFun arg) expr'
+      L.List (L.Symbol fn:arg) -> fnToExpr (fgcast l) g fn arg
+      L.List [L.List (L.Symbol "_":arg),expr] 
+        -> fgcast l $ App (InternalFun arg) $
+           lispToExprT () g expr
       _ -> error $ "Cannot parse "++show l
       where
         letToExpr g' (L.List [L.Symbol name,expr]:rest) arg
-          = do
-            res <- lispToExprU (\expr' -> do
-                                   rest' <- letToExpr (\txt -> if txt==name
-                                                               then typeOf expr'
-                                                               else g txt) rest arg
-                                   return $ Let (extractAnnotation expr') expr' (\(Var name' _) -> replaceName (\n -> if n==name 
-                                                                                                                          then name' 
-                                                                                                                          else n) rest')
-                               ) g' expr
-            case res of
-              Just r -> return r
+          = let res = lispToExprU 
+                      (\expr' -> let rest' = letToExpr (\txt -> if txt==name
+                                                                then typeOf expr'
+                                                                else g txt) rest arg
+                                 in Let (extractAnnotation expr') expr' (\(Var name' _) -> replaceName (\n -> if n==name 
+                                                                                                              then name' 
+                                                                                                              else n) rest')
+                      ) g' expr
+            in case res of
+              Just r -> r
               Nothing -> error $ "Unparseable expression "++show expr++" in let expression"
         letToExpr g' [] arg = lispToExprT ann g' arg
         letToExpr _ (x:_) _ = error $ "Unparseable entry "++show x++" in let expression"

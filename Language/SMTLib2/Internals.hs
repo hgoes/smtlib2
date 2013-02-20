@@ -30,7 +30,7 @@ class (Eq t,Typeable t,Typeable (SMTAnnotation t)) => SMTType t where
 
 -- | Haskell values which can be represented as SMT constants
 class SMTType t => SMTValue t where
-  unmangle :: L.Lisp -> SMTAnnotation t -> SMT (Maybe t)
+  unmangle :: L.Lisp -> SMTAnnotation t -> Maybe t
   mangle :: t -> SMTAnnotation t -> L.Lisp
 
 -- | All records which can be expressed in SMT
@@ -143,6 +143,11 @@ data SMTExpr t where
 instance Eq a => Eq (SMTExpr a) where
     (==) (Var v1 _) (Var v2 _) = v1 == v2
     (==) (Const v1 _) (Const v2 _) = v1 == v2
+    (==) (Eq l1 r1) (Eq l2 r2) = case gcast l2 of
+      Nothing -> False
+      Just l2' -> case gcast r2 of
+        Nothing -> False
+        Just r2' -> l1 == l2' && r1 == r2'
     (==) (Ge l1 r1) (Ge l2 r2) = (eqExpr l1 l2) && (eqExpr r1 r2)
     (==) (Gt l1 r1) (Gt l2 r2) = (eqExpr l1 l2) && (eqExpr r1 r2)
     (==) (Le l1 r1) (Le l2 r2) = (eqExpr l1 l2) && (eqExpr r1 r2)
@@ -322,13 +327,10 @@ class Args a => LiftArgs a where
   -- | Converts a SMT representation back into a haskell value.
   unliftArgs :: a -> SMT (Unpacked a)
 
-firstJust :: Monad m => [m (Maybe a)] -> m (Maybe a)
-firstJust [] = return Nothing
-firstJust (act:acts) = do
-  r <- act
-  case r of
-    Nothing -> firstJust acts
-    Just res -> return $ Just res
+firstJust :: [Maybe a] -> Maybe a
+firstJust [] = Nothing
+firstJust ((Just x):_) = Just x
+firstJust (Nothing:xs) = firstJust xs
 
 getUndef :: SMTExpr t -> t
 getUndef _ = error "Don't evaluate the result of 'getUndef'"

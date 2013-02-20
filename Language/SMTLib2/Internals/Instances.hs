@@ -4,7 +4,6 @@
 module Language.SMTLib2.Internals.Instances where
 
 import Language.SMTLib2.Internals
-import Language.SMTLib2.Internals.SMTMonad
 import qualified Data.AttoLisp as L
 import qualified Data.Attoparsec.Number as L
 import Data.Word
@@ -27,9 +26,9 @@ instance SMTType Bool where
   declareType _ _ = return ()
 
 instance SMTValue Bool where
-  unmangle (L.Symbol "true") _ = return $ Just True
-  unmangle (L.Symbol "false") _ = return $ Just False
-  unmangle _ _ = return Nothing
+  unmangle (L.Symbol "true") _ = Just True
+  unmangle (L.Symbol "false") _ = Just False
+  unmangle _ _ = Nothing
   mangle True _ = L.Symbol "true"
   mangle False _ = L.Symbol "false"
 
@@ -41,10 +40,10 @@ instance SMTType Integer where
   declareType _ _ = return ()
 
 instance SMTValue Integer where
-  unmangle (L.Number (L.I v)) _ = return $ Just v
+  unmangle (L.Number (L.I v)) _ = Just v
   unmangle (L.List [L.Symbol "-"
-                   ,L.Number (L.I v)]) _ = return $ Just $ - v
-  unmangle _ _ = return Nothing
+                   ,L.Number (L.I v)]) _ = Just $ - v
+  unmangle _ _ = Nothing
   mangle v _
     | v < 0 = L.List [L.Symbol "-"
                      ,L.toLisp (-v)]
@@ -93,21 +92,18 @@ instance SMTType (Ratio Integer) where
   declareType _ _ = return ()
 
 instance SMTValue (Ratio Integer) where
-  unmangle (L.Number (L.I v)) _ = return $ Just $ fromInteger v
-  unmangle (L.Number (L.D v)) _ = return $ Just $ realToFrac v
+  unmangle (L.Number (L.I v)) _ = Just $ fromInteger v
+  unmangle (L.Number (L.D v)) _ = Just $ realToFrac v
   unmangle (L.List [L.Symbol "/"
                    ,x
                    ,y]) _ = do
                           q <- unmangle x ()
                           r <- unmangle y ()
-                          return (do
-                                     qq <- q
-                                     rr <- r
-                                     return $ qq / rr)
+                          return (q / r)
   unmangle (L.List [L.Symbol "-",r]) _ = do
     res <- unmangle r ()
-    return (fmap (\x -> -x) res)
-  unmangle _ _ = return Nothing
+    return (-res)
+  unmangle _ _ = Nothing
   mangle v _ = L.List [L.Symbol "/"
                       ,L.Symbol $ T.pack $ (show $ numerator v)++".0"
                       ,L.Symbol $ T.pack $ (show $ denominator v)++".0"]
@@ -191,8 +187,8 @@ withUndef1 f = f undefined
 -- | Parses a given SMT bitvector value into a numerical value within the SMT monad.
 getBVValue :: (Num a,Bits a,Read a) => L.Lisp -- ^ The SMT expression
               -> b -- ^ Ignored
-              -> SMT (Maybe a)
-getBVValue arg _ = return $ withUndef1 $ \u -> getBVValue' (bitSize u) arg
+              -> Maybe a
+getBVValue arg _ = withUndef1 $ \u -> getBVValue' (bitSize u) arg
 
 -- | Parses a given SMT bitvector value into a numerical value.
 getBVValue' :: (Num a,Bits a,Read a,Integral i) => i -- ^ The number of bits of the value.
@@ -574,15 +570,15 @@ instance SMTType a => SMTType (Maybe a) where
       undef _ = undefined
 
 instance SMTValue a => SMTValue (Maybe a) where
-  unmangle (L.Symbol "Nothing") _ = return $ Just Nothing
+  unmangle (L.Symbol "Nothing") _ = Just Nothing
   unmangle (L.List [L.Symbol "as"
                    ,L.Symbol "Nothing"
-                   ,_]) _ = return $ Just Nothing
+                   ,_]) _ = Just Nothing
   unmangle (L.List [L.Symbol "Just"
                    ,res]) ann = do
     r <- unmangle res ann
-    return (fmap Just r)
-  unmangle _ _ = return Nothing
+    return (Just r)
+  unmangle _ _ = Nothing
   mangle u@Nothing ann = L.List [L.Symbol "as"
                                 ,L.Symbol "Nothing"
                                 ,getSort u ann]
@@ -600,15 +596,12 @@ instance (Typeable a,SMTType a) => SMTType [a] where
   getSortBase _ = L.Symbol "List"
 
 instance (Typeable a,SMTValue a) => SMTValue [a] where
-  unmangle (L.Symbol "nil") _ = return $ Just []
+  unmangle (L.Symbol "nil") _ = Just []
   unmangle (L.List [L.Symbol "insert",h,t]) ann = do
     h' <- unmangle h ann
     t' <- unmangle t ann
-    return (do
-               hh <- h'
-               tt <- t'
-               return $ hh:tt)
-  unmangle _ _ = return Nothing
+    return (h':t')
+  unmangle _ _ = Nothing
   mangle [] _ = L.Symbol "nil"
   mangle (x:xs) ann = L.List [L.Symbol "insert"
                              ,mangle x ann
@@ -626,7 +619,7 @@ instance SMTType BS.ByteString where
     declareType _ _ = return ()
 
 instance SMTValue BS.ByteString where
-    unmangle v (ByteStringLen l) = return $ fmap int2bs (getBVValue' (l*8) v)
+    unmangle v (ByteStringLen l) = fmap int2bs (getBVValue' (l*8) v)
         where
           int2bs :: Integer -> BS.ByteString
           int2bs cv = BS.pack $ fmap (\i -> fromInteger $ cv `shiftR` i) (reverse [0..(l-1)])
@@ -653,7 +646,7 @@ instance SMTType BitVector where
   declareType _ _ = return ()
 
 instance SMTValue BitVector where
-  unmangle v l = return $ fmap BitVector $ getBVValue' l v
+  unmangle v l = fmap BitVector $ getBVValue' l v
   mangle (BitVector v) l = putBVValue' l v
 
 instance Concatable BitVector BitVector where

@@ -321,29 +321,32 @@ generateUnmangleFun dec
           NewtypeD _ _ _ c _ -> [c]
         cl = fmap genClause cons
         asClause = clause [conP 'L.List [ listP [ [p| L.Symbol "as" |],varP p,wildP] ],varP ann] (normalB $ [| unmangle |] `appE` (varE p) `appE` (varE ann)) []
-    funD 'unmangle (cl++[asClause,clause [wildP,wildP] (normalB [| return Nothing |]) []])
+    funD 'unmangle (cl++[asClause,clause [wildP,wildP] (normalB [| Nothing |]) []])
 
 genClause :: Con -> Q Clause
-genClause (NormalC cname []) = clause [conP 'L.Symbol [litP $ stringL $ nameBase cname],wildP] (normalB $ [| return |] `appE` ([| Just |] `appE` (conE cname))) []
+genClause (NormalC cname []) 
+  = clause [conP 'L.Symbol [litP $ stringL $ nameBase cname],wildP] (normalB $ [| Just |] `appE` (conE cname)) []
 genClause (RecC cname fields) = do
   vars <- mapM (const $ do
                    v1 <- newName "f"
                    v2 <- newName "r"
-                   v3 <- newName "q"
-                   return (v1,v2,v3)) fields
-  let genRet e [] = appsE [[| return |],appsE [[| Just |],e]]
+                   return (v1,v2)) fields
+  let genRet e = doE $ [ bindS (varP r) (appsE [ [| unmangle |],varE v,tupE [] ])
+                       | (v,r) <- vars ] ++
+                 [ noBindS $ appsE [[| return |],e ] ]
+  {- let genRet e [] = appsE [[| return |],appsE [[| Just |],e]]
       genRet e ((v,r,q):vs) = doE [ bindS (varP r) (appsE [ [| unmangle |],varE v,tupE [] ]) 
                                   , noBindS $ caseE (varE r)
                                               [ match (conP 'Just [varP q]) (normalB (genRet e vs)) []
                                               , match (conP 'Nothing []) (normalB [| return Nothing |]) []
                                               ]
-                                  ]
+                                  ] -}
   clause [(if Prelude.null fields
            then conP 'L.Symbol [litP $ stringL $ nameBase cname]
            else conP 'L.List [listP $ [conP 'L.Symbol [litP $ stringL $ nameBase cname]]++
-                                      (fmap (\(v,_,_) -> varP v) vars)])
+                                      (fmap (\(v,_) -> varP v) vars)])
          ,wildP]
-    (normalB $ genRet (appsE $ (conE cname):(fmap (\(_,_,q) -> varE q) vars)) vars) []
+    (normalB $ genRet (appsE $ (conE cname):(fmap (\(_,q) -> varE q) vars))) []
 
 constructorType :: Type -> TypeQ
 constructorType (AppT _ tp) = constructorType tp
