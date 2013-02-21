@@ -141,93 +141,134 @@ data SMTExpr t where
   deriving Typeable
 
 instance Eq a => Eq (SMTExpr a) where
-    (==) (Var v1 _) (Var v2 _) = v1 == v2
-    (==) (Const v1 _) (Const v2 _) = v1 == v2
-    (==) (Eq l1 r1) (Eq l2 r2) = case gcast l2 of
-      Nothing -> False
-      Just l2' -> case gcast r2 of
-        Nothing -> False
-        Just r2' -> l1 == l2' && r1 == r2'
-    (==) (Ge l1 r1) (Ge l2 r2) = (eqExpr l1 l2) && (eqExpr r1 r2)
-    (==) (Gt l1 r1) (Gt l2 r2) = (eqExpr l1 l2) && (eqExpr r1 r2)
-    (==) (Le l1 r1) (Le l2 r2) = (eqExpr l1 l2) && (eqExpr r1 r2)
-    (==) (Lt l1 r1) (Lt l2 r2) = (eqExpr l1 l2) && (eqExpr r1 r2)
-    (==) (Distinct x1) (Distinct x2) = eqExprs x1 x2
-    (==) (Plus x1) (Plus x2) = eqExprs x1 x2
-    (==) (Minus l1 r1) (Minus l2 r2) = (eqExpr l1 l2) && (eqExpr r1 r2)
-    (==) (Mult x1) (Mult x2) = eqExprs x1 x2
-    (==) (Div l1 r1) (Div l2 r2) = l1 == l2 && r1 == r2
-    (==) (Mod l1 r1) (Mod l2 r2) = l1 == l2 && r1 == r2
-    (==) (Rem l1 r1) (Rem l2 r2) = l1 == l2 && r1 == r2
-    (==) (Divide l1 r1) (Divide l2 r2) = l1 == l2 && r1 == r2
-    (==) (Neg x) (Neg y) = x == y
-    (==) (Abs x) (Abs y) = x == y
-    (==) (ToReal x) (ToReal y) = x == y
-    (==) (ToInt x) (ToInt y) = x == y
-    (==) (ITE c1 l1 r1) (ITE c2 l2 r2) = c1 == c2 && eqExpr l1 l2 && eqExpr r1 r2
-    (==) (And x) (And y) = x == y
-    (==) (Or x) (Or y) = x == y
-    (==) (XOr l1 r1) (XOr l2 r2) = l1 == l2 && r1 == r2
-    (==) (Implies l1 r1) (Implies l2 r2) = l1 == l2 && r1 == r2
-    (==) (Not x) (Not y) = x==y
-    (==) (Select a1 i1) (Select a2 i2) = eqExpr a1 a2 && (case cast i2 of
-                                                            Nothing -> False
-                                                            Just i2' -> i1 == i2')
-    (==) (Store a1 i1 v1) (Store a2 i2 v2) = a1==a2 && i1 == i2 && v1 == v2
-    (==) (AsArray f1) (AsArray f2) = eqExpr f1 f2
-    (==) (ConstArray c1 _) (ConstArray c2 _) = eqExpr c1 c2
-    (==) (BVAdd l1 r1) (BVAdd l2 r2) = l1 == l2 && r1 == r2
-    (==) (BVSub l1 r1) (BVSub l2 r2) = l1 == l2 && r1 == r2
-    (==) (BVMul l1 r1) (BVMul l2 r2) = l1 == l2 && r1 == r2
-    (==) (BVURem l1 r1) (BVURem l2 r2) = l1 == l2 && r1 == r2
-    (==) (BVSRem l1 r1) (BVSRem l2 r2) = l1 == l2 && r1 == r2
-    (==) (BVUDiv l1 r1) (BVUDiv l2 r2) = l1 == l2 && r1 == r2
-    (==) (BVSDiv l1 r1) (BVSDiv l2 r2) = l1 == l2 && r1 == r2
-    (==) (BVULE l1 r1) (BVULE l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
-    (==) (BVULT l1 r1) (BVULT l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
-    (==) (BVUGE l1 r1) (BVUGE l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
-    (==) (BVUGT l1 r1) (BVUGT l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
-    (==) (BVSLE l1 r1) (BVSLE l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
-    (==) (BVSLT l1 r1) (BVSLT l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
-    (==) (BVSGE l1 r1) (BVSGE l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
-    (==) (BVSGT l1 r1) (BVSGT l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
-    (==) (BVSHL l1 r1) (BVSHL l2 r2) = l1 == l2 && r1 == r2
-    (==) (BVExtract l1 u1 _ e1) (BVExtract l2 u2 _ e2) = l1 == l2 && u1 == u2 && eqExpr e1 e2
-    (==) (BVConcat l1 r1) (BVConcat l2 r2) = eqExpr l1 l2 && eqExpr r1 r2
-    (==) (BVConcats x) (BVConcats y) = eqExprs x y
-    (==) (BVXor l1 r1) (BVXor l2 r2) = l1 == l2 && r1 == r2
-    (==) (BVAnd l1 r1) (BVAnd l2 r2) = l1 == l2 && r1 == r2
-    (==) (BVOr l1 r1) (BVOr l2 r2) = l1 == l2 && r1 == r2
-    (==) (BVNot x) (BVNot y) = x == y
-    (==) (ConTest c1 e1) (ConTest c2 e2) = eqExpr c1 c2 && eqExpr e1 e2
-    (==) (FieldSel (Field f1) e1) (FieldSel (Field f2) e2) = f1 == f2 && eqExpr e1 e2
-    (==) (Head x) (Head y) = x == y
-    (==) (Tail x) (Tail y) = x == y
-    -- This doesn't work for unknown reasons
-    --(==) (Insert x xs) (Insert y ys) = x == y && xs == ys
-    (==) (Named e1 n1) (Named e2 n2) = e1==e2 && n1==n2
-    (==) (InternalFun arg1) (InternalFun arg2) = arg1 == arg2
-    (==) Undefined Undefined = True
-    (==) (App f1 arg1) (App f2 arg2) = case gcast f2 of
+  (==) = eqExpr 0
+
+eqExpr :: Integer -> SMTExpr a -> SMTExpr a -> Bool
+eqExpr n lhs rhs = case (lhs,rhs) of
+  (Var v1 _,Var v2 _) -> v1 == v2
+  (Const v1 _,Const v2 _) -> v1 == v2
+  (Eq l1 r1,Eq l2 r2) -> eqExpr' n l1 l2 &&
+                         eqExpr' n r1 r2
+  (Ge l1 r1,Ge l2 r2) -> eqExpr' n l1 l2 &&
+                         eqExpr' n r1 r2
+  (Gt l1 r1,Gt l2 r2) -> eqExpr' n l1 l2 &&
+                         eqExpr' n r1 r2
+  (Le l1 r1,Le l2 r2) -> eqExpr' n l1 l2 &&
+                         eqExpr' n r1 r2
+  (Lt l1 r1,Lt l2 r2) -> eqExpr' n l1 l2 &&
+                         eqExpr' n r1 r2
+  (Distinct x1,Distinct x2) -> eqExprs' n x1 x2
+  (Plus x1,Plus x2) -> eqExprs n x1 x2
+  (Minus l1 r1,Minus l2 r2) -> eqExpr' n l1 l2 && 
+                               eqExpr' n r1 r2
+  (Mult x1,Mult x2) -> eqExprs n x1 x2
+  (Div l1 r1,Div l2 r2) -> eqExpr n l1 l2 && 
+                           eqExpr n r1 r2
+  (Mod l1 r1,Mod l2 r2) -> eqExpr n l1 l2 && 
+                           eqExpr n r1 r2
+  (Rem l1 r1,Rem l2 r2) -> eqExpr n l1 l2 &&
+                           eqExpr n r1 r2
+  (Divide l1 r1,Divide l2 r2) -> eqExpr n l1 l2 &&
+                                 eqExpr n r1 r2
+  (Neg x,Neg y) -> eqExpr n x y
+  (Abs x,Abs y) -> eqExpr n x y
+  (ToReal x,ToReal y) -> eqExpr n x y
+  (ToInt x,ToInt y) -> eqExpr n x y
+  (ITE c1 l1 r1,ITE c2 l2 r2) -> eqExpr n c1 c2 &&
+                                 eqExpr' n l1 l2 && 
+                                 eqExpr' n r1 r2
+  (And x,And y) -> eqExprs n x y
+  (Or x,Or y) -> eqExprs n x y
+  (XOr l1 r1,XOr l2 r2) -> eqExpr n l1 l2 &&
+                           eqExpr n r1 r2
+  (Implies l1 r1,Implies l2 r2) -> eqExpr n l1 l2 &&
+                                   eqExpr n r1 r2
+  (Not x,Not y) -> eqExpr n x y
+  (Select a1 i1,Select a2 i2) -> eqExpr' n a1 a2 && 
+                                 (case cast i2 of
+                                     Nothing -> False
+                                     Just i2' -> i1 == i2')
+  (Store a1 i1 v1,Store a2 i2 v2) -> eqExpr n a1 a2 &&
+                                     i1 == i2 &&
+                                     eqExpr n v1 v2
+  (AsArray f1,AsArray f2) -> eqExpr' n f1 f2
+  (ConstArray c1 _,ConstArray c2 _) -> eqExpr' n c1 c2
+  (BVAdd l1 r1,BVAdd l2 r2) -> eqExpr n l1 l2 &&
+                               eqExpr n r1 r2
+  (BVSub l1 r1,BVSub l2 r2) -> eqExpr n l1 r2 &&
+                               eqExpr n r1 r2
+  (BVMul l1 r1,BVMul l2 r2) -> eqExpr n l1 l2 && 
+                               eqExpr n r1 r2
+  (BVURem l1 r1,BVURem l2 r2) -> eqExpr n l1 l2 &&
+                                 eqExpr n r1 r2
+  (BVSRem l1 r1,BVSRem l2 r2) -> eqExpr n l1 l2 &&
+                                 eqExpr n r1 r2
+  (BVUDiv l1 r1,BVUDiv l2 r2) -> eqExpr n l1 l2 &&
+                                 eqExpr n r1 r2
+  (BVSDiv l1 r1,BVSDiv l2 r2) -> eqExpr n l1 l2 &&
+                                 eqExpr n r1 r2
+  (BVULE l1 r1,BVULE l2 r2) -> eqExpr' n l1 l2 && eqExpr' n r1 r2
+  (BVULT l1 r1,BVULT l2 r2) -> eqExpr' n l1 l2 && eqExpr' n r1 r2
+  (BVUGE l1 r1,BVUGE l2 r2) -> eqExpr' n l1 l2 && eqExpr' n r1 r2
+  (BVUGT l1 r1,BVUGT l2 r2) -> eqExpr' n l1 l2 && eqExpr' n r1 r2
+  (BVSLE l1 r1,BVSLE l2 r2) -> eqExpr' n l1 l2 && eqExpr' n r1 r2
+  (BVSLT l1 r1,BVSLT l2 r2) -> eqExpr' n l1 l2 && eqExpr' n r1 r2
+  (BVSGE l1 r1,BVSGE l2 r2) -> eqExpr' n l1 l2 && eqExpr' n r1 r2
+  (BVSGT l1 r1,BVSGT l2 r2) -> eqExpr' n l1 l2 && eqExpr' n r1 r2
+  (BVSHL l1 r1,BVSHL l2 r2) -> eqExpr' n l1 l2 && eqExpr n r1 r2
+  (BVExtract l1 u1 _ e1,BVExtract l2 u2 _ e2) -> l1 == l2 && u1 == u2 && eqExpr' n e1 e2
+  (BVConcat l1 r1,BVConcat l2 r2) -> eqExpr' n l1 l2 && eqExpr' n r1 r2
+  (BVConcats x,BVConcats y) -> eqExprs' n x y
+  (BVXor l1 r1,BVXor l2 r2) -> eqExpr n l1 l2 && eqExpr n r1 r2
+  (BVAnd l1 r1,BVAnd l2 r2) -> eqExpr n l1 l2 && eqExpr n r1 r2
+  (BVOr l1 r1,BVOr l2 r2) -> eqExpr n l1 l2 && eqExpr n r1 r2
+  (BVNot x,BVNot y) -> eqExpr n x y
+  (Forall a1 f1,Forall a2 f2) -> let name i = T.pack $ "internal_eq_check"++show i
+                                     (n',v) = foldExprs (\i _ ann -> (i+1,Var (name i) ann)) n undefined a1
+                                 in case cast f2 of
+                                   Nothing -> False
+                                   Just f2' -> eqExpr n' (f1 v) (f2' v)
+  (Exists a1 f1,Exists a2 f2) -> let name i = T.pack $ "internal_eq_check"++show i
+                                     (n',v) = foldExprs (\i _ ann -> (i+1,Var (name i) ann)) n undefined a1
+                                 in case cast f2 of
+                                   Nothing -> False
+                                   Just f2' -> eqExpr n' (f1 v) (f2' v)
+  (ConTest c1 e1,ConTest c2 e2) -> case gcast c2 of
+    Nothing -> False
+    Just c2' -> c1 == c2' && eqExpr' n e1 e2
+  (FieldSel (Field f1) e1,FieldSel (Field f2) e2) -> f1 == f2 && eqExpr' n e1 e2
+  (Head x,Head y) -> eqExpr n x y
+  (Tail x,Tail y) -> eqExpr n x y
+  -- This doesn't work for unknown reasons
+  --(Insert x xs,Insert y ys) = eqExpr n x y && eqExpr n xs ys
+  (Named e1 n1,Named e2 n2) -> eqExpr n e1 e2 && n1==n2
+  (InternalFun arg1,InternalFun arg2) -> arg1 == arg2
+  (Undefined,Undefined) -> True
+  (App f1 arg1,App f2 arg2) -> case gcast f2 of
       Nothing -> False
       Just f2' -> case cast arg2 of
         Nothing -> False
-        Just arg2' -> f1 == f2' && arg1 == arg2'
-    (==) (Fun name1 _ _) (Fun name2 _ _) = name1 == name2
-    (==) (Map f1 _) (Map f2 _) = case gcast f2 of
+        Just arg2' -> eqExpr n f1 f2' && arg1 == arg2'
+  (Fun name1 _ _,Fun name2 _ _) -> name1 == name2
+  (Map f1 _,Map f2 _) -> case gcast f2 of
       Nothing -> False
-      Just f2' -> f1 == f2'
-    (==) _ _ = False
-  
-eqExprs :: (Eq a,Typeable a,Typeable b) => [SMTExpr a] -> [SMTExpr b] -> Bool
-eqExprs (x:xs) (y:ys) = eqExpr x y && eqExprs xs ys
-eqExprs [] [] = True
-eqExprs _ _ = False
+      Just f2' -> eqExpr n f1 f2'
+  _ -> False
+  where
+    eqExpr' :: (Typeable a,Typeable b) => Integer -> SMTExpr a -> SMTExpr b -> Bool
+    eqExpr' n lhs rhs = case gcast rhs of
+      Nothing -> False
+      Just rhs' -> eqExpr n lhs rhs'
 
-eqExpr :: (Eq (c a),Typeable a,Typeable b) => c a -> c b -> Bool
-eqExpr lhs rhs = case gcast rhs of
-                   Nothing -> False
-                   Just rhs' -> lhs == rhs'
+    eqExprs' :: (Eq a,Typeable a,Typeable b) => Integer -> [SMTExpr a] -> [SMTExpr b] -> Bool
+    eqExprs' n xs ys = case cast ys of
+      Nothing -> False
+      Just ys' -> eqExprs n xs ys'
+
+    eqExprs :: (Eq a) => Integer -> [SMTExpr a] -> [SMTExpr a] -> Bool
+    eqExprs n (x:xs) (y:ys) = eqExpr n x y && eqExprs n xs ys
+    eqExprs _ [] [] = True
+    eqExprs _ _ _ = False
 
 -- | Represents a constructor of a datatype /a/
 --   Can be obtained by using the template haskell extension module
