@@ -3,7 +3,6 @@
 module Language.SMTLib2.Internals.Interface where
 
 import Language.SMTLib2.Internals
-import Language.SMTLib2.Internals.SMTMonad
 import Language.SMTLib2.Internals.Instances ()
 import Language.SMTLib2.Internals.Translation
 
@@ -468,22 +467,22 @@ named' = named "named"
 --   Note that not all SMT solvers support this.
 getInterpolants :: [SMTExpr Bool] -> SMT [SMTExpr Bool]
 getInterpolants exprs = do
-  (_,_,mp) <- getSMT
+  (_,tps,mp) <- getSMT
   putRequest (L.List (L.Symbol "get-interpolants":fmap (\e -> let (r,_) = exprToLisp e 0 in r) exprs))
   L.List res <- parseResponse
-  return $ fmap (lispToExprT () (\name -> mp Map.! name)) res
+  return $ fmap (lispToExprT tps () (\name -> mp Map.! name)) res
   
 -- | After an unsuccessful 'checkSat' this method extracts a proof from the SMT solver that the instance is unsatisfiable.
 getProof :: SMT (SMTExpr Bool)
 getProof = do
-  (_,_,mp) <- getSMT
+  (_,tps,mp) <- getSMT
   let mp' = Map.union mp commonTheorems
   putRequest (L.List [L.Symbol "get-proof"])
   res <- parseResponse
-  return $ lispToExprT () (\name -> case Map.lookup name mp' of
-                              Nothing -> error $ "Failed to find a definition for "++show name
-                              Just n -> n
-                          ) res
+  return $ lispToExprT tps () (\name -> case Map.lookup name mp' of
+                                  Nothing -> error $ "Failed to find a definition for "++show name
+                                  Just n -> n
+                              ) res
 
 -- | After an unsuccessful 'checkSat', return a list of names of named
 --   expression which make the instance unsatisfiable.

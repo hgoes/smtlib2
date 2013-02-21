@@ -23,7 +23,7 @@ import Data.Traversable
 instance SMTType Bool where
   type SMTAnnotation Bool = ()
   getSortBase _ = L.Symbol "Bool"
-  declareType _ _ = return ()
+  declareType = defaultDeclareValue
 
 instance SMTValue Bool where
   unmangle (L.Symbol "true") _ = Just True
@@ -37,7 +37,7 @@ instance SMTValue Bool where
 instance SMTType Integer where
   type SMTAnnotation Integer = ()
   getSortBase _ = L.Symbol "Int"
-  declareType _ _ = return ()
+  declareType = defaultDeclareValue
 
 instance SMTValue Integer where
   unmangle (L.Number (L.I v)) _ = Just v
@@ -89,7 +89,7 @@ instance Enum (SMTExpr Integer) where
 instance SMTType (Ratio Integer) where
   type SMTAnnotation (Ratio Integer) = ()
   getSortBase _ = L.Symbol "Real"
-  declareType _ _ = return ()
+  declareType = defaultDeclareValue
 
 instance SMTValue (Ratio Integer) where
   unmangle (L.Number (L.I v)) _ = Just $ fromInteger v
@@ -143,6 +143,7 @@ instance (Args idx,SMTType val) => SMTType (SMTArray idx val) where
   declareType u (anni,annv) = do
       declareArgTypes (getIdx u) anni
       declareType (getVal u) annv
+      defaultDeclareType u (anni,annv)
     where
       getIdx :: SMTArray i v -> i
       getIdx _ = undefined
@@ -173,12 +174,12 @@ bv n = L.List [L.Symbol "_"
 instance SMTType Word8 where
   type SMTAnnotation Word8 = ()
   getSortBase _ = bv (8::Integer)
-  declareType _ _ = return ()
+  declareType = defaultDeclareValue
 
 instance SMTType Int8 where
   type SMTAnnotation Int8 = ()
   getSortBase _ = bv (8::Integer)
-  declareType _ _ = return ()
+  declareType = defaultDeclareValue
 
 -- | Helper function which applies a given function to the 'undefined' value.
 withUndef1 :: (a -> g a) -> g a
@@ -265,12 +266,12 @@ instance SMTOrd Int8 where
 instance SMTType Word16 where
   type SMTAnnotation Word16 = ()
   getSortBase _ = bv (16::Integer)
-  declareType _ _ = return ()
+  declareType = defaultDeclareValue
 
 instance SMTType Int16 where
   type SMTAnnotation Int16 = ()
   getSortBase _ = bv (16::Integer)
-  declareType _ _ = return ()
+  declareType = defaultDeclareValue
 
 instance SMTValue Word16 where
   unmangle = getBVValue
@@ -298,12 +299,12 @@ instance SMTOrd Int16 where
 instance SMTType Word32 where
   type SMTAnnotation Word32 = ()
   getSortBase _ = bv (32::Integer)
-  declareType _ _ = return ()
+  declareType = defaultDeclareValue
 
 instance SMTType Int32 where
   type SMTAnnotation Int32 = ()
   getSortBase _ = bv (32::Integer)
-  declareType _ _ = return ()
+  declareType = defaultDeclareValue
 
 instance SMTValue Word32 where
   unmangle = getBVValue
@@ -331,12 +332,12 @@ instance SMTOrd Int32 where
 instance SMTType Word64 where
   type SMTAnnotation Word64 = ()
   getSortBase _ = bv (64::Integer)
-  declareType _ _ = return ()
+  declareType = defaultDeclareValue
   
 instance SMTType Int64 where
   type SMTAnnotation Int64 = ()
   getSortBase _ = bv (64::Integer)
-  declareType _ _ = return ()
+  declareType = defaultDeclareValue
 
 instance SMTValue Word64 where
   unmangle = getBVValue
@@ -563,7 +564,7 @@ instance SMTType a => SMTType (Maybe a) where
   getSortBase _ = L.Symbol "Maybe"
   declareType u ann = do
     declareType (undef u) ann
-    declareType' (typeOf u)
+    declareType' (DeclaredType u ann)
       (declareDatatypes ["a"] [("Maybe",[("Nothing",[]),("Just",[("fromJust",L.Symbol "a")])])])
     where
       undef :: Maybe a -> a
@@ -592,7 +593,9 @@ undefArg _ = undefined
 instance (Typeable a,SMTType a) => SMTType [a] where
   type SMTAnnotation [a] = SMTAnnotation a
   getSort u ann = L.List [L.Symbol "List",getSort (undefArg u) ann]
-  declareType u ann = declareType (undefArg u) ann
+  declareType u ann = do
+    declareType (undefArg u) ann
+    defaultDeclareType u ann
   getSortBase _ = L.Symbol "List"
 
 instance (Typeable a,SMTValue a) => SMTValue [a] where
@@ -616,7 +619,7 @@ instance SMTType BS.ByteString where
     type SMTAnnotation BS.ByteString = ByteStringLen
     getSort _ (ByteStringLen l) = bv (l*8)
     getSortBase _ = error "smtlib2: No getSortBase implementation for ByteString"
-    declareType _ _ = return ()
+    declareType = defaultDeclareValue
 
 instance SMTValue BS.ByteString where
     unmangle v (ByteStringLen l) = fmap int2bs (getBVValue' (l*8) v)
@@ -643,7 +646,7 @@ instance SMTType BitVector where
   type SMTAnnotation BitVector = Integer
   getSort _ l = bv l
   getSortBase _ = error "smtlib2: No getSortBase implementation for BitVector"
-  declareType _ _ = return ()
+  declareType = defaultDeclareValue
 
 instance SMTValue BitVector where
   unmangle v l = fmap BitVector $ getBVValue' l v

@@ -16,7 +16,17 @@ import Data.Map as Map hiding (assocs)
 import Data.Set as Set
 import Data.List as List (mapAccumL)
 
-import Language.SMTLib2.Internals.SMTMonad
+-- Monad stuff
+import Control.Applicative (Applicative(..))
+import Control.Monad.State.Lazy as Lazy (StateT)
+import Control.Monad.Cont (ContT)
+import Control.Monad.Error (ErrorT, Error)
+import Control.Monad.Trans.Identity (IdentityT)
+import Control.Monad.List (ListT)
+import Control.Monad.Trans.Maybe (MaybeT)
+import Control.Monad.State.Strict as Strict (StateT)
+import Control.Monad.Writer.Lazy as Lazy (WriterT)
+import Control.Monad.Writer.Strict as Strict (WriterT)
 
 -- | Haskell types which can be represented in SMT
 class (Eq t,Typeable t,Typeable (SMTAnnotation t)) => SMTType t where
@@ -65,6 +75,78 @@ class (SMTType a,SMTType b,SMTType (ConcatResult a b)) => Concatable a b where
 
 class Extractable a b where
     extract' :: a -> b -> Integer -> Integer -> SMTAnnotation a -> SMTAnnotation b
+
+type SMTRead = (Handle, Handle)
+type SMTState = (Map String Integer,Map TyCon DeclaredType,Map T.Text TypeRep)
+
+-- | The SMT monad used for communating with the SMT solver
+newtype SMT a = SMT { runSMT :: ReaderT SMTRead (Lazy.StateT SMTState IO) a }
+
+instance Functor SMT where
+  fmap f = SMT . fmap f . runSMT
+
+instance Monad SMT where
+  return = SMT . return
+  m >>= f = SMT $ (runSMT m) >>= runSMT . f
+
+instance MonadIO SMT where
+  liftIO = SMT . liftIO
+
+instance MonadFix SMT where
+  mfix f = SMT $ mfix (runSMT . f)
+
+instance Applicative SMT where
+  pure = return
+  (<*>) = ap
+
+askSMT :: SMT SMTRead
+askSMT = SMT ask
+
+getSMT :: SMT SMTState
+getSMT = SMT get
+
+putSMT :: SMTState -> SMT ()
+putSMT = SMT . put
+
+modifySMT :: (SMTState -> SMTState) -> SMT ()
+modifySMT f = SMT $ modify f
+
+-- | Lift an SMT action into an arbitrary monad (like liftIO).
+class Monad m => MonadSMT m where
+  liftSMT :: SMT a -> m a
+
+instance MonadSMT SMT where
+  liftSMT = id
+
+instance MonadSMT m => MonadSMT (ContT r m) where
+  liftSMT = lift . liftSMT
+
+instance (Error e, MonadSMT m) => MonadSMT (ErrorT e m) where
+  liftSMT = lift . liftSMT
+
+instance MonadSMT m => MonadSMT (IdentityT m) where
+  liftSMT = lift . liftSMT
+
+instance MonadSMT m => MonadSMT (ListT m) where
+  liftSMT = lift . liftSMT
+
+instance MonadSMT m => MonadSMT (MaybeT m) where
+  liftSMT = lift . liftSMT
+
+instance MonadSMT m => MonadSMT (ReaderT r m) where
+  liftSMT = lift . liftSMT
+
+instance MonadSMT m => MonadSMT (Lazy.StateT s m) where
+  liftSMT = lift . liftSMT
+
+instance MonadSMT m => MonadSMT (Strict.StateT s m) where
+  liftSMT = lift . liftSMT
+
+instance (Monoid w, MonadSMT m) => MonadSMT (Lazy.WriterT w m) where
+  liftSMT = lift . liftSMT
+
+instance (Monoid w, MonadSMT m) => MonadSMT (Strict.WriterT w m) where
+  liftSMT = lift . liftSMT
 
 -- | An abstract SMT expression
 data SMTExpr t where
@@ -325,6 +407,21 @@ class (Args (MapArgument a i),Args i,Args a) => Mapable a i where
   type MapArgument a i
   getMapArgumentAnn :: a -> i -> ArgAnnotation a -> ArgAnnotation i -> ArgAnnotation (MapArgument a i)
 
+data DeclaredType where
+  DeclaredType :: SMTType a => a -> SMTAnnotation a -> DeclaredType
+  DeclaredValueType :: SMTValue a => a -> SMTAnnotation a -> DeclaredType
+
+withDeclaredType :: (forall a. SMTType a => a -> SMTAnnotation a -> b) -> DeclaredType -> b
+withDeclaredType f (DeclaredType u ann) = f u ann
+withDeclaredType f (DeclaredValueType u ann) = f u ann
+
+withDeclaredValueType :: (forall a. SMTValue a => a -> SMTAnnotation a -> b) -> DeclaredType -> Maybe b
+withDeclaredValueType f (DeclaredValueType u ann) = Just $ f u ann
+withDeclaredValueType _ _ = Nothing
+
+declaredTypeCon :: DeclaredType -> TyCon
+declaredTypeCon = withDeclaredType (\u _ -> fst $ splitTyConApp $ typeOf u)
+
 argSorts :: Args a => a -> ArgAnnotation a -> [L.Lisp]
 argSorts arg ann = Prelude.reverse res
     where
@@ -342,16 +439,21 @@ declareArgTypes :: Args a => a -> ArgAnnotation a -> SMT ()
 declareArgTypes arg ann
   = fst $ foldExprs (\act e ann' -> (act >> declareType (getUndef e) ann',e)) (return ()) arg ann
 
-declareType' :: Typeable a => a -> SMT () -> SMT ()
-declareType' u act = do
-  let rep = typeOf u
-      (con,_) = splitTyConApp rep
+declareType' :: DeclaredType -> SMT () -> SMT ()
+declareType' decl act = do
+  let con = declaredTypeCon decl
   (c,decls,mp) <- getSMT
-  if Set.member con decls
+  if Map.member con decls
     then return ()
     else (do
-             putSMT (c,Set.insert con decls,mp)
-             act)      
+             putSMT (c,Map.insert con decl decls,mp)
+             act)
+
+defaultDeclareValue :: SMTValue a => a -> SMTAnnotation a -> SMT ()
+defaultDeclareValue u ann = declareType' (DeclaredValueType u ann) (return ())
+
+defaultDeclareType :: SMTType a => a -> SMTAnnotation a -> SMT ()
+defaultDeclareType u ann = declareType' (DeclaredType u ann) (return ())
 
 createArgs :: Args a => ArgAnnotation a -> Integer -> (a,[(Text,L.Lisp)],Integer)
 createArgs ann i = let ((tps,ni),res) = foldExprs (\(tps',ci) e ann' -> let name = T.pack $ "arg_"++show ci
@@ -464,7 +566,7 @@ withSMTSolver solver f = do
                                  res <- f
                                  putRequest (L.List [L.Symbol "exit"])
                                  return res
-                                ) (hin,hout)) (Map.empty,Set.empty,Map.empty)
+                                ) (hin,hout)) (Map.empty,Map.empty,Map.empty)
   hClose hin
   hClose hout
   terminateProcess handle

@@ -84,7 +84,6 @@ module Language.SMTLib2
        where
 
 import Language.SMTLib2.Internals
-import Language.SMTLib2.Internals.SMTMonad
 import Language.SMTLib2.Internals.Instances
 import Language.SMTLib2.Internals.Translation
 import Language.SMTLib2.Internals.Interface

@@ -8,7 +8,7 @@ module Language.SMTLib2.Connection
        ,performSMT
        ) where
 
-import Language.SMTLib2.Internals.SMTMonad
+import Language.SMTLib2.Internals
 import System.IO
 import System.Process
 import Control.Concurrent.MVar
@@ -40,7 +40,7 @@ open solver = do
                           , create_group = False
                           }
   (Just hin,Just hout,_,hand) <- createProcess cmd
-  st <- newMVar (Map.empty,Set.empty,Map.empty)
+  st <- newMVar (Map.empty,Map.empty,Map.empty)
   return (SMTConnection { input = hin
                         , output = hout
                         , handle = hand

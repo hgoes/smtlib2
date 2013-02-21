@@ -9,7 +9,6 @@ module Language.SMTLib2.TH
        where
 
 import Language.SMTLib2.Internals
-import Language.SMTLib2.Internals.SMTMonad
 import Language.SMTLib2.Internals.Interface
 import Language.Haskell.TH
 import qualified Data.AttoLisp as L
@@ -211,7 +210,7 @@ generateDeclareType decl decls = do
       decls <- newName "decls"
       mp <- newName "mp"
       con <- newName "con"
-      appE (appE [| declareType' |] pat)
+      appE (appE [| declareType' |] (appsE [[| DeclaredType |],pat,varE ann]))
            (doE $ [ noBindS $ [| declareType |] `appE` e `appE` [| () |] | (e,tp) <- allFields pat decl 
                                                                         , case getTyCon tp of
                                                                             Nothing -> True

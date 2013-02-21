@@ -15,7 +15,6 @@ Library
     Language.SMTLib2.TH
     Language.SMTLib2.Connection
     Language.SMTLib2.Internals
-    Language.SMTLib2.Internals.SMTMonad
     Language.SMTLib2.Internals.Instances
     Language.SMTLib2.Internals.Translation
     Language.SMTLib2.Internals.Interface
