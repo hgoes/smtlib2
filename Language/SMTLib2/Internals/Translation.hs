@@ -420,9 +420,30 @@ lispToExprU f tps g l
         L.List [L.Symbol "bvsgt",lhs,rhs] -> Just $ f $ binBV BVSGT tps g lhs rhs
         L.List [L.Symbol "forall",L.List args,body] -> Just $ f $ quantToExpr Forall tps g args body
         L.List [L.Symbol "exists",L.List args,body] -> Just $ f $ quantToExpr Exists tps g args body
+        L.List [L.Symbol "let",L.List args,body] -> letToExpr f tps g args body
         L.List (L.Symbol fn:arg) -> Just $ fnToExpr f tps g fn arg
         _ -> Nothing
     ]
+  where
+    letToExpr :: (forall a. (SMTValue a,Typeable a) => SMTExpr a -> b)
+                 -> Map.Map TyCon DeclaredType
+                 -> (T.Text -> TypeRep)
+                 -> [L.Lisp] -> L.Lisp -> Maybe b
+    letToExpr f tps' g' (L.List [L.Symbol name,expr]:rest) arg
+      = case lispToExprU 
+             (\expr' -> letToExpr
+                        (\body -> f $ Let (extractAnnotation expr') expr' 
+                                  (\sym -> replaceName (\n -> if n==name
+                                                              then gcast sym
+                                                              else Nothing) body)
+                        ) tps' (\txt -> if txt==name
+                                        then typeOf $ getUndef expr'
+                                        else g' txt) rest arg
+             ) tps' g' expr of
+          Just r -> r
+          Nothing -> Nothing
+    letToExpr f tps' g' [] arg = lispToExprU f tps' g' arg
+    letToExpr _ _ _ (x:_) _ = error $ "Unparseable entry "++show x++" in let expression"
 
 asBV :: Typeable a => (forall b. (SMTBV b,Typeable b) => SMTExpr b -> c) -> SMTExpr a -> c
 asBV f e = case (gcast e :: Maybe (SMTExpr Word8)) of
@@ -575,11 +596,12 @@ lispToExprT tps ann g l = case unmangle l ann of
         letToExpr tps' g' (L.List [L.Symbol name,expr]:rest) arg
           = let res = lispToExprU 
                       (\expr' -> let rest' = letToExpr tps' (\txt -> if txt==name
-                                                                     then typeOf expr'
-                                                                     else g txt) rest arg
-                                 in Let (extractAnnotation expr') expr' (\(Var name' _) -> replaceName (\n -> if n==name 
-                                                                                                              then name' 
-                                                                                                              else n) rest')
+                                                                     then typeOf $ getUndef expr'
+                                                                     else g' txt) rest arg
+                                     ann' = extractAnnotation expr'
+                                 in Let ann' expr' (\sym -> replaceName (\n -> if n==name 
+                                                                               then gcast sym
+                                                                               else Nothing) rest')
                       ) tps' g' expr
             in case res of
               Just r -> r
@@ -594,10 +616,10 @@ quantToExpr q tps' g' (L.List [L.Symbol var,tp]:rest) body
         expr = quantToExpr q tps' (\txt -> if txt==var
                                            then declaredTypeRep decl
                                            else g' txt) rest body
-        getForall :: a -> SMTExpr a -> SMTExpr Bool
-        getForall u (Var name' _) = replaceName (\n -> if n==var
-                                                       then name'
-                                                       else n) expr
+        getForall :: Typeable a => a -> SMTExpr a -> SMTExpr Bool
+        getForall u sym = replaceName (\n -> if n==var
+                                             then gcast sym
+                                             else Nothing) expr
     in withDeclaredType (\u ann -> q ann $ getForall u) decl
 quantToExpr q tps' g' [] body = lispToExprT tps' () g' body
 

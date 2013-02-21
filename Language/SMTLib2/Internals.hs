@@ -315,6 +315,7 @@ eqExpr n lhs rhs = case (lhs,rhs) of
                                  in case cast f2 of
                                    Nothing -> False
                                    Just f2' -> eqExpr n' (f1 v) (f2' v)
+  (Let a1 x1 f1,Let a2 x2 f2) -> eqExpr n (f1 x1) (f2 x2)
   (ConTest c1 e1,ConTest c2 e2) -> case gcast c2 of
     Nothing -> False
     Just c2' -> c1 == c2' && eqExpr' n e1 e2
@@ -784,9 +785,11 @@ getVars = fst . foldExpr (\s expr -> (case expr of
                                          Var n _ -> Set.insert n s
                                          _ -> s,expr)) Set.empty
 
-replaceName :: (T.Text -> T.Text) -> SMTExpr a -> SMTExpr a
+replaceName :: (forall b. SMTType b => T.Text -> Maybe (SMTExpr b)) -> SMTExpr a -> SMTExpr a
 replaceName f = snd . foldExpr (\_ expr -> ((),case expr of
-                                               Var n ann -> Var (f n) ann
+                                               Var n ann -> case f n of
+                                                 Nothing -> expr
+                                                 Just expr' -> expr'
                                                _ -> expr)) ()
 
 escapeName :: String -> String
