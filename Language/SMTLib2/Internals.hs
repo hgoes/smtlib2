@@ -14,7 +14,7 @@ import Data.Text as T
 import Data.Typeable
 import Data.Map as Map hiding (assocs)
 import Data.Set as Set
-import Data.List as List (mapAccumL)
+import Data.List as List (mapAccumL,find)
 
 -- Monad stuff
 import Control.Applicative (Applicative(..))
@@ -420,7 +420,15 @@ withDeclaredValueType f (DeclaredValueType u ann) = Just $ f u ann
 withDeclaredValueType _ _ = Nothing
 
 declaredTypeCon :: DeclaredType -> TyCon
-declaredTypeCon = withDeclaredType (\u _ -> fst $ splitTyConApp $ typeOf u)
+declaredTypeCon d = fst $ splitTyConApp $ declaredTypeRep d
+
+declaredTypeRep :: DeclaredType -> TypeRep
+declaredTypeRep = withDeclaredType (\u _ -> typeOf u)
+
+declForSMTType :: L.Lisp -> Map TyCon DeclaredType -> DeclaredType
+declForSMTType l mp = case List.find (\(_,d) -> withDeclaredType (\u ann -> (getSort u ann) == l) d) (Map.toList mp) of
+  Nothing -> error $ "smtlib2: Can't convert type "++show l++" to haskell."
+  Just (_,d) -> d
 
 argSorts :: Args a => a -> ArgAnnotation a -> [L.Lisp]
 argSorts arg ann = Prelude.reverse res

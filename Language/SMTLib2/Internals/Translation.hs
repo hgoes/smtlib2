@@ -418,6 +418,8 @@ lispToExprU f tps g l
         L.List [L.Symbol "bvslt",lhs,rhs] -> Just $ f $ binBV BVSLT tps g lhs rhs
         L.List [L.Symbol "bvsge",lhs,rhs] -> Just $ f $ binBV BVSGE tps g lhs rhs
         L.List [L.Symbol "bvsgt",lhs,rhs] -> Just $ f $ binBV BVSGT tps g lhs rhs
+        L.List [L.Symbol "forall",L.List args,body] -> Just $ f $ quantToExpr Forall tps g args body
+        L.List [L.Symbol "exists",L.List args,body] -> Just $ f $ quantToExpr Exists tps g args body
         L.List (L.Symbol fn:arg) -> Just $ fnToExpr f tps g fn arg
         _ -> Nothing
     ]
@@ -562,7 +564,8 @@ lispToExprT tps ann g l = case unmangle l ann of
       L.List [L.Symbol "bvslt",lhs,rhs] -> fgcast l $ binBV BVSLT tps g lhs rhs
       L.List [L.Symbol "bvsge",lhs,rhs] -> fgcast l $ binBV BVSGE tps g lhs rhs
       L.List [L.Symbol "bvsgt",lhs,rhs] -> fgcast l $ binBV BVSGT tps g lhs rhs
-      --L.List [L.Symbol "forall",L.List vars,body] -> quantToExpr g vars body
+      L.List [L.Symbol "forall",L.List vars,body] -> fgcast l $ quantToExpr Forall tps g vars body
+      L.List [L.Symbol "exists",L.List vars,body] -> fgcast l $ quantToExpr Exists tps g vars body
       L.List (L.Symbol fn:arg) -> fnToExpr (fgcast l) tps g fn arg
       L.List [L.List (L.Symbol "_":arg),expr] 
         -> fgcast l $ App (InternalFun arg) $
@@ -584,9 +587,19 @@ lispToExprT tps ann g l = case unmangle l ann of
         letToExpr tps' g' [] arg = lispToExprT tps' ann g' arg
         letToExpr _ _ (x:_) _ = error $ "Unparseable entry "++show x++" in let expression"
 
-        {-quantToExpr g' (L.List [L.Symbol var,tp]:rest) body
-          = quantToExpr (\txt -> if txt==name
-                                 then -}
+quantToExpr :: (forall a. Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool)
+               -> Map.Map TyCon DeclaredType -> (T.Text -> TypeRep) -> [L.Lisp] -> L.Lisp -> SMTExpr Bool
+quantToExpr q tps' g' (L.List [L.Symbol var,tp]:rest) body
+  = let decl = declForSMTType tp tps'
+        expr = quantToExpr q tps' (\txt -> if txt==var
+                                           then declaredTypeRep decl
+                                           else g' txt) rest body
+        getForall :: a -> SMTExpr a -> SMTExpr Bool
+        getForall u (Var name' _) = replaceName (\n -> if n==var
+                                                       then name'
+                                                       else n) expr
+    in withDeclaredType (\u ann -> q ann $ getForall u) decl
+quantToExpr q tps' g' [] body = lispToExprT tps' () g' body
 
 -- | Reconstruct the type annotation for a given SMT expression.
 extractAnnotation :: SMTExpr a -> SMTAnnotation a
