@@ -53,18 +53,18 @@ instance SMTArith Integer
 
 instance Num (SMTExpr Integer) where
   fromInteger x = Const x ()
-  (+) x y = Plus [x,y]
-  (-) = Minus
-  (*) x y = Mult [x,y]
-  negate = Neg
-  abs = Abs
-  signum x = ITE (Ge x (Const 0 ())) (Const 1 ()) (Const (-1) ())
+  (+) x y = App Plus (x,y)
+  (-) x y = App Minus (x,y)
+  (*) x y = App Mult (x,y)
+  negate x = App Neg x
+  abs x = App Abs x
+  signum x = ITE (App Ge (x,Const 0 ())) (Const 1 ()) (Const (-1) ())
 
 instance SMTOrd Integer where
-  (.<.) = Lt
-  (.<=.) = Le
-  (.>.) = Gt
-  (.>=.) = Ge
+  (.<.) x y = App Lt (x,y)
+  (.<=.) x y = App Le (x,y)
+  (.>.) x y = App Gt (x,y)
+  (.>=.) x y = App Ge (x,y)
 
 instance Enum (SMTExpr Integer) where
   succ x = x + 1
@@ -112,22 +112,22 @@ instance SMTArith (Ratio Integer)
 
 instance Num (SMTExpr (Ratio Integer)) where
   fromInteger x = Const (fromInteger x) ()
-  (+) x y = Plus [x,y]
-  (-) = Minus
-  (*) x y = Mult [x,y]
-  negate = Neg
-  abs x = ITE (Ge x (Const 0 ())) x (Neg x)
-  signum x = ITE (Ge x (Const 0 ())) (Const 1 ()) (Const (-1) ())
+  (+) x y = App Plus (x,y)
+  (-) x y = App Minus (x,y)
+  (*) x y = App Mult (x,y)
+  negate = App Neg
+  abs x = ITE (App Ge (x,Const 0 ())) x (App Neg x)
+  signum x = ITE (App Ge (x,Const 0 ())) (Const 1 ()) (Const (-1) ())
 
 instance Fractional (SMTExpr (Ratio Integer)) where
   (/) = Divide
   fromRational x = Const x ()
 
 instance SMTOrd (Ratio Integer) where
-  (.<.) = Lt
-  (.<=.) = Le
-  (.>.) = Gt
-  (.>=.) = Ge
+  (.<.) x y = App Lt (x,y)
+  (.<=.) x y = App Le (x,y)
+  (.>.) x y = App Gt (x,y)
+  (.>=.) x y = App Ge (x,y)
 
 -- Arrays
 

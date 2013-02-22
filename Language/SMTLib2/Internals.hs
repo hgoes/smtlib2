@@ -152,29 +152,29 @@ instance (Monoid w, MonadSMT m) => MonadSMT (Strict.WriterT w m) where
 data SMTExpr t where
   Var :: SMTType t => Text -> SMTAnnotation t -> SMTExpr t
   Const :: SMTValue t => t -> SMTAnnotation t -> SMTExpr t
-  Eq :: SMTType a => SMTExpr a -> SMTExpr a -> SMTExpr Bool
-  Ge :: (Num a,SMTType a) => SMTExpr a -> SMTExpr a -> SMTExpr Bool
-  Gt :: (Num a,SMTType a) => SMTExpr a -> SMTExpr a -> SMTExpr Bool
-  Le :: (Num a,SMTType a) => SMTExpr a -> SMTExpr a -> SMTExpr Bool
-  Lt :: (Num a,SMTType a) => SMTExpr a -> SMTExpr a -> SMTExpr Bool
+  Eq :: SMTType a => SMTExpr (SMTFun (SMTExpr a,SMTExpr a) Bool)
+  Ge :: (Num a,SMTType a) => SMTExpr (SMTFun (SMTExpr a,SMTExpr a) Bool)
+  Gt :: (Num a,SMTType a) => SMTExpr (SMTFun (SMTExpr a,SMTExpr a) Bool)
+  Le :: (Num a,SMTType a) => SMTExpr (SMTFun (SMTExpr a,SMTExpr a) Bool)
+  Lt :: (Num a,SMTType a) => SMTExpr (SMTFun (SMTExpr a,SMTExpr a) Bool)
   Distinct :: SMTType a => [SMTExpr a] -> SMTExpr Bool
-  Plus :: SMTArith t => [SMTExpr t] -> SMTExpr t
-  Minus :: SMTArith t => SMTExpr t -> SMTExpr t -> SMTExpr t
-  Mult :: SMTArith t => [SMTExpr t] -> SMTExpr t
+  Plus :: SMTArith t => SMTExpr (SMTFun (SMTExpr t,SMTExpr t) t)
+  Minus :: SMTArith t => SMTExpr (SMTFun (SMTExpr t,SMTExpr t) t)
+  Mult :: SMTArith t => SMTExpr (SMTFun (SMTExpr t,SMTExpr t) t)
   Div :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
   Mod :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
   Rem :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
   Divide :: SMTExpr Rational -> SMTExpr Rational -> SMTExpr Rational
-  Neg :: SMTArith t => SMTExpr t -> SMTExpr t
-  Abs :: SMTExpr Integer -> SMTExpr Integer
+  Neg :: SMTArith t => SMTExpr (SMTFun (SMTExpr t) t)
+  Abs :: SMTExpr (SMTFun (SMTExpr Integer) Integer)
   ToReal :: SMTExpr Integer -> SMTExpr Rational
   ToInt :: SMTExpr Rational -> SMTExpr Integer
   ITE :: SMTType t => SMTExpr Bool -> SMTExpr t -> SMTExpr t -> SMTExpr t
-  And :: [SMTExpr Bool] -> SMTExpr Bool
-  Or :: [SMTExpr Bool] -> SMTExpr Bool
-  XOr :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
-  Implies :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
-  Not :: SMTExpr Bool -> SMTExpr Bool
+  And :: SMTExpr (SMTFun (SMTExpr Bool,SMTExpr Bool) Bool)
+  Or :: SMTExpr (SMTFun (SMTExpr Bool,SMTExpr Bool) Bool)
+  XOr :: SMTExpr (SMTFun (SMTExpr Bool,SMTExpr Bool) Bool)
+  Implies :: SMTExpr (SMTFun (SMTExpr Bool,SMTExpr Bool) Bool)
+  Not :: SMTExpr (SMTFun (SMTExpr Bool) Bool)
   Select :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v
   Store :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v -> SMTExpr (SMTArray i v)
   AsArray :: (Args i,SMTType v) => SMTExpr (SMTFun i v) -> SMTExpr (SMTArray i v)
@@ -229,21 +229,15 @@ eqExpr :: Integer -> SMTExpr a -> SMTExpr a -> Bool
 eqExpr n lhs rhs = case (lhs,rhs) of
   (Var v1 _,Var v2 _) -> v1 == v2
   (Const v1 _,Const v2 _) -> v1 == v2
-  (Eq l1 r1,Eq l2 r2) -> eqExpr' n l1 l2 &&
-                         eqExpr' n r1 r2
-  (Ge l1 r1,Ge l2 r2) -> eqExpr' n l1 l2 &&
-                         eqExpr' n r1 r2
-  (Gt l1 r1,Gt l2 r2) -> eqExpr' n l1 l2 &&
-                         eqExpr' n r1 r2
-  (Le l1 r1,Le l2 r2) -> eqExpr' n l1 l2 &&
-                         eqExpr' n r1 r2
-  (Lt l1 r1,Lt l2 r2) -> eqExpr' n l1 l2 &&
-                         eqExpr' n r1 r2
+  (Eq,Eq) -> True
+  (Ge,Ge) -> True
+  (Gt,Gt) -> True
+  (Le,Le) -> True
+  (Lt,Lt) -> True
   (Distinct x1,Distinct x2) -> eqExprs' n x1 x2
-  (Plus x1,Plus x2) -> eqExprs n x1 x2
-  (Minus l1 r1,Minus l2 r2) -> eqExpr' n l1 l2 && 
-                               eqExpr' n r1 r2
-  (Mult x1,Mult x2) -> eqExprs n x1 x2
+  (Plus,Plus) -> True
+  (Minus,Minus) -> True
+  (Mult,Mult) -> True
   (Div l1 r1,Div l2 r2) -> eqExpr n l1 l2 && 
                            eqExpr n r1 r2
   (Mod l1 r1,Mod l2 r2) -> eqExpr n l1 l2 && 
@@ -252,20 +246,18 @@ eqExpr n lhs rhs = case (lhs,rhs) of
                            eqExpr n r1 r2
   (Divide l1 r1,Divide l2 r2) -> eqExpr n l1 l2 &&
                                  eqExpr n r1 r2
-  (Neg x,Neg y) -> eqExpr n x y
-  (Abs x,Abs y) -> eqExpr n x y
+  (Neg,Neg) -> True
+  (Abs,Abs) -> True
   (ToReal x,ToReal y) -> eqExpr n x y
   (ToInt x,ToInt y) -> eqExpr n x y
   (ITE c1 l1 r1,ITE c2 l2 r2) -> eqExpr n c1 c2 &&
                                  eqExpr' n l1 l2 && 
                                  eqExpr' n r1 r2
-  (And x,And y) -> eqExprs n x y
-  (Or x,Or y) -> eqExprs n x y
-  (XOr l1 r1,XOr l2 r2) -> eqExpr n l1 l2 &&
-                           eqExpr n r1 r2
-  (Implies l1 r1,Implies l2 r2) -> eqExpr n l1 l2 &&
-                                   eqExpr n r1 r2
-  (Not x,Not y) -> eqExpr n x y
+  (And,And) -> True
+  (Or,Or) -> True
+  (XOr,XOr) -> True
+  (Implies,Implies) -> True
+  (Not,Not) -> True
   (Select a1 i1,Select a2 i2) -> eqExpr' n a1 a2 && 
                                  (case cast i2 of
                                      Nothing -> False
@@ -614,183 +606,6 @@ parseResponse = do
 -- | Declare a new sort with a specified arity
 declareSort :: T.Text -> Integer -> SMT ()
 declareSort name arity = putRequest (L.List [L.Symbol "declare-sort",L.Symbol name,L.toLisp arity])
-
-foldExpr :: (forall a. b -> SMTExpr a -> (b,SMTExpr a)) -> b -> SMTExpr c -> (b,SMTExpr c)
-foldExpr f x (Eq l r) = let (x1,e1) = foldExpr f x l
-                            (x2,e2) = foldExpr f x1 r
-                        in f x2 (Eq e1 e2)
-foldExpr f x (Ge l r) = let (x1,e1) = foldExpr f x l
-                            (x2,e2) = foldExpr f x1 r
-                        in f x2 (Ge e1 e2)
-foldExpr f x (Gt l r) = let (x1,e1) = foldExpr f x l
-                            (x2,e2) = foldExpr f x1 r
-                        in f x2 (Gt e1 e2)
-foldExpr f x (Le l r) = let (x1,e1) = foldExpr f x l
-                            (x2,e2) = foldExpr f x1 r
-                        in f x2 (Le e1 e2)
-foldExpr f x (Lt l r) = let (x1,e1) = foldExpr f x l
-                            (x2,e2) = foldExpr f x1 r
-                        in f x2 (Lt e1 e2)
-foldExpr f x (Distinct ds) = let (x',ds') = List.mapAccumL (foldExpr f) x ds
-                             in f x' (Distinct ds')
-foldExpr f x (Plus ds) = let (x',ds') = List.mapAccumL (foldExpr f) x ds
-                         in f x' (Plus ds')
-foldExpr f x (Minus l r) = let (x1,e1) = foldExpr f x l
-                               (x2,e2) = foldExpr f x1 r
-                           in f x2 (Minus e1 e2)
-foldExpr f x (Mult ds) = let (x',ds') = List.mapAccumL (foldExpr f) x ds
-                         in f x' (Mult ds')
-foldExpr f x (Div l r) = let (x1,e1) = foldExpr f x l
-                             (x2,e2) = foldExpr f x1 r
-                         in f x2 (Div e1 e2)
-foldExpr f x (Mod l r) = let (x1,e1) = foldExpr f x l
-                             (x2,e2) = foldExpr f x1 r
-                         in f x2 (Mod e1 e2)
-foldExpr f x (Rem l r) = let (x1,e1) = foldExpr f x l
-                             (x2,e2) = foldExpr f x1 r
-                         in f x2 (Rem e1 e2)
-foldExpr f x (Divide l r) = let (x1,e1) = foldExpr f x l
-                                (x2,e2) = foldExpr f x1 r
-                            in f x2 (Divide e1 e2)
-foldExpr f x (Neg l) = let (x1,e1) = foldExpr f x l
-                       in f x1 (Neg e1)
-foldExpr f x (Abs e) = let (x1,e1) = foldExpr f x e
-                       in f x1 (Abs e1)
-foldExpr f x (ToReal e) = let (x1,e1) = foldExpr f x e
-                          in f x1 (ToReal e1)
-foldExpr f x (ToInt e) = let (x1,e1) = foldExpr f x e
-                         in f x1 (ToInt e1)
-foldExpr f x (ITE l r c) = let (x1,e1) = foldExpr f x l
-                               (x2,e2) = foldExpr f x1 r
-                               (x3,e3) = foldExpr f x2 c
-                           in f x3 (ITE e1 e2 e3)
-foldExpr f x (And ds) = let (x',ds') = List.mapAccumL (foldExpr f) x ds
-                        in f x' (And ds')
-foldExpr f x (Or ds) = let (x',ds') = List.mapAccumL (foldExpr f) x ds
-                       in f x' (Or ds')
-foldExpr f x (XOr l r) = let (x1,e1) = foldExpr f x l
-                             (x2,e2) = foldExpr f x1 r
-                         in f x2 (XOr e1 e2)
-foldExpr f x (Implies l r) = let (x1,e1) = foldExpr f x l
-                                 (x2,e2) = foldExpr f x1 r
-                             in f x2 (Implies e1 e2)
-foldExpr f x (Not l) = let (x1,e1) = foldExpr f x l
-                       in f x1 (Not e1)
-foldExpr f x (Select l r) = let (x1,e1) = foldExpr f x l
-                                (x2,e2) = foldExprs (\st e _ -> f st e)
-                                          x1 r undefined
-                            in f x2 (Select e1 e2)
-foldExpr f x (Store l r c) = let (x1,e1) = foldExpr f x l
-                                 (x2,e2) = foldExprs (\st e _ -> f st e) x1 r undefined
-                                 (x3,e3) = foldExpr f x2 c
-                             in f x3 (Store e1 e2 e3)
-foldExpr f x (AsArray fun) = let (x',fun') = foldExpr f x fun
-                             in f x' (AsArray fun')
-foldExpr f x (BVAdd l r) = let (x1,e1) = foldExpr f x l
-                               (x2,e2) = foldExpr f x1 r
-                           in f x2 (BVAdd e1 e2)
-foldExpr f x (BVSub l r) = let (x1,e1) = foldExpr f x l
-                               (x2,e2) = foldExpr f x1 r
-                           in f x2 (BVSub e1 e2)
-foldExpr f x (BVMul l r) = let (x1,e1) = foldExpr f x l
-                               (x2,e2) = foldExpr f x1 r
-                           in f x2 (BVMul e1 e2)
-foldExpr f x (BVURem l r) = let (x1,e1) = foldExpr f x l
-                                (x2,e2) = foldExpr f x1 r
-                            in f x2 (BVURem e1 e2)
-foldExpr f x (BVSRem l r) = let (x1,e1) = foldExpr f x l
-                                (x2,e2) = foldExpr f x1 r
-                            in f x2 (BVSRem e1 e2)
-foldExpr f x (BVULE l r) = let (x1,e1) = foldExpr f x l
-                               (x2,e2) = foldExpr f x1 r
-                           in f x2 (BVULE e1 e2)
-foldExpr f x (BVULT l r) = let (x1,e1) = foldExpr f x l
-                               (x2,e2) = foldExpr f x1 r
-                           in f x2 (BVULT e1 e2)
-foldExpr f x (BVUGE l r) = let (x1,e1) = foldExpr f x l
-                               (x2,e2) = foldExpr f x1 r
-                           in f x2 (BVUGE e1 e2)
-foldExpr f x (BVUGT l r) = let (x1,e1) = foldExpr f x l
-                               (x2,e2) = foldExpr f x1 r
-                           in f x2 (BVUGT e1 e2)
-foldExpr f x (BVSLE l r) = let (x1,e1) = foldExpr f x l
-                               (x2,e2) = foldExpr f x1 r
-                           in f x2 (BVSLE e1 e2)
-foldExpr f x (BVSLT l r) = let (x1,e1) = foldExpr f x l
-                               (x2,e2) = foldExpr f x1 r
-                           in f x2 (BVSLT e1 e2)
-foldExpr f x (BVSGE l r) = let (x1,e1) = foldExpr f x l
-                               (x2,e2) = foldExpr f x1 r
-                           in f x2 (BVSGE e1 e2)
-foldExpr f x (BVSGT l r) = let (x1,e1) = foldExpr f x l
-                               (x2,e2) = foldExpr f x1 r
-                           in f x2 (BVSGT e1 e2)
-foldExpr f x (BVSHL l r) = let (x1,e1) = foldExpr f x l
-                               (x2,e2) = foldExpr f x1 r
-                           in f x2 (BVSHL e1 e2)
-foldExpr f x (BVConcat l r) = let (x1,e1) = foldExpr f x l
-                                  (x2,e2) = foldExpr f x1 r
-                              in f x2 (BVConcat e1 e2)
-{-foldExpr f x (BVConcats cs) = let (cs',nx) = List.mapAccumL (foldExpr f) x cs
-                              in f nx (BVConcats cs')-}
-foldExpr f x (BVXor l r) = let (x1,e1) = foldExpr f x l
-                               (x2,e2) = foldExpr f x1 r
-                           in f x2 (BVXor e1 e2)
-foldExpr f x (BVAnd l r) = let (x1,e1) = foldExpr f x l
-                               (x2,e2) = foldExpr f x1 r
-                           in f x2 (BVAnd e1 e2)
-foldExpr f x (BVOr l r) = let (x1,e1) = foldExpr f x l
-                              (x2,e2) = foldExpr f x1 r
-                          in f x2 (BVOr e1 e2)
-foldExpr f x (BVNot l) = let (x1,e1) = foldExpr f x l
-                         in f x1 (BVNot e1)
-foldExpr f x (Forall ann g) = let g' = foldExpr f x . g
-                              in f (fst $ g' $ allOf Undefined) (Forall ann (snd . g'))
-foldExpr f x (Exists ann g) = let g' = foldExpr f x . g
-                              in f (fst $ g' $ allOf Undefined) (Exists ann (snd . g'))
-foldExpr f x (Let ann arg g) = let g' = foldExpr f x1 . g
-                                   (x1,e1) = foldExprs (\st e _ -> f st e) x arg ann
-                               in f (fst $ g' $ allOf Undefined) (Let ann e1 (snd . g'))
-foldExpr f x (App fun arg) = let (_,arg_ann,_) = getFunAnn fun
-                                 (x1,arg') = foldExprs (\st e _ -> f st e) x arg arg_ann
-                                 (x2,fun') = foldExpr f x1 fun
-                             in f x2 (App fun' arg')
-foldExpr f x (Map fun ann) = let (x1,fun') = foldExpr f x fun
-                             in f x1 (Map fun' ann)
-foldExpr f x (ConTest c e) = let (x1,e1) = foldExpr f x e
-                             in f x1 (ConTest c e1)
-foldExpr f x (FieldSel g e) = let (x1,e1) = foldExpr f x e
-                              in f x1 (FieldSel g e1)
-foldExpr f x (Head l) = let (x1,e1) = foldExpr f x l
-                        in f x1 (Head e1)
-foldExpr f x (Tail l) = let (x1,e1) = foldExpr f x l
-                        in f x1 (Tail e1)
-foldExpr f x (Insert l r) = let (x1,e1) = foldExpr f x l
-                                (x2,e2) = foldExpr f x1 r
-                            in f x2 (Insert e1 e2)
-foldExpr f x (Named e n) = let (x1,e1) = foldExpr f x e
-                           in f x1 (Named e1 n)
-foldExpr f x e = f x e
-
-getFunAnn :: SMTExpr (SMTFun a r) -> (L.Lisp,ArgAnnotation a,SMTAnnotation r)
-getFunAnn (Fun name arg_ann res_ann) = (L.Symbol name,arg_ann,res_ann)
-getFunAnn p@(Map f i_ann) = let (name,arg_ann,res_ann) = getFunAnn f
-                                (arg_u,_) = getFunUndef f
-                                getUdefIdx :: SMTExpr (SMTFun a (SMTArray i r)) -> i
-                                getUdefIdx _ = undefined
-                            in (L.List [L.Symbol "_",L.Symbol "map",name],getMapArgumentAnn arg_u (getUdefIdx p) arg_ann i_ann,(i_ann,res_ann))
-
-getVars :: SMTExpr a -> Set T.Text
-getVars = fst . foldExpr (\s expr -> (case expr of
-                                         Var n _ -> Set.insert n s
-                                         _ -> s,expr)) Set.empty
-
-replaceName :: (forall b. SMTType b => T.Text -> Maybe (SMTExpr b)) -> SMTExpr a -> SMTExpr a
-replaceName f = snd . foldExpr (\_ expr -> ((),case expr of
-                                               Var n ann -> case f n of
-                                                 Nothing -> expr
-                                                 Just expr' -> expr'
-                                               _ -> expr)) ()
 
 escapeName :: String -> String
 escapeName [] = []

@@ -12,7 +12,7 @@ import Language.SMTLib2.Internals
 import Language.SMTLib2.Internals.Interface
 import Language.Haskell.TH
 import qualified Data.AttoLisp as L
-import qualified Data.Text as T
+import qualified Data.Text as T hiding (foldl1)
 import Data.Typeable
 import Data.Maybe (catMaybes)
 import qualified Data.Graph.Inductive as Gr
@@ -20,7 +20,7 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Foldable
-import Prelude hiding (foldl,concat,elem,all)
+import Prelude hiding (foldl,concat,elem,all,foldl1)
 import Data.List (findIndex)
 
 data TypeGraph = TypeGraph { typeNodes :: Map Name Gr.Node
@@ -390,6 +390,6 @@ matches exp pat = do
       let Just (RecC _ fields) = find (\con -> case con of
                                           RecC n _ -> n==name
                                           _ -> False) cons
-      [| and' $ (is $exp $(constructor name)): $(listE $ catMaybes [ matches' [| $exp .# $(field f) |] pat | ((f,_,_),pat) <- Prelude.zip fields pats ]) |]
-    matches' exp (RecP name pats) = Just [| and' $ (is $exp $(constructor name)): $(listE $ catMaybes [ matches' [| $exp .# $(field f) |] pat | (f,pat) <- pats ]) |]
+      [| foldl (.&&.) (constant True) $ (is $exp $(constructor name)): $(listE $ catMaybes [ matches' [| $exp .# $(field f) |] pat | ((f,_,_),pat) <- Prelude.zip fields pats ]) |]
+    matches' exp (RecP name pats) = Just [| foldl (.&&.) (constant True) $ (is $exp $(constructor name)): $(listE $ catMaybes [ matches' [| $exp .# $(field f) |] pat | (f,pat) <- pats ]) |]
     

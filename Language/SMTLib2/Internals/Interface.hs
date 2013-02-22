@@ -7,7 +7,7 @@ import Language.SMTLib2.Internals.Instances ()
 import Language.SMTLib2.Internals.Translation
 
 import Data.Typeable
-import Data.Text as T
+import Data.Text as T hiding (foldl1)
 import Data.Map as Map hiding (assocs)
 import Data.Array
 import qualified Data.AttoLisp as L
@@ -72,21 +72,26 @@ constantAnn :: SMTValue t => t -> SMTAnnotation t -> SMTExpr t
 constantAnn x ann = Const x ann
 
 -- | Boolean conjunction
-and' :: [SMTExpr Bool] -> SMTExpr Bool
-and' [] = Const True ()
-and' [x] = x
-and' xs = And xs
+and' :: SMTExpr (SMTFun (SMTExpr Bool,SMTExpr Bool) Bool)
+and' = And
+
+(.&&.) :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
+(.&&.) x y = App And (x,y)
 
 -- | Boolean disjunction
-or' :: [SMTExpr Bool] -> SMTExpr Bool
-or' [] = Const False ()
-or' [x] = x
-or' xs = Or xs
+or' :: SMTExpr (SMTFun (SMTExpr Bool,SMTExpr Bool) Bool)
+or' = Or
+
+(.||.) :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
+(.||.) x y = App Or (x,y)
 
 -- | Create a boolean expression that encodes that the array is equal to the supplied constant array.
 arrayEquals :: (LiftArgs i,SMTValue v,Ix (Unpacked i),Unit (ArgAnnotation i),Unit (SMTAnnotation v)) => SMTExpr (SMTArray i v) -> Array (Unpacked i) v -> SMTExpr Bool
-arrayEquals expr arr = and' [(select expr (liftArgs i unit)) .==. (constant v)
-                            | (i,v) <- assocs arr ]
+arrayEquals expr arr 
+  = case [(select expr (liftArgs i unit)) .==. (constant v)
+         | (i,v) <- assocs arr ] of
+      [] -> constant True
+      xs -> foldl1 (.&&.) xs
 
 -- | Asserts that a boolean expression is true
 assert :: SMTExpr Bool -> SMT ()
@@ -161,7 +166,7 @@ map' f = Map f unit
 
 -- | Two expressions shall be equal
 (.==.) :: SMTType a => SMTExpr a -> SMTExpr a -> SMTExpr Bool
-(.==.) = Eq
+(.==.) x y = App Eq (x,y)
 
 infix 4 .==.
 
@@ -170,15 +175,15 @@ distinct :: SMTType a => [SMTExpr a] -> SMTExpr Bool
 distinct = Distinct
 
 -- | Calculate the sum of arithmetic expressions
-plus :: (SMTArith a) => [SMTExpr a] -> SMTExpr a
+plus :: (SMTArith a) => SMTExpr (SMTFun (SMTExpr a,SMTExpr a) a)
 plus = Plus
 
 -- | Calculate the product of arithmetic expressions
-mult :: (SMTArith a) => [SMTExpr a] -> SMTExpr a
+mult :: (SMTArith a) => SMTExpr (SMTFun (SMTExpr a,SMTExpr a) a)
 mult = Mult
 
 -- | Subtracts two expressions
-minus :: (SMTArith a) => SMTExpr a -> SMTExpr a -> SMTExpr a
+minus :: (SMTArith a) => SMTExpr (SMTFun (SMTExpr a,SMTExpr a) a)
 minus = Minus
 
 -- | Divide an arithmetic expression by another
@@ -199,7 +204,7 @@ divide = Divide
 
 -- | For an expression @x@, this returns the expression @-x@.
 neg :: SMTArith a => SMTExpr a -> SMTExpr a
-neg = Neg
+neg = App Neg
 
 -- | Convert an integer expression to a real expression
 toReal :: SMTExpr Integer -> SMTExpr Rational
@@ -217,18 +222,21 @@ ite :: (SMTType a) => SMTExpr Bool -- ^ If this expression is true
 ite = ITE
 
 -- | Exclusive or: Return true if exactly one argument is true.
-xor :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
+xor :: SMTExpr (SMTFun (SMTExpr Bool,SMTExpr Bool) Bool)
 xor = XOr
 
 -- | Implication
 (.=>.) :: SMTExpr Bool -- ^ If this expression is true
           -> SMTExpr Bool -- ^ This one must be as well
           -> SMTExpr Bool
-(.=>.) = Implies
+(.=>.) x y = App Implies (x,y)
 
 -- | Negates a boolean expression
 not' :: SMTExpr Bool -> SMTExpr Bool
-not' = Not
+not' = App Not
+
+not'' :: SMTExpr (SMTFun (SMTExpr Bool) Bool)
+not'' = Not
 
 -- | Extracts an element of an array by its index
 select :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v
@@ -470,7 +478,7 @@ getInterpolants exprs = do
   (_,tps,mp) <- getSMT
   putRequest (L.List (L.Symbol "get-interpolants":fmap (\e -> let (r,_) = exprToLisp e 0 in r) exprs))
   L.List res <- parseResponse
-  return $ fmap (lispToExprT tps () (\name -> mp Map.! name)) res
+  return $ fmap (lispToExprT (const Nothing) tps () (\name -> mp Map.! name)) res
   
 -- | After an unsuccessful 'checkSat' this method extracts a proof from the SMT solver that the instance is unsatisfiable.
 getProof :: SMT (SMTExpr Bool)
@@ -479,10 +487,10 @@ getProof = do
   let mp' = Map.union mp commonTheorems
   putRequest (L.List [L.Symbol "get-proof"])
   res <- parseResponse
-  return $ lispToExprT tps () (\name -> case Map.lookup name mp' of
-                                  Nothing -> error $ "Failed to find a definition for "++show name
-                                  Just n -> n
-                              ) res
+  return $ lispToExprT (const Nothing) tps () (\name -> case Map.lookup name mp' of
+                                                  Nothing -> error $ "Failed to find a definition for "++show name
+                                                  Just n -> n
+                                              ) res
 
 -- | After an unsuccessful 'checkSat', return a list of names of named
 --   expression which make the instance unsatisfiable.

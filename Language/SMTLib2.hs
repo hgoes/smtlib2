@@ -54,7 +54,7 @@ module Language.SMTLib2
          (.==.),
          distinct,
          ite,
-         and',or',xor,not',(.=>.),
+         (.&&.),(.||.),and',or',xor,not',not'',(.=>.),
          forAll,exists,
          forAllAnn,existsAnn,
          forAllList,existsList,
