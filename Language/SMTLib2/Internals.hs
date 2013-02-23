@@ -161,10 +161,10 @@ data SMTExpr t where
   Plus :: SMTArith t => SMTExpr (SMTFun (SMTExpr t,SMTExpr t) t)
   Minus :: SMTArith t => SMTExpr (SMTFun (SMTExpr t,SMTExpr t) t)
   Mult :: SMTArith t => SMTExpr (SMTFun (SMTExpr t,SMTExpr t) t)
-  Div :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
-  Mod :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
-  Rem :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
-  Divide :: SMTExpr Rational -> SMTExpr Rational -> SMTExpr Rational
+  Div :: SMTExpr (SMTFun (SMTExpr Integer,SMTExpr Integer) Integer)
+  Mod :: SMTExpr (SMTFun (SMTExpr Integer,SMTExpr Integer) Integer)
+  Rem :: SMTExpr (SMTFun (SMTExpr Integer,SMTExpr Integer) Integer)
+  Divide :: SMTExpr (SMTFun (SMTExpr Rational,SMTExpr Rational) Rational)
   Neg :: SMTArith t => SMTExpr (SMTFun (SMTExpr t) t)
   Abs :: SMTExpr (SMTFun (SMTExpr Integer) Integer)
   ToReal :: SMTExpr Integer -> SMTExpr Rational
@@ -238,14 +238,10 @@ eqExpr n lhs rhs = case (lhs,rhs) of
   (Plus,Plus) -> True
   (Minus,Minus) -> True
   (Mult,Mult) -> True
-  (Div l1 r1,Div l2 r2) -> eqExpr n l1 l2 && 
-                           eqExpr n r1 r2
-  (Mod l1 r1,Mod l2 r2) -> eqExpr n l1 l2 && 
-                           eqExpr n r1 r2
-  (Rem l1 r1,Rem l2 r2) -> eqExpr n l1 l2 &&
-                           eqExpr n r1 r2
-  (Divide l1 r1,Divide l2 r2) -> eqExpr n l1 l2 &&
-                                 eqExpr n r1 r2
+  (Div,Div) -> True
+  (Mod,Mod) -> True
+  (Rem,Rem) -> True
+  (Divide,Divide) -> True
   (Neg,Neg) -> True
   (Abs,Abs) -> True
   (ToReal x,ToReal y) -> eqExpr n x y

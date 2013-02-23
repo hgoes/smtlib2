@@ -120,7 +120,7 @@ instance Num (SMTExpr (Ratio Integer)) where
   signum x = ITE (App Ge (x,Const 0 ())) (Const 1 ()) (Const (-1) ())
 
 instance Fractional (SMTExpr (Ratio Integer)) where
-  (/) = Divide
+  (/) x y = App Divide (x,y)
   fromRational x = Const x ()
 
 instance SMTOrd (Ratio Integer) where

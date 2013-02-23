@@ -188,23 +188,35 @@ minus = Minus
 
 -- | Divide an arithmetic expression by another
 div' :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
-div' = Div
+div' x y = App Div (x,y)
+
+div'' :: SMTExpr (SMTFun (SMTExpr Integer,SMTExpr Integer) Integer)
+div'' = Div
 
 -- | Perform a modulo operation on an arithmetic expression
 mod' :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
-mod' = Mod
+mod' x y = App Mod (x,y)
+
+mod'' :: SMTExpr (SMTFun (SMTExpr Integer,SMTExpr Integer) Integer)
+mod'' = Mod
 
 -- | Calculate the remainder of the division of two integer expressions
 rem' :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
-rem' = Rem
+rem' x y = App Rem (x,y)
+
+rem'' :: SMTExpr (SMTFun (SMTExpr Integer,SMTExpr Integer) Integer)
+rem'' = Rem
 
 -- | Divide a rational expression by another one
 divide :: SMTExpr Rational -> SMTExpr Rational -> SMTExpr Rational
-divide = Divide
+divide x y = App Divide (x,y)
+
+divide' :: SMTExpr (SMTFun (SMTExpr Rational,SMTExpr Rational) Rational)
+divide' = Divide
 
 -- | For an expression @x@, this returns the expression @-x@.
-neg :: SMTArith a => SMTExpr a -> SMTExpr a
-neg = App Neg
+neg :: SMTArith a => SMTExpr (SMTFun (SMTExpr a) a)
+neg = Neg
 
 -- | Convert an integer expression to a real expression
 toReal :: SMTExpr Integer -> SMTExpr Rational

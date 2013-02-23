@@ -110,18 +110,10 @@ exprToLisp (Distinct lst) c = let (lst',c') = exprsToLisp lst c
 exprToLisp Plus c = (L.Symbol "+",c)
 exprToLisp Mult c = (L.Symbol "*",c)
 exprToLisp Minus c = (L.Symbol "-",c)
-exprToLisp (Div l r) c = let (l',c') = exprToLisp l c
-                             (r',c'') = exprToLisp r c'
-                         in (L.List [L.Symbol "div",l',r'],c'')
-exprToLisp (Divide l r) c = let (l',c') = exprToLisp l c
-                                (r',c'') = exprToLisp r c'
-                            in (L.List [L.Symbol "/",l',r'],c'')
-exprToLisp (Mod l r) c = let (l',c') = exprToLisp l c
-                             (r',c'') = exprToLisp r c'
-                         in (L.List [L.Symbol "mod",l',r'],c'')
-exprToLisp (Rem l r) c = let (l',c') = exprToLisp l c
-                             (r',c'') = exprToLisp r c'
-                         in (L.List [L.Symbol "rem",l',r'],c'')
+exprToLisp Div c = (L.Symbol "div",c)
+exprToLisp Divide c = (L.Symbol "/",c)
+exprToLisp Mod c = (L.Symbol "mod",c)
+exprToLisp Rem c = (L.Symbol "rem",c)
 exprToLisp Neg c = (L.Symbol "-",c)
 exprToLisp Abs c = (L.Symbol "abs",c)
 exprToLisp (ToReal e) c = let (e',c') = exprToLisp e c
@@ -373,10 +365,10 @@ lispToExprU f bound tps g l
         L.List [L.Symbol "-",lhs,rhs] -> binT f ((-)::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer) bound tps g lhs rhs
         L.List (L.Symbol "*":arg) -> Just $ f $ foldl1 ((*)::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer) $
                                      fmap (lispToExprT bound tps () g) arg
-        L.List [L.Symbol "div",lhs,rhs] -> binT f Div bound tps g lhs rhs
-        L.List [L.Symbol "mod",lhs,rhs] -> binT f Mod bound tps g lhs rhs
-        L.List [L.Symbol "rem",lhs,rhs] -> binT f Rem bound tps g lhs rhs
-        L.List [L.Symbol "/",lhs,rhs] -> binT f Divide bound tps g lhs rhs
+        L.List [L.Symbol "div",lhs,rhs] -> binT f (curry $ App Div) bound tps g lhs rhs
+        L.List [L.Symbol "mod",lhs,rhs] -> binT f (curry $ App Mod) bound tps g lhs rhs
+        L.List [L.Symbol "rem",lhs,rhs] -> binT f (curry $ App Rem) bound tps g lhs rhs
+        L.List [L.Symbol "/",lhs,rhs] -> binT f (curry $ App Divide) bound tps g lhs rhs
         L.List [L.Symbol "-",arg] -> Just $ f $ App Neg (lispToExprT bound tps () g arg :: SMTExpr Integer)
         L.List [L.Symbol "abs",arg] -> Just $ f $ App Abs (lispToExprT bound tps () g arg :: SMTExpr Integer)
         L.List [L.Symbol "to_real",arg] -> Just $ f $ ToReal (lispToExprT bound tps () g arg :: SMTExpr Integer)
@@ -570,16 +562,16 @@ lispToExprT bound tps ann g l
                                       in fgcast l $ foldl1 (*) (arg' :: [SMTExpr Integer])
          L.List [L.Symbol "/",lhs,rhs] -> let l' = lispToExprT bound tps () g lhs
                                               r' = lispToExprT bound tps () g rhs
-                                          in fgcast l $ Div l' r'
+                                          in fgcast l $ App Div (l',r')
          L.List [L.Symbol "div",lhs,rhs] -> let l' = lispToExprT bound tps () g lhs
                                                 r' = lispToExprT bound tps () g rhs
-                                            in fgcast l $ Div l' r'
+                                            in fgcast l $ App Div (l',r')
          L.List [L.Symbol "mod",lhs,rhs] -> let l' = lispToExprT bound tps () g lhs
                                                 r' = lispToExprT bound tps () g rhs
-                                            in fgcast l $ Mod l' r'
+                                            in fgcast l $ App Mod (l',r')
          L.List [L.Symbol "rem",lhs,rhs] -> let l' = lispToExprT bound tps () g lhs
                                                 r' = lispToExprT bound tps () g rhs
-                                            in fgcast l $ Rem l' r'
+                                            in fgcast l $ App Rem (l',r')
          L.List [L.Symbol "to_real",arg] -> let arg' = lispToExprT bound tps () g arg
                                             in fgcast l $ ToReal arg'
          L.List [L.Symbol "to_int",arg] -> let arg' = lispToExprT bound tps () g arg
@@ -672,10 +664,6 @@ extractAnnotation :: SMTExpr a -> SMTAnnotation a
 extractAnnotation (Var _ ann) = ann
 extractAnnotation (Const _ ann) = ann
 extractAnnotation (Distinct _) = ()
-extractAnnotation (Div _ _) = ()
-extractAnnotation (Mod _ _) = ()
-extractAnnotation (Rem _ _) = ()
-extractAnnotation (Divide _ _) = ()
 extractAnnotation (ITE _ x _) = extractAnnotation x
 extractAnnotation (Select arr _) = snd (extractAnnotation arr)
 extractAnnotation (Store arr _ _) = extractAnnotation arr
