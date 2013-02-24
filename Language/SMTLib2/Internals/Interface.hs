@@ -354,7 +354,7 @@ bvashr = curry $ App BVASHR
 -- | Concats two bitvectors into one.
 bvconcat :: (Concatable t1 t2,t3 ~ ConcatResult t1 t2)
             => SMTExpr t1 -> SMTExpr t2 -> SMTExpr t3
-bvconcat = BVConcat
+bvconcat = curry $ App BVConcat
 
 -- | Concat a list of bitvectors into one.
 bvconcats :: (SMTType t1,SMTType t2,Concatable t2 t1,t2 ~ ConcatResult t2 t1)

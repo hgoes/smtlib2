@@ -24,7 +24,6 @@ extractAnnotation (Var _ ann) = ann
 extractAnnotation (Const _ ann) = ann
 extractAnnotation (AsArray f arg) = (arg,inferResAnnotation f arg)
 extractAnnotation (ConstArray e ann) = (ann,extractAnnotation e)
-extractAnnotation (BVConcat x y) = concatAnn (getUndef x) (getUndef y) (extractAnnotation x) (extractAnnotation y)
 extractAnnotation (BVExtract _ _ ann _) = ann
 extractAnnotation (Forall _ _) = ()
 extractAnnotation (Exists _ _) = ()
@@ -989,3 +988,15 @@ instance (Args i,SMTType v) => SMTFunction (SMTStore i v) where
   isOverloaded _ = True
   getFunctionSymbol _ _ = L.Symbol "store"
   inferResAnnotation _ ~(ann,_,_) = ann
+
+instance (Concatable t1 t2) => SMTFunction (SMTConcat t1 t2) where
+  type SMTFunArg (SMTConcat t1 t2) = (SMTExpr t1,SMTExpr t2)
+  type SMTFunRes (SMTConcat t1 t2) = ConcatResult t1 t2
+  isOverloaded _ = True
+  getFunctionSymbol _ _ = L.Symbol "concat"
+  inferResAnnotation f ~(ann1,ann2)
+    = withUndef f $
+      \u1 u2 -> concatAnn u1 u2 ann1 ann2
+    where
+      withUndef :: SMTConcat t1 t2 -> (t1 -> t2 -> a) -> a
+      withUndef _ f = f undefined undefined

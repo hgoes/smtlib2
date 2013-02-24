@@ -155,8 +155,6 @@ data SMTExpr t where
              -> SMTExpr (SMTArray (SMTFunArg f) (SMTFunRes f))
   ConstArray :: (Args i,SMTType v) => SMTExpr v -> ArgAnnotation i -> SMTExpr (SMTArray i v)
   BVExtract :: (SMTType t1,SMTType t2,Extractable t1 t2) => Integer -> Integer -> SMTAnnotation t2 -> SMTExpr t1 -> SMTExpr t2
-  BVConcat :: (Concatable t1 t2,t3 ~ ConcatResult t1 t2)
-              => SMTExpr t1 -> SMTExpr t2 -> SMTExpr t3
   BVConcats :: (SMTType t1,SMTType t2,Concatable t2 t1,t2 ~ ConcatResult t2 t1)
                => [SMTExpr t1] -> SMTExpr t2
   BVNot :: SMTExpr t -> SMTExpr t
@@ -264,6 +262,8 @@ data SMTSelect i v = Select deriving (Typeable,Eq)
 
 data SMTStore i v = Store deriving (Typeable,Eq)
 
+data SMTConcat t1 t2 = BVConcat deriving (Typeable,Eq)
+
 instance Eq a => Eq (SMTExpr a) where
   (==) = eqExpr 0
 
@@ -278,7 +278,6 @@ eqExpr n lhs rhs = case (lhs,rhs) of
       Just arg2' -> f1 == f2' && arg1 == arg2'
   (ConstArray c1 _,ConstArray c2 _) -> eqExpr' n c1 c2
   (BVExtract l1 u1 _ e1,BVExtract l2 u2 _ e2) -> l1 == l2 && u1 == u2 && eqExpr' n e1 e2
-  (BVConcat l1 r1,BVConcat l2 r2) -> eqExpr' n l1 l2 && eqExpr' n r1 r2
   (BVConcats x,BVConcats y) -> eqExprs' n x y
   (BVNot x,BVNot y) -> eqExpr n x y
   (Forall a1 f1,Forall a2 f2) -> let name i = T.pack $ "internal_eq_check"++show i
