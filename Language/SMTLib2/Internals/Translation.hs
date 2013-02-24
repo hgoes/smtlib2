@@ -135,11 +135,6 @@ exprToLisp (App fun x) c = let arg_ann = extractArgAnnotation x
                            in if Prelude.null x'
                               then (l,c1)
                               else (L.List $ l:x',c1)
-exprToLisp (ConTest (Constructor name) e) c = let (e',c') = exprToLisp e c
-                                              in (L.List [L.Symbol $ T.append "is-" name
-                                                         ,e'],c')
-exprToLisp (FieldSel (Field name) e) c = let (e',c') = exprToLisp e c
-                                         in (L.List [L.Symbol name,e'],c')
 exprToLisp (Head xs) c = let (e,c') = exprToLisp xs c
                          in (L.List [L.Symbol "head",e],c')
 exprToLisp (Tail xs) c = let (e,c') = exprToLisp xs c

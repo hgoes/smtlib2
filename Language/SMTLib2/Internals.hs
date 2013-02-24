@@ -157,8 +157,6 @@ data SMTExpr t where
   Exists :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
   Let :: (Args a) => ArgAnnotation a -> a -> (a -> SMTExpr b) -> SMTExpr b
   App :: SMTFunction a => a -> SMTFunArg a -> SMTExpr (SMTFunRes a)
-  ConTest :: SMTType a => Constructor a -> SMTExpr a -> SMTExpr Bool
-  FieldSel :: (SMTRecordType a,SMTType f) => Field a f -> SMTExpr a -> SMTExpr f
   Head :: SMTExpr [a] -> SMTExpr a
   Tail :: SMTExpr [a] -> SMTExpr [a]
   Insert :: SMTExpr a -> SMTExpr [a] -> SMTExpr [a]
@@ -268,6 +266,10 @@ data SMTConcat t1 t2 = BVConcat deriving (Typeable,Eq)
 
 data SMTExtract t1 t2 = BVExtract Integer Integer deriving (Typeable,Eq)
 
+data SMTConTest a = ConTest (Constructor a) deriving (Typeable,Eq)
+
+data SMTFieldSel a f = FieldSel (Field a f) deriving (Typeable,Eq)
+
 instance Eq a => Eq (SMTExpr a) where
   (==) = eqExpr 0
 
@@ -291,10 +293,6 @@ eqExpr n lhs rhs = case (lhs,rhs) of
                                    Nothing -> False
                                    Just f2' -> eqExpr n' (f1 v) (f2' v)
   (Let a1 x1 f1,Let a2 x2 f2) -> eqExpr n (f1 x1) (f2 x2)
-  (ConTest c1 e1,ConTest c2 e2) -> case gcast c2 of
-    Nothing -> False
-    Just c2' -> c1 == c2' && eqExpr' n e1 e2
-  (FieldSel (Field f1) e1,FieldSel (Field f2) e2) -> f1 == f2 && eqExpr' n e1 e2
   (Head x,Head y) -> eqExpr n x y
   (Tail x,Tail y) -> eqExpr n x y
   -- This doesn't work for unknown reasons

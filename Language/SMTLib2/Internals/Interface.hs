@@ -443,11 +443,11 @@ existsList l = Exists (genericReplicate l unit)
 
 -- | Checks if the expression is formed a specific constructor.
 is :: SMTType a => SMTExpr a -> Constructor a -> SMTExpr Bool
-is e con = ConTest con e
+is e con = App (ConTest con) e
 
 -- | Access a field of an expression
 (.#) :: (SMTRecordType a,SMTType f) => SMTExpr a -> Field a f -> SMTExpr f
-(.#) e f = FieldSel f e
+(.#) e f = App (FieldSel f) e
 
 -- | Takes the first element of a list
 head' :: SMTExpr [a] -> SMTExpr a

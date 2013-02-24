@@ -26,7 +26,6 @@ extractAnnotation (AsArray f arg) = (arg,inferResAnnotation f arg)
 extractAnnotation (Forall _ _) = ()
 extractAnnotation (Exists _ _) = ()
 extractAnnotation (Let _ x f) = extractAnnotation (f x)
-extractAnnotation (ConTest _ _) = ()
 extractAnnotation (Head x) = extractAnnotation x
 extractAnnotation (Tail x) = extractAnnotation x
 extractAnnotation (Insert _ x) = extractAnnotation x
@@ -35,7 +34,6 @@ extractAnnotation (InternalFun _) = error "Internal smtlib2 error: extractAnnota
 --extractAnnotation (App (SMTFun _ _ ann) _) = ann
 extractAnnotation (App f arg) = inferResAnnotation f (extractArgAnnotation arg)
 extractAnnotation Undefined = error "Internal smtlib2 error: extractAnnotation called on Undefined."
-extractAnnotation (FieldSel field expr) = getFieldAnn field (extractAnnotation expr)
 
 -- Bool
 
@@ -1034,3 +1032,19 @@ instance (Extractable t1 t2) => SMTFunction (SMTExtract t1 t2) where
     where
       withUndef :: SMTExtract t1 t2 -> (t1 -> t2 -> a) -> a
       withUndef _ f = f undefined undefined
+
+instance SMTType a => SMTFunction (SMTConTest a) where
+  type SMTFunArg (SMTConTest a) = SMTExpr a
+  type SMTFunRes (SMTConTest a) = Bool
+  isOverloaded _ = False
+  getFunctionSymbol (ConTest (Constructor name)) _
+    = L.Symbol $ T.append "is-" name
+  inferResAnnotation _ _ = ()
+
+instance (SMTRecordType a,SMTType f) => SMTFunction (SMTFieldSel a f) where
+  type SMTFunArg (SMTFieldSel a f) = SMTExpr a
+  type SMTFunRes (SMTFieldSel a f) = f
+  isOverloaded _ = False
+  getFunctionSymbol (FieldSel (Field name)) _ = L.Symbol name
+  inferResAnnotation (FieldSel field) ann 
+    = getFieldAnn field ann
