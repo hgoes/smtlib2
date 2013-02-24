@@ -35,14 +35,6 @@ extractAnnotation (BVUDiv x _) = extractAnnotation x
 extractAnnotation (BVSDiv x _) = extractAnnotation x
 extractAnnotation (BVConcat x y) = concatAnn (getUndef x) (getUndef y) (extractAnnotation x) (extractAnnotation y)
 extractAnnotation (BVExtract _ _ ann _) = ann
-extractAnnotation (BVULE _ _) = ()
-extractAnnotation (BVULT _ _) = ()
-extractAnnotation (BVUGE _ _) = ()
-extractAnnotation (BVUGT _ _) = ()
-extractAnnotation (BVSLE _ _) = ()
-extractAnnotation (BVSLT _ _) = ()
-extractAnnotation (BVSGE _ _) = ()
-extractAnnotation (BVSGT _ _) = ()
 extractAnnotation (BVSHL x _) = extractAnnotation x
 extractAnnotation (BVLSHR x _) = extractAnnotation x
 extractAnnotation (BVASHR x _) = extractAnnotation x
@@ -305,16 +297,16 @@ instance SMTBV Word8
 instance SMTBV Int8
 
 instance SMTOrd Word8 where
-  (.<.) = BVULT
-  (.<=.) = BVULE
-  (.>.) = BVUGT
-  (.>=.) = BVUGE
+  (.<.) = curry (App BVULT)
+  (.<=.) = curry (App BVULE)
+  (.>.) = curry (App BVUGT)
+  (.>=.) = curry (App BVUGE)
 
 instance SMTOrd Int8 where
-  (.<.) = BVSLT
-  (.<=.) = BVSLE
-  (.>.) = BVSGT
-  (.>=.) = BVSGE
+  (.<.) = curry (App BVSLT)
+  (.<=.) = curry (App BVSLE)
+  (.>.) = curry (App BVSGT)
+  (.>=.) = curry (App BVSGE)
 
 instance SMTType Word16 where
   type SMTAnnotation Word16 = ()
@@ -338,16 +330,16 @@ instance SMTBV Word16
 instance SMTBV Int16
 
 instance SMTOrd Word16 where
-  (.<.) = BVULT
-  (.<=.) = BVULE
-  (.>.) = BVUGT
-  (.>=.) = BVUGE
+  (.<.) = curry (App BVULT)
+  (.<=.) = curry (App BVULE)
+  (.>.) = curry (App BVUGT)
+  (.>=.) = curry (App BVUGE)
 
 instance SMTOrd Int16 where
-  (.<.) = BVSLT
-  (.<=.) = BVSLE
-  (.>.) = BVSGT
-  (.>=.) = BVSGE
+  (.<.) = curry (App BVSLT)
+  (.<=.) = curry (App BVSLE)
+  (.>.) = curry (App BVSGT)
+  (.>=.) = curry (App BVSGE)
 
 instance SMTType Word32 where
   type SMTAnnotation Word32 = ()
@@ -371,16 +363,16 @@ instance SMTBV Word32
 instance SMTBV Int32
 
 instance SMTOrd Word32 where
-  (.<.) = BVULT
-  (.<=.) = BVULE
-  (.>.) = BVUGT
-  (.>=.) = BVUGE
+  (.<.) = curry (App BVULT)
+  (.<=.) = curry (App BVULE)
+  (.>.) = curry (App BVUGT)
+  (.>=.) = curry (App BVUGE)
 
 instance SMTOrd Int32 where
-  (.<.) = BVSLT
-  (.<=.) = BVSLE
-  (.>.) = BVSGT
-  (.>=.) = BVSGE
+  (.<.) = curry (App BVSLT)
+  (.<=.) = curry (App BVSLE)
+  (.>.) = curry (App BVSGT)
+  (.>=.) = curry (App BVSGE)
 
 instance SMTType Word64 where
   type SMTAnnotation Word64 = ()
@@ -404,16 +396,16 @@ instance SMTBV Word64
 instance SMTBV Int64
 
 instance SMTOrd Word64 where
-  (.<.) = BVULT
-  (.<=.) = BVULE
-  (.>.) = BVUGT
-  (.>=.) = BVUGE
+  (.<.) = curry (App BVULT)
+  (.<=.) = curry (App BVULE)
+  (.>.) = curry (App BVUGT)
+  (.>=.) = curry (App BVUGE)
 
 instance SMTOrd Int64 where
-  (.<.) = BVSLT
-  (.<=.) = BVSLE
-  (.>.) = BVSGT
-  (.>=.) = BVSGE
+  (.<.) = curry (App BVSLT)
+  (.<=.) = curry (App BVSLE)
+  (.>.) = curry (App BVSGT)
+  (.>=.) = curry (App BVSGE)
 
 instance Num (SMTExpr Word8) where
   fromInteger x = Const (fromInteger x) ()
@@ -428,8 +420,8 @@ instance Num (SMTExpr Int8) where
   (+) = BVAdd
   (-) = BVSub
   (*) = BVMul
-  abs x = App ITE (BVSGE x (Const 0 ()),x,BVSub (Const 0 ()) x)
-  signum x = App ITE (BVSGE x (Const 0 ()),Const 1 (),Const (-1) ())
+  abs x = App ITE (App BVSGE (x,Const 0 ()),x,BVSub (Const 0 ()) x)
+  signum x = App ITE (App BVSGE (x,Const 0 ()),Const 1 (),Const (-1) ())
 
 instance Num (SMTExpr Word16) where
   fromInteger x = Const (fromInteger x) ()
@@ -444,8 +436,8 @@ instance Num (SMTExpr Int16) where
   (+) = BVAdd
   (-) = BVSub
   (*) = BVMul
-  abs x = App ITE (BVSGE x (Const 0 ()),x,BVSub (Const 0 ()) x)
-  signum x = App ITE (BVSGE x (Const 0 ()),Const 1 (),Const (-1) ())
+  abs x = App ITE (App BVSGE (x,Const 0 ()),x,BVSub (Const 0 ()) x)
+  signum x = App ITE (App BVSGE (x,Const 0 ()),Const 1 (),Const (-1) ())
 
 instance Num (SMTExpr Word32) where
   fromInteger x = Const (fromInteger x) ()
@@ -460,8 +452,8 @@ instance Num (SMTExpr Int32) where
   (+) = BVAdd
   (-) = BVSub
   (*) = BVMul
-  abs x = App ITE (BVSGE x (Const 0 ()),x,BVSub (Const 0 ()) x)
-  signum x = App ITE (BVSGE x (Const 0 ()),Const 1 (),Const (-1) ())
+  abs x = App ITE (App BVSGE (x,Const 0 ()),x,BVSub (Const 0 ()) x)
+  signum x = App ITE (App BVSGE (x,Const 0 ()),Const 1 (),Const (-1) ())
 
 instance Num (SMTExpr Word64) where
   fromInteger x = Const (fromInteger x) ()
@@ -476,8 +468,8 @@ instance Num (SMTExpr Int64) where
   (+) = BVAdd
   (-) = BVSub
   (*) = BVMul
-  abs x = App ITE (BVSGE x (Const 0 ()),x,BVSub (Const 0 ()) x)
-  signum x = App ITE (BVSGE x (Const 0 ()),Const 1 (),Const (-1) ())
+  abs x = App ITE (App BVSGE (x,Const 0 ()),x,BVSub (Const 0 ()) x)
+  signum x = App ITE (App BVSGE (x,Const 0 ()),Const 1 (),Const (-1) ())
 
 -- Arguments
 
@@ -965,3 +957,16 @@ instance SMTType a => SMTFunction (SMTITE a) where
   isOverloaded _ = True
   getFunctionSymbol _ _ = L.Symbol "ite"
   inferResAnnotation _ ~(_,ann,_) = ann
+
+instance SMTBV a => SMTFunction (SMTBVComp a) where
+  type SMTFunArg (SMTBVComp a) = (SMTExpr a,SMTExpr a)
+  type SMTFunRes (SMTBVComp a) = Bool
+  isOverloaded _ = True
+  getFunctionSymbol BVULE _ = L.Symbol "bvule"
+  getFunctionSymbol BVULT _ = L.Symbol "bvult"
+  getFunctionSymbol BVUGE _ = L.Symbol "bvuge"
+  getFunctionSymbol BVUGT _ = L.Symbol "bvugt"
+  getFunctionSymbol BVSLE _ = L.Symbol "bvsle"
+  getFunctionSymbol BVSLT _ = L.Symbol "bvslt"
+  getFunctionSymbol BVSGE _ = L.Symbol "bvsge"
+  getFunctionSymbol BVSGT _ = L.Symbol "bvsgt"

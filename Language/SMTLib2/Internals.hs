@@ -163,14 +163,6 @@ data SMTExpr t where
   BVSRem :: SMTExpr t -> SMTExpr t -> SMTExpr t
   BVUDiv :: SMTExpr t -> SMTExpr t -> SMTExpr t
   BVSDiv :: SMTExpr t -> SMTExpr t -> SMTExpr t
-  BVULE :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-  BVULT :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-  BVUGE :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-  BVUGT :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-  BVSLE :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-  BVSLT :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-  BVSGE :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-  BVSGT :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
   BVSHL :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr t
   BVLSHR :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr t
   BVASHR :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr t
@@ -258,6 +250,17 @@ data SMTToInt = ToInt deriving (Typeable,Eq)
 
 data SMTITE a = ITE deriving (Typeable,Eq)
 
+data SMTBVComp a = BVULE
+                 | BVULT
+                 | BVUGE
+                 | BVUGT
+                 | BVSLE
+                 | BVSLT
+                 | BVSGE
+                 | BVSGT
+                 deriving (Typeable,Eq)
+
+
 instance Eq a => Eq (SMTExpr a) where
   (==) = eqExpr 0
 
@@ -292,14 +295,6 @@ eqExpr n lhs rhs = case (lhs,rhs) of
                                  eqExpr n r1 r2
   (BVSDiv l1 r1,BVSDiv l2 r2) -> eqExpr n l1 l2 &&
                                  eqExpr n r1 r2
-  (BVULE l1 r1,BVULE l2 r2) -> eqExpr' n l1 l2 && eqExpr' n r1 r2
-  (BVULT l1 r1,BVULT l2 r2) -> eqExpr' n l1 l2 && eqExpr' n r1 r2
-  (BVUGE l1 r1,BVUGE l2 r2) -> eqExpr' n l1 l2 && eqExpr' n r1 r2
-  (BVUGT l1 r1,BVUGT l2 r2) -> eqExpr' n l1 l2 && eqExpr' n r1 r2
-  (BVSLE l1 r1,BVSLE l2 r2) -> eqExpr' n l1 l2 && eqExpr' n r1 r2
-  (BVSLT l1 r1,BVSLT l2 r2) -> eqExpr' n l1 l2 && eqExpr' n r1 r2
-  (BVSGE l1 r1,BVSGE l2 r2) -> eqExpr' n l1 l2 && eqExpr' n r1 r2
-  (BVSGT l1 r1,BVSGT l2 r2) -> eqExpr' n l1 l2 && eqExpr' n r1 r2
   (BVSHL l1 r1,BVSHL l2 r2) -> eqExpr' n l1 l2 && eqExpr n r1 r2
   (BVExtract l1 u1 _ e1,BVExtract l2 u2 _ e2) -> l1 == l2 && u1 == u2 && eqExpr' n e1 e2
   (BVConcat l1 r1,BVConcat l2 r2) -> eqExpr' n l1 l2 && eqExpr' n r1 r2

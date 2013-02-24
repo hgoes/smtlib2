@@ -136,30 +136,6 @@ exprToLisp (BVUDiv l r) c = let (l',c') = exprToLisp l c
 exprToLisp (BVSDiv l r) c = let (l',c') = exprToLisp l c
                                 (r',c'') = exprToLisp r c'
                             in (L.List [L.Symbol "bvsdiv",l',r'],c'')
-exprToLisp (BVULE l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvule",l',r'],c'')
-exprToLisp (BVULT l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvult",l',r'],c'')
-exprToLisp (BVUGE l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvuge",l',r'],c'')
-exprToLisp (BVUGT l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvugt",l',r'],c'')
-exprToLisp (BVSLE l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvsle",l',r'],c'')
-exprToLisp (BVSLT l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvslt",l',r'],c'')
-exprToLisp (BVSGE l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvsge",l',r'],c'')
-exprToLisp (BVSGT l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvsgt",l',r'],c'')
 exprToLisp (BVSHL l r) c = let (l',c') = exprToLisp l c
                                (r',c'') = exprToLisp r c'
                            in (L.List [L.Symbol "bvshl",l',r'],c'')
@@ -372,14 +348,22 @@ lispToExprU f bound tps g l
         L.List (L.Symbol "=>":arg) 
           -> Just $ f $ App Implies $ fmap (lispToExprT bound tps () g) arg
         L.List [L.Symbol "not",arg] -> Just $ f $ App Not (lispToExprT bound tps () g arg :: SMTExpr Bool)
-        L.List [L.Symbol "bvule",lhs,rhs] -> Just $ f $ binBV BVULE bound tps g lhs rhs
-        L.List [L.Symbol "bvult",lhs,rhs] -> Just $ f $ binBV BVULT bound tps g lhs rhs
-        L.List [L.Symbol "bvuge",lhs,rhs] -> Just $ f $ binBV BVUGE bound tps g lhs rhs
-        L.List [L.Symbol "bvugt",lhs,rhs] -> Just $ f $ binBV BVUGT bound tps g lhs rhs
-        L.List [L.Symbol "bvsle",lhs,rhs] -> Just $ f $ binBV BVSLE bound tps g lhs rhs
-        L.List [L.Symbol "bvslt",lhs,rhs] -> Just $ f $ binBV BVSLT bound tps g lhs rhs
-        L.List [L.Symbol "bvsge",lhs,rhs] -> Just $ f $ binBV BVSGE bound tps g lhs rhs
-        L.List [L.Symbol "bvsgt",lhs,rhs] -> Just $ f $ binBV BVSGT bound tps g lhs rhs
+        L.List [L.Symbol "bvule",lhs,rhs] 
+          -> Just $ f $ binBV (curry $ App BVULE) bound tps g lhs rhs
+        L.List [L.Symbol "bvult",lhs,rhs]
+          -> Just $ f $ binBV (curry $ App BVULT) bound tps g lhs rhs
+        L.List [L.Symbol "bvuge",lhs,rhs]
+          -> Just $ f $ binBV (curry $ App BVUGE) bound tps g lhs rhs
+        L.List [L.Symbol "bvugt",lhs,rhs]
+          -> Just $ f $ binBV (curry $ App BVUGT) bound tps g lhs rhs
+        L.List [L.Symbol "bvsle",lhs,rhs]
+          -> Just $ f $ binBV (curry $ App BVSLE) bound tps g lhs rhs
+        L.List [L.Symbol "bvslt",lhs,rhs]
+          -> Just $ f $ binBV (curry $ App BVSLT) bound tps g lhs rhs
+        L.List [L.Symbol "bvsge",lhs,rhs]
+          -> Just $ f $ binBV (curry $ App BVSGE) bound tps g lhs rhs
+        L.List [L.Symbol "bvsgt",lhs,rhs]
+          -> Just $ f $ binBV (curry $ App BVSGT) bound tps g lhs rhs
         L.List [L.Symbol "forall",L.List args,body] -> Just $ f $ quantToExpr Forall bound tps g args body
         L.List [L.Symbol "exists",L.List args,body] -> Just $ f $ quantToExpr Exists bound tps g args body
         L.List [L.Symbol "let",L.List args,body] -> Just $ convertLetStruct f (parseLetStruct bound tps g args body)
@@ -582,14 +566,22 @@ lispToExprT bound tps ann g l
                   Nothing -> error $ "Failed to parse expression "++show l
          L.List [L.Symbol "not",arg] -> fgcast l $ App Not $ lispToExprT bound tps () g arg
          L.List [L.Symbol "let",L.List syms,arg] -> letToExpr bound tps g ann syms arg
-         L.List [L.Symbol "bvule",lhs,rhs] -> fgcast l $ binBV BVULE bound tps g lhs rhs
-         L.List [L.Symbol "bvult",lhs,rhs] -> fgcast l $ binBV BVULT bound tps g lhs rhs
-         L.List [L.Symbol "bvuge",lhs,rhs] -> fgcast l $ binBV BVUGE bound tps g lhs rhs
-         L.List [L.Symbol "bvugt",lhs,rhs] -> fgcast l $ binBV BVUGT bound tps g lhs rhs
-         L.List [L.Symbol "bvsle",lhs,rhs] -> fgcast l $ binBV BVSLE bound tps g lhs rhs
-         L.List [L.Symbol "bvslt",lhs,rhs] -> fgcast l $ binBV BVSLT bound tps g lhs rhs
-         L.List [L.Symbol "bvsge",lhs,rhs] -> fgcast l $ binBV BVSGE bound tps g lhs rhs
-         L.List [L.Symbol "bvsgt",lhs,rhs] -> fgcast l $ binBV BVSGT bound tps g lhs rhs
+         L.List [L.Symbol "bvule",lhs,rhs]
+           -> fgcast l $ binBV (curry $ App BVULE) bound tps g lhs rhs
+         L.List [L.Symbol "bvult",lhs,rhs]
+           -> fgcast l $ binBV (curry $ App BVULT) bound tps g lhs rhs
+         L.List [L.Symbol "bvuge",lhs,rhs]
+           -> fgcast l $ binBV (curry $ App BVUGE) bound tps g lhs rhs
+         L.List [L.Symbol "bvugt",lhs,rhs]
+           -> fgcast l $ binBV (curry $ App BVUGT) bound tps g lhs rhs
+         L.List [L.Symbol "bvsle",lhs,rhs]
+           -> fgcast l $ binBV (curry $ App BVSLE) bound tps g lhs rhs
+         L.List [L.Symbol "bvslt",lhs,rhs]
+           -> fgcast l $ binBV (curry $ App BVSLT) bound tps g lhs rhs
+         L.List [L.Symbol "bvsge",lhs,rhs]
+           -> fgcast l $ binBV (curry $ App BVSGE) bound tps g lhs rhs
+         L.List [L.Symbol "bvsgt",lhs,rhs]
+           -> fgcast l $ binBV (curry $ App BVSGT) bound tps g lhs rhs
          L.List [L.Symbol "forall",L.List vars,body] -> fgcast l $ quantToExpr Forall bound tps g vars body
          L.List [L.Symbol "exists",L.List vars,body] -> fgcast l $ quantToExpr Exists bound tps g vars body
          L.List (L.Symbol fn:arg) -> fnToExpr (fgcast l) bound tps g fn arg

@@ -309,35 +309,35 @@ bvsrem = BVSRem
 
 -- | Bitvector unsigned less-or-equal
 bvule :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvule = BVULE
+bvule = curry $ App BVULE
 
 -- | Bitvector unsigned less-than
 bvult :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvult = BVULT
+bvult = curry $ App BVULT
 
 -- | Bitvector unsigned greater-or-equal
 bvuge :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvuge = BVUGE
+bvuge = curry $ App BVUGE
 
 -- | Bitvector unsigned greater-than
 bvugt :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvugt = BVUGT
+bvugt = curry $ App BVUGT
 
 -- | Bitvector signed less-or-equal
 bvsle :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvsle = BVSLE
+bvsle = curry $ App BVSLE
 
 -- | Bitvector signed less-than
 bvslt :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvslt = BVSLT
+bvslt = curry $ App BVSLT
 
 -- | Bitvector signed greater-or-equal
 bvsge :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvsge = BVSGE
+bvsge = curry $ App BVSGE
 
 -- | Bitvector signed greater-than
 bvsgt :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvsgt = BVSGT
+bvsgt = curry $ App BVSGT
 
 -- | Bitvector shift left
 bvshl :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
