@@ -150,9 +150,6 @@ instance (Monoid w, MonadSMT m) => MonadSMT (Strict.WriterT w m) where
 data SMTExpr t where
   Var :: SMTType t => Text -> SMTAnnotation t -> SMTExpr t
   Const :: SMTValue t => t -> SMTAnnotation t -> SMTExpr t
-  Distinct :: SMTType a => [SMTExpr a] -> SMTExpr Bool
-  ToReal :: SMTExpr Integer -> SMTExpr Rational
-  ToInt :: SMTExpr Rational -> SMTExpr Integer
   ITE :: SMTType t => SMTExpr Bool -> SMTExpr t -> SMTExpr t -> SMTExpr t
   Select :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v
   Store :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v -> SMTExpr (SMTArray i v)
@@ -254,6 +251,12 @@ data SMTLogic = And
               | Implies
               deriving (Typeable,Eq)
 
+data SMTDistinct a = Distinct deriving (Typeable,Eq)
+
+data SMTToReal = ToReal deriving (Typeable,Eq)
+
+data SMTToInt = ToInt deriving (Typeable,Eq)
+
 instance Eq a => Eq (SMTExpr a) where
   (==) = eqExpr 0
 
@@ -261,9 +264,6 @@ eqExpr :: Integer -> SMTExpr a -> SMTExpr a -> Bool
 eqExpr n lhs rhs = case (lhs,rhs) of
   (Var v1 _,Var v2 _) -> v1 == v2
   (Const v1 _,Const v2 _) -> v1 == v2
-  (Distinct x1,Distinct x2) -> eqExprs' n x1 x2
-  (ToReal x,ToReal y) -> eqExpr n x y
-  (ToInt x,ToInt y) -> eqExpr n x y
   (ITE c1 l1 r1,ITE c2 l2 r2) -> eqExpr n c1 c2 &&
                                  eqExpr' n l1 l2 && 
                                  eqExpr' n r1 r2

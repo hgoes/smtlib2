@@ -177,7 +177,7 @@ infix 4 .==.
 
 -- | Declares all arguments to be distinct
 distinct :: SMTType a => [SMTExpr a] -> SMTExpr Bool
-distinct = Distinct
+distinct = App Distinct
 
 -- | Calculate the sum of arithmetic expressions
 plus :: (SMTArith a) => SMTArithOp a
@@ -225,11 +225,11 @@ neg = Neg
 
 -- | Convert an integer expression to a real expression
 toReal :: SMTExpr Integer -> SMTExpr Rational
-toReal = ToReal
+toReal = App ToReal
 
 -- | Convert a real expression into an integer expression
 toInt :: SMTExpr Rational -> SMTExpr Integer
-toInt = ToInt
+toInt = App ToInt
 
 -- | If-then-else construct
 ite :: (SMTType a) => SMTExpr Bool -- ^ If this expression is true

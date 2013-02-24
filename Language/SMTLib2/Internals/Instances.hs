@@ -22,7 +22,6 @@ import Data.Traversable
 extractAnnotation :: SMTExpr a -> SMTAnnotation a
 extractAnnotation (Var _ ann) = ann
 extractAnnotation (Const _ ann) = ann
-extractAnnotation (Distinct _) = ()
 extractAnnotation (ITE _ x _) = extractAnnotation x
 extractAnnotation (Select arr _) = snd (extractAnnotation arr)
 extractAnnotation (Store arr _ _) = extractAnnotation arr
@@ -939,3 +938,24 @@ instance (Args a,SMTType r) => SMTFunction (SMTFun a r) where
   isOverloaded _ = False
   getFunctionSymbol (SMTFun name _ _) _ = L.Symbol name
   inferResAnnotation (SMTFun _ _ r) _ = r
+
+instance SMTType a => SMTFunction (SMTDistinct a) where
+  type SMTFunArg (SMTDistinct a) = [SMTExpr a]
+  type SMTFunRes (SMTDistinct a) = Bool
+  isOverloaded _ = True
+  getFunctionSymbol _ _ = L.Symbol "distinct"
+  inferResAnnotation _ _ = ()
+
+instance SMTFunction SMTToReal where
+  type SMTFunArg SMTToReal = SMTExpr Integer
+  type SMTFunRes SMTToReal = Rational
+  isOverloaded _ = False
+  getFunctionSymbol _ _ = L.Symbol "to_real"
+  inferResAnnotation _ _ = ()
+
+instance SMTFunction SMTToInt where
+  type SMTFunArg SMTToInt = SMTExpr Rational
+  type SMTFunRes SMTToInt = Integer
+  isOverloaded _ = False
+  getFunctionSymbol _ _ = L.Symbol "to_int"
+  inferResAnnotation _ _ = ()
