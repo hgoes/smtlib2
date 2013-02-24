@@ -285,7 +285,7 @@ bvor = curry $ App BVOr
 
 -- | Bitvector not
 bvnot :: SMTBV t => SMTExpr t -> SMTExpr t
-bvnot = BVNot
+bvnot = App BVNot
 
 -- | Bitvector addition
 bvadd :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t

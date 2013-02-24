@@ -974,6 +974,13 @@ instance SMTBV a => SMTFunction (SMTBVBinOp a) where
   getFunctionSymbol BVOr _ = L.Symbol "bvor"
   inferResAnnotation _ ~(ann,_) = ann
 
+instance SMTBV a => SMTFunction (SMTBVNot a) where
+  type SMTFunArg (SMTBVNot a) = SMTExpr a
+  type SMTFunRes (SMTBVNot a) = a
+  isOverloaded _ = True
+  getFunctionSymbol _ _ = L.Symbol "bvnot"
+  inferResAnnotation _ x = x
+
 instance (Args i,SMTType v) => SMTFunction (SMTSelect i v) where
   type SMTFunArg (SMTSelect i v) = (SMTExpr (SMTArray i v),i)
   type SMTFunRes (SMTSelect i v) = v
