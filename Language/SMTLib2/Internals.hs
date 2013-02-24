@@ -3,14 +3,14 @@ module Language.SMTLib2.Internals where
 
 import Data.Attoparsec
 import qualified Data.AttoLisp as L
-import Data.ByteString as BS
+import Data.ByteString as BS hiding (reverse)
 import Blaze.ByteString.Builder
 import System.Process
 import System.IO as IO
 import Data.Monoid
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.Text as T
+import Data.Text as T hiding (reverse)
 import Data.Typeable
 import Data.Map as Map hiding (assocs)
 import Data.Set as Set
@@ -29,7 +29,8 @@ import Control.Monad.Writer.Lazy as Lazy (WriterT)
 import Control.Monad.Writer.Strict as Strict (WriterT)
 
 -- | Haskell types which can be represented in SMT
-class (Eq t,Typeable t,Typeable (SMTAnnotation t)) => SMTType t where
+class (Eq t,Typeable t,Eq (SMTAnnotation t),Typeable (SMTAnnotation t)) 
+      => SMTType t where
   type SMTAnnotation t
   getSort :: t -> SMTAnnotation t -> L.Lisp
   getSort u _ = getSortBase u
@@ -61,9 +62,6 @@ class (SMTType t) => SMTOrd t where
   (.<=.) :: SMTExpr t -> SMTExpr t -> SMTExpr Bool
 
 infix 4 .<., .<=., .>=., .>.
-
--- | Represents a function in the SMT solver. /a/ is the argument of the function in SMT terms, /b/ is the argument in haskell types and /r/ is the result type of the function.
-data SMTFun a r = SMTFun deriving (Eq,Typeable)
 
 -- | An array which maps indices of type /i/ to elements of type /v/.
 data SMTArray i v = SMTArray deriving (Eq,Typeable)
@@ -152,32 +150,15 @@ instance (Monoid w, MonadSMT m) => MonadSMT (Strict.WriterT w m) where
 data SMTExpr t where
   Var :: SMTType t => Text -> SMTAnnotation t -> SMTExpr t
   Const :: SMTValue t => t -> SMTAnnotation t -> SMTExpr t
-  Eq :: SMTType a => SMTExpr (SMTFun (SMTExpr a,SMTExpr a) Bool)
-  Ge :: (Num a,SMTType a) => SMTExpr (SMTFun (SMTExpr a,SMTExpr a) Bool)
-  Gt :: (Num a,SMTType a) => SMTExpr (SMTFun (SMTExpr a,SMTExpr a) Bool)
-  Le :: (Num a,SMTType a) => SMTExpr (SMTFun (SMTExpr a,SMTExpr a) Bool)
-  Lt :: (Num a,SMTType a) => SMTExpr (SMTFun (SMTExpr a,SMTExpr a) Bool)
   Distinct :: SMTType a => [SMTExpr a] -> SMTExpr Bool
-  Plus :: SMTArith t => SMTExpr (SMTFun (SMTExpr t,SMTExpr t) t)
-  Minus :: SMTArith t => SMTExpr (SMTFun (SMTExpr t,SMTExpr t) t)
-  Mult :: SMTArith t => SMTExpr (SMTFun (SMTExpr t,SMTExpr t) t)
-  Div :: SMTExpr (SMTFun (SMTExpr Integer,SMTExpr Integer) Integer)
-  Mod :: SMTExpr (SMTFun (SMTExpr Integer,SMTExpr Integer) Integer)
-  Rem :: SMTExpr (SMTFun (SMTExpr Integer,SMTExpr Integer) Integer)
-  Divide :: SMTExpr (SMTFun (SMTExpr Rational,SMTExpr Rational) Rational)
-  Neg :: SMTArith t => SMTExpr (SMTFun (SMTExpr t) t)
-  Abs :: SMTExpr (SMTFun (SMTExpr Integer) Integer)
   ToReal :: SMTExpr Integer -> SMTExpr Rational
   ToInt :: SMTExpr Rational -> SMTExpr Integer
   ITE :: SMTType t => SMTExpr Bool -> SMTExpr t -> SMTExpr t -> SMTExpr t
-  And :: SMTExpr (SMTFun (SMTExpr Bool,SMTExpr Bool) Bool)
-  Or :: SMTExpr (SMTFun (SMTExpr Bool,SMTExpr Bool) Bool)
-  XOr :: SMTExpr (SMTFun (SMTExpr Bool,SMTExpr Bool) Bool)
-  Implies :: SMTExpr (SMTFun (SMTExpr Bool,SMTExpr Bool) Bool)
-  Not :: SMTExpr (SMTFun (SMTExpr Bool) Bool)
   Select :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v
   Store :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v -> SMTExpr (SMTArray i v)
-  AsArray :: (Args i,SMTType v) => SMTExpr (SMTFun i v) -> SMTExpr (SMTArray i v)
+  AsArray :: (SMTFunction f) 
+             => f -> ArgAnnotation (SMTFunArg f)
+             -> SMTExpr (SMTArray (SMTFunArg f) (SMTFunRes f))
   ConstArray :: (Args i,SMTType v) => SMTExpr v -> ArgAnnotation i -> SMTExpr (SMTArray i v)
   BVAdd :: SMTExpr t -> SMTExpr t -> SMTExpr t
   BVSub :: SMTExpr t -> SMTExpr t -> SMTExpr t
@@ -209,9 +190,7 @@ data SMTExpr t where
   Forall :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
   Exists :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
   Let :: (Args a) => ArgAnnotation a -> a -> (a -> SMTExpr b) -> SMTExpr b
-  Fun :: (Args a,SMTType r) => Text -> ArgAnnotation a -> SMTAnnotation r -> SMTExpr (SMTFun a r)
-  App :: (Args a,SMTType r) => SMTExpr (SMTFun a r) -> a -> SMTExpr r
-  Map :: (Mapable a i,SMTAnnotation (SMTArray i r) ~ (ArgAnnotation i,SMTAnnotation r),Typeable r) => SMTExpr (SMTFun a r) -> ArgAnnotation i -> SMTExpr (SMTFun (MapArgument a i) (SMTArray i r))
+  App :: SMTFunction a => a -> SMTFunArg a -> SMTExpr (SMTFunRes a)
   ConTest :: SMTType a => Constructor a -> SMTExpr a -> SMTExpr Bool
   FieldSel :: (SMTRecordType a,SMTType f) => Field a f -> SMTExpr a -> SMTExpr f
   Head :: SMTExpr [a] -> SMTExpr a
@@ -222,6 +201,59 @@ data SMTExpr t where
   Undefined :: SMTExpr a
   deriving Typeable
 
+class (Args (SMTFunArg a),
+       SMTType (SMTFunRes a),
+       Typeable a,Eq a)
+      => SMTFunction a where
+  type SMTFunArg a
+  type SMTFunRes a
+  isOverloaded :: a -> Bool
+  getFunctionSymbol :: a -> ArgAnnotation (SMTFunArg a) -> L.Lisp
+  inferResAnnotation :: a -> ArgAnnotation (SMTFunArg a)
+                        -> SMTAnnotation (SMTFunRes a)
+
+data SMTEq a = Eq Integer deriving (Typeable,Eq)
+
+data SMTMap f a i r = SMTMap f deriving (Typeable,Eq)
+
+-- | Represents a function in the SMT solver. /a/ is the argument of the function in SMT terms, /b/ is the argument in haskell types and /r/ is the result type of the function.
+data SMTFun a r = SMTFun T.Text (ArgAnnotation a) (SMTAnnotation r)
+                   deriving (Typeable)
+
+instance (Args a,SMTType r) => Eq (SMTFun a r) where
+  (==) (SMTFun n1 a1 r1) (SMTFun n2 a2 r2) = n1 == n2 && a1==a2 && r1 == r2
+
+data SMTOrdOp a = Ge
+                | Gt
+                | Le
+                | Lt
+                deriving (Typeable,Eq)
+
+data SMTArithOp a = Plus
+                  | Mult
+                  deriving (Typeable,Eq)
+
+data SMTMinus a = Minus deriving (Typeable,Eq)
+
+data SMTIntArith = Div
+                 | Mod
+                 | Rem
+                 deriving (Typeable,Eq)
+
+data SMTDivide = Divide deriving (Typeable,Eq)
+
+data SMTNeg a = Neg deriving (Typeable,Eq)
+
+data SMTAbs a = Abs deriving (Typeable,Eq)
+
+data SMTNot = Not deriving (Typeable,Eq)
+
+data SMTLogic = And
+              | Or
+              | XOr
+              | Implies
+              deriving (Typeable,Eq)
+
 instance Eq a => Eq (SMTExpr a) where
   (==) = eqExpr 0
 
@@ -229,31 +261,12 @@ eqExpr :: Integer -> SMTExpr a -> SMTExpr a -> Bool
 eqExpr n lhs rhs = case (lhs,rhs) of
   (Var v1 _,Var v2 _) -> v1 == v2
   (Const v1 _,Const v2 _) -> v1 == v2
-  (Eq,Eq) -> True
-  (Ge,Ge) -> True
-  (Gt,Gt) -> True
-  (Le,Le) -> True
-  (Lt,Lt) -> True
   (Distinct x1,Distinct x2) -> eqExprs' n x1 x2
-  (Plus,Plus) -> True
-  (Minus,Minus) -> True
-  (Mult,Mult) -> True
-  (Div,Div) -> True
-  (Mod,Mod) -> True
-  (Rem,Rem) -> True
-  (Divide,Divide) -> True
-  (Neg,Neg) -> True
-  (Abs,Abs) -> True
   (ToReal x,ToReal y) -> eqExpr n x y
   (ToInt x,ToInt y) -> eqExpr n x y
   (ITE c1 l1 r1,ITE c2 l2 r2) -> eqExpr n c1 c2 &&
                                  eqExpr' n l1 l2 && 
                                  eqExpr' n r1 r2
-  (And,And) -> True
-  (Or,Or) -> True
-  (XOr,XOr) -> True
-  (Implies,Implies) -> True
-  (Not,Not) -> True
   (Select a1 i1,Select a2 i2) -> eqExpr' n a1 a2 && 
                                  (case cast i2 of
                                      Nothing -> False
@@ -261,7 +274,11 @@ eqExpr n lhs rhs = case (lhs,rhs) of
   (Store a1 i1 v1,Store a2 i2 v2) -> eqExpr n a1 a2 &&
                                      i1 == i2 &&
                                      eqExpr n v1 v2
-  (AsArray f1,AsArray f2) -> eqExpr' n f1 f2
+  (AsArray f1 arg1,AsArray f2 arg2) -> case cast f2 of
+    Nothing -> False
+    Just f2' -> case cast arg2 of
+      Nothing -> False 
+      Just arg2' -> f1 == f2' && arg1 == arg2'
   (ConstArray c1 _,ConstArray c2 _) -> eqExpr' n c1 c2
   (BVAdd l1 r1,BVAdd l2 r2) -> eqExpr n l1 l2 &&
                                eqExpr n r1 r2
@@ -315,16 +332,11 @@ eqExpr n lhs rhs = case (lhs,rhs) of
   (Named e1 n1,Named e2 n2) -> eqExpr n e1 e2 && n1==n2
   (InternalFun arg1,InternalFun arg2) -> arg1 == arg2
   (Undefined,Undefined) -> True
-  (App f1 arg1,App f2 arg2) -> case gcast f2 of
+  (App f1 arg1,App f2 arg2) -> case cast f2 of
       Nothing -> False
       Just f2' -> case cast arg2 of
         Nothing -> False
-        Just arg2' -> eqExpr n f1 f2' && arg1 == arg2'
-  (Fun name1 _ _,Fun name2 _ _) -> name1 == name2
-  (Map f1 _,Map f2 _) -> case gcast f2 of
-      Nothing -> False
-      Just f2' -> eqExpr n f1 f2'
-  _ -> False
+        Just arg2' -> f1 == f2' && arg1 == arg2'
   where
     eqExpr' :: (Typeable a,Typeable b) => Integer -> SMTExpr a -> SMTExpr b -> Bool
     eqExpr' n lhs rhs = case gcast rhs of
@@ -388,13 +400,16 @@ instance SMTInfo SMTSolverVersion where
       _ -> error "Invalid solver response to 'get-info' version query"
 
 -- | Instances of this class may be used as arguments for constructed functions and quantifiers.
-class (Eq a,Typeable a,Typeable (ArgAnnotation a)) => Args a where
+class (Eq a,Typeable a,Eq (ArgAnnotation a),Typeable (ArgAnnotation a)) 
+      => Args a where
   type ArgAnnotation a
   foldExprs :: (forall t. SMTType t => s -> SMTExpr t -> SMTAnnotation t -> (s,SMTExpr t)) -> s -> a -> ArgAnnotation a -> (s,a)
+  extractArgAnnotation :: a -> ArgAnnotation a
 
 class (Args (MapArgument a i),Args i,Args a) => Mapable a i where
   type MapArgument a i
   getMapArgumentAnn :: a -> i -> ArgAnnotation a -> ArgAnnotation i -> ArgAnnotation (MapArgument a i)
+  inferMapAnnotation :: a -> i -> ArgAnnotation (MapArgument a i) -> (ArgAnnotation i,ArgAnnotation a)
 
 data DeclaredType where
   DeclaredType :: SMTType a => a -> SMTAnnotation a -> DeclaredType
@@ -475,7 +490,7 @@ firstJust (Nothing:xs) = firstJust xs
 getUndef :: SMTExpr t -> t
 getUndef _ = error "Don't evaluate the result of 'getUndef'"
 
-getFunUndef :: Args a => SMTExpr (SMTFun a r) -> (a,r)
+getFunUndef :: (SMTFunction f) => f -> (SMTFunArg f,SMTFunRes f)
 getFunUndef _ = (error "Don't evaluate the first result of 'getFunUndef'",
                  error "Don't evaluate the second result of 'getFunUndef'")
 
@@ -633,3 +648,18 @@ removeLets = removeLets' Map.empty
       Just r -> r
     removeLets' mp (L.List entrs) = L.List $ fmap (removeLets' mp) entrs
     removeLets' _ x = x
+
+argsSignature :: Args a => a -> ArgAnnotation a -> [L.Lisp]
+argsSignature arg ann 
+  = reverse $ fst $ 
+    foldExprs (\sigs e ann -> ((getSort (getUndef e) ann):sigs,e))
+    [] arg ann
+
+functionGetSignature :: (SMTFunction f) 
+                        => f
+                        -> ArgAnnotation (SMTFunArg f) 
+                        -> SMTAnnotation (SMTFunRes f) 
+                        -> ([L.Lisp],L.Lisp)
+functionGetSignature fun arg_ann res_ann 
+  = let (uarg,ures) = getFunUndef fun
+    in (argsSignature uarg arg_ann,getSort ures res_ann)

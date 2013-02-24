@@ -2,7 +2,7 @@
 module Language.SMTLib2.Internals.Translation where
 
 import Language.SMTLib2.Internals
-import Language.SMTLib2.Internals.Instances ()
+import Language.SMTLib2.Internals.Instances (extractAnnotation)
 
 import qualified Data.AttoLisp as L
 import Data.Typeable
@@ -10,6 +10,7 @@ import Data.Text as T hiding (foldl1)
 import Data.Word
 import Data.Array
 import qualified Data.Map as Map (Map,lookup,elems)
+import Data.List (genericLength)
 
 import Data.Unit
 
@@ -48,7 +49,7 @@ getRawValue expr = do
     _ -> error $ "unknown response to get-value: "++show val
 
 -- | Define a new function with a body
-defFun :: (Args a,SMTType r,Unit (ArgAnnotation a),Unit (SMTAnnotation r)) => (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a r))
+defFun :: (Args a,SMTType r,Unit (ArgAnnotation a),Unit (SMTAnnotation r)) => (a -> SMTExpr r) -> SMT (SMTFun a r)
 defFun = defFunAnn unit unit
 
 -- | Define a new constant
@@ -62,7 +63,7 @@ defConstAnn ann e = do
   return $ App f ()
 
 -- | Define a new function with a body and custom type annotations for arguments and result.
-defFunAnnNamed :: (Args a,SMTType r) => String -> ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a r))
+defFunAnnNamed :: (Args a,SMTType r) => String -> ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT (SMTFun a r)
 defFunAnnNamed name ann_arg ann_res f = do
   fname <- freeName name
   (names,_,_) <- getSMT
@@ -70,7 +71,7 @@ defFunAnnNamed name ann_arg ann_res f = do
         Nothing -> 0
         Just n -> n
 
-      res = Fun fname ann_arg ann_res
+      res = SMTFun fname ann_arg ann_res
       
       (_,rtp) = getFunUndef res
       
@@ -81,11 +82,16 @@ defFunAnnNamed name ann_arg ann_res f = do
   return res
 
 -- | Like `defFunAnnNamed`, but defaults the function name to "fun".
-defFunAnn :: (Args a,SMTType r) => ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT (SMTExpr (SMTFun a r))
+defFunAnn :: (Args a,SMTType r) => ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT (SMTFun a r)
 defFunAnn = defFunAnnNamed "fun"
 
 -- | Extract all values of an array by giving the range of indices.
-unmangleArray :: (LiftArgs i,Ix (Unpacked i),SMTValue v,Unit (SMTAnnotation (Unpacked i)),Unit (ArgAnnotation i)) => (Unpacked i,Unpacked i) -> SMTExpr (SMTArray i v) -> SMT (Array (Unpacked i) v)
+unmangleArray :: (LiftArgs i,Ix (Unpacked i),SMTValue v,
+                  --Unit (SMTAnnotation (Unpacked i)),
+                  Unit (ArgAnnotation i)) 
+                 => (Unpacked i,Unpacked i) 
+                 -> SMTExpr (SMTArray i v) 
+                 -> SMT (Array (Unpacked i) v)
 unmangleArray b expr = mapM (\i -> do
                                 v <- getValue (Select expr (liftArgs i unit))
                                 return (i,v)
@@ -100,22 +106,8 @@ exprsToLisp (e:es) c = let (e',c') = exprToLisp e c
 exprToLisp :: SMTExpr t -> Integer -> (L.Lisp,Integer)
 exprToLisp (Var name _) c = (L.Symbol name,c)
 exprToLisp (Const x ann) c = (mangle x ann,c)
-exprToLisp Eq c = (L.Symbol "=",c)
-exprToLisp Lt c = (L.Symbol "<",c)
-exprToLisp Le c = (L.Symbol "<=",c)
-exprToLisp Gt c = (L.Symbol ">",c)
-exprToLisp Ge c = (L.Symbol ">=",c)
 exprToLisp (Distinct lst) c = let (lst',c') = exprsToLisp lst c
                               in (L.List $ [L.Symbol "distinct"] ++ lst',c')
-exprToLisp Plus c = (L.Symbol "+",c)
-exprToLisp Mult c = (L.Symbol "*",c)
-exprToLisp Minus c = (L.Symbol "-",c)
-exprToLisp Div c = (L.Symbol "div",c)
-exprToLisp Divide c = (L.Symbol "/",c)
-exprToLisp Mod c = (L.Symbol "mod",c)
-exprToLisp Rem c = (L.Symbol "rem",c)
-exprToLisp Neg c = (L.Symbol "-",c)
-exprToLisp Abs c = (L.Symbol "abs",c)
 exprToLisp (ToReal e) c = let (e',c') = exprToLisp e c
                           in (L.List [L.Symbol "to_real",e'],c')
 exprToLisp (ToInt e) c = let (e',c') = exprToLisp e c
@@ -124,11 +116,6 @@ exprToLisp (ITE cond tt ff) c = let (cond',c') = exprToLisp cond c
                                     (tt',c'') = exprToLisp tt c'
                                     (ff',c''') = exprToLisp ff c''
                                 in (L.List [L.Symbol "ite",cond',tt',ff'],c''')
-exprToLisp And c = (L.Symbol "and",c)
-exprToLisp Or c = (L.Symbol "or",c)
-exprToLisp XOr c = (L.Symbol "xor",c)
-exprToLisp Implies c = (L.Symbol "=>",c)
-exprToLisp Not c = (L.Symbol "not",c)
 exprToLisp (Select arr idx) c = let (arr',c') = exprToLisp arr c
                                     (idx',c'') = unpackArgs (\e _ i -> exprToLisp e i) idx undefined c'
                                 in (L.List (L.Symbol "select":arr':idx'),c'')
@@ -136,8 +123,9 @@ exprToLisp (Store arr idx val) c = let (arr',c1) = exprToLisp arr c
                                        (idx',c2) = unpackArgs (\e _ i -> exprToLisp e i) idx undefined c1
                                        (val',c3) = exprToLisp val c2
                                    in (L.List (L.Symbol "store":arr':idx'++[val']),c3)
-exprToLisp (AsArray f) c = let (f',c') = exprToLisp f c
-                           in (L.List [L.Symbol "_",L.Symbol "as-array",f'],c')
+exprToLisp (AsArray f arg) c 
+  = let f' = getFunctionSymbol f arg
+    in (L.List [L.Symbol "_",L.Symbol "as-array",f'],c)
 exprToLisp expr@(ConstArray v ann) c = let (v',c') = exprToLisp v c
                                            (ui,_,uv) = getArrayUndef expr
                                        in (L.List [L.List [L.Symbol "as",L.Symbol "const",
@@ -250,14 +238,13 @@ exprToLisp (Let ann x f) c = let (arg,tps,nc) = createArgs ann c
                              in (L.List [L.Symbol "let"
                                         ,L.List [L.List [L.Symbol name,lisp] | ((name,_),lisp) <- Prelude.zip tps arg' ]
                                         ,arg''],nc'')
-exprToLisp (Fun name _ _) c = (L.Symbol name,c)
-exprToLisp (App fun x) c = let (l,c1) = exprToLisp fun c
-                               ~(x',c2) = unpackArgs (\e _ i -> exprToLisp e i) x (error "smtlib2: Language.SMTLib2.Internals.Translation.exprToLisp: Argument to unpackArgs was evaluated") c1
+exprToLisp (App fun x) c = let arg_ann = extractArgAnnotation x
+                               l = getFunctionSymbol fun arg_ann
+                               ~(x',c1) = unpackArgs (\e _ i -> exprToLisp e i) x
+                                          arg_ann c
                            in if Prelude.null x'
-                              then (l,c2)
-                              else (L.List $ l:x',c2)
-exprToLisp (Map fun _) c = let (l,c1) = exprToLisp fun c
-                           in (L.List [L.Symbol "_",L.Symbol "map",l],c1)
+                              then (l,c1)
+                              else (L.List $ l:x',c1)
 exprToLisp (ConTest (Constructor name) e) c = let (e',c') = exprToLisp e c
                                               in (L.List [L.Symbol $ T.append "is-" name
                                                          ,e'],c')
@@ -345,12 +332,12 @@ lispToExprU f bound tps g l
                            Just subst -> entype (\subst' ->  Just $ f subst') subst
         L.List [L.Symbol "=",lhs,rhs] 
           -> let lhs' = lispToExprU (\lhs' -> let rhs' = lispToExprT bound tps (extractAnnotation lhs') g rhs
-                                              in f (App Eq (lhs',rhs'))
+                                              in f (App (Eq 2) [lhs',rhs'])
                                     ) bound tps g lhs
              in case lhs' of
                Just r -> Just r
                Nothing -> lispToExprU (\rhs' -> let lhs'' = lispToExprT bound tps (extractAnnotation rhs') g lhs
-                                                in f (App Eq (lhs'',rhs'))
+                                                in f (App (Eq 2) [lhs'',rhs'])
                                       ) bound tps g rhs
         L.List [L.Symbol ">=",lhs,rhs] -> binT f ((.>=.)::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) bound tps g lhs rhs
         L.List [L.Symbol ">",lhs,rhs] -> binT f ((.>.)::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) bound tps g lhs rhs
@@ -382,16 +369,16 @@ lispToExprU f bound tps g l
                   Nothing -> lispToExprU (\rhs' -> let lhs'' = lispToExprT bound tps (extractAnnotation rhs') g lhs
                                                    in f (ITE cond' lhs'' rhs')
                                          ) bound tps g rhs
-        L.List (L.Symbol "and":arg) -> Just $ f $ foldl1 (curry $ App And) $ fmap (lispToExprT bound tps () g) arg
-        L.List (L.Symbol "or":arg) -> Just $ f $ foldl1 (curry $ App Or) $ fmap (lispToExprT bound tps () g) arg
-        L.List [L.Symbol "xor",lhs,rhs] 
-          -> let lhs' = lispToExprT bound tps () g lhs
-                 rhs' = lispToExprT bound tps () g rhs
-             in Just $ f (App XOr (lhs',rhs'))
-        L.List [L.Symbol "=>",lhs,rhs] 
-          -> let lhs' = lispToExprT bound tps () g lhs
-                 rhs' = lispToExprT bound tps () g rhs
-             in Just $ f (App Implies (lhs',rhs'))
+        L.List (L.Symbol "and":arg) -> Just $ f $ 
+                                       App And $
+                                       fmap (lispToExprT bound tps () g) arg
+        L.List (L.Symbol "or":arg) -> Just $ f $
+                                      App Or $
+                                      fmap (lispToExprT bound tps () g) arg
+        L.List (L.Symbol "xor":arg)
+          -> Just $ f $ App XOr $ fmap (lispToExprT bound tps () g) arg
+        L.List (L.Symbol "=>":arg) 
+          -> Just $ f $ App Implies $ fmap (lispToExprT bound tps () g) arg
         L.List [L.Symbol "not",arg] -> Just $ f $ App Not (lispToExprT bound tps () g arg :: SMTExpr Bool)
         L.List [L.Symbol "bvule",lhs,rhs] -> Just $ f $ binBV BVULE bound tps g lhs rhs
         L.List [L.Symbol "bvult",lhs,rhs] -> Just $ f $ binBV BVULT bound tps g lhs rhs
@@ -469,13 +456,13 @@ fnToExpr f bound tps g fn arg = case splitTyConApp $ g fn of
     (_,rargs) -> case rargs of
       [] -> let [a0] = arg 
             in withUndef targs $ 
-               \t0' -> f $ asType res' $ App (Fun fn undefined undefined) (asType t0' $ lispToExprT bound tps () g a0)
+               \t0' -> f $ asType res' $ App (SMTFun fn undefined undefined) (asType t0' $ lispToExprT bound tps () g a0)
       [t0,t1] -> let [a0,a1] = arg 
                  in withUndef t0 $ 
                     \t0' -> withUndef t1 $ 
                             \t1' -> let p0 = lispToExprT bound tps () g a0
                                         p1 = lispToExprT bound tps () g a1
-                                    in f $ asType res' $ App (Fun fn undefined undefined) (asType t0' p0,asType t1' p1)
+                                    in f $ asType res' $ App (SMTFun fn undefined undefined) (asType t0' p0,asType t1' p1)
       [t0,t1,t2] -> let [a0,a1,a2] = arg 
                     in withUndef t0 $ 
                        \t0' -> withUndef t1 $ 
@@ -483,7 +470,7 @@ fnToExpr f bound tps g fn arg = case splitTyConApp $ g fn of
                                        \t2' -> let p0 = lispToExprT bound tps () g a0
                                                    p1 = lispToExprT bound tps () g a1
                                                    p2 = lispToExprT bound tps () g a2
-                                               in f $ asType res' $ App (Fun fn undefined undefined) (asType t0' p0,asType t1' p1,asType t2' p2)
+                                               in f $ asType res' $ App (SMTFun fn undefined undefined) (asType t0' p0,asType t1' p1,asType t2' p2)
       _ -> error "Language.SMTLib2.Internals.Translation.fnToExpr: Invalid number of function arguments given (more than 3)."
   _ -> error $ "Language.SMTLib2.Internals.Translation.fnToExpr: Invalid function type "++(show $ g fn)++" given to function "++show fn++"."
 
@@ -531,13 +518,14 @@ lispToExprT bound tps ann g l
                         expr
          L.List [L.Symbol "=",lhs,rhs] 
            -> let lhs' = lispToExprU (\lhs' -> let rhs' = lispToExprT bound tps (extractAnnotation lhs') g rhs
-                                               in fgcast l $ App Eq (lhs',rhs')
+                                               in fgcast l $ App (Eq 2) [lhs',rhs']
                                      ) bound tps g lhs
               in case lhs' of
                 Just r -> r
-                Nothing -> let rhs' = lispToExprU (\rhs' -> let lhs'' = lispToExprT bound tps (extractAnnotation rhs') g lhs
-                                                            in fgcast l $ App Eq (lhs'',rhs')
-                                                  ) bound tps g rhs
+                Nothing -> let rhs' = lispToExprU 
+                                      (\rhs' -> let lhs'' = lispToExprT bound tps (extractAnnotation rhs') g lhs
+                                                in fgcast l $ App (Eq 2) [lhs'',rhs']
+                                      ) bound tps g rhs
                            in case rhs' of
                              Just r -> r
                              Nothing -> error $ "Failed to parse expression "++show l
@@ -576,13 +564,15 @@ lispToExprT bound tps ann g l
                                             in fgcast l $ ToReal arg'
          L.List [L.Symbol "to_int",arg] -> let arg' = lispToExprT bound tps () g arg
                                            in fgcast l $ ToInt arg'
-         L.List (L.Symbol "and":arg) -> let arg' = fmap (lispToExprT bound tps () g) arg
-                                        in fgcast l $ foldl1 (curry $ App And) arg'
-         L.List (L.Symbol "or":arg) -> let arg' = fmap (lispToExprT bound tps () g) arg
-                                       in fgcast l $ foldl1 (curry $ App Or) arg'
-         L.List [L.Symbol "xor",lhs,rhs] -> let l' = lispToExprT bound tps () g lhs
-                                                r' = lispToExprT bound tps () g rhs
-                                            in fgcast l $ App XOr (l',r')
+         L.List (L.Symbol "and":arg)
+           -> let arg' = fmap (lispToExprT bound tps () g) arg
+              in fgcast l $ App And arg'
+         L.List (L.Symbol "or":arg) 
+           -> let arg' = fmap (lispToExprT bound tps () g) arg
+              in fgcast l $ App Or arg'
+         L.List (L.Symbol "xor":arg)
+           -> let arg' = fmap (lispToExprT bound tps () g) arg
+              in fgcast l $ App XOr arg'
          L.List [L.Symbol "ite",cond,lhs,rhs]
            -> let c' = lispToExprT bound tps () g cond
                   lhs' = lispToExprU (\lhs' -> let rhs' = lispToExprT bound tps (extractAnnotation lhs') g rhs
@@ -609,9 +599,9 @@ lispToExprT bound tps ann g l
          L.List [L.Symbol "forall",L.List vars,body] -> fgcast l $ quantToExpr Forall bound tps g vars body
          L.List [L.Symbol "exists",L.List vars,body] -> fgcast l $ quantToExpr Exists bound tps g vars body
          L.List (L.Symbol fn:arg) -> fnToExpr (fgcast l) bound tps g fn arg
-         L.List [L.List (L.Symbol "_":arg),expr] 
+         {-L.List [L.List (L.Symbol "_":arg),expr] 
            -> fgcast l $ App (InternalFun arg) $
-              lispToExprT bound tps () g expr
+              lispToExprT bound tps () g expr-}
          _ -> error $ "Cannot parse "++show l
   where
     letToExpr :: SMTType a => 
@@ -658,55 +648,6 @@ quantToExpr q bound tps' g' (L.List [L.Symbol var,tp]:rest) body
                                          then declaredTypeRep decl
                                          else g' txt) rest body) decl
 quantToExpr q bound tps' g' [] body = lispToExprT bound tps' () g' body
-
--- | Reconstruct the type annotation for a given SMT expression.
-extractAnnotation :: SMTExpr a -> SMTAnnotation a
-extractAnnotation (Var _ ann) = ann
-extractAnnotation (Const _ ann) = ann
-extractAnnotation (Distinct _) = ()
-extractAnnotation (ITE _ x _) = extractAnnotation x
-extractAnnotation (Select arr _) = snd (extractAnnotation arr)
-extractAnnotation (Store arr _ _) = extractAnnotation arr
-extractAnnotation (AsArray (Fun _ iann eann)) = (iann,eann)
-extractAnnotation (AsArray _) = error "Internal smtlib2 error: Argument to AsArray isn't a function."
-extractAnnotation (ConstArray e ann) = (ann,extractAnnotation e)
-extractAnnotation (BVAdd x _) = extractAnnotation x
-extractAnnotation (BVSub x _) = extractAnnotation x
-extractAnnotation (BVMul x _) = extractAnnotation x
-extractAnnotation (BVURem x _) = extractAnnotation x
-extractAnnotation (BVSRem x _) = extractAnnotation x
-extractAnnotation (BVUDiv x _) = extractAnnotation x
-extractAnnotation (BVSDiv x _) = extractAnnotation x
-extractAnnotation (BVConcat x y) = concatAnn (getUndef x) (getUndef y) (extractAnnotation x) (extractAnnotation y)
-extractAnnotation (BVExtract _ _ ann _) = ann
-extractAnnotation (BVULE _ _) = ()
-extractAnnotation (BVULT _ _) = ()
-extractAnnotation (BVUGE _ _) = ()
-extractAnnotation (BVUGT _ _) = ()
-extractAnnotation (BVSLE _ _) = ()
-extractAnnotation (BVSLT _ _) = ()
-extractAnnotation (BVSGE _ _) = ()
-extractAnnotation (BVSGT _ _) = ()
-extractAnnotation (BVSHL x _) = extractAnnotation x
-extractAnnotation (BVLSHR x _) = extractAnnotation x
-extractAnnotation (BVASHR x _) = extractAnnotation x
-extractAnnotation (BVXor x _) = extractAnnotation x
-extractAnnotation (BVAnd x _) = extractAnnotation x
-extractAnnotation (BVOr x _) = extractAnnotation x
-extractAnnotation (Forall _ _) = ()
-extractAnnotation (Exists _ _) = ()
-extractAnnotation (Let _ x f) = extractAnnotation (f x)
-extractAnnotation (ConTest _ _) = ()
-extractAnnotation (Head x) = extractAnnotation x
-extractAnnotation (Tail x) = extractAnnotation x
-extractAnnotation (Insert _ x) = extractAnnotation x
-extractAnnotation (Named x _) = extractAnnotation x
-extractAnnotation (Fun _ _ _) = error "Internal smtlib2 error: extractAnnotation called on Fun, which isn't a SMTType instance."
-extractAnnotation (InternalFun _) = error "Internal smtlib2 error: extractAnnotation called on Fun, which isn't a SMTType instance."
-extractAnnotation (App (Fun _ _ ann) _) = ann
-extractAnnotation (App _ _) = error "Internal smtlib2 error: First argument to App isn't a function."
-extractAnnotation Undefined = error "Internal smtlib2 error: extractAnnotation called on Undefined."
-extractAnnotation (FieldSel field expr) = getFieldAnn field (extractAnnotation expr)
 
 instance (SMTValue a) => LiftArgs (SMTExpr a) where
   type Unpacked (SMTExpr a) = a

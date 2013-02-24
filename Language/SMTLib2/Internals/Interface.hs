@@ -3,7 +3,7 @@
 module Language.SMTLib2.Internals.Interface where
 
 import Language.SMTLib2.Internals
-import Language.SMTLib2.Internals.Instances ()
+import Language.SMTLib2.Internals.Instances (extractAnnotation)
 import Language.SMTLib2.Internals.Translation
 
 import Data.Typeable
@@ -72,18 +72,18 @@ constantAnn :: SMTValue t => t -> SMTAnnotation t -> SMTExpr t
 constantAnn x ann = Const x ann
 
 -- | Boolean conjunction
-and' :: SMTExpr (SMTFun (SMTExpr Bool,SMTExpr Bool) Bool)
+and' :: SMTLogic
 and' = And
 
 (.&&.) :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
-(.&&.) x y = App And (x,y)
+(.&&.) x y = App And [x,y]
 
 -- | Boolean disjunction
-or' :: SMTExpr (SMTFun (SMTExpr Bool,SMTExpr Bool) Bool)
+or' :: SMTLogic
 or' = Or
 
 (.||.) :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
-(.||.) x y = App Or (x,y)
+(.||.) x y = App Or [x,y]
 
 -- | Create a boolean expression that encodes that the array is equal to the supplied constant array.
 arrayEquals :: (LiftArgs i,SMTValue v,Ix (Unpacked i),Unit (ArgAnnotation i),Unit (SMTAnnotation v)) => SMTExpr (SMTArray i v) -> Array (Unpacked i) v -> SMTExpr Bool
@@ -120,12 +120,12 @@ interpolationGroup = do
 
 -- | Create a new uniterpreted function with annotations for
 --   the argument and the return type.
-funAnn :: (Args a, SMTType r) => ArgAnnotation a -> SMTAnnotation r -> SMT (SMTExpr (SMTFun a r))
+funAnn :: (Args a, SMTType r) => ArgAnnotation a -> SMTAnnotation r -> SMT (SMTFun a r)
 funAnn = funAnnNamed "fun"
 
 -- | Create a new uninterpreted named function with annotation for
 --   the argument and the return type.
-funAnnNamed :: (Args a, SMTType r) => String -> ArgAnnotation a -> SMTAnnotation r -> SMT (SMTExpr (SMTFun a r))
+funAnnNamed :: (Args a, SMTType r) => String -> ArgAnnotation a -> SMTAnnotation r -> SMT (SMTFun a r)
 funAnnNamed name annArg annRet = do
   (names,decl,mp) <- getSMT
   let func = case Map.lookup name names of
@@ -135,7 +135,7 @@ funAnnNamed name annArg annRet = do
   let rname = T.pack $ (escapeName name)++(case func of
                                               0 -> ""
                                               _ -> "_"++show func)
-      res = Fun rname annArg annRet
+      res = SMTFun rname annArg annRet
       
       (au,rtp) = getFunUndef res
       
@@ -149,24 +149,29 @@ funAnnNamed name annArg annRet = do
   return res
 
 -- | funAnn with an annotation only for the return type.
-funAnnRet :: (Args a, SMTType r, Unit (ArgAnnotation a)) => SMTAnnotation r -> SMT (SMTExpr (SMTFun a r))
+funAnnRet :: (Args a, SMTType r, Unit (ArgAnnotation a)) => SMTAnnotation r -> SMT (SMTFun a r)
 funAnnRet = funAnn unit
 
 -- | Create a new uninterpreted function.
-fun :: (Args a,SMTType r,SMTAnnotation r ~ (),Unit (ArgAnnotation a)) => SMT (SMTExpr (SMTFun a r))
+fun :: (Args a,SMTType r,SMTAnnotation r ~ (),Unit (ArgAnnotation a)) => SMT (SMTFun a r)
 fun = funAnn unit unit
 
 -- | Apply a function to an argument
-app :: (Args a,SMTType r) => SMTExpr (SMTFun a r) -> a -> SMTExpr r
+app :: (SMTFunction f) => f -> SMTFunArg f -> SMTExpr (SMTFunRes f)
 app = App
 
 -- | Lift a function to arrays
-map' :: (Mapable a i,Unit (ArgAnnotation i),Typeable r) => SMTExpr (SMTFun a r) -> SMTExpr (SMTFun (MapArgument a i) (SMTArray i r))
-map' f = Map f unit
+map' :: (SMTFunction f,Mapable (SMTFunArg f) i) 
+        => f 
+        -> SMTMap f 
+        (SMTFunArg f) 
+        i 
+        (SMTFunRes f)
+map' f = SMTMap f
 
 -- | Two expressions shall be equal
 (.==.) :: SMTType a => SMTExpr a -> SMTExpr a -> SMTExpr Bool
-(.==.) x y = App Eq (x,y)
+(.==.) x y = App (Eq 2) [x,y]
 
 infix 4 .==.
 
@@ -175,47 +180,47 @@ distinct :: SMTType a => [SMTExpr a] -> SMTExpr Bool
 distinct = Distinct
 
 -- | Calculate the sum of arithmetic expressions
-plus :: (SMTArith a) => SMTExpr (SMTFun (SMTExpr a,SMTExpr a) a)
+plus :: (SMTArith a) => SMTArithOp a
 plus = Plus
 
 -- | Calculate the product of arithmetic expressions
-mult :: (SMTArith a) => SMTExpr (SMTFun (SMTExpr a,SMTExpr a) a)
+mult :: (SMTArith a) => SMTArithOp a
 mult = Mult
 
 -- | Subtracts two expressions
-minus :: (SMTArith a) => SMTExpr (SMTFun (SMTExpr a,SMTExpr a) a)
+minus :: (SMTArith a) => SMTMinus a
 minus = Minus
 
 -- | Divide an arithmetic expression by another
 div' :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
 div' x y = App Div (x,y)
 
-div'' :: SMTExpr (SMTFun (SMTExpr Integer,SMTExpr Integer) Integer)
+div'' :: SMTIntArith
 div'' = Div
 
 -- | Perform a modulo operation on an arithmetic expression
 mod' :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
 mod' x y = App Mod (x,y)
 
-mod'' :: SMTExpr (SMTFun (SMTExpr Integer,SMTExpr Integer) Integer)
+mod'' :: SMTIntArith
 mod'' = Mod
 
 -- | Calculate the remainder of the division of two integer expressions
 rem' :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
 rem' x y = App Rem (x,y)
 
-rem'' :: SMTExpr (SMTFun (SMTExpr Integer,SMTExpr Integer) Integer)
+rem'' :: SMTIntArith
 rem'' = Rem
 
 -- | Divide a rational expression by another one
 divide :: SMTExpr Rational -> SMTExpr Rational -> SMTExpr Rational
 divide x y = App Divide (x,y)
 
-divide' :: SMTExpr (SMTFun (SMTExpr Rational,SMTExpr Rational) Rational)
+divide' :: SMTDivide
 divide' = Divide
 
 -- | For an expression @x@, this returns the expression @-x@.
-neg :: SMTArith a => SMTExpr (SMTFun (SMTExpr a) a)
+neg :: SMTArith a => SMTNeg a
 neg = Neg
 
 -- | Convert an integer expression to a real expression
@@ -234,20 +239,20 @@ ite :: (SMTType a) => SMTExpr Bool -- ^ If this expression is true
 ite = ITE
 
 -- | Exclusive or: Return true if exactly one argument is true.
-xor :: SMTExpr (SMTFun (SMTExpr Bool,SMTExpr Bool) Bool)
+xor :: SMTLogic
 xor = XOr
 
 -- | Implication
 (.=>.) :: SMTExpr Bool -- ^ If this expression is true
           -> SMTExpr Bool -- ^ This one must be as well
           -> SMTExpr Bool
-(.=>.) x y = App Implies (x,y)
+(.=>.) x y = App Implies [x,y]
 
 -- | Negates a boolean expression
 not' :: SMTExpr Bool -> SMTExpr Bool
 not' = App Not
 
-not'' :: SMTExpr (SMTFun (SMTExpr Bool) Bool)
+not'' :: SMTNot
 not'' = Not
 
 -- | Extracts an element of an array by its index
@@ -260,8 +265,9 @@ store = Store
 
 -- | Interpret a function /f/ from /i/ to /v/ as an array with indices /i/ and elements /v/.
 --   Such that: @f \`app\` j .==. select (asArray f) j@ for all indices j.
-asArray :: (Args i,SMTType v) => SMTExpr (SMTFun i v) -> SMTExpr (SMTArray i v)
-asArray = AsArray
+asArray :: (SMTFunction f,Unit (ArgAnnotation (SMTFunArg f))) 
+           => f -> SMTExpr (SMTArray (SMTFunArg f) (SMTFunRes f))
+asArray f = AsArray f unit
 
 -- | Create an array where each element is the same.
 constArray :: (Args i,SMTType v) => SMTExpr v -- ^ This element will be at every index of the array
