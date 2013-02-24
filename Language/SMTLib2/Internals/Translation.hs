@@ -114,8 +114,6 @@ exprToLisp expr@(ConstArray v ann) c = let (v',c') = exprToLisp v c
                                        in (L.List [L.List [L.Symbol "as",L.Symbol "const",
                                                            L.List ((L.Symbol "Array"):(argSorts ui ann)++[getSort uv (extractAnnotation v)])]
                                                   ,v'],c')
-exprToLisp (BVConcats v) c = let (v',c') = exprsToLisp v c
-                             in (Prelude.foldl1 (\cur nxt -> L.List [L.Symbol "concat",cur,nxt]) v',c')
 exprToLisp (BVNot expr) c = let (expr',c') = exprToLisp expr c
                             in (L.List [L.Symbol "bvnot",expr'],c')
 exprToLisp (Forall ann f) c = let (arg,tps,nc) = createArgs ann c

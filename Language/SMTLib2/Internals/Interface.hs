@@ -356,11 +356,6 @@ bvconcat :: (Concatable t1 t2,t3 ~ ConcatResult t1 t2)
             => SMTExpr t1 -> SMTExpr t2 -> SMTExpr t3
 bvconcat = curry $ App BVConcat
 
--- | Concat a list of bitvectors into one.
-bvconcats :: (SMTType t1,SMTType t2,Concatable t2 t1,t2 ~ ConcatResult t2 t1)
-            => [SMTExpr t1] -> SMTExpr t2
-bvconcats = BVConcats
-
 -- | Extract a sub-vector out of a given bitvector.
 bvextract :: Extractable t t => Integer -- ^ The upper bound of the extracted region
           -> Integer -- ^ The lower bound of the extracted region

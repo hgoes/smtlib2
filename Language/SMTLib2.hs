@@ -70,7 +70,7 @@ module Language.SMTLib2
          bvshl,bvlshr,bvashr,
          BitVector(..),
          ByteStringLen(..),
-         bvconcat,bvconcats,bvextract,bvextractUnsafe,
+         bvconcat,bvextract,bvextractUnsafe,
          bvsplitu16to8,
          bvsplitu32to16,bvsplitu32to8,
          bvsplitu64to32,bvsplitu64to16,bvsplitu64to8,

@@ -154,8 +154,6 @@ data SMTExpr t where
              => f -> ArgAnnotation (SMTFunArg f)
              -> SMTExpr (SMTArray (SMTFunArg f) (SMTFunRes f))
   ConstArray :: (Args i,SMTType v) => SMTExpr v -> ArgAnnotation i -> SMTExpr (SMTArray i v)
-  BVConcats :: (SMTType t1,SMTType t2,Concatable t2 t1,t2 ~ ConcatResult t2 t1)
-               => [SMTExpr t1] -> SMTExpr t2
   BVNot :: SMTExpr t -> SMTExpr t
   Forall :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
   Exists :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
@@ -278,7 +276,6 @@ eqExpr n lhs rhs = case (lhs,rhs) of
       Nothing -> False 
       Just arg2' -> f1 == f2' && arg1 == arg2'
   (ConstArray c1 _,ConstArray c2 _) -> eqExpr' n c1 c2
-  (BVConcats x,BVConcats y) -> eqExprs' n x y
   (BVNot x,BVNot y) -> eqExpr n x y
   (Forall a1 f1,Forall a2 f2) -> let name i = T.pack $ "internal_eq_check"++show i
                                      (n',v) = foldExprs (\i _ ann -> (i+1,Var (name i) ann)) n undefined a1
