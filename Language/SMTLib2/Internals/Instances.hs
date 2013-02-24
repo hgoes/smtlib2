@@ -26,21 +26,8 @@ extractAnnotation (Select arr _) = snd (extractAnnotation arr)
 extractAnnotation (Store arr _ _) = extractAnnotation arr
 extractAnnotation (AsArray f arg) = (arg,inferResAnnotation f arg)
 extractAnnotation (ConstArray e ann) = (ann,extractAnnotation e)
-extractAnnotation (BVAdd x _) = extractAnnotation x
-extractAnnotation (BVSub x _) = extractAnnotation x
-extractAnnotation (BVMul x _) = extractAnnotation x
-extractAnnotation (BVURem x _) = extractAnnotation x
-extractAnnotation (BVSRem x _) = extractAnnotation x
-extractAnnotation (BVUDiv x _) = extractAnnotation x
-extractAnnotation (BVSDiv x _) = extractAnnotation x
 extractAnnotation (BVConcat x y) = concatAnn (getUndef x) (getUndef y) (extractAnnotation x) (extractAnnotation y)
 extractAnnotation (BVExtract _ _ ann _) = ann
-extractAnnotation (BVSHL x _) = extractAnnotation x
-extractAnnotation (BVLSHR x _) = extractAnnotation x
-extractAnnotation (BVASHR x _) = extractAnnotation x
-extractAnnotation (BVXor x _) = extractAnnotation x
-extractAnnotation (BVAnd x _) = extractAnnotation x
-extractAnnotation (BVOr x _) = extractAnnotation x
 extractAnnotation (Forall _ _) = ()
 extractAnnotation (Exists _ _) = ()
 extractAnnotation (Let _ x f) = extractAnnotation (f x)
@@ -409,66 +396,66 @@ instance SMTOrd Int64 where
 
 instance Num (SMTExpr Word8) where
   fromInteger x = Const (fromInteger x) ()
-  (+) = BVAdd
-  (-) = BVSub
-  (*) = BVMul
+  (+) = curry $ App BVAdd
+  (-) = curry $ App BVSub
+  (*) = curry $ App BVMul
   abs x = x
   signum _ = Const 1 ()
 
 instance Num (SMTExpr Int8) where
   fromInteger x = Const (fromInteger x) ()
-  (+) = BVAdd
-  (-) = BVSub
-  (*) = BVMul
-  abs x = App ITE (App BVSGE (x,Const 0 ()),x,BVSub (Const 0 ()) x)
+  (+) = curry $ App BVAdd
+  (-) = curry $ App BVSub
+  (*) = curry $ App BVMul
+  abs x = App ITE (App BVSGE (x,Const 0 ()),x,App BVSub (Const 0 (),x))
   signum x = App ITE (App BVSGE (x,Const 0 ()),Const 1 (),Const (-1) ())
 
 instance Num (SMTExpr Word16) where
   fromInteger x = Const (fromInteger x) ()
-  (+) = BVAdd
-  (-) = BVSub
-  (*) = BVMul
+  (+) = curry $ App BVAdd
+  (-) = curry $ App BVSub
+  (*) = curry $ App BVMul
   abs x = x
   signum _ = Const 1 ()
 
 instance Num (SMTExpr Int16) where
   fromInteger x = Const (fromInteger x) ()
-  (+) = BVAdd
-  (-) = BVSub
-  (*) = BVMul
-  abs x = App ITE (App BVSGE (x,Const 0 ()),x,BVSub (Const 0 ()) x)
+  (+) = curry $ App BVAdd
+  (-) = curry $ App BVSub
+  (*) = curry $ App BVMul
+  abs x = App ITE (App BVSGE (x,Const 0 ()),x,App BVSub (Const 0 (),x))
   signum x = App ITE (App BVSGE (x,Const 0 ()),Const 1 (),Const (-1) ())
 
 instance Num (SMTExpr Word32) where
   fromInteger x = Const (fromInteger x) ()
-  (+) = BVAdd
-  (-) = BVSub
-  (*) = BVMul
+  (+) = curry $ App BVAdd
+  (-) = curry $ App BVSub
+  (*) = curry $ App BVMul
   abs x = x
   signum _ = Const 1 ()
 
 instance Num (SMTExpr Int32) where
   fromInteger x = Const (fromInteger x) ()
-  (+) = BVAdd
-  (-) = BVSub
-  (*) = BVMul
-  abs x = App ITE (App BVSGE (x,Const 0 ()),x,BVSub (Const 0 ()) x)
+  (+) = curry $ App BVAdd
+  (-) = curry $ App BVSub
+  (*) = curry $ App BVMul
+  abs x = App ITE (App BVSGE (x,Const 0 ()),x,App BVSub (Const 0 (),x))
   signum x = App ITE (App BVSGE (x,Const 0 ()),Const 1 (),Const (-1) ())
 
 instance Num (SMTExpr Word64) where
   fromInteger x = Const (fromInteger x) ()
-  (+) = BVAdd
-  (-) = BVSub
-  (*) = BVMul
+  (+) = curry $ App BVAdd
+  (-) = curry $ App BVSub
+  (*) = curry $ App BVMul
   abs x = x
   signum _ = Const 1 ()
 
 instance Num (SMTExpr Int64) where
   fromInteger x = Const (fromInteger x) ()
-  (+) = BVAdd
-  (-) = BVSub
-  (*) = BVMul
-  abs x = App ITE (App BVSGE (x,Const 0 ()),x,BVSub (Const 0 ()) x)
+  (+) = curry $ App BVAdd
+  (-) = curry $ App BVSub
+  (*) = curry $ App BVMul
+  abs x = App ITE (App BVSGE (x,Const 0 ()),x,App BVSub (Const 0 (),x))
   signum x = App ITE (App BVSGE (x,Const 0 ()),Const 1 (),Const (-1) ())
 
 -- Arguments
@@ -970,3 +957,23 @@ instance SMTBV a => SMTFunction (SMTBVComp a) where
   getFunctionSymbol BVSLT _ = L.Symbol "bvslt"
   getFunctionSymbol BVSGE _ = L.Symbol "bvsge"
   getFunctionSymbol BVSGT _ = L.Symbol "bvsgt"
+  inferResAnnotation _ _ = ()
+
+instance SMTBV a => SMTFunction (SMTBVBinOp a) where
+  type SMTFunArg (SMTBVBinOp a) = (SMTExpr a,SMTExpr a)
+  type SMTFunRes (SMTBVBinOp a) = a
+  isOverloaded _ = True
+  getFunctionSymbol BVAdd _ = L.Symbol "bvadd"
+  getFunctionSymbol BVSub _ = L.Symbol "bvsub"
+  getFunctionSymbol BVMul _ = L.Symbol "bvmul"
+  getFunctionSymbol BVURem _ = L.Symbol "bvurem"
+  getFunctionSymbol BVSRem _ = L.Symbol "bvsrem"
+  getFunctionSymbol BVUDiv _ = L.Symbol "bvudiv"
+  getFunctionSymbol BVSDiv _ = L.Symbol "bvsdiv"
+  getFunctionSymbol BVSHL _ = L.Symbol "bvshl"
+  getFunctionSymbol BVLSHR _ = L.Symbol "bvlshr"
+  getFunctionSymbol BVASHR _ = L.Symbol "bvashr"
+  getFunctionSymbol BVXor _ = L.Symbol "bvxor"
+  getFunctionSymbol BVAnd _ = L.Symbol "bvand"
+  getFunctionSymbol BVOr _ = L.Symbol "bvor"
+  inferResAnnotation _ ~(ann,_) = ann

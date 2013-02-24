@@ -121,30 +121,6 @@ exprToLisp expr@(ConstArray v ann) c = let (v',c') = exprToLisp v c
                                        in (L.List [L.List [L.Symbol "as",L.Symbol "const",
                                                            L.List ((L.Symbol "Array"):(argSorts ui ann)++[getSort uv (extractAnnotation v)])]
                                                   ,v'],c')
-exprToLisp (BVAdd l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvadd",l',r'],c'')
-exprToLisp (BVSub l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvsub",l',r'],c'')
-exprToLisp (BVMul l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvmul",l',r'],c'')
-exprToLisp (BVUDiv l r) c = let (l',c') = exprToLisp l c
-                                (r',c'') = exprToLisp r c'
-                            in (L.List [L.Symbol "bvudiv",l',r'],c'')
-exprToLisp (BVSDiv l r) c = let (l',c') = exprToLisp l c
-                                (r',c'') = exprToLisp r c'
-                            in (L.List [L.Symbol "bvsdiv",l',r'],c'')
-exprToLisp (BVSHL l r) c = let (l',c') = exprToLisp l c
-                               (r',c'') = exprToLisp r c'
-                           in (L.List [L.Symbol "bvshl",l',r'],c'')
-exprToLisp (BVLSHR l r) c = let (l',c') = exprToLisp l c
-                                (r',c'') = exprToLisp r c'
-                            in (L.List [L.Symbol "bvlshr",l',r'],c'')
-exprToLisp (BVASHR l r) c = let (l',c') = exprToLisp l c
-                                (r',c'') = exprToLisp r c'
-                            in (L.List [L.Symbol "bvashr",l',r'],c'')
 exprToLisp (BVExtract i j _ v) c = let (v',c') = exprToLisp v c
                                    in (L.List [L.List [L.Symbol "_"
                                                       ,L.Symbol "extract"
@@ -158,33 +134,8 @@ exprToLisp (BVConcat v1 v2) c = let (v1',c') = exprToLisp v1 c
                                            ,v2'],c'')
 exprToLisp (BVConcats v) c = let (v',c') = exprsToLisp v c
                              in (Prelude.foldl1 (\cur nxt -> L.List [L.Symbol "concat",cur,nxt]) v',c')
-exprToLisp (BVXor v1 v2) c = let (v1',c') = exprToLisp v1 c
-                                 (v2',c'') = exprToLisp v2 c'
-                             in (L.List [L.Symbol "bvxor"
-                                        ,v1'
-                                        ,v2'],c'')
-exprToLisp (BVAnd v1 v2) c = let (v1',c') = exprToLisp v1 c
-                                 (v2',c'') = exprToLisp v2 c'
-                             in (L.List [L.Symbol "bvand"
-                                        ,v1'
-                                        ,v2'],c'')
-exprToLisp (BVOr v1 v2) c = let (v1',c') = exprToLisp v1 c
-                                (v2',c'') = exprToLisp v2 c'
-                            in (L.List [L.Symbol "bvor"
-                                       ,v1'
-                                       ,v2'],c'')
 exprToLisp (BVNot expr) c = let (expr',c') = exprToLisp expr c
                             in (L.List [L.Symbol "bvnot",expr'],c')
-exprToLisp (BVURem v1 v2) c = let (v1',c') = exprToLisp v1 c
-                                  (v2',c'') = exprToLisp v2 c'
-                              in (L.List [L.Symbol "bvurem"
-                                         ,v1'
-                                         ,v2'],c'')
-exprToLisp (BVSRem v1 v2) c = let (v1',c') = exprToLisp v1 c
-                                  (v2',c'') = exprToLisp v2 c'
-                              in (L.List [L.Symbol "bvsrem"
-                                         ,v1'
-                                         ,v2'],c'')
 exprToLisp (Forall ann f) c = let (arg,tps,nc) = createArgs ann c
                                   (arg',nc') = exprToLisp (f arg) nc
                               in (L.List [L.Symbol "forall"

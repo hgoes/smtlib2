@@ -156,24 +156,11 @@ data SMTExpr t where
              => f -> ArgAnnotation (SMTFunArg f)
              -> SMTExpr (SMTArray (SMTFunArg f) (SMTFunRes f))
   ConstArray :: (Args i,SMTType v) => SMTExpr v -> ArgAnnotation i -> SMTExpr (SMTArray i v)
-  BVAdd :: SMTExpr t -> SMTExpr t -> SMTExpr t
-  BVSub :: SMTExpr t -> SMTExpr t -> SMTExpr t
-  BVMul :: SMTExpr t -> SMTExpr t -> SMTExpr t
-  BVURem :: SMTExpr t -> SMTExpr t -> SMTExpr t
-  BVSRem :: SMTExpr t -> SMTExpr t -> SMTExpr t
-  BVUDiv :: SMTExpr t -> SMTExpr t -> SMTExpr t
-  BVSDiv :: SMTExpr t -> SMTExpr t -> SMTExpr t
-  BVSHL :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr t
-  BVLSHR :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr t
-  BVASHR :: SMTType t => SMTExpr t -> SMTExpr t -> SMTExpr t
   BVExtract :: (SMTType t1,SMTType t2,Extractable t1 t2) => Integer -> Integer -> SMTAnnotation t2 -> SMTExpr t1 -> SMTExpr t2
   BVConcat :: (Concatable t1 t2,t3 ~ ConcatResult t1 t2)
               => SMTExpr t1 -> SMTExpr t2 -> SMTExpr t3
   BVConcats :: (SMTType t1,SMTType t2,Concatable t2 t1,t2 ~ ConcatResult t2 t1)
                => [SMTExpr t1] -> SMTExpr t2
-  BVXor :: SMTExpr t -> SMTExpr t -> SMTExpr t
-  BVAnd :: SMTExpr t -> SMTExpr t -> SMTExpr t
-  BVOr :: SMTExpr t -> SMTExpr t -> SMTExpr t
   BVNot :: SMTExpr t -> SMTExpr t
   Forall :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
   Exists :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
@@ -260,6 +247,20 @@ data SMTBVComp a = BVULE
                  | BVSGT
                  deriving (Typeable,Eq)
 
+data SMTBVBinOp a = BVAdd
+                  | BVSub
+                  | BVMul
+                  | BVURem
+                  | BVSRem
+                  | BVUDiv
+                  | BVSDiv
+                  | BVSHL
+                  | BVLSHR
+                  | BVASHR
+                  | BVXor
+                  | BVAnd
+                  | BVOr
+                  deriving (Typeable,Eq)
 
 instance Eq a => Eq (SMTExpr a) where
   (==) = eqExpr 0
@@ -281,27 +282,9 @@ eqExpr n lhs rhs = case (lhs,rhs) of
       Nothing -> False 
       Just arg2' -> f1 == f2' && arg1 == arg2'
   (ConstArray c1 _,ConstArray c2 _) -> eqExpr' n c1 c2
-  (BVAdd l1 r1,BVAdd l2 r2) -> eqExpr n l1 l2 &&
-                               eqExpr n r1 r2
-  (BVSub l1 r1,BVSub l2 r2) -> eqExpr n l1 r2 &&
-                               eqExpr n r1 r2
-  (BVMul l1 r1,BVMul l2 r2) -> eqExpr n l1 l2 && 
-                               eqExpr n r1 r2
-  (BVURem l1 r1,BVURem l2 r2) -> eqExpr n l1 l2 &&
-                                 eqExpr n r1 r2
-  (BVSRem l1 r1,BVSRem l2 r2) -> eqExpr n l1 l2 &&
-                                 eqExpr n r1 r2
-  (BVUDiv l1 r1,BVUDiv l2 r2) -> eqExpr n l1 l2 &&
-                                 eqExpr n r1 r2
-  (BVSDiv l1 r1,BVSDiv l2 r2) -> eqExpr n l1 l2 &&
-                                 eqExpr n r1 r2
-  (BVSHL l1 r1,BVSHL l2 r2) -> eqExpr' n l1 l2 && eqExpr n r1 r2
   (BVExtract l1 u1 _ e1,BVExtract l2 u2 _ e2) -> l1 == l2 && u1 == u2 && eqExpr' n e1 e2
   (BVConcat l1 r1,BVConcat l2 r2) -> eqExpr' n l1 l2 && eqExpr' n r1 r2
   (BVConcats x,BVConcats y) -> eqExprs' n x y
-  (BVXor l1 r1,BVXor l2 r2) -> eqExpr n l1 l2 && eqExpr n r1 r2
-  (BVAnd l1 r1,BVAnd l2 r2) -> eqExpr n l1 l2 && eqExpr n r1 r2
-  (BVOr l1 r1,BVOr l2 r2) -> eqExpr n l1 l2 && eqExpr n r1 r2
   (BVNot x,BVNot y) -> eqExpr n x y
   (Forall a1 f1,Forall a2 f2) -> let name i = T.pack $ "internal_eq_check"++show i
                                      (n',v) = foldExprs (\i _ ann -> (i+1,Var (name i) ann)) n undefined a1

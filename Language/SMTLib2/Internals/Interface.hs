@@ -277,11 +277,11 @@ constArray = ConstArray
 
 -- | Bitvector and
 bvand :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvand = BVAnd
+bvand = curry $ App BVAnd
 
 -- | Bitvector or
 bvor :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvor = BVOr
+bvor = curry $ App BVOr
 
 -- | Bitvector not
 bvnot :: SMTBV t => SMTExpr t -> SMTExpr t
@@ -289,23 +289,23 @@ bvnot = BVNot
 
 -- | Bitvector addition
 bvadd :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvadd = BVAdd
+bvadd = curry $ App BVAdd
 
 -- | Bitvector subtraction
 bvsub :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvsub = BVSub
+bvsub = curry $ App BVSub
 
 -- | Bitvector multiplication
 bvmul :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvmul = BVMul
+bvmul = curry $ App BVMul
 
 -- | Bitvector unsigned remainder
 bvurem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvurem = BVURem
+bvurem = curry $ App BVURem
 
 -- | Bitvector signed remainder
 bvsrem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvsrem = BVSRem
+bvsrem = curry $ App BVSRem
 
 -- | Bitvector unsigned less-or-equal
 bvule :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
@@ -341,15 +341,15 @@ bvsgt = curry $ App BVSGT
 
 -- | Bitvector shift left
 bvshl :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvshl = BVSHL
+bvshl = curry $ App BVSHL
 
 -- | Bitvector logical right shift
 bvlshr :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvlshr = BVLSHR
+bvlshr = curry $ App BVLSHR
 
 -- | Bitvector arithmetical right shift
 bvashr :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvashr = BVASHR
+bvashr = curry $ App BVASHR
 
 -- | Concats two bitvectors into one.
 bvconcat :: (Concatable t1 t2,t3 ~ ConcatResult t1 t2)
