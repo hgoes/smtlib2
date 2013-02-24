@@ -26,9 +26,6 @@ extractAnnotation (AsArray f arg) = (arg,inferResAnnotation f arg)
 extractAnnotation (Forall _ _) = ()
 extractAnnotation (Exists _ _) = ()
 extractAnnotation (Let _ x f) = extractAnnotation (f x)
-extractAnnotation (Head x) = extractAnnotation x
-extractAnnotation (Tail x) = extractAnnotation x
-extractAnnotation (Insert _ x) = extractAnnotation x
 extractAnnotation (Named x _) = extractAnnotation x
 extractAnnotation (InternalFun _) = error "Internal smtlib2 error: extractAnnotation called on Fun, which isn't a SMTType instance."
 --extractAnnotation (App (SMTFun _ _ ann) _) = ann
@@ -1048,3 +1045,24 @@ instance (SMTRecordType a,SMTType f) => SMTFunction (SMTFieldSel a f) where
   getFunctionSymbol (FieldSel (Field name)) _ = L.Symbol name
   inferResAnnotation (FieldSel field) ann 
     = getFieldAnn field ann
+
+instance SMTType a => SMTFunction (SMTHead a) where
+  type SMTFunArg (SMTHead a) = SMTExpr [a]
+  type SMTFunRes (SMTHead a) = a
+  isOverloaded _ = True
+  getFunctionSymbol _ _ = L.Symbol "head"
+  inferResAnnotation _ ann = ann
+
+instance SMTType a => SMTFunction (SMTTail a) where
+  type SMTFunArg (SMTTail a) = SMTExpr [a]
+  type SMTFunRes (SMTTail a) = [a]
+  isOverloaded _ = True
+  getFunctionSymbol _ _ = L.Symbol "tail"
+  inferResAnnotation _ ann = ann
+
+instance SMTType a => SMTFunction (SMTInsert a) where
+  type SMTFunArg (SMTInsert a) = (SMTExpr a,SMTExpr [a])
+  type SMTFunRes (SMTInsert a) = [a]
+  isOverloaded _ = True
+  getFunctionSymbol _ _ = L.Symbol "insert"
+  inferResAnnotation _ = fst

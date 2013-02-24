@@ -135,13 +135,6 @@ exprToLisp (App fun x) c = let arg_ann = extractArgAnnotation x
                            in if Prelude.null x'
                               then (l,c1)
                               else (L.List $ l:x',c1)
-exprToLisp (Head xs) c = let (e,c') = exprToLisp xs c
-                         in (L.List [L.Symbol "head",e],c')
-exprToLisp (Tail xs) c = let (e,c') = exprToLisp xs c
-                         in (L.List [L.Symbol "tail",e],c')
-exprToLisp (Insert x xs) c = let (x',c') = exprToLisp x c
-                                 (xs',c'') = exprToLisp xs c'
-                             in (L.List [L.Symbol "insert",x',xs'],c'')
 exprToLisp (Named expr name) c = let (expr',c') = exprToLisp expr c
                                  in (L.List [L.Symbol "!",expr',L.Symbol ":named",L.Symbol name],c')
 exprToLisp (InternalFun arguments) c = (L.List (L.Symbol "_":arguments),c)

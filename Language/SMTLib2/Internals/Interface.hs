@@ -450,16 +450,16 @@ is e con = App (ConTest con) e
 (.#) e f = App (FieldSel f) e
 
 -- | Takes the first element of a list
-head' :: SMTExpr [a] -> SMTExpr a
-head' = Head
+head' :: SMTType a => SMTExpr [a] -> SMTExpr a
+head' = App Head
 
 -- | Drops the first element from a list
-tail' :: SMTExpr [a] -> SMTExpr [a]
-tail' = Tail
+tail' :: SMTType a => SMTExpr [a] -> SMTExpr [a]
+tail' = App Tail
 
 -- | Put a new element at the front of the list
-insert' :: SMTExpr a -> SMTExpr [a] -> SMTExpr [a]
-insert' = Insert
+insert' :: SMTType a => SMTExpr a -> SMTExpr [a] -> SMTExpr [a]
+insert' = curry (App Insert)
 
 -- | Checks if a list is empty.
 isNil :: SMTType a => SMTExpr [a] -> SMTExpr Bool

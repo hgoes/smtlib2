@@ -157,9 +157,6 @@ data SMTExpr t where
   Exists :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
   Let :: (Args a) => ArgAnnotation a -> a -> (a -> SMTExpr b) -> SMTExpr b
   App :: SMTFunction a => a -> SMTFunArg a -> SMTExpr (SMTFunRes a)
-  Head :: SMTExpr [a] -> SMTExpr a
-  Tail :: SMTExpr [a] -> SMTExpr [a]
-  Insert :: SMTExpr a -> SMTExpr [a] -> SMTExpr [a]
   Named :: SMTExpr a -> Text -> SMTExpr a
   InternalFun :: [L.Lisp] -> SMTExpr (SMTFun (SMTExpr Bool) Bool)
   Undefined :: SMTExpr a
@@ -270,6 +267,12 @@ data SMTConTest a = ConTest (Constructor a) deriving (Typeable,Eq)
 
 data SMTFieldSel a f = FieldSel (Field a f) deriving (Typeable,Eq)
 
+data SMTHead a = Head deriving (Typeable,Eq)
+
+data SMTTail a = Tail deriving (Typeable,Eq)
+
+data SMTInsert a = Insert deriving (Typeable,Eq)
+  
 instance Eq a => Eq (SMTExpr a) where
   (==) = eqExpr 0
 
@@ -293,10 +296,6 @@ eqExpr n lhs rhs = case (lhs,rhs) of
                                    Nothing -> False
                                    Just f2' -> eqExpr n' (f1 v) (f2' v)
   (Let a1 x1 f1,Let a2 x2 f2) -> eqExpr n (f1 x1) (f2 x2)
-  (Head x,Head y) -> eqExpr n x y
-  (Tail x,Tail y) -> eqExpr n x y
-  -- This doesn't work for unknown reasons
-  --(Insert x xs,Insert y ys) = eqExpr n x y && eqExpr n xs ys
   (Named e1 n1,Named e2 n2) -> eqExpr n e1 e2 && n1==n2
   (InternalFun arg1,InternalFun arg2) -> arg1 == arg2
   (Undefined,Undefined) -> True
