@@ -71,7 +71,7 @@ class (SMTType a,SMTType b,SMTType (ConcatResult a b)) => Concatable a b where
     concat' :: a -> SMTAnnotation a -> b -> SMTAnnotation b -> ConcatResult a b
     concatAnn :: a -> b -> SMTAnnotation a -> SMTAnnotation b -> SMTAnnotation (ConcatResult a b)
 
-class Extractable a b where
+class (SMTType a,SMTType b) => Extractable a b where
     extract' :: a -> b -> Integer -> Integer -> SMTAnnotation a -> SMTAnnotation b
 
 type SMTRead = (Handle, Handle)
@@ -154,7 +154,6 @@ data SMTExpr t where
              => f -> ArgAnnotation (SMTFunArg f)
              -> SMTExpr (SMTArray (SMTFunArg f) (SMTFunRes f))
   ConstArray :: (Args i,SMTType v) => SMTExpr v -> ArgAnnotation i -> SMTExpr (SMTArray i v)
-  BVExtract :: (SMTType t1,SMTType t2,Extractable t1 t2) => Integer -> Integer -> SMTAnnotation t2 -> SMTExpr t1 -> SMTExpr t2
   BVConcats :: (SMTType t1,SMTType t2,Concatable t2 t1,t2 ~ ConcatResult t2 t1)
                => [SMTExpr t1] -> SMTExpr t2
   BVNot :: SMTExpr t -> SMTExpr t
@@ -264,6 +263,8 @@ data SMTStore i v = Store deriving (Typeable,Eq)
 
 data SMTConcat t1 t2 = BVConcat deriving (Typeable,Eq)
 
+data SMTExtract t1 t2 = BVExtract Integer Integer deriving (Typeable,Eq)
+
 instance Eq a => Eq (SMTExpr a) where
   (==) = eqExpr 0
 
@@ -277,7 +278,6 @@ eqExpr n lhs rhs = case (lhs,rhs) of
       Nothing -> False 
       Just arg2' -> f1 == f2' && arg1 == arg2'
   (ConstArray c1 _,ConstArray c2 _) -> eqExpr' n c1 c2
-  (BVExtract l1 u1 _ e1,BVExtract l2 u2 _ e2) -> l1 == l2 && u1 == u2 && eqExpr' n e1 e2
   (BVConcats x,BVConcats y) -> eqExprs' n x y
   (BVNot x,BVNot y) -> eqExpr n x y
   (Forall a1 f1,Forall a2 f2) -> let name i = T.pack $ "internal_eq_check"++show i

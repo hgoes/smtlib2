@@ -3,7 +3,7 @@
 module Language.SMTLib2.Internals.Interface where
 
 import Language.SMTLib2.Internals
-import Language.SMTLib2.Internals.Instances (extractAnnotation)
+import Language.SMTLib2.Internals.Instances ()
 import Language.SMTLib2.Internals.Translation
 
 import Data.Typeable
@@ -362,46 +362,46 @@ bvconcats :: (SMTType t1,SMTType t2,Concatable t2 t1,t2 ~ ConcatResult t2 t1)
 bvconcats = BVConcats
 
 -- | Extract a sub-vector out of a given bitvector.
-bvextract :: (SMTType t,Extractable t t) => Integer -- ^ The upper bound of the extracted region
+bvextract :: Extractable t t => Integer -- ^ The upper bound of the extracted region
           -> Integer -- ^ The lower bound of the extracted region
           -> SMTExpr t -- ^ The bitvector to extract from
           -> SMTExpr t
-bvextract u l e = withUndef' $ \un -> BVExtract u l (extract' un un u l (extractAnnotation e)) e
-    where
-      withUndef' :: (t -> SMTExpr t) -> SMTExpr t
-      withUndef' f = f undefined
+bvextract u l e = App (BVExtract u l) e
 
 -- | A more general variant of `bvextract` which can fail if the bounds are invalid.
-bvextractUnsafe :: (SMTType t1,SMTType t2,Extractable t1 t2) => Integer -> Integer -> SMTExpr t1 -> SMTExpr t2
-bvextractUnsafe u l e = withUndef' $ \un ->
-                        BVExtract u l (extract' (getUndef e) un u l (extractAnnotation e)) e
-    where
-      withUndef' :: (t -> SMTExpr t) -> SMTExpr t
-      withUndef' f = f undefined
+bvextractUnsafe :: Extractable t1 t2 => Integer -> Integer -> SMTExpr t1 -> SMTExpr t2
+bvextractUnsafe u l e = App (BVExtract u l) e
 
 -- | Safely split a 16-bit bitvector into two 8-bit bitvectors.
 bvsplitu16to8 :: SMTExpr Word16 -> (SMTExpr Word8,SMTExpr Word8)
-bvsplitu16to8 e = (BVExtract 15 8 () e,BVExtract 7 0 () e)
+bvsplitu16to8 e = (App (BVExtract 15 8) e,App (BVExtract 7 0) e)
 
 -- | Safely split a 32-bit bitvector into two 16-bit bitvectors.
 bvsplitu32to16 :: SMTExpr Word32 -> (SMTExpr Word16,SMTExpr Word16)
-bvsplitu32to16 e = (BVExtract 31 16 () e,BVExtract 15 0 () e)
+bvsplitu32to16 e = (App (BVExtract 31 16) e,App (BVExtract 15 0) e)
 
 -- | Safely split a 32-bit bitvector into four 8-bit bitvectors.
 bvsplitu32to8 :: SMTExpr Word32 -> (SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8)
-bvsplitu32to8 e = (BVExtract 31 24 () e,BVExtract 23 16 () e,BVExtract 15 8 () e,BVExtract 7 0 () e)
+bvsplitu32to8 e = (App (BVExtract 31 24) e,App (BVExtract 23 16) e,App (BVExtract 15 8) e,App (BVExtract 7 0) e)
 
 -- | Safely split a 64-bit bitvector into two 32-bit bitvectors.
 bvsplitu64to32 :: SMTExpr Word64 -> (SMTExpr Word32,SMTExpr Word32)
-bvsplitu64to32 e = (BVExtract 63 32 () e,BVExtract 31 0 () e)
+bvsplitu64to32 e = (App (BVExtract 63 32) e,App (BVExtract 31 0) e)
 
 -- | Safely split a 64-bit bitvector into four 16-bit bitvectors.
 bvsplitu64to16 :: SMTExpr Word64 -> (SMTExpr Word16,SMTExpr Word16,SMTExpr Word16,SMTExpr Word16)
-bvsplitu64to16 e = (BVExtract 63 48 () e,BVExtract 47 32 () e,BVExtract 31 16 () e,BVExtract 15 0 () e)
+bvsplitu64to16 e = (App (BVExtract 63 48) e,App (BVExtract 47 32) e,App (BVExtract 31 16) e,App (BVExtract 15 0) e)
 
 -- | Safely split a 64-bit bitvector into eight 8-bit bitvectors.
 bvsplitu64to8 :: SMTExpr Word64 -> (SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8)
-bvsplitu64to8 e = (BVExtract 63 56 () e,BVExtract 55 48 () e,BVExtract 47 40 () e,BVExtract 39 32 () e,BVExtract 31 24 () e,BVExtract 23 16 () e,BVExtract 15 8 () e,BVExtract 7 0 () e)
+bvsplitu64to8 e = (App (BVExtract 63 56) e,
+                   App (BVExtract 55 48) e,
+                   App (BVExtract 47 40) e,
+                   App (BVExtract 39 32) e,
+                   App (BVExtract 31 24) e,
+                   App (BVExtract 23 16) e,
+                   App (BVExtract 15 8) e,
+                   App (BVExtract 7 0) e)
 
 -- | If the supplied function returns true for all possible values, the forall quantification returns true.
 forAll :: (Args a,Unit (ArgAnnotation a)) => (a -> SMTExpr Bool) -> SMTExpr Bool
