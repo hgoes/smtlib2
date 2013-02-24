@@ -257,11 +257,11 @@ not'' = Not
 
 -- | Extracts an element of an array by its index
 select :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v
-select = Select
+select arr i = App Select (arr,i)
 
 -- | The expression @store arr i v@ stores the value /v/ in the array /arr/ at position /i/ and returns the resulting new array.
 store :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v -> SMTExpr (SMTArray i v)
-store = Store
+store arr i v = App Store (arr,i,v)
 
 -- | Interpret a function /f/ from /i/ to /v/ as an array with indices /i/ and elements /v/.
 --   Such that: @f \`app\` j .==. select (asArray f) j@ for all indices j.

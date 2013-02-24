@@ -150,8 +150,6 @@ instance (Monoid w, MonadSMT m) => MonadSMT (Strict.WriterT w m) where
 data SMTExpr t where
   Var :: SMTType t => Text -> SMTAnnotation t -> SMTExpr t
   Const :: SMTValue t => t -> SMTAnnotation t -> SMTExpr t
-  Select :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v
-  Store :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v -> SMTExpr (SMTArray i v)
   AsArray :: (SMTFunction f) 
              => f -> ArgAnnotation (SMTFunArg f)
              -> SMTExpr (SMTArray (SMTFunArg f) (SMTFunRes f))
@@ -262,6 +260,10 @@ data SMTBVBinOp a = BVAdd
                   | BVOr
                   deriving (Typeable,Eq)
 
+data SMTSelect i v = Select deriving (Typeable,Eq)
+
+data SMTStore i v = Store deriving (Typeable,Eq)
+
 instance Eq a => Eq (SMTExpr a) where
   (==) = eqExpr 0
 
@@ -269,13 +271,6 @@ eqExpr :: Integer -> SMTExpr a -> SMTExpr a -> Bool
 eqExpr n lhs rhs = case (lhs,rhs) of
   (Var v1 _,Var v2 _) -> v1 == v2
   (Const v1 _,Const v2 _) -> v1 == v2
-  (Select a1 i1,Select a2 i2) -> eqExpr' n a1 a2 && 
-                                 (case cast i2 of
-                                     Nothing -> False
-                                     Just i2' -> i1 == i2')
-  (Store a1 i1 v1,Store a2 i2 v2) -> eqExpr n a1 a2 &&
-                                     i1 == i2 &&
-                                     eqExpr n v1 v2
   (AsArray f1 arg1,AsArray f2 arg2) -> case cast f2 of
     Nothing -> False
     Just f2' -> case cast arg2 of

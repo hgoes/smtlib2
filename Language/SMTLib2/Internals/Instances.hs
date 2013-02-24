@@ -22,8 +22,6 @@ import Data.Traversable
 extractAnnotation :: SMTExpr a -> SMTAnnotation a
 extractAnnotation (Var _ ann) = ann
 extractAnnotation (Const _ ann) = ann
-extractAnnotation (Select arr _) = snd (extractAnnotation arr)
-extractAnnotation (Store arr _ _) = extractAnnotation arr
 extractAnnotation (AsArray f arg) = (arg,inferResAnnotation f arg)
 extractAnnotation (ConstArray e ann) = (ann,extractAnnotation e)
 extractAnnotation (BVConcat x y) = concatAnn (getUndef x) (getUndef y) (extractAnnotation x) (extractAnnotation y)
@@ -977,3 +975,17 @@ instance SMTBV a => SMTFunction (SMTBVBinOp a) where
   getFunctionSymbol BVAnd _ = L.Symbol "bvand"
   getFunctionSymbol BVOr _ = L.Symbol "bvor"
   inferResAnnotation _ ~(ann,_) = ann
+
+instance (Args i,SMTType v) => SMTFunction (SMTSelect i v) where
+  type SMTFunArg (SMTSelect i v) = (SMTExpr (SMTArray i v),i)
+  type SMTFunRes (SMTSelect i v) = v
+  isOverloaded _ = True
+  getFunctionSymbol _ _ = L.Symbol "select"
+  inferResAnnotation _ ~(~(_,ann),_) = ann
+
+instance (Args i,SMTType v) => SMTFunction (SMTStore i v) where
+  type SMTFunArg (SMTStore i v) = (SMTExpr (SMTArray i v),i,SMTExpr v)
+  type SMTFunRes (SMTStore i v) = SMTArray i v
+  isOverloaded _ = True
+  getFunctionSymbol _ _ = L.Symbol "store"
+  inferResAnnotation _ ~(ann,_,_) = ann

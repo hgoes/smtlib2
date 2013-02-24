@@ -93,7 +93,7 @@ unmangleArray :: (LiftArgs i,Ix (Unpacked i),SMTValue v,
                  -> SMTExpr (SMTArray i v) 
                  -> SMT (Array (Unpacked i) v)
 unmangleArray b expr = mapM (\i -> do
-                                v <- getValue (Select expr (liftArgs i unit))
+                                v <- getValue (App Select (expr,liftArgs i unit))
                                 return (i,v)
                             ) (range b) >>= return.array b
 
@@ -106,13 +106,6 @@ exprsToLisp (e:es) c = let (e',c') = exprToLisp e c
 exprToLisp :: SMTExpr t -> Integer -> (L.Lisp,Integer)
 exprToLisp (Var name _) c = (L.Symbol name,c)
 exprToLisp (Const x ann) c = (mangle x ann,c)
-exprToLisp (Select arr idx) c = let (arr',c') = exprToLisp arr c
-                                    (idx',c'') = unpackArgs (\e _ i -> exprToLisp e i) idx undefined c'
-                                in (L.List (L.Symbol "select":arr':idx'),c'')
-exprToLisp (Store arr idx val) c = let (arr',c1) = exprToLisp arr c
-                                       (idx',c2) = unpackArgs (\e _ i -> exprToLisp e i) idx undefined c1
-                                       (val',c3) = exprToLisp val c2
-                                   in (L.List (L.Symbol "store":arr':idx'++[val']),c3)
 exprToLisp (AsArray f arg) c 
   = let f' = getFunctionSymbol f arg
     in (L.List [L.Symbol "_",L.Symbol "as-array",f'],c)
