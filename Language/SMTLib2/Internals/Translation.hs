@@ -106,10 +106,6 @@ exprsToLisp (e:es) c = let (e',c') = exprToLisp e c
 exprToLisp :: SMTExpr t -> Integer -> (L.Lisp,Integer)
 exprToLisp (Var name _) c = (L.Symbol name,c)
 exprToLisp (Const x ann) c = (mangle x ann,c)
-exprToLisp (ITE cond tt ff) c = let (cond',c') = exprToLisp cond c
-                                    (tt',c'') = exprToLisp tt c'
-                                    (ff',c''') = exprToLisp ff c''
-                                in (L.List [L.Symbol "ite",cond',tt',ff'],c''')
 exprToLisp (Select arr idx) c = let (arr',c') = exprToLisp arr c
                                     (idx',c'') = unpackArgs (\e _ i -> exprToLisp e i) idx undefined c'
                                 in (L.List (L.Symbol "select":arr':idx'),c'')
@@ -359,11 +355,11 @@ lispToExprU f bound tps g l
         L.List [L.Symbol "ite",cond,lhs,rhs]
           -> let cond' = lispToExprT bound tps () g cond
              in case lispToExprU (\lhs' -> let rhs' = lispToExprT bound tps (extractAnnotation lhs') g rhs
-                                           in f (ITE cond' lhs' rhs')
+                                           in f (App ITE (cond',lhs',rhs'))
                                  ) bound tps g lhs of
                   Just r -> Just r
                   Nothing -> lispToExprU (\rhs' -> let lhs'' = lispToExprT bound tps (extractAnnotation rhs') g lhs
-                                                   in f (ITE cond' lhs'' rhs')
+                                                   in f (App ITE (cond',lhs'',rhs'))
                                          ) bound tps g rhs
         L.List (L.Symbol "and":arg) -> Just $ f $ 
                                        App And $
@@ -574,10 +570,10 @@ lispToExprT bound tps ann g l
          L.List [L.Symbol "ite",cond,lhs,rhs]
            -> let c' = lispToExprT bound tps () g cond
                   lhs' = lispToExprU (\lhs' -> let rhs' = lispToExprT bound tps (extractAnnotation lhs') g rhs
-                                               in fgcast l $ ITE c' lhs' rhs'
+                                               in fgcast l $ App ITE (c',lhs',rhs')
                                      ) bound tps g lhs
                   rhs' = lispToExprU (\rhs' -> let lhs'' = lispToExprT bound tps (extractAnnotation rhs') g lhs
-                                               in fgcast l $ ITE c' lhs'' rhs'
+                                               in fgcast l $ App ITE (c',lhs'',rhs')
                                      ) bound tps g rhs
               in case lhs' of
                 Just r -> r

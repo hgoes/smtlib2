@@ -22,7 +22,6 @@ import Data.Traversable
 extractAnnotation :: SMTExpr a -> SMTAnnotation a
 extractAnnotation (Var _ ann) = ann
 extractAnnotation (Const _ ann) = ann
-extractAnnotation (ITE _ x _) = extractAnnotation x
 extractAnnotation (Select arr _) = snd (extractAnnotation arr)
 extractAnnotation (Store arr _ _) = extractAnnotation arr
 extractAnnotation (AsArray f arg) = (arg,inferResAnnotation f arg)
@@ -104,7 +103,7 @@ instance Num (SMTExpr Integer) where
   (*) x y = App Mult [x,y]
   negate x = App Neg x
   abs x = App Abs x
-  signum x = ITE (App Ge (x,Const 0 ())) (Const 1 ()) (Const (-1) ())
+  signum x = App ITE (App Ge (x,Const 0 ()),Const 1 (),Const (-1) ())
 
 instance SMTOrd Integer where
   (.<.) x y = App Lt (x,y)
@@ -162,8 +161,8 @@ instance Num (SMTExpr (Ratio Integer)) where
   (-) x y = App Minus (x,y)
   (*) x y = App Mult [x,y]
   negate = App Neg
-  abs x = ITE (App Ge (x,Const 0 ())) x (App Neg x)
-  signum x = ITE (App Ge (x,Const 0 ())) (Const 1 ()) (Const (-1) ())
+  abs x = App ITE (App Ge (x,Const 0 ()),x,App Neg x)
+  signum x = App ITE (App Ge (x,Const 0 ()),Const 1 (),Const (-1) ())
 
 instance Fractional (SMTExpr (Ratio Integer)) where
   (/) x y = App Divide (x,y)
@@ -429,8 +428,8 @@ instance Num (SMTExpr Int8) where
   (+) = BVAdd
   (-) = BVSub
   (*) = BVMul
-  abs x = ITE (BVSGE x (Const 0 ())) x (BVSub (Const 0 ()) x)
-  signum x = ITE (BVSGE x (Const 0 ())) (Const 1 ()) (Const (-1) ())
+  abs x = App ITE (BVSGE x (Const 0 ()),x,BVSub (Const 0 ()) x)
+  signum x = App ITE (BVSGE x (Const 0 ()),Const 1 (),Const (-1) ())
 
 instance Num (SMTExpr Word16) where
   fromInteger x = Const (fromInteger x) ()
@@ -445,8 +444,8 @@ instance Num (SMTExpr Int16) where
   (+) = BVAdd
   (-) = BVSub
   (*) = BVMul
-  abs x = ITE (BVSGE x (Const 0 ())) x (BVSub (Const 0 ()) x)
-  signum x = ITE (BVSGE x (Const 0 ())) (Const 1 ()) (Const (-1) ())
+  abs x = App ITE (BVSGE x (Const 0 ()),x,BVSub (Const 0 ()) x)
+  signum x = App ITE (BVSGE x (Const 0 ()),Const 1 (),Const (-1) ())
 
 instance Num (SMTExpr Word32) where
   fromInteger x = Const (fromInteger x) ()
@@ -461,8 +460,8 @@ instance Num (SMTExpr Int32) where
   (+) = BVAdd
   (-) = BVSub
   (*) = BVMul
-  abs x = ITE (BVSGE x (Const 0 ())) x (BVSub (Const 0 ()) x)
-  signum x = ITE (BVSGE x (Const 0 ())) (Const 1 ()) (Const (-1) ())
+  abs x = App ITE (BVSGE x (Const 0 ()),x,BVSub (Const 0 ()) x)
+  signum x = App ITE (BVSGE x (Const 0 ()),Const 1 (),Const (-1) ())
 
 instance Num (SMTExpr Word64) where
   fromInteger x = Const (fromInteger x) ()
@@ -477,8 +476,8 @@ instance Num (SMTExpr Int64) where
   (+) = BVAdd
   (-) = BVSub
   (*) = BVMul
-  abs x = ITE (BVSGE x (Const 0 ())) x (BVSub (Const 0 ()) x)
-  signum x = ITE (BVSGE x (Const 0 ())) (Const 1 ()) (Const (-1) ())
+  abs x = App ITE (BVSGE x (Const 0 ()),x,BVSub (Const 0 ()) x)
+  signum x = App ITE (BVSGE x (Const 0 ()),Const 1 (),Const (-1) ())
 
 -- Arguments
 
@@ -959,3 +958,10 @@ instance SMTFunction SMTToInt where
   isOverloaded _ = False
   getFunctionSymbol _ _ = L.Symbol "to_int"
   inferResAnnotation _ _ = ()
+
+instance SMTType a => SMTFunction (SMTITE a) where
+  type SMTFunArg (SMTITE a) = (SMTExpr Bool,SMTExpr a,SMTExpr a)
+  type SMTFunRes (SMTITE a) = a
+  isOverloaded _ = True
+  getFunctionSymbol _ _ = L.Symbol "ite"
+  inferResAnnotation _ ~(_,ann,_) = ann

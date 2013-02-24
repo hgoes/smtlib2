@@ -150,7 +150,6 @@ instance (Monoid w, MonadSMT m) => MonadSMT (Strict.WriterT w m) where
 data SMTExpr t where
   Var :: SMTType t => Text -> SMTAnnotation t -> SMTExpr t
   Const :: SMTValue t => t -> SMTAnnotation t -> SMTExpr t
-  ITE :: SMTType t => SMTExpr Bool -> SMTExpr t -> SMTExpr t -> SMTExpr t
   Select :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v
   Store :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v -> SMTExpr (SMTArray i v)
   AsArray :: (SMTFunction f) 
@@ -257,6 +256,8 @@ data SMTToReal = ToReal deriving (Typeable,Eq)
 
 data SMTToInt = ToInt deriving (Typeable,Eq)
 
+data SMTITE a = ITE deriving (Typeable,Eq)
+
 instance Eq a => Eq (SMTExpr a) where
   (==) = eqExpr 0
 
@@ -264,9 +265,6 @@ eqExpr :: Integer -> SMTExpr a -> SMTExpr a -> Bool
 eqExpr n lhs rhs = case (lhs,rhs) of
   (Var v1 _,Var v2 _) -> v1 == v2
   (Const v1 _,Const v2 _) -> v1 == v2
-  (ITE c1 l1 r1,ITE c2 l2 r2) -> eqExpr n c1 c2 &&
-                                 eqExpr' n l1 l2 && 
-                                 eqExpr' n r1 r2
   (Select a1 i1,Select a2 i2) -> eqExpr' n a1 a2 && 
                                  (case cast i2 of
                                      Nothing -> False

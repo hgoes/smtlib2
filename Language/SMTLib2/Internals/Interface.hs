@@ -236,7 +236,7 @@ ite :: (SMTType a) => SMTExpr Bool -- ^ If this expression is true
        -> SMTExpr a -- ^ Then return this expression
        -> SMTExpr a -- ^ Else this one
        -> SMTExpr a
-ite = ITE
+ite c l r = App ITE (c,l,r)
 
 -- | Exclusive or: Return true if exactly one argument is true.
 xor :: SMTLogic
