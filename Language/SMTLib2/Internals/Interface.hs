@@ -273,7 +273,7 @@ asArray f = AsArray f unit
 constArray :: (Args i,SMTType v) => SMTExpr v -- ^ This element will be at every index of the array
            -> ArgAnnotation i -- ^ Annotations of the index type
            -> SMTExpr (SMTArray i v)
-constArray = ConstArray
+constArray e i_ann = App (ConstArray i_ann) e
 
 -- | Bitvector and
 bvand :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t

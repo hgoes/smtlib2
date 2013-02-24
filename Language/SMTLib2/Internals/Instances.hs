@@ -23,7 +23,6 @@ extractAnnotation :: SMTExpr a -> SMTAnnotation a
 extractAnnotation (Var _ ann) = ann
 extractAnnotation (Const _ ann) = ann
 extractAnnotation (AsArray f arg) = (arg,inferResAnnotation f arg)
-extractAnnotation (ConstArray e ann) = (ann,extractAnnotation e)
 extractAnnotation (Forall _ _) = ()
 extractAnnotation (Exists _ _) = ()
 extractAnnotation (Let _ x f) = extractAnnotation (f x)
@@ -994,6 +993,20 @@ instance (Args i,SMTType v) => SMTFunction (SMTStore i v) where
   isOverloaded _ = True
   getFunctionSymbol _ _ = L.Symbol "store"
   inferResAnnotation _ ~(ann,_,_) = ann
+
+instance (Args i,SMTType v) => SMTFunction (SMTConstArray i v) where
+  type SMTFunArg (SMTConstArray i v) = SMTExpr v
+  type SMTFunRes (SMTConstArray i v) = SMTArray i v
+  isOverloaded _ = True
+  getFunctionSymbol f@(ConstArray i_ann) v_ann
+    = withUndef f $
+      \u_arr -> L.List [L.Symbol "as"
+                       ,L.Symbol "const"
+                       ,getSort u_arr (i_ann,v_ann)]
+    where
+      withUndef :: SMTConstArray i v -> (SMTArray i v -> a) -> a
+      withUndef _ f = f undefined
+  inferResAnnotation (ConstArray i_ann) v_ann = (i_ann,v_ann)
 
 instance (Concatable t1 t2) => SMTFunction (SMTConcat t1 t2) where
   type SMTFunArg (SMTConcat t1 t2) = (SMTExpr t1,SMTExpr t2)

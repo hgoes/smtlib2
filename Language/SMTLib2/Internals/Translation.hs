@@ -109,11 +109,6 @@ exprToLisp (Const x ann) c = (mangle x ann,c)
 exprToLisp (AsArray f arg) c 
   = let f' = getFunctionSymbol f arg
     in (L.List [L.Symbol "_",L.Symbol "as-array",f'],c)
-exprToLisp expr@(ConstArray v ann) c = let (v',c') = exprToLisp v c
-                                           (ui,_,uv) = getArrayUndef expr
-                                       in (L.List [L.List [L.Symbol "as",L.Symbol "const",
-                                                           L.List ((L.Symbol "Array"):(argSorts ui ann)++[getSort uv (extractAnnotation v)])]
-                                                  ,v'],c')
 exprToLisp (Forall ann f) c = let (arg,tps,nc) = createArgs ann c
                                   (arg',nc') = exprToLisp (f arg) nc
                               in (L.List [L.Symbol "forall"

@@ -153,7 +153,6 @@ data SMTExpr t where
   AsArray :: (SMTFunction f) 
              => f -> ArgAnnotation (SMTFunArg f)
              -> SMTExpr (SMTArray (SMTFunArg f) (SMTFunRes f))
-  ConstArray :: (Args i,SMTType v) => SMTExpr v -> ArgAnnotation i -> SMTExpr (SMTArray i v)
   Forall :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
   Exists :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
   Let :: (Args a) => ArgAnnotation a -> a -> (a -> SMTExpr b) -> SMTExpr b
@@ -260,6 +259,11 @@ data SMTSelect i v = Select deriving (Typeable,Eq)
 
 data SMTStore i v = Store deriving (Typeable,Eq)
 
+data SMTConstArray i v = ConstArray (ArgAnnotation i) deriving (Typeable)
+
+instance Args i => Eq (SMTConstArray i v) where
+  (==) (ConstArray i1) (ConstArray i2) = i1 == i2
+
 data SMTConcat t1 t2 = BVConcat deriving (Typeable,Eq)
 
 data SMTExtract t1 t2 = BVExtract Integer Integer deriving (Typeable,Eq)
@@ -276,7 +280,6 @@ eqExpr n lhs rhs = case (lhs,rhs) of
     Just f2' -> case cast arg2 of
       Nothing -> False 
       Just arg2' -> f1 == f2' && arg1 == arg2'
-  (ConstArray c1 _,ConstArray c2 _) -> eqExpr' n c1 c2
   (Forall a1 f1,Forall a2 f2) -> let name i = T.pack $ "internal_eq_check"++show i
                                      (n',v) = foldExprs (\i _ ann -> (i+1,Var (name i) ann)) n undefined a1
                                  in case cast f2 of
