@@ -172,15 +172,27 @@ instance (SMTType a) => Mapable [SMTExpr a] where
   getMapArgumentAnn _ _ a_anns i_ann = fmap (\a_ann -> (i_ann,a_ann)) a_anns
   inferMapAnnotation _ _ ~(~(i,x):xs) = (i,x:(fmap snd xs))
 
-instance (SMTType a,SMTType b) => Mapable (SMTExpr a,SMTExpr b) where
-  type MapArgument (SMTExpr a,SMTExpr b) i = (SMTExpr (SMTArray i a),SMTExpr (SMTArray i b))
-  getMapArgumentAnn _ _ (a_ann,b_ann) i_ann = ((i_ann,a_ann),(i_ann,b_ann))
-  inferMapAnnotation _ _ ~(~(i,x1),~(_,x2)) = (i,(x1,x2))
+instance (Mapable a,Mapable b)
+         => Mapable (a,b) where
+  type MapArgument (a,b) i = (MapArgument a i,MapArgument b i)
+  getMapArgumentAnn ~(x,y) i (a_ann,b_ann) i_ann = (getMapArgumentAnn x i a_ann i_ann,
+                                                    getMapArgumentAnn y i b_ann i_ann)
+  inferMapAnnotation ~(x,y) i ~(a_ann,b_ann) = let (ann_i,ann_a) = inferMapAnnotation x i a_ann
+                                                   (_,ann_b) = inferMapAnnotation y i b_ann
+                                               in (ann_i,(ann_a,ann_b))
 
-instance (SMTType a,SMTType b,SMTType c) => Mapable (SMTExpr a,SMTExpr b,SMTExpr c) where
-  type MapArgument (SMTExpr a,SMTExpr b,SMTExpr c) i = (SMTExpr (SMTArray i a),SMTExpr (SMTArray i b),SMTExpr (SMTArray i c))
-  getMapArgumentAnn _ _ (a_ann,b_ann,c_ann) i_ann = ((i_ann,a_ann),(i_ann,b_ann),(i_ann,c_ann))
-  inferMapAnnotation _ _ ~(~(i,x1),~(_,x2),~(_,x3)) = (i,(x1,x2,x3))
+instance (Mapable a,Mapable b,Mapable c)
+         => Mapable (a,b,c) where
+  type MapArgument (a,b,c) i = (MapArgument a i,MapArgument b i,MapArgument c i)
+  getMapArgumentAnn ~(x1,x2,x3) i (ann1,ann2,ann3) i_ann 
+     = (getMapArgumentAnn x1 i ann1 i_ann,
+        getMapArgumentAnn x2 i ann2 i_ann,
+        getMapArgumentAnn x3 i ann3 i_ann)
+  inferMapAnnotation ~(x1,x2,x3) i ~(ann1,ann2,ann3)
+    = let (i_ann,ann1') = inferMapAnnotation x1 i ann1
+          (_,ann2') = inferMapAnnotation x2 i ann2
+          (_,ann3') = inferMapAnnotation x3 i ann3
+      in (i_ann,(ann1',ann2',ann3'))
 
 -- BitVectors
 
