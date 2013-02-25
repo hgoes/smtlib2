@@ -5,7 +5,7 @@ import Language.SMTLib2.Internals
 import Data.Typeable
 import Data.Text as T
 
-data SMTEq a = Eq Integer deriving (Typeable,Eq)
+data SMTEq a = Eq deriving (Typeable,Eq)
 
 data SMTMap f a i r = SMTMap f deriving (Typeable,Eq)
 

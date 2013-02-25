@@ -175,7 +175,7 @@ map' f = SMTMap f
 
 -- | Two expressions shall be equal
 (.==.) :: SMTType a => SMTExpr a -> SMTExpr a -> SMTExpr Bool
-(.==.) x y = App (Eq 2) [x,y]
+(.==.) x y = App Eq [x,y]
 
 infix 4 .==.
 

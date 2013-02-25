@@ -209,12 +209,12 @@ lispToExprU f bound tps g l
                            Just subst -> entype (\subst' ->  Just $ f subst') subst
         L.List [L.Symbol "=",lhs,rhs] 
           -> let lhs' = lispToExprU (\lhs' -> let rhs' = lispToExprT bound tps (extractAnnotation lhs') g rhs
-                                              in f (App (Eq 2) [lhs',rhs'])
+                                              in f (App Eq [lhs',rhs'])
                                     ) bound tps g lhs
              in case lhs' of
                Just r -> Just r
                Nothing -> lispToExprU (\rhs' -> let lhs'' = lispToExprT bound tps (extractAnnotation rhs') g lhs
-                                                in f (App (Eq 2) [lhs'',rhs'])
+                                                in f (App Eq [lhs'',rhs'])
                                       ) bound tps g rhs
         L.List [L.Symbol ">=",lhs,rhs] -> binT f ((.>=.)::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) bound tps g lhs rhs
         L.List [L.Symbol ">",lhs,rhs] -> binT f ((.>.)::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) bound tps g lhs rhs
@@ -405,13 +405,13 @@ lispToExprT bound tps ann g l
                         expr
          L.List [L.Symbol "=",lhs,rhs] 
            -> let lhs' = lispToExprU (\lhs' -> let rhs' = lispToExprT bound tps (extractAnnotation lhs') g rhs
-                                               in fgcast l $ App (Eq 2) [lhs',rhs']
+                                               in fgcast l $ App Eq [lhs',rhs']
                                      ) bound tps g lhs
               in case lhs' of
                 Just r -> r
                 Nothing -> let rhs' = lispToExprU 
                                       (\rhs' -> let lhs'' = lispToExprT bound tps (extractAnnotation rhs') g lhs
-                                                in fgcast l $ App (Eq 2) [lhs'',rhs']
+                                                in fgcast l $ App Eq [lhs'',rhs']
                                       ) bound tps g rhs
                            in case rhs' of
                              Just r -> r
