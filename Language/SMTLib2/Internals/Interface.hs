@@ -3,7 +3,7 @@
 module Language.SMTLib2.Internals.Interface where
 
 import Language.SMTLib2.Internals
-import Language.SMTLib2.Internals.Instances ()
+import Language.SMTLib2.Internals.Instances (extractAnnotation)
 import Language.SMTLib2.Internals.Translation
 import Language.SMTLib2.Functions
 
@@ -502,9 +502,24 @@ getProof = do
   putRequest (L.List [L.Symbol "get-proof"])
   res <- parseResponse
   return $ lispToExprT (const Nothing) tps () (\name -> case Map.lookup name mp' of
-                                                  Nothing -> error $ "Failed to find a definition for "++show name
+                                                  Nothing -> error $ "smtlib2: Failed to find a definition for "++show name
                                                   Just n -> n
                                               ) res
+
+-- | Use the SMT solver to simplify a given expression.
+--   Currently only works with Z3.
+simplify :: SMTType t => SMTExpr t -> SMT (SMTExpr t)
+simplify expr = do
+  clearInput
+  putRequest $ L.List [L.Symbol "simplify"
+                      ,L.toLisp expr]
+  val <- parseResponse
+  (_,tps,mp) <- getSMT
+  return $ lispToExprT (const Nothing) tps (extractAnnotation expr)
+    (\name -> case Map.lookup name mp of
+        Nothing -> error $ "smtlib2: Failed to find a definition for "++show name
+        Just n -> n
+    ) val
 
 -- | After an unsuccessful 'checkSat', return a list of names of named
 --   expression which make the instance unsatisfiable.
