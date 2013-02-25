@@ -136,7 +136,7 @@ funAnnNamed name annArg annRet = do
   let rname = T.pack $ (escapeName name)++(case func of
                                               0 -> ""
                                               _ -> "_"++show func)
-      res = SMTFun rname annArg annRet
+      res = SMTFun rname annRet
       
       (au,rtp) = getFunUndef res
       

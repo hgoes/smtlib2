@@ -72,7 +72,7 @@ defFunAnnNamed name ann_arg ann_res f = do
         Nothing -> 0
         Just n -> n
 
-      res = SMTFun fname ann_arg ann_res
+      res = SMTFun fname ann_res
       
       (_,rtp) = getFunUndef res
       
@@ -344,13 +344,13 @@ fnToExpr f bound tps g fn arg = case splitTyConApp $ g fn of
     (_,rargs) -> case rargs of
       [] -> let [a0] = arg 
             in withUndef targs $ 
-               \t0' -> f $ asType res' $ App (SMTFun fn undefined undefined) (asType t0' $ lispToExprT bound tps () g a0)
+               \t0' -> f $ asType res' $ App (SMTFun fn undefined) (asType t0' $ lispToExprT bound tps () g a0)
       [t0,t1] -> let [a0,a1] = arg 
                  in withUndef t0 $ 
                     \t0' -> withUndef t1 $ 
                             \t1' -> let p0 = lispToExprT bound tps () g a0
                                         p1 = lispToExprT bound tps () g a1
-                                    in f $ asType res' $ App (SMTFun fn undefined undefined) (asType t0' p0,asType t1' p1)
+                                    in f $ asType res' $ App (SMTFun fn undefined) (asType t0' p0,asType t1' p1)
       [t0,t1,t2] -> let [a0,a1,a2] = arg 
                     in withUndef t0 $ 
                        \t0' -> withUndef t1 $ 
@@ -358,7 +358,7 @@ fnToExpr f bound tps g fn arg = case splitTyConApp $ g fn of
                                        \t2' -> let p0 = lispToExprT bound tps () g a0
                                                    p1 = lispToExprT bound tps () g a1
                                                    p2 = lispToExprT bound tps () g a2
-                                               in f $ asType res' $ App (SMTFun fn undefined undefined) (asType t0' p0,asType t1' p1,asType t2' p2)
+                                               in f $ asType res' $ App (SMTFun fn undefined) (asType t0' p0,asType t1' p1,asType t2' p2)
       _ -> error "Language.SMTLib2.Internals.Translation.fnToExpr: Invalid number of function arguments given (more than 3)."
   _ -> error $ "Language.SMTLib2.Internals.Translation.fnToExpr: Invalid function type "++(show $ g fn)++" given to function "++show fn++"."
 

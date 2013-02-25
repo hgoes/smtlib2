@@ -10,11 +10,11 @@ data SMTEq a = Eq Integer deriving (Typeable,Eq)
 data SMTMap f a i r = SMTMap f deriving (Typeable,Eq)
 
 -- | Represents a function in the SMT solver. /a/ is the argument of the function in SMT terms, /b/ is the argument in haskell types and /r/ is the result type of the function.
-data SMTFun a r = SMTFun T.Text (ArgAnnotation a) (SMTAnnotation r)
+data SMTFun a r = SMTFun T.Text (SMTAnnotation r)
                    deriving (Typeable)
 
 instance (Args a,SMTType r) => Eq (SMTFun a r) where
-  (==) (SMTFun n1 a1 r1) (SMTFun n2 a2 r2) = n1 == n2 && a1==a2 && r1 == r2
+  (==) (SMTFun n1 r1) (SMTFun n2 r2) = n1 == n2 && r1 == r2
 
 data SMTOrdOp a = Ge
                 | Gt

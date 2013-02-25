@@ -911,8 +911,8 @@ instance (Args a,SMTType r) => SMTFunction (SMTFun a r) where
   type SMTFunArg (SMTFun a r) = a
   type SMTFunRes (SMTFun a r) = r
   isOverloaded _ = False
-  getFunctionSymbol (SMTFun name _ _) _ = L.Symbol name
-  inferResAnnotation (SMTFun _ _ r) _ = r
+  getFunctionSymbol (SMTFun name _) _ = L.Symbol name
+  inferResAnnotation (SMTFun _ r) _ = r
 
 instance SMTType a => SMTFunction (SMTDistinct a) where
   type SMTFunArg (SMTDistinct a) = [SMTExpr a]
