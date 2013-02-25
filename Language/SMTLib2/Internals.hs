@@ -159,7 +159,6 @@ data SMTExpr t where
   Let :: (Args a) => ArgAnnotation a -> a -> (a -> SMTExpr b) -> SMTExpr b
   App :: SMTFunction a => a -> SMTFunArg a -> SMTExpr (SMTFunRes a)
   Named :: SMTExpr a -> Text -> SMTExpr a
-  Undefined :: SMTExpr a
   deriving Typeable
 
 class (Args (SMTFunArg a),
@@ -197,7 +196,6 @@ eqExpr n lhs rhs = case (lhs,rhs) of
                                    Just f2' -> eqExpr n' (f1 v) (f2' v)
   (Let a1 x1 f1,Let a2 x2 f2) -> eqExpr n (f1 x1) (f2 x2)
   (Named e1 n1,Named e2 n2) -> eqExpr n e1 e2 && n1==n2
-  (Undefined,Undefined) -> True
   (App f1 arg1,App f2 arg2) -> case cast f2 of
       Nothing -> False
       Just f2' -> case cast arg2 of

@@ -29,7 +29,6 @@ extractAnnotation (Exists _ _) = ()
 extractAnnotation (Let _ x f) = extractAnnotation (f x)
 extractAnnotation (Named x _) = extractAnnotation x
 extractAnnotation (App f arg) = inferResAnnotation f (extractArgAnnotation arg)
-extractAnnotation Undefined = error "Internal smtlib2 error: extractAnnotation called on Undefined."
 
 -- Bool
 
