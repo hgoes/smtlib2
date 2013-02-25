@@ -14,6 +14,7 @@ Library
     Language.SMTLib2.Solver
     Language.SMTLib2.TH
     Language.SMTLib2.Connection
+    Language.SMTLib2.Functions
     Language.SMTLib2.Internals
     Language.SMTLib2.Internals.Instances
     Language.SMTLib2.Internals.Translation

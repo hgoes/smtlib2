@@ -5,6 +5,7 @@ module Language.SMTLib2.Internals.Interface where
 import Language.SMTLib2.Internals
 import Language.SMTLib2.Internals.Instances ()
 import Language.SMTLib2.Internals.Translation
+import Language.SMTLib2.Functions
 
 import Data.Typeable
 import Data.Text as T hiding (foldl1)

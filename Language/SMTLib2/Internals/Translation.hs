@@ -3,6 +3,7 @@ module Language.SMTLib2.Internals.Translation where
 
 import Language.SMTLib2.Internals
 import Language.SMTLib2.Internals.Instances (extractAnnotation)
+import Language.SMTLib2.Functions
 
 import qualified Data.AttoLisp as L
 import Data.Typeable
@@ -137,7 +138,6 @@ exprToLisp (App fun x) c = let arg_ann = extractArgAnnotation x
                               else (L.List $ l:x',c1)
 exprToLisp (Named expr name) c = let (expr',c') = exprToLisp expr c
                                  in (L.List [L.Symbol "!",expr',L.Symbol ":named",L.Symbol name],c')
-exprToLisp (InternalFun arguments) c = (L.List (L.Symbol "_":arguments),c)
 exprToLisp Undefined _ = error "Language.SMTLib2.Internals.Translation.exprToLisp: Called on Undefined expression."
 
 withUndef :: TypeRep -> (forall a. (SMTValue a,Typeable a,SMTAnnotation a ~ ()) => a -> b) -> b

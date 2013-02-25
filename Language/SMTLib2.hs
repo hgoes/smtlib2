@@ -29,8 +29,8 @@ module Language.SMTLib2
          SMTArith,
          SMTOrd(..),
          SMTExpr,
-         SMTOption(..),
          SMTFun,
+         SMTOption(..),
          SMTArray,
          Constructor,
          Field,
@@ -87,3 +87,4 @@ import Language.SMTLib2.Internals
 import Language.SMTLib2.Internals.Instances
 import Language.SMTLib2.Internals.Translation
 import Language.SMTLib2.Internals.Interface
+import Language.SMTLib2.Functions

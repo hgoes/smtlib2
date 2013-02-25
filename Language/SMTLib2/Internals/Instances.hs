@@ -4,6 +4,7 @@
 module Language.SMTLib2.Internals.Instances where
 
 import Language.SMTLib2.Internals
+import Language.SMTLib2.Functions
 import qualified Data.AttoLisp as L
 import qualified Data.Attoparsec.Number as L
 import Data.Word
@@ -27,8 +28,6 @@ extractAnnotation (Forall _ _) = ()
 extractAnnotation (Exists _ _) = ()
 extractAnnotation (Let _ x f) = extractAnnotation (f x)
 extractAnnotation (Named x _) = extractAnnotation x
-extractAnnotation (InternalFun _) = error "Internal smtlib2 error: extractAnnotation called on Fun, which isn't a SMTType instance."
---extractAnnotation (App (SMTFun _ _ ann) _) = ann
 extractAnnotation (App f arg) = inferResAnnotation f (extractArgAnnotation arg)
 extractAnnotation Undefined = error "Internal smtlib2 error: extractAnnotation called on Undefined."
 
