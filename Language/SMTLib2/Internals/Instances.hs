@@ -1,6 +1,6 @@
 {- | Implements various instance declarations for 'Language.SMTLib2.SMTType',
      'Language.SMTLib2.SMTValue', etc. -}
-{-# LANGUAGE FlexibleInstances,OverloadedStrings,MultiParamTypeClasses,RankNTypes,TypeFamilies,GeneralizedNewtypeDeriving,DeriveDataTypeable,GADTs #-}
+{-# LANGUAGE FlexibleInstances,OverloadedStrings,MultiParamTypeClasses,RankNTypes,TypeFamilies,GeneralizedNewtypeDeriving,DeriveDataTypeable,GADTs,FlexibleContexts #-}
 module Language.SMTLib2.Internals.Instances where
 
 import Language.SMTLib2.Internals
@@ -162,22 +162,22 @@ instance (Args idx,SMTType val) => SMTType (SMTArray idx val) where
       getVal :: SMTArray i v -> v
       getVal _ = undefined
 
-instance (SMTType a,Args i) => Mapable (SMTExpr a) i where
+instance (SMTType a) => Mapable (SMTExpr a) where
   type MapArgument (SMTExpr a) i = SMTExpr (SMTArray i a)
   getMapArgumentAnn _ _ a_ann i_ann = (i_ann,a_ann)
   inferMapAnnotation _ _ ~(i,a) = (i,a)
 
-instance (SMTType a,Args i) => Mapable [SMTExpr a] i where
+instance (SMTType a) => Mapable [SMTExpr a] where
   type MapArgument [SMTExpr a] i = [SMTExpr (SMTArray i a)]
   getMapArgumentAnn _ _ a_anns i_ann = fmap (\a_ann -> (i_ann,a_ann)) a_anns
   inferMapAnnotation _ _ ~(~(i,x):xs) = (i,x:(fmap snd xs))
 
-instance (SMTType a,SMTType b,Args i) => Mapable (SMTExpr a,SMTExpr b) i where
+instance (SMTType a,SMTType b) => Mapable (SMTExpr a,SMTExpr b) where
   type MapArgument (SMTExpr a,SMTExpr b) i = (SMTExpr (SMTArray i a),SMTExpr (SMTArray i b))
   getMapArgumentAnn _ _ (a_ann,b_ann) i_ann = ((i_ann,a_ann),(i_ann,b_ann))
   inferMapAnnotation _ _ ~(~(i,x1),~(_,x2)) = (i,(x1,x2))
 
-instance (SMTType a,SMTType b,SMTType c,Args i) => Mapable (SMTExpr a,SMTExpr b,SMTExpr c) i where
+instance (SMTType a,SMTType b,SMTType c) => Mapable (SMTExpr a,SMTExpr b,SMTExpr c) where
   type MapArgument (SMTExpr a,SMTExpr b,SMTExpr c) i = (SMTExpr (SMTArray i a),SMTExpr (SMTArray i b),SMTExpr (SMTArray i c))
   getMapArgumentAnn _ _ (a_ann,b_ann,c_ann) i_ann = ((i_ann,a_ann),(i_ann,b_ann),(i_ann,c_ann))
   inferMapAnnotation _ _ ~(~(i,x1),~(_,x2),~(_,x3)) = (i,(x1,x2,x3))
@@ -807,7 +807,8 @@ instance SMTType a => SMTFunction (SMTEq a) where
   getFunctionSymbol _ _ = L.Symbol "="
   inferResAnnotation _ _ = ()
 
-instance (SMTFunction f,Mapable a i,SMTType r,
+instance (SMTFunction f,Mapable a,SMTType r,
+          Args (MapArgument a i),Args i,
           SMTFunArg f ~ a,SMTFunRes f ~ r) 
          => SMTFunction (SMTMap f a i r) where
   type SMTFunArg (SMTMap f a i r) = MapArgument a i

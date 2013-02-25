@@ -270,10 +270,10 @@ class (Eq a,Typeable a,Eq (ArgAnnotation a),Typeable (ArgAnnotation a))
   foldExprs :: (forall t. SMTType t => s -> SMTExpr t -> SMTAnnotation t -> (s,SMTExpr t)) -> s -> a -> ArgAnnotation a -> (s,a)
   extractArgAnnotation :: a -> ArgAnnotation a
 
-class (Args (MapArgument a i),Args i,Args a) => Mapable a i where
+class (Args a) => Mapable a where
   type MapArgument a i
-  getMapArgumentAnn :: a -> i -> ArgAnnotation a -> ArgAnnotation i -> ArgAnnotation (MapArgument a i)
-  inferMapAnnotation :: a -> i -> ArgAnnotation (MapArgument a i) -> (ArgAnnotation i,ArgAnnotation a)
+  getMapArgumentAnn :: forall i. (Args i,Args (MapArgument a i)) => a -> i -> ArgAnnotation a -> ArgAnnotation i -> ArgAnnotation (MapArgument a i)
+  inferMapAnnotation :: forall i. (Args i,Args (MapArgument a i)) => a -> i -> ArgAnnotation (MapArgument a i) -> (ArgAnnotation i,ArgAnnotation a)
 
 data DeclaredType where
   DeclaredType :: SMTType a => a -> SMTAnnotation a -> DeclaredType

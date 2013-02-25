@@ -165,7 +165,7 @@ app :: (SMTFunction f) => f -> SMTFunArg f -> SMTExpr (SMTFunRes f)
 app = App
 
 -- | Lift a function to arrays
-map' :: (SMTFunction f,Mapable (SMTFunArg f) i) 
+map' :: (SMTFunction f,Mapable (SMTFunArg f)) 
         => f 
         -> SMTMap f 
         (SMTFunArg f) 
