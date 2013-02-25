@@ -388,6 +388,7 @@ instance Num (SMTExpr Word8) where
   (+) = curry $ App BVAdd
   (-) = curry $ App BVSub
   (*) = curry $ App BVMul
+  negate = App BVNeg
   abs x = x
   signum _ = Const 1 ()
 
@@ -396,6 +397,7 @@ instance Num (SMTExpr Int8) where
   (+) = curry $ App BVAdd
   (-) = curry $ App BVSub
   (*) = curry $ App BVMul
+  negate = App BVNeg
   abs x = App ITE (App BVSGE (x,Const 0 ()),x,App BVSub (Const 0 (),x))
   signum x = App ITE (App BVSGE (x,Const 0 ()),Const 1 (),Const (-1) ())
 
@@ -404,6 +406,7 @@ instance Num (SMTExpr Word16) where
   (+) = curry $ App BVAdd
   (-) = curry $ App BVSub
   (*) = curry $ App BVMul
+  negate = App BVNeg
   abs x = x
   signum _ = Const 1 ()
 
@@ -412,6 +415,7 @@ instance Num (SMTExpr Int16) where
   (+) = curry $ App BVAdd
   (-) = curry $ App BVSub
   (*) = curry $ App BVMul
+  negate = App BVNeg
   abs x = App ITE (App BVSGE (x,Const 0 ()),x,App BVSub (Const 0 (),x))
   signum x = App ITE (App BVSGE (x,Const 0 ()),Const 1 (),Const (-1) ())
 
@@ -420,6 +424,7 @@ instance Num (SMTExpr Word32) where
   (+) = curry $ App BVAdd
   (-) = curry $ App BVSub
   (*) = curry $ App BVMul
+  negate = App BVNeg
   abs x = x
   signum _ = Const 1 ()
 
@@ -428,6 +433,7 @@ instance Num (SMTExpr Int32) where
   (+) = curry $ App BVAdd
   (-) = curry $ App BVSub
   (*) = curry $ App BVMul
+  negate = App BVNeg
   abs x = App ITE (App BVSGE (x,Const 0 ()),x,App BVSub (Const 0 (),x))
   signum x = App ITE (App BVSGE (x,Const 0 ()),Const 1 (),Const (-1) ())
 
@@ -436,6 +442,7 @@ instance Num (SMTExpr Word64) where
   (+) = curry $ App BVAdd
   (-) = curry $ App BVSub
   (*) = curry $ App BVMul
+  negate = App BVNeg
   abs x = x
   signum _ = Const 1 ()
 
@@ -444,6 +451,7 @@ instance Num (SMTExpr Int64) where
   (+) = curry $ App BVAdd
   (-) = curry $ App BVSub
   (*) = curry $ App BVMul
+  negate = App BVNeg
   abs x = App ITE (App BVSGE (x,Const 0 ()),x,App BVSub (Const 0 (),x))
   signum x = App ITE (App BVSGE (x,Const 0 ()),Const 1 (),Const (-1) ())
 
@@ -967,11 +975,12 @@ instance SMTBV a => SMTFunction (SMTBVBinOp a) where
   getFunctionSymbol BVOr _ = L.Symbol "bvor"
   inferResAnnotation _ ~(ann,_) = ann
 
-instance SMTBV a => SMTFunction (SMTBVNot a) where
-  type SMTFunArg (SMTBVNot a) = SMTExpr a
-  type SMTFunRes (SMTBVNot a) = a
+instance SMTBV a => SMTFunction (SMTBVUnOp a) where
+  type SMTFunArg (SMTBVUnOp a) = SMTExpr a
+  type SMTFunRes (SMTBVUnOp a) = a
   isOverloaded _ = True
-  getFunctionSymbol _ _ = L.Symbol "bvnot"
+  getFunctionSymbol BVNot _ = L.Symbol "bvnot"
+  getFunctionSymbol BVNeg _ = L.Symbol "bvneg"
   inferResAnnotation _ x = x
 
 instance (Args i,SMTType v) => SMTFunction (SMTSelect i v) where

@@ -80,7 +80,9 @@ data SMTBVBinOp a = BVAdd
                   | BVOr
                   deriving (Typeable,Eq)
 
-data SMTBVNot a = BVNot deriving (Typeable,Eq)
+data SMTBVUnOp a = BVNot 
+                 | BVNeg
+                 deriving (Typeable,Eq)
 
 data SMTSelect i v = Select deriving (Typeable,Eq)
 
