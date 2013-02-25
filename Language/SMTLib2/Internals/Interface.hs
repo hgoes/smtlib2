@@ -45,18 +45,21 @@ argVarsAnnNamed name ann = do
       namec = case Map.lookup name names of
         Nothing -> 0
         Just c -> c
-      ((nc,act),res) = foldExprs
-                       (\(cc,act') u ann'
-                         -> let rname = T.pack $ case cc of
-                                  0 -> ename
-                                  _ -> ename++"_"++show cc
-                                sort = getSort (getUndef u) ann'
-                            in ((cc+1,act' >> (do
-                                                  declareType (getUndef u) ann'
-                                                  declareFun rname [] sort
-                                                  mapM_ assert $ additionalConstraints (getUndef u) ann' (Var rname ann')))
-                                ,Var rname ann')) (namec,return ()) undefined ann
-  putSMT (Map.insert name nc names,decl,mp)
+      ((nc,act,mp'),res) = foldExprs
+                           (\(cc,act',cmp) u ann'
+                            -> let rname = T.pack $ case cc of
+                                     0 -> ename
+                                     _ -> ename++"_"++show cc
+                                   sort = getSort (getUndef u) ann'
+                               in ((cc+1,
+                                    act' >> (do
+                                                declareType (getUndef u) ann'
+                                                declareFun rname [] sort
+                                                mapM_ assert $ additionalConstraints (getUndef u) ann' (Var rname ann')),
+                                    Map.insert rname (typeOf $ getUndef u) cmp
+                                   ),
+                                   Var rname ann')) (namec,return (),mp) undefined ann
+  putSMT (Map.insert name nc names,decl,mp')
   act
   return res
 
@@ -517,7 +520,7 @@ simplify expr = do
   (_,tps,mp) <- getSMT
   return $ lispToExprT (const Nothing) tps (extractAnnotation expr)
     (\name -> case Map.lookup name mp of
-        Nothing -> error $ "smtlib2: Failed to find a definition for "++show name
+        Nothing -> error $ "smtlib2: Failed to find a definition for "++show name++" ("++show mp++")"
         Just n -> n
     ) val
 
