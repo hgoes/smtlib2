@@ -4,6 +4,7 @@ module Language.SMTLib2.Internals where
 import Data.Attoparsec
 import qualified Data.AttoLisp as L
 import Data.ByteString as BS hiding (reverse)
+import qualified Data.ByteString.Char8 as BS8
 import Blaze.ByteString.Builder
 import System.Process
 import System.IO as IO
@@ -475,9 +476,9 @@ parseResponse = do
   let continue (Done _ r) = return r
       continue res@(Partial _) = do
         line <- BS.hGetLine hout
-        continue (feed res line)
+        continue (feed (feed res line) (BS8.singleton '\n'))
       continue (Fail str' ctx msg) = error $ "Error parsing "++show str'++" response in "++show ctx++": "++msg
-  liftIO $ continue $ parse L.lisp str
+  liftIO $ continue $ parse L.lisp (BS8.snoc str '\n')
 
 -- | Declare a new sort with a specified arity
 declareSort :: T.Text -> Integer -> SMT ()
