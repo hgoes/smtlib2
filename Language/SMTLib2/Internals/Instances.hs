@@ -1,6 +1,6 @@
 {- | Implements various instance declarations for 'Language.SMTLib2.SMTType',
      'Language.SMTLib2.SMTValue', etc. -}
-{-# LANGUAGE FlexibleInstances,OverloadedStrings,MultiParamTypeClasses,RankNTypes,TypeFamilies,GeneralizedNewtypeDeriving,DeriveDataTypeable,GADTs,FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances,OverloadedStrings,MultiParamTypeClasses,RankNTypes,TypeFamilies,GeneralizedNewtypeDeriving,DeriveDataTypeable,GADTs,FlexibleContexts,CPP,ScopedTypeVariables #-}
 module Language.SMTLib2.Internals.Instances where
 
 import Language.SMTLib2.Internals
@@ -18,6 +18,10 @@ import qualified Data.ByteString as BS
 import Data.Map
 import Data.List (genericLength,genericReplicate)
 import Data.Traversable
+#ifdef SMTLIB2_WITH_CONSTRAINTS
+import Data.Constraint
+import Data.Proxy
+#endif
 
 -- | Reconstruct the type annotation for a given SMT expression.
 extractAnnotation :: SMTExpr a -> SMTAnnotation a
@@ -36,6 +40,9 @@ instance SMTType Bool where
   type SMTAnnotation Bool = ()
   getSortBase _ = L.Symbol "Bool"
   declareType = defaultDeclareValue
+  fromSort _ = SortParser $ \sym _ -> case sym of
+    L.Symbol "Bool" -> Just $ Sort (undefined::Bool) ()
+    _ -> Nothing
 
 instance SMTValue Bool where
   unmangle (L.Symbol "true") _ = Just True
@@ -50,6 +57,9 @@ instance SMTType Integer where
   type SMTAnnotation Integer = ()
   getSortBase _ = L.Symbol "Int"
   declareType = defaultDeclareValue
+  fromSort _ = SortParser $ \sym _ -> case sym of
+    L.Symbol "Int" -> Just $ Sort (undefined::Integer) ()
+    _ -> Nothing
 
 instance SMTValue Integer where
   unmangle (L.Number (L.I v)) _ = Just v
@@ -102,6 +112,9 @@ instance SMTType (Ratio Integer) where
   type SMTAnnotation (Ratio Integer) = ()
   getSortBase _ = L.Symbol "Real"
   declareType = defaultDeclareValue
+  fromSort _ = SortParser $ \sym _ -> case sym of
+    L.Symbol "Real" -> Just (toSort (undefined::Ratio Integer) ())
+    _ -> Nothing
 
 instance SMTValue (Ratio Integer) where
   unmangle (L.Number (L.I v)) _ = Just $ fromInteger v
@@ -161,38 +174,71 @@ instance (Args idx,SMTType val) => SMTType (SMTArray idx val) where
       getIdx _ = undefined
       getVal :: SMTArray i v -> v
       getVal _ = undefined
+  toSort (_::SMTArray i v) (anni,annv) = ArraySort (toSorts (undefined::i) anni) (toSort (undefined::v) annv)
+  fromSort _ = SortParser $ \sym rec -> case sym of
+    L.List (L.Symbol "Array":args')
+      -> let (idx,v) = splitLast sym $ fmap 
+                       (\arg -> case parseSort rec arg rec of
+                           Nothing -> error $ "smtlib2: Failed to parse array argument sort "++show arg
+                           Just s -> s
+                       ) args'
+         in Just $ ArraySort idx v
+    _ -> Nothing
+    where
+      splitLast :: L.Lisp -> [a] -> ([a],a)
+      splitLast sym [] = error $ "smtlib2: Invalid array type: "++show sym
+      splitLast _ [x] = ([],x)
+      splitLast sym (x:xs) = let ~(xs',x') = splitLast sym xs
+                             in (x:xs',x')
 
-instance (SMTType a) => Mapable (SMTExpr a) where
-  type MapArgument (SMTExpr a) i = SMTExpr (SMTArray i a)
-  getMapArgumentAnn _ _ a_ann i_ann = (i_ann,a_ann)
-  inferMapAnnotation _ _ ~(i,a) = (i,a)
+instance (SMTType a) => Liftable (SMTExpr a) where
+  type Lifted (SMTExpr a) i = SMTExpr (SMTArray i a)
+  getLiftedArgumentAnn _ _ a_ann i_ann = (i_ann,a_ann)
+  inferLiftedAnnotation _ _ ~(i,a) = (i,a)
+#ifdef SMTLIB2_WITH_CONSTRAINTS
+  getConstraint _ = Dict
+#endif
 
-instance (SMTType a) => Mapable [SMTExpr a] where
-  type MapArgument [SMTExpr a] i = [SMTExpr (SMTArray i a)]
-  getMapArgumentAnn _ _ a_anns i_ann = fmap (\a_ann -> (i_ann,a_ann)) a_anns
-  inferMapAnnotation _ _ ~(~(i,x):xs) = (i,x:(fmap snd xs))
+instance (SMTType a) => Liftable [SMTExpr a] where
+  type Lifted [SMTExpr a] i = [SMTExpr (SMTArray i a)]
+  getLiftedArgumentAnn _ _ a_anns i_ann = fmap (\a_ann -> (i_ann,a_ann)) a_anns
+  inferLiftedAnnotation _ _ ~(~(i,x):xs) = (i,x:(fmap snd xs))
+#ifdef SMTLIB2_WITH_CONSTRAINTS
+  getConstraint _ = Dict
+#endif 
 
-instance (Mapable a,Mapable b)
-         => Mapable (a,b) where
-  type MapArgument (a,b) i = (MapArgument a i,MapArgument b i)
-  getMapArgumentAnn ~(x,y) i (a_ann,b_ann) i_ann = (getMapArgumentAnn x i a_ann i_ann,
-                                                    getMapArgumentAnn y i b_ann i_ann)
-  inferMapAnnotation ~(x,y) i ~(a_ann,b_ann) = let (ann_i,ann_a) = inferMapAnnotation x i a_ann
-                                                   (_,ann_b) = inferMapAnnotation y i b_ann
-                                               in (ann_i,(ann_a,ann_b))
+instance (Liftable a,Liftable b)
+         => Liftable (a,b) where
+  type Lifted (a,b) i = (Lifted a i,Lifted b i)
+  getLiftedArgumentAnn ~(x,y) i (a_ann,b_ann) i_ann = (getLiftedArgumentAnn x i a_ann i_ann,
+                                                       getLiftedArgumentAnn y i b_ann i_ann)
+  inferLiftedAnnotation ~(x,y) i ~(a_ann,b_ann) = let (ann_i,ann_a) = inferLiftedAnnotation x i a_ann
+                                                      (_,ann_b) = inferLiftedAnnotation y i b_ann
+                                                  in (ann_i,(ann_a,ann_b))
+#ifdef SMTLIB2_WITH_CONSTRAINTS
+  getConstraint (_ :: p ((a,b),i)) = case getConstraint (Proxy :: Proxy (a,i)) of
+    Dict -> case getConstraint (Proxy :: Proxy (b,i)) of
+      Dict -> Dict
+#endif
 
-instance (Mapable a,Mapable b,Mapable c)
-         => Mapable (a,b,c) where
-  type MapArgument (a,b,c) i = (MapArgument a i,MapArgument b i,MapArgument c i)
-  getMapArgumentAnn ~(x1,x2,x3) i (ann1,ann2,ann3) i_ann 
-     = (getMapArgumentAnn x1 i ann1 i_ann,
-        getMapArgumentAnn x2 i ann2 i_ann,
-        getMapArgumentAnn x3 i ann3 i_ann)
-  inferMapAnnotation ~(x1,x2,x3) i ~(ann1,ann2,ann3)
-    = let (i_ann,ann1') = inferMapAnnotation x1 i ann1
-          (_,ann2') = inferMapAnnotation x2 i ann2
-          (_,ann3') = inferMapAnnotation x3 i ann3
+instance (Liftable a,Liftable b,Liftable c)
+         => Liftable (a,b,c) where
+  type Lifted (a,b,c) i = (Lifted a i,Lifted b i,Lifted c i)
+  getLiftedArgumentAnn ~(x1,x2,x3) i (ann1,ann2,ann3) i_ann 
+     = (getLiftedArgumentAnn x1 i ann1 i_ann,
+        getLiftedArgumentAnn x2 i ann2 i_ann,
+        getLiftedArgumentAnn x3 i ann3 i_ann)
+  inferLiftedAnnotation ~(x1,x2,x3) i ~(ann1,ann2,ann3)
+    = let (i_ann,ann1') = inferLiftedAnnotation x1 i ann1
+          (_,ann2') = inferLiftedAnnotation x2 i ann2
+          (_,ann3') = inferLiftedAnnotation x3 i ann3
       in (i_ann,(ann1',ann2',ann3'))
+#ifdef SMTLIB2_WITH_CONSTRAINTS
+  getConstraint (_ :: p ((a,b,c),i)) = case getConstraint (Proxy :: Proxy (a,i)) of
+    Dict -> case getConstraint (Proxy :: Proxy (b,i)) of
+      Dict -> case getConstraint (Proxy :: Proxy (c,i)) of
+        Dict -> Dict
+#endif
 
 -- BitVectors
 
@@ -472,11 +518,18 @@ instance Args () where
   type ArgAnnotation () = ()
   foldExprs _ s _ _ = (s,())
   extractArgAnnotation _ = ()
+  toArgs x = Just ((),x)
+  toSorts _ _ = []
 
 instance (SMTType a) => Args (SMTExpr a) where
   type ArgAnnotation (SMTExpr a) = SMTAnnotation a
   foldExprs f = f
   extractArgAnnotation = extractAnnotation
+  toArgs (x:xs) = do
+    r <- entype gcast x
+    return (r,xs)
+  toArgs [] = Nothing
+  toSorts (_::SMTExpr a) ann = [toSort (undefined::a) ann]
 
 instance (Args a,Args b) => Args (a,b) where
   type ArgAnnotation (a,b) = (ArgAnnotation a,ArgAnnotation b)
@@ -485,6 +538,11 @@ instance (Args a,Args b) => Args (a,b) where
                                         in (s2,(e1',e2'))
   extractArgAnnotation ~(x,y) = (extractArgAnnotation x,
                                  extractArgAnnotation y)
+  toArgs x = do
+    (r1,x1) <- toArgs x
+    (r2,x2) <- toArgs x1
+    return ((r1,r2),x2)
+  toSorts ~(x1,x2) (ann1,ann2) = toSorts x1 ann1 ++ toSorts x2 ann2
 
 instance (LiftArgs a,LiftArgs b) => LiftArgs (a,b) where
   type Unpacked (a,b) = (Unpacked a,Unpacked b)
@@ -504,6 +562,12 @@ instance (Args a,Args b,Args c) => Args (a,b,c) where
     = (extractArgAnnotation e1,
        extractArgAnnotation e2,
        extractArgAnnotation e3)
+  toArgs x = do
+    (r1,x1) <- toArgs x
+    (r2,x2) <- toArgs x1
+    (r3,x3) <- toArgs x2
+    return ((r1,r2,r3),x3)
+
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c) => LiftArgs (a,b,c) where
   type Unpacked (a,b,c) = (Unpacked a,Unpacked b,Unpacked c)
@@ -526,6 +590,12 @@ instance (Args a,Args b,Args c,Args d) => Args (a,b,c,d) where
        extractArgAnnotation e2,
        extractArgAnnotation e3,
        extractArgAnnotation e4)
+  toArgs x = do
+    (r1,x1) <- toArgs x
+    (r2,x2) <- toArgs x1
+    (r3,x3) <- toArgs x2
+    (r4,x4) <- toArgs x3
+    return ((r1,r2,r3,r4),x4)
 
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d) => LiftArgs (a,b,c,d) where
@@ -553,7 +623,13 @@ instance (Args a,Args b,Args c,Args d,Args e) => Args (a,b,c,d,e) where
        extractArgAnnotation e3,
        extractArgAnnotation e4,
        extractArgAnnotation e5)
-
+  toArgs x = do
+    (r1,x1) <- toArgs x
+    (r2,x2) <- toArgs x1
+    (r3,x3) <- toArgs x2
+    (r4,x4) <- toArgs x3
+    (r5,x5) <- toArgs x4
+    return ((r1,r2,r3,r4,r5),x5)
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d,LiftArgs e) => LiftArgs (a,b,c,d,e) where
   type Unpacked (a,b,c,d,e) = (Unpacked a,Unpacked b,Unpacked c,Unpacked d,Unpacked e)
@@ -583,7 +659,15 @@ instance (Args a,Args b,Args c,Args d,Args e,Args f) => Args (a,b,c,d,e,f) where
        extractArgAnnotation e4,
        extractArgAnnotation e5,
        extractArgAnnotation e6)
-
+  toArgs x = do
+    (r1,x1) <- toArgs x
+    (r2,x2) <- toArgs x1
+    (r3,x3) <- toArgs x2
+    (r4,x4) <- toArgs x3
+    (r5,x5) <- toArgs x4
+    (r6,x6) <- toArgs x5
+    return ((r1,r2,r3,r4,r5,r6),x6)
+    
 instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d,LiftArgs e,LiftArgs f) => LiftArgs (a,b,c,d,e,f) where
   type Unpacked (a,b,c,d,e,f) = (Unpacked a,Unpacked b,Unpacked c,Unpacked d,Unpacked e,Unpacked f)
   liftArgs (x1,x2,x3,x4,x5,x6) ~(a1,a2,a3,a4,a5,a6)
@@ -604,6 +688,11 @@ instance Args a => Args [a] where
                                          (s'',xs') = foldExprs f s' xs anns
                                      in (s'',x':xs')
   extractArgAnnotation = fmap extractArgAnnotation
+  toArgs [] = Just ([],[])
+  toArgs x = do
+    (r,x') <- toArgs x
+    (rs,x'') <- toArgs x'
+    return (r:rs,x'')
 
 instance LiftArgs a => LiftArgs [a] where
   type Unpacked [a] = [Unpacked a]
@@ -619,6 +708,7 @@ instance (Ord a,Typeable a,Args b) => Args (Map a b) where
   type ArgAnnotation (Map a b) = Map a (ArgAnnotation b)
   foldExprs f s mp anns = mapAccumWithKey (\s1 key ann -> foldExprs f s1 (mp!key) ann) s anns
   extractArgAnnotation = fmap extractArgAnnotation
+  toArgs _ = error "smtlib2: Don't use Map as argument type for functions you want to read back."
 
 instance (Ord a,Typeable a,LiftArgs b) => LiftArgs (Map a b) where
   type Unpacked (Map a b) = Map a (Unpacked b)
@@ -819,16 +909,16 @@ instance SMTType a => SMTFunction (SMTEq a) where
   getFunctionSymbol _ _ = L.Symbol "="
   inferResAnnotation _ _ = ()
 
-instance (SMTFunction f,Mapable a,SMTType r,
-          Args (MapArgument a i),Args i,
-          SMTFunArg f ~ a,SMTFunRes f ~ r) 
-         => SMTFunction (SMTMap f a i r) where
-  type SMTFunArg (SMTMap f a i r) = MapArgument a i
-  type SMTFunRes (SMTMap f a i r) = SMTArray i r
+instance (SMTFunction f,Liftable r,r ~ Lifted (SMTFunArg f) i,
+          Args i,
+          Args r)
+         => SMTFunction (SMTMap f i r) where
+  type SMTFunArg (SMTMap f i r) = r
+  type SMTFunRes (SMTMap f i r) = SMTArray i (SMTFunRes f)
   isOverloaded _ = True
   getFunctionSymbol x@(SMTMap f) arg_ann
     = withUndef x $
-      \ua ui -> let (i_ann,a_ann) = inferMapAnnotation ua ui arg_ann
+      \ua ui -> let (i_ann,a_ann) = inferLiftedAnnotation ua ui arg_ann
                     (sargs,sres) = functionGetSignature f a_ann (inferResAnnotation f a_ann)
                     sym = getFunctionSymbol f a_ann
                 in L.List [L.Symbol "_"
@@ -837,17 +927,17 @@ instance (SMTFunction f,Mapable a,SMTType r,
                            then L.List [sym,L.List sargs,sres]
                            else sym]
     where
-      withUndef :: SMTMap f a i r -> (a -> i -> b) -> b
+      withUndef :: SMTMap f i r -> (SMTFunArg f -> i -> b) -> b
       withUndef _ f = f undefined undefined
   inferResAnnotation x@(SMTMap f) arg_ann
     = withUndef x $ \ua ui 
-                    -> let (i_ann,a_ann) = inferMapAnnotation ua ui arg_ann
+                    -> let (i_ann,a_ann) = inferLiftedAnnotation ua ui arg_ann
                        in (i_ann,inferResAnnotation f a_ann)
     where
-      withUndef :: SMTMap f a i r -> (a -> i -> b) -> b
+      withUndef :: SMTMap f i r -> (SMTFunArg f -> i -> b) -> b
       withUndef _ f = f undefined undefined
 
-instance SMTOrd a => SMTFunction (SMTOrdOp a) where
+instance SMTType a => SMTFunction (SMTOrdOp a) where
   type SMTFunArg (SMTOrdOp a) = (SMTExpr a,SMTExpr a)
   type SMTFunRes (SMTOrdOp a) = Bool
   isOverloaded _ = True
@@ -857,7 +947,7 @@ instance SMTOrd a => SMTFunction (SMTOrdOp a) where
   getFunctionSymbol Lt _ = L.Symbol "<"
   inferResAnnotation _ _ = ()
 
-instance SMTArith a => SMTFunction (SMTArithOp a) where
+instance SMTType a => SMTFunction (SMTArithOp a) where
   type SMTFunArg (SMTArithOp a) = [SMTExpr a]
   type SMTFunRes (SMTArithOp a) = a
   isOverloaded _ = True
@@ -865,7 +955,7 @@ instance SMTArith a => SMTFunction (SMTArithOp a) where
   getFunctionSymbol Mult _ = L.Symbol "*"
   inferResAnnotation _ = head
 
-instance SMTArith a => SMTFunction (SMTMinus a) where
+instance SMTType a => SMTFunction (SMTMinus a) where
   type SMTFunArg (SMTMinus a) = (SMTExpr a,SMTExpr a)
   type SMTFunRes (SMTMinus a) = a
   isOverloaded _ = True
@@ -888,14 +978,14 @@ instance SMTFunction SMTDivide where
   getFunctionSymbol _ _ = L.Symbol "/"
   inferResAnnotation _ _ = ()
 
-instance SMTArith a => SMTFunction (SMTNeg a) where
+instance SMTType a => SMTFunction (SMTNeg a) where
   type SMTFunArg (SMTNeg a) = SMTExpr a
   type SMTFunRes (SMTNeg a) = a
   isOverloaded _ = True
   getFunctionSymbol _ _ = L.Symbol "-"
   inferResAnnotation _ = id
 
-instance SMTArith a => SMTFunction (SMTAbs a) where
+instance SMTType a => SMTFunction (SMTAbs a) where
   type SMTFunArg (SMTAbs a) = SMTExpr a
   type SMTFunRes (SMTAbs a) = a
   isOverloaded _ = True
@@ -919,7 +1009,7 @@ instance SMTFunction SMTLogic where
   getFunctionSymbol Implies _ = L.Symbol "=>"
   inferResAnnotation _ _ = ()
 
-instance (Args a,SMTType r) => SMTFunction (SMTFun a r) where
+instance (Liftable a,SMTType r) => SMTFunction (SMTFun a r) where
   type SMTFunArg (SMTFun a r) = a
   type SMTFunRes (SMTFun a r) = r
   isOverloaded _ = False
@@ -995,14 +1085,14 @@ instance SMTBV a => SMTFunction (SMTBVUnOp a) where
   getFunctionSymbol BVNeg _ = L.Symbol "bvneg"
   inferResAnnotation _ x = x
 
-instance (Args i,SMTType v) => SMTFunction (SMTSelect i v) where
+instance (Liftable i,SMTType v) => SMTFunction (SMTSelect i v) where
   type SMTFunArg (SMTSelect i v) = (SMTExpr (SMTArray i v),i)
   type SMTFunRes (SMTSelect i v) = v
   isOverloaded _ = True
   getFunctionSymbol _ _ = L.Symbol "select"
   inferResAnnotation _ ~(~(_,ann),_) = ann
 
-instance (Args i,SMTType v) => SMTFunction (SMTStore i v) where
+instance (Liftable i,SMTType v) => SMTFunction (SMTStore i v) where
   type SMTFunArg (SMTStore i v) = (SMTExpr (SMTArray i v),i,SMTExpr v)
   type SMTFunRes (SMTStore i v) = SMTArray i v
   isOverloaded _ = True

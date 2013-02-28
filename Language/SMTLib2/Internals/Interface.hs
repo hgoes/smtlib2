@@ -1,5 +1,5 @@
 {- | Defines the user-accessible interface of the smtlib2 library -}
-{-# LANGUAGE TypeFamilies,OverloadedStrings,FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies,OverloadedStrings,FlexibleContexts,ScopedTypeVariables #-}
 module Language.SMTLib2.Internals.Interface where
 
 import Language.SMTLib2.Internals
@@ -51,14 +51,15 @@ argVarsAnnNamed name ann = do
                                      0 -> ename
                                      _ -> ename++"_"++show cc
                                    sort = getSort (getUndef u) ann'
+                                   resVar = Var rname ann'
                                in ((cc+1,
                                     act' >> (do
                                                 declareType (getUndef u) ann'
                                                 declareFun rname [] sort
                                                 mapM_ assert $ additionalConstraints (getUndef u) ann' (Var rname ann')),
-                                    Map.insert rname (typeOf $ getUndef u) cmp
+                                    Map.insert rname (UntypedExpr resVar) cmp
                                    ),
-                                   Var rname ann')) (namec,return (),mp) undefined ann
+                                   resVar)) (namec,return (),mp) undefined ann
   putSMT (Map.insert name nc names,decl,mp')
   act
   return res
@@ -90,7 +91,8 @@ or' = Or
 (.||.) x y = App Or [x,y]
 
 -- | Create a boolean expression that encodes that the array is equal to the supplied constant array.
-arrayEquals :: (LiftArgs i,SMTValue v,Ix (Unpacked i),Unit (ArgAnnotation i),Unit (SMTAnnotation v)) => SMTExpr (SMTArray i v) -> Array (Unpacked i) v -> SMTExpr Bool
+arrayEquals :: (LiftArgs i,Liftable i,SMTValue v,Ix (Unpacked i),Unit (ArgAnnotation i),Unit (SMTAnnotation v))
+               => SMTExpr (SMTArray i v) -> Array (Unpacked i) v -> SMTExpr Bool
 arrayEquals expr arr 
   = case [(select expr (liftArgs i unit)) .==. (constant v)
          | (i,v) <- assocs arr ] of
@@ -124,12 +126,12 @@ interpolationGroup = do
 
 -- | Create a new uniterpreted function with annotations for
 --   the argument and the return type.
-funAnn :: (Args a, SMTType r) => ArgAnnotation a -> SMTAnnotation r -> SMT (SMTFun a r)
+funAnn :: (Liftable a, SMTType r) => ArgAnnotation a -> SMTAnnotation r -> SMT (SMTFun a r)
 funAnn = funAnnNamed "fun"
 
 -- | Create a new uninterpreted named function with annotation for
 --   the argument and the return type.
-funAnnNamed :: (Args a, SMTType r) => String -> ArgAnnotation a -> SMTAnnotation r -> SMT (SMTFun a r)
+funAnnNamed :: (Liftable a, SMTType r) => String -> ArgAnnotation a -> SMTAnnotation r -> SMT (SMTFun a r)
 funAnnNamed name annArg annRet = do
   (names,decl,mp) <- getSMT
   let func = case Map.lookup name names of
@@ -153,11 +155,11 @@ funAnnNamed name annArg annRet = do
   return res
 
 -- | funAnn with an annotation only for the return type.
-funAnnRet :: (Args a, SMTType r, Unit (ArgAnnotation a)) => SMTAnnotation r -> SMT (SMTFun a r)
+funAnnRet :: (Liftable a, SMTType r, Unit (ArgAnnotation a)) => SMTAnnotation r -> SMT (SMTFun a r)
 funAnnRet = funAnn unit
 
 -- | Create a new uninterpreted function.
-fun :: (Args a,SMTType r,SMTAnnotation r ~ (),Unit (ArgAnnotation a)) => SMT (SMTFun a r)
+fun :: (Liftable a,SMTType r,SMTAnnotation r ~ (),Unit (ArgAnnotation a)) => SMT (SMTFun a r)
 fun = funAnn unit unit
 
 -- | Apply a function to an argument
@@ -165,12 +167,8 @@ app :: (SMTFunction f) => f -> SMTFunArg f -> SMTExpr (SMTFunRes f)
 app = App
 
 -- | Lift a function to arrays
-map' :: (SMTFunction f,Mapable (SMTFunArg f)) 
-        => f 
-        -> SMTMap f 
-        (SMTFunArg f) 
-        i 
-        (SMTFunRes f)
+map' :: (SMTFunction f,Liftable (SMTFunArg f)) 
+        => f -> SMTMap f i (Lifted (SMTFunArg f) i)
 map' f = SMTMap f
 
 -- | Two expressions shall be equal
@@ -260,11 +258,11 @@ not'' :: SMTNot
 not'' = Not
 
 -- | Extracts an element of an array by its index
-select :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v
+select :: (Liftable i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v
 select arr i = App Select (arr,i)
 
 -- | The expression @store arr i v@ stores the value /v/ in the array /arr/ at position /i/ and returns the resulting new array.
-store :: (Args i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v -> SMTExpr (SMTArray i v)
+store :: (Liftable i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v -> SMTExpr (SMTArray i v)
 store arr i v = App Store (arr,i,v)
 
 -- | Interpret a function /f/ from /i/ to /v/ as an array with indices /i/ and elements /v/.
@@ -493,36 +491,44 @@ named' = named "named"
 getInterpolants :: [SMTExpr Bool] -> SMT [SMTExpr Bool]
 getInterpolants exprs = do
   (_,tps,mp) <- getSMT
+  sort_parser <- getSortParser
   putRequest (L.List (L.Symbol "get-interpolants":fmap (\e -> let (r,_) = exprToLisp e 0 in r) exprs))
   L.List res <- parseResponse
-  return $ fmap (lispToExprT (const Nothing) tps () (\name -> mp Map.! name)) res
+  return $ fmap (\expr 
+                 -> case lispToExpr commonFunctions sort_parser 
+                         (\n -> Map.lookup n mp) tps gcast 
+                         (Just $ toSort (undefined::Bool) ()) expr of
+                      Just (Just x) -> x
+                      _ -> error $ "smtlib2: Couldn't parse interpolant "++show expr
+                ) res
   
 -- | After an unsuccessful 'checkSat' this method extracts a proof from the SMT solver that the instance is unsatisfiable.
 getProof :: SMT (SMTExpr Bool)
 getProof = do
   (_,tps,mp) <- getSMT
-  let mp' = Map.union mp commonTheorems
+  sort_parser <- getSortParser
+  let mp' = mp -- Map.union mp commonTheorems
   putRequest (L.List [L.Symbol "get-proof"])
   res <- parseResponse
-  return $ lispToExprT (const Nothing) tps () (\name -> case Map.lookup name mp' of
-                                                  Nothing -> error $ "smtlib2: Failed to find a definition for "++show name
-                                                  Just n -> n
-                                              ) res
+  case lispToExpr commonFunctions sort_parser
+       (\n -> Map.lookup n mp') tps gcast (Just $ toSort (undefined::Bool) ()) res of
+    Just (Just x) -> return x
+    _ -> error $ "smtlib2: Couldn't parse proof "++show res
 
 -- | Use the SMT solver to simplify a given expression.
 --   Currently only works with Z3.
 simplify :: SMTType t => SMTExpr t -> SMT (SMTExpr t)
-simplify expr = do
+simplify (expr::SMTExpr t) = do
   clearInput
   putRequest $ L.List [L.Symbol "simplify"
                       ,L.toLisp expr]
   val <- parseResponse
   (_,tps,mp) <- getSMT
-  return $ lispToExprT (const Nothing) tps (extractAnnotation expr)
-    (\name -> case Map.lookup name mp of
-        Nothing -> error $ "smtlib2: Failed to find a definition for "++show name++" ("++show mp++")"
-        Just n -> n
-    ) val
+  sort_parser <- getSortParser
+  case lispToExpr commonFunctions sort_parser
+       (\n -> Map.lookup n mp) tps gcast (Just $ toSort (undefined::t) (extractAnnotation expr)) val of
+    Just (Just x) -> return x
+    _ -> error $ "smtlib2: Failed to parse simplify result: "++show val
 
 -- | After an unsuccessful 'checkSat', return a list of names of named
 --   expression which make the instance unsatisfiable.

@@ -1,4 +1,4 @@
-{-# LANGUAGE RankNTypes,TypeFamilies,OverloadedStrings,GADTs,FlexibleContexts #-}
+{-# LANGUAGE RankNTypes,TypeFamilies,OverloadedStrings,GADTs,FlexibleContexts,ScopedTypeVariables,CPP #-}
 module Language.SMTLib2.Internals.Translation where
 
 import Language.SMTLib2.Internals
@@ -7,13 +7,18 @@ import Language.SMTLib2.Functions
 
 import qualified Data.AttoLisp as L
 import Data.Typeable
-import Data.Text as T hiding (foldl1)
+import Data.Text as T hiding (foldl1,head)
 import Data.Word
 import Data.Array
 import qualified Data.Map as Map (Map,lookup,elems)
-import Data.List (genericLength)
+import Data.Monoid
 
 import Data.Unit
+
+#ifdef SMTLIB2_WITH_CONSTRAINTS
+import Data.Constraint
+import Data.Proxy
+#endif
 
 instance L.ToLisp (SMTExpr t) where
   toLisp e = fst $ exprToLisp e 0
@@ -50,7 +55,7 @@ getRawValue expr = do
     _ -> error $ "unknown response to get-value: "++show val
 
 -- | Define a new function with a body
-defFun :: (Args a,SMTType r,Unit (ArgAnnotation a),Unit (SMTAnnotation r)) => (a -> SMTExpr r) -> SMT (SMTFun a r)
+defFun :: (Liftable a,SMTType r,Unit (ArgAnnotation a),Unit (SMTAnnotation r)) => (a -> SMTExpr r) -> SMT (SMTFun a r)
 defFun = defFunAnn unit unit
 
 -- | Define a new constant
@@ -60,11 +65,13 @@ defConst = defConstAnn unit
 -- | Define a new constant with a type annotation.
 defConstAnn :: (SMTType r) => SMTAnnotation r -> SMTExpr r -> SMT (SMTExpr r)
 defConstAnn ann e = do
-  f <- defFunAnn () ann (const e)
-  return $ App f ()
+  fname <- freeName "constvar"
+  let (expr',_) = exprToLisp e 0
+  defineFun fname [] (getSort (getUndef e) ann) expr'
+  return $ Var fname ann
 
 -- | Define a new function with a body and custom type annotations for arguments and result.
-defFunAnnNamed :: (Args a,SMTType r) => String -> ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT (SMTFun a r)
+defFunAnnNamed :: (Liftable a,SMTType r) => String -> ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT (SMTFun a r)
 defFunAnnNamed name ann_arg ann_res f = do
   fname <- freeName name
   (names,_,_) <- getSMT
@@ -83,11 +90,11 @@ defFunAnnNamed name ann_arg ann_res f = do
   return res
 
 -- | Like `defFunAnnNamed`, but defaults the function name to "fun".
-defFunAnn :: (Args a,SMTType r) => ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT (SMTFun a r)
+defFunAnn :: (Liftable a,SMTType r) => ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT (SMTFun a r)
 defFunAnn = defFunAnnNamed "fun"
 
 -- | Extract all values of an array by giving the range of indices.
-unmangleArray :: (LiftArgs i,Ix (Unpacked i),SMTValue v,
+unmangleArray :: (Liftable i,LiftArgs i,Ix (Unpacked i),SMTValue v,
                   --Unit (SMTAnnotation (Unpacked i)),
                   Unit (ArgAnnotation i)) 
                  => (Unpacked i,Unpacked i) 
@@ -97,6 +104,35 @@ unmangleArray b expr = mapM (\i -> do
                                 v <- getValue (App Select (expr,liftArgs i unit))
                                 return (i,v)
                             ) (range b) >>= return.array b
+
+withSort :: Sort -> (forall t. SMTType t => t -> SMTAnnotation t -> a) -> a
+withSort (Sort u ann) f = f u ann
+withSort (ArraySort i v) f = withArraySort i v f
+
+withArraySort :: [Sort] -> Sort -> (forall i v. (Args i,SMTType v) => SMTArray i v -> (ArgAnnotation i,SMTAnnotation v) -> a) -> a
+withArraySort idx v f
+  = withArgSort idx $
+    \(_::i) anni 
+    -> withSort v $
+       \(_::vt) annv -> f (undefined::SMTArray i vt) (anni,annv)
+
+withArgSort :: [Sort] -> (forall i. Args i => i -> ArgAnnotation i -> a) -> a
+withArgSort [] f = f () ()
+withArgSort [i] f = withSort i $
+                    \(_::ti) anni -> f (undefined::SMTExpr ti) anni
+withArgSort [i1,i2] f
+  = withSort i1 $
+    \(_::t1) ann1
+     -> withSort i2 $
+        \(_::t2) ann2 -> f (undefined::(SMTExpr t1,SMTExpr t2)) (ann1,ann2)
+withArgSort [i1,i2,i3] f
+  = withSort i1 $
+    \(_::t1) ann1
+     -> withSort i2 $
+        \(_::t2) ann2 
+        -> withSort i3 $
+           \(_::t3) ann3 -> f (undefined::(SMTExpr t1,SMTExpr t2,SMTExpr t3)) (ann1,ann2,ann3)
+withArgSort _ _ = error $ "smtlib2: Please provide more cases for withArgSort."
 
 exprsToLisp :: [SMTExpr t] -> Integer -> ([L.Lisp],Integer)
 exprsToLisp [] c = ([],c)
@@ -152,6 +188,7 @@ withUndef rep f
 asType :: a -> g a -> g a
 asType = const id
 
+{-
 binT :: (SMTValue b1,Typeable b1,
          SMTValue b2,Typeable b2,
          SMTValue c,Typeable c,
@@ -165,7 +202,7 @@ binT :: (SMTValue b1,Typeable b1,
 binT f con bound tps g lhs rhs 
   = let lhs' = lispToExprT bound tps () g lhs
         rhs' = lispToExprT bound tps () g rhs
-    in Just $ f (con lhs' rhs')
+    in Just $ f (con lhs' rhs') -}
 
 unmangleDeclared :: ((forall a. (SMTValue a,Typeable a) => SMTExpr a -> b)) -> DeclaredType -> L.Lisp -> Maybe b
 unmangleDeclared f d l
@@ -186,124 +223,107 @@ createVarDeclared f d name
     eq :: a -> SMTExpr a -> SMTExpr a
     eq = const id
 
-data UntypedExpr where
-  UntypedExpr :: SMTType a => SMTExpr a -> UntypedExpr
+newtype FunctionParser 
+  = FunctionParser { parseFun :: forall a. L.Lisp -> Maybe [Sort] -> Maybe Sort
+                                 -> FunctionParser
+                                 -> (forall f. SMTFunction f => f -> a)
+                                 -> Maybe a }
 
-entype :: (forall a. SMTType a => SMTExpr a -> b) -> UntypedExpr -> b
-entype f (UntypedExpr x) = f x
+instance Monoid FunctionParser where
+  mempty = FunctionParser $ \_ _ _ _ _ -> Nothing
+  mappend p1 p2 = FunctionParser $
+                  \sym sort_arg sort_ret rec f 
+                  -> case parseFun p1 sym sort_arg sort_ret rec f of
+                    Nothing -> parseFun p2 sym sort_arg sort_ret rec f
+                    Just r -> Just r
 
-lispToExprU :: (forall a. SMTType a => SMTExpr a -> b)
-               -> (T.Text -> Maybe UntypedExpr)
-               -> Map.Map TyCon DeclaredType
-               -> (T.Text -> TypeRep)
-               -> L.Lisp -> Maybe b
-lispToExprU f bound tps g l
+lispToExpr :: FunctionParser -> SortParser 
+              -> (T.Text -> Maybe UntypedExpr) 
+              -> Map.Map TyCon DeclaredType
+              -> (forall a. SMTType a => SMTExpr a -> b) -> Maybe Sort -> L.Lisp -> Maybe b
+lispToExpr fun sort bound tps f expected l
   = firstJust $
     [ unmangleDeclared f tp l | tp <- Map.elems tps ] ++
     [case l of
-        L.Symbol name -> let (tycon,_) = splitTyConApp (g name)
-                         in case bound name of
-                           Nothing -> case Map.lookup tycon tps of
-                             Nothing -> Nothing
-                             Just decl -> Just $ createVarDeclared f decl name
-                           Just subst -> entype (\subst' ->  Just $ f subst') subst
-        L.List [L.Symbol "=",lhs,rhs] 
-          -> let lhs' = lispToExprU (\lhs' -> let rhs' = lispToExprT bound tps (extractAnnotation lhs') g rhs
-                                              in f (App Eq [lhs',rhs'])
-                                    ) bound tps g lhs
-             in case lhs' of
-               Just r -> Just r
-               Nothing -> lispToExprU (\rhs' -> let lhs'' = lispToExprT bound tps (extractAnnotation rhs') g lhs
-                                                in f (App Eq [lhs'',rhs'])
-                                      ) bound tps g rhs
-        L.List [L.Symbol ">=",lhs,rhs] -> binT f ((.>=.)::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) bound tps g lhs rhs
-        L.List [L.Symbol ">",lhs,rhs] -> binT f ((.>.)::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) bound tps g lhs rhs
-        L.List [L.Symbol "<=",lhs,rhs] -> binT f ((.<=.)::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) bound tps g lhs rhs
-        L.List [L.Symbol "<",lhs,rhs] -> binT f ((.<.)::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Bool) bound tps g lhs rhs
-        L.List (L.Symbol "distinct":first:rest)
-          -> lispToExprU (\first' -> let rest' = fmap (lispToExprT bound tps (extractAnnotation first') g) rest
-                                     in f $ App Distinct (first':rest')
-                         ) bound tps g first
-        L.List (L.Symbol "+":arg) -> Just $ f $ foldl1 ((+)::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer) $ 
-                                     fmap (lispToExprT bound tps () g) arg
-        L.List [L.Symbol "-",lhs,rhs] -> binT f ((-)::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer) bound tps g lhs rhs
-        L.List (L.Symbol "*":arg) -> Just $ f $ foldl1 ((*)::SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer) $
-                                     fmap (lispToExprT bound tps () g) arg
-        L.List [L.Symbol "div",lhs,rhs] -> binT f (curry $ App Div) bound tps g lhs rhs
-        L.List [L.Symbol "mod",lhs,rhs] -> binT f (curry $ App Mod) bound tps g lhs rhs
-        L.List [L.Symbol "rem",lhs,rhs] -> binT f (curry $ App Rem) bound tps g lhs rhs
-        L.List [L.Symbol "/",lhs,rhs] -> binT f (curry $ App Divide) bound tps g lhs rhs
-        L.List [L.Symbol "-",arg] -> Just $ f $ App Neg (lispToExprT bound tps () g arg :: SMTExpr Integer)
-        L.List [L.Symbol "abs",arg] -> Just $ f $ App Abs (lispToExprT bound tps () g arg :: SMTExpr Integer)
-        L.List [L.Symbol "to_real",arg] 
-          -> Just $ f $ App ToReal (lispToExprT bound tps () g arg)
-        L.List [L.Symbol "to_int",arg] 
-          -> Just $ f $ App ToInt (lispToExprT bound tps () g arg)
-        L.List [L.Symbol "ite",cond,lhs,rhs]
-          -> let cond' = lispToExprT bound tps () g cond
-             in case lispToExprU (\lhs' -> let rhs' = lispToExprT bound tps (extractAnnotation lhs') g rhs
-                                           in f (App ITE (cond',lhs',rhs'))
-                                 ) bound tps g lhs of
-                  Just r -> Just r
-                  Nothing -> lispToExprU (\rhs' -> let lhs'' = lispToExprT bound tps (extractAnnotation rhs') g lhs
-                                                   in f (App ITE (cond',lhs'',rhs'))
-                                         ) bound tps g rhs
-        L.List (L.Symbol "and":arg) -> Just $ f $ 
-                                       App And $
-                                       fmap (lispToExprT bound tps () g) arg
-        L.List (L.Symbol "or":arg) -> Just $ f $
-                                      App Or $
-                                      fmap (lispToExprT bound tps () g) arg
-        L.List (L.Symbol "xor":arg)
-          -> Just $ f $ App XOr $ fmap (lispToExprT bound tps () g) arg
-        L.List (L.Symbol "=>":arg) 
-          -> Just $ f $ App Implies $ fmap (lispToExprT bound tps () g) arg
-        L.List [L.Symbol "not",arg] -> Just $ f $ App Not (lispToExprT bound tps () g arg :: SMTExpr Bool)
-        L.List [L.Symbol "bvule",lhs,rhs] 
-          -> Just $ f $ binBV (curry $ App BVULE) bound tps g lhs rhs
-        L.List [L.Symbol "bvult",lhs,rhs]
-          -> Just $ f $ binBV (curry $ App BVULT) bound tps g lhs rhs
-        L.List [L.Symbol "bvuge",lhs,rhs]
-          -> Just $ f $ binBV (curry $ App BVUGE) bound tps g lhs rhs
-        L.List [L.Symbol "bvugt",lhs,rhs]
-          -> Just $ f $ binBV (curry $ App BVUGT) bound tps g lhs rhs
-        L.List [L.Symbol "bvsle",lhs,rhs]
-          -> Just $ f $ binBV (curry $ App BVSLE) bound tps g lhs rhs
-        L.List [L.Symbol "bvslt",lhs,rhs]
-          -> Just $ f $ binBV (curry $ App BVSLT) bound tps g lhs rhs
-        L.List [L.Symbol "bvsge",lhs,rhs]
-          -> Just $ f $ binBV (curry $ App BVSGE) bound tps g lhs rhs
-        L.List [L.Symbol "bvsgt",lhs,rhs]
-          -> Just $ f $ binBV (curry $ App BVSGT) bound tps g lhs rhs
-        L.List [L.Symbol "forall",L.List args,body] -> Just $ f $ quantToExpr Forall bound tps g args body
-        L.List [L.Symbol "exists",L.List args,body] -> Just $ f $ quantToExpr Exists bound tps g args body
-        L.List [L.Symbol "let",L.List args,body] -> Just $ convertLetStruct f (parseLetStruct bound tps g args body)
-        L.List (L.Symbol fn:arg) -> Just $ fnToExpr f bound tps g fn arg
+        L.Symbol name -> case bound name of
+          Nothing -> Nothing
+          Just subst -> entype (\subst' -> Just $ f subst') subst
+        L.List [L.Symbol "forall",L.List args',body]
+          -> fmap f $ quantToExpr Forall fun sort bound tps args' body
+        L.List [L.Symbol "exists",L.List args',body]
+          -> fmap f $ quantToExpr Exists fun sort bound tps args' body
+        L.List [L.Symbol "let",L.List args',body]
+          -> let struct = parseLetStruct fun sort bound tps expected args' body
+             in Just $ convertLetStruct f struct
+        --L.List [L.Symbol "_",L.Symbol "as-array",fsym]
+        --  -> parseFun fun fsym (
+        L.List (fsym:args') -> do
+          nargs <- lispToExprs args'
+          let arg_tps = fmap (entype $ \(expr::SMTExpr t) 
+                                       -> toSort (undefined::t) (extractAnnotation expr)
+                             ) nargs
+          parseFun fun fsym (Just arg_tps) expected fun $
+            \rfun -> case (do
+                              (rargs,rest) <- toArgs nargs
+                              case rest of
+                                [] -> Just $ App rfun rargs
+                                _ -> Nothing) of
+                       Just e -> f e
+                       Nothing -> error $ "smtlib2: Wrong arguments for function"
         _ -> Nothing
     ]
+  where
+    lispToExprs = mapM $ \arg -> lispToExpr fun sort bound tps (UntypedExpr) Nothing arg
 
-parseLetStruct :: (T.Text -> Maybe UntypedExpr)
-                 -> Map.Map TyCon DeclaredType
-                 -> (T.Text -> TypeRep) 
-                 -> [L.Lisp] -> L.Lisp -> LetStruct
-parseLetStruct bound tps g (L.List [L.Symbol name,expr]:rest) arg
-  = case lispToExprU (\expr' -> LetStruct (extractAnnotation expr') expr' $
-                                \sym -> parseLetStruct (\txt -> if txt==name
-                                                                then Just $ UntypedExpr expr'
-                                                                else bound txt) tps
-                                        (\txt -> if txt==name
-                                                 then typeOf $ getUndef $ expr'
-                                                 else g txt) rest arg
-                     ) bound tps g expr of
-      Nothing -> error $ "smtlib2: Failed to parse argument in let-expression "++show expr
-      Just x -> x
-parseLetStruct bound tps g [] arg = case lispToExprU EndLet bound tps g arg of
-  Nothing -> error $ "smtlib2: Failed to parse body of let-expression: "++show arg
-  Just x -> x
+quantToExpr :: (forall a. Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool)
+               -> FunctionParser -> SortParser
+               -> (T.Text -> Maybe UntypedExpr)
+               -> Map.Map TyCon DeclaredType -> [L.Lisp] -> L.Lisp -> Maybe (SMTExpr Bool)
+quantToExpr q fun sort bound tps' (L.List [L.Symbol var,tp]:rest) body
+  = let decl = declForSMTType tp tps'
+        getForall :: Typeable a => a -> SMTExpr a -> SMTExpr a
+        getForall = const id
+    in Just $ withDeclaredType 
+       (\u ann ->
+         q ann $ \subst -> case quantToExpr q fun sort 
+                                (\txt -> if txt==var
+                                         then Just $ UntypedExpr $ getForall u subst
+                                         else bound txt)
+                                tps' rest body of
+                             Just r -> r
+                             Nothing -> error $ "smtlib2: Failed to parse quantifier construct "++show rest
+                             ) decl
+quantToExpr _ fun sort bound tps' [] body
+  = lispToExpr fun sort bound tps' (\expr -> case gcast expr of 
+                                       Nothing -> error "smtlib2: Body of existential quantification isn't bool."
+                                       Just r -> r
+                                   ) (Just $ toSort (undefined::Bool) ()) body
+quantToExpr _ _ _ _ _ (el:_) _ = error $ "smtlib2: Invalid element "++show el++" in quantifier construct."
 
 data LetStruct where
   LetStruct :: SMTType a => SMTAnnotation a -> SMTExpr a -> (SMTExpr a -> LetStruct) -> LetStruct
   EndLet :: SMTType a => SMTExpr a -> LetStruct
+
+parseLetStruct :: FunctionParser -> SortParser
+                  -> (T.Text -> Maybe UntypedExpr)
+                  -> Map.Map TyCon DeclaredType
+                  -> Maybe Sort
+                  -> [L.Lisp] -> L.Lisp -> LetStruct
+parseLetStruct fun sort bound tps expected (L.List [L.Symbol name,expr]:rest) arg
+  = case lispToExpr fun sort bound tps
+         (\expr' -> LetStruct (extractAnnotation expr') expr' $
+                    \sym -> parseLetStruct fun sort
+                            (\txt -> if txt==name
+                                     then Just $ UntypedExpr expr'
+                                     else bound txt) tps expected rest arg
+                     ) Nothing expr of
+      Nothing -> error $ "smtlib2: Failed to parse argument in let-expression "++show expr
+      Just x -> x
+parseLetStruct fun sort bound tps expected [] arg 
+  = case lispToExpr fun sort bound tps EndLet expected arg of
+    Nothing -> error $ "smtlib2: Failed to parse body of let-expression: "++show arg
+    Just x -> x
+parseLetStruct _ _ _ _ _ (el:_) _ = error $ "smtlib2: Invalid entry "++show el++" in let construct."
 
 extractType :: (forall a. SMTType a => a -> b) -> LetStruct -> b
 extractType f (EndLet x) = f (getUndef x)
@@ -321,230 +341,150 @@ convertLetStruct f x
   where
     assertEq :: a -> SMTExpr a -> SMTExpr a
     assertEq _ x = x
+
+withFirstArgSort :: L.Lisp -> Maybe [Sort] -> (forall t. SMTType t => t -> SMTAnnotation t -> a) -> a
+withFirstArgSort sym (Just (s:_)) f = withSort s f
+withFirstArgSort sym (Just []) f = error $ "smtlib2: Function "++show sym++" needs at least one argument."
+withFirstArgSort sym Nothing f = error $ "smtlib2: Must provide signature for overloaded symbol "++show sym
+
+withAnySort :: L.Lisp -> Maybe [Sort] -> Maybe Sort -> (forall t. SMTType t => t -> SMTAnnotation t -> a) -> a
+withAnySort sym (Just (s:_)) _ f = withSort s f
+withAnySort sym _ (Just s) f = withSort s f
+withAnySort sym (Just []) _ f = error $ "smtlib2: Function "++show sym++" needs at least one argument."
+withAnySort sym Nothing Nothing f = error $ "smtlib2: Must provide signature for overloaded symbol "++show sym
+
+commonFunctions :: FunctionParser
+commonFunctions = mconcat [eqParser
+                          ,mapParser
+                          ,ordOpParser
+                          ,arithOpParser
+                          ,minusParser
+                          ,intArithParser
+                          ,divideParser
+                          ,absParser
+                          ,logicParser
+                          ,iteParser]
+
+eqParser :: FunctionParser
+eqParser = FunctionParser $ 
+           \sym sort_arg _ rec f -> case sym of
+             L.Symbol "=" -> withFirstArgSort sym sort_arg $
+                             \(u::t) _ -> Just $ f (Eq :: SMTEq t)
+             _ -> Nothing
+
+mapParser :: FunctionParser
+#ifdef SMTLIB2_WITH_CONSTRAINTS
+mapParser = FunctionParser $
+            \sym sort_arg sort_ret rec f -> case sym of
+              L.List [L.Symbol "_"
+                     ,L.Symbol "map"
+                     ,fun] -> let idx_sort = case sort_arg of
+                                    Nothing -> case sort_ret of
+                                      Nothing -> [toSort (undefined::Integer) ()]
+                                      Just (ArraySort i _) -> i
+                                      Just _ -> error $ "smtlib2: map return value must be array."
+                                    Just (ArraySort i _:_) -> i
+                                    Just _ -> error $ "smtlib2: all map arguments must be arrays."
+                                  arg_sorts = fmap 
+                                              (fmap (\s -> case s of
+                                                        ArraySort _ v -> v
+                                                        _ -> error $ "smtlib2: all map arguments must be arrays."
+                                                    )) sort_arg
+                                  ret_sort = case sort_ret of
+                                    Nothing -> Nothing
+                                    Just (ArraySort _ v) -> Just v
+                                    Just _ -> error $ "smtlib2: map return value must be array."
+                              in parseFun rec fun arg_sorts ret_sort rec
+                                 (\(fun' :: g) -> withArgSort idx_sort $
+                                                  \(_::i) _
+                                                  -> let res = SMTMap fun' :: SMTMap g i r
+                                                     in case getConstraint (Proxy :: Proxy (SMTFunArg g,i)) of
+                                                       Dict -> f res
+                                 )
+              _ -> Nothing
+#else
+mapParser = FunctionParser 
+            $ \sym _ _ _ 
+              -> case sym of
+                L.List [L.Symbol "_"
+                       ,L.Symbol "map"
+                       ,_] -> error "smtlib2: Compile smtlib2 with -fWithConstraints to enable parsing of map functions"
+#endif
+
+ordOpParser :: FunctionParser
+ordOpParser 
+  = FunctionParser $
+    \sym sort_arg _ rec f 
+    -> case sym of
+      L.Symbol ">=" -> withFirstArgSort sym sort_arg $ \(_::t) _ -> Just $ f (Ge::SMTOrdOp t)
+      L.Symbol ">" -> withFirstArgSort sym sort_arg $ \(_::t) _ -> Just $ f (Gt::SMTOrdOp t)
+      L.Symbol "<=" -> withFirstArgSort sym sort_arg $ \(_::t) _ -> Just $ f (Le::SMTOrdOp t)
+      L.Symbol "<" -> withFirstArgSort sym sort_arg $ \(_::t) _ -> Just $ f (Lt::SMTOrdOp t)
+      _ -> Nothing
+
+arithOpParser :: FunctionParser
+arithOpParser
+  = FunctionParser $
+    \sym sort_arg sort_ret rec f -> case sym of
+      L.Symbol "+" -> withAnySort sym sort_arg sort_ret $ \(_::t) _ -> Just $ f (Plus::SMTArithOp t)
+      L.Symbol "*" -> withAnySort sym sort_arg sort_ret $ \(_::t) _ -> Just $ f (Mult::SMTArithOp t)
+      _ -> Nothing
+
+minusParser :: FunctionParser
+minusParser
+  = FunctionParser $
+    \sym sort_arg sort_ret rec f -> case sym of
+      L.Symbol "-" -> case sort_arg of
+        Just [s] -> withSort s $ \(_::t) _ -> Just $ f (Neg::SMTNeg t)
+        Just (s:_) -> withSort s $ \(_::t) _ -> Just $ f (Minus::SMTMinus t)
+        Nothing -> error $ "smtlib2: Must provide signature for overloaded symbol "++show sym
+      _ -> Nothing
+
+intArithParser :: FunctionParser
+intArithParser
+  = FunctionParser $
+    \sym _ _ rec f -> case sym of
+      L.Symbol "div" -> Just $ f Div
+      L.Symbol "mod" -> Just $ f Mod
+      L.Symbol "rem" -> Just $ f Rem
+      _ -> Nothing
+
+divideParser :: FunctionParser
+divideParser
+  = FunctionParser $
+    \sym _ _ rec f -> case sym of
+      L.Symbol "/" -> Just $ f Divide
+      _ -> Nothing
+
+absParser :: FunctionParser
+absParser
+  = FunctionParser $
+    \sym sort_arg sort_ret rec f -> case sym of
+      L.Symbol "abs" -> withAnySort sym sort_arg sort_ret $ \(_::t) _ -> Just $ f (Abs::SMTAbs t)
+      _ -> Nothing
+
+logicParser :: FunctionParser
+logicParser
+  = FunctionParser $
+    \sym _ _ rec f -> case sym of
+      L.Symbol "not" -> Just $ f Not
+      L.Symbol "and" -> Just $ f And
+      L.Symbol "or" -> Just $ f Or
+      L.Symbol "xor" -> Just $ f XOr
+      L.Symbol "=>" -> Just $ f Implies
+      _ -> Nothing
                                      
-asBV :: Typeable a => (forall b. (SMTBV b,Typeable b) => SMTExpr b -> c) -> SMTExpr a -> c
-asBV f e = case (gcast e :: Maybe (SMTExpr Word8)) of
-  Just r -> f r
-  Nothing -> case (gcast e :: Maybe (SMTExpr Word16)) of
-    Just r -> f r
-    Nothing -> case (gcast e :: Maybe (SMTExpr Word32)) of
-      Just r -> f r
-      Nothing -> case (gcast e :: Maybe (SMTExpr Word64)) of
-        Just r -> f r
-        Nothing -> error $ "Cannot treat expression of type "++show (typeOf e)++" as bitvector"
-
-fnToExpr :: (forall a. (SMTValue a,Typeable a,SMTAnnotation a ~ ()) => SMTExpr a -> b)
-            -> (T.Text -> Maybe UntypedExpr)
-            -> Map.Map TyCon DeclaredType
-            -> (T.Text -> TypeRep)
-            -> T.Text -> [L.Lisp] -> b
-fnToExpr f bound tps g fn arg = case splitTyConApp $ g fn of
-  (_,[targs,res]) -> withUndef res $ \res' -> case splitTyConApp targs of
-    (_,rargs) -> case rargs of
-      [] -> let [a0] = arg 
-            in withUndef targs $ 
-               \t0' -> f $ asType res' $ App (SMTFun fn undefined) (asType t0' $ lispToExprT bound tps () g a0)
-      [t0,t1] -> let [a0,a1] = arg 
-                 in withUndef t0 $ 
-                    \t0' -> withUndef t1 $ 
-                            \t1' -> let p0 = lispToExprT bound tps () g a0
-                                        p1 = lispToExprT bound tps () g a1
-                                    in f $ asType res' $ App (SMTFun fn undefined) (asType t0' p0,asType t1' p1)
-      [t0,t1,t2] -> let [a0,a1,a2] = arg 
-                    in withUndef t0 $ 
-                       \t0' -> withUndef t1 $ 
-                               \t1' -> withUndef t2 $ 
-                                       \t2' -> let p0 = lispToExprT bound tps () g a0
-                                                   p1 = lispToExprT bound tps () g a1
-                                                   p2 = lispToExprT bound tps () g a2
-                                               in f $ asType res' $ App (SMTFun fn undefined) (asType t0' p0,asType t1' p1,asType t2' p2)
-      _ -> error "Language.SMTLib2.Internals.Translation.fnToExpr: Invalid number of function arguments given (more than 3)."
-  _ -> error $ "Language.SMTLib2.Internals.Translation.fnToExpr: Invalid function type "++(show $ g fn)++" given to function "++show fn++"."
-
-fgcast :: (Typeable a,Typeable b) => L.Lisp -> c a -> c b
-fgcast l x = case gcast x of
-  Just r -> r
-  Nothing -> error $ "Type error in expression "++show l
-
-binBV :: (forall a. (SMTBV a,Typeable a) => SMTExpr a -> SMTExpr a -> SMTExpr b) 
-         -> (T.Text -> Maybe UntypedExpr)
-         -> Map.Map TyCon DeclaredType -> (T.Text -> TypeRep) -> L.Lisp -> L.Lisp -> SMTExpr b
-binBV f bound tps g lhs rhs
-  = let r0 = lispToExprU (asBV (\lhs0 -> let rhs0 = lispToExprT bound tps (extractAnnotation lhs0) g rhs
-                                         in f lhs0 rhs0
-                               )) bound tps g lhs
-    in case r0 of
-      Just r -> r
-      Nothing -> let r1 = lispToExprU (asBV (\rhs1 -> let lhs1 = lispToExprT bound tps (extractAnnotation rhs1) g lhs
-                                                      in f lhs1 rhs1
-                                            )) bound tps g rhs
-                 in case r1 of
-                   Just r -> r
-                   Nothing -> error $ "Parsing bitvector expression failed"
-
-lispToExprT :: (SMTType a,Typeable a) => 
-               (T.Text -> Maybe UntypedExpr)
-               -> Map.Map TyCon DeclaredType 
-               -> SMTAnnotation a -> (T.Text -> TypeRep) -> L.Lisp -> SMTExpr a
-lispToExprT bound tps ann g l 
-  = withWitness $ \u -> 
-  let (tycon,_) = splitTyConApp $ typeOf u
-  in case (do 
-              decl <- Map.lookup tycon tps
-              withDeclaredValueType (\u' ann' -> do
-                                        c <- unmangle l ann'
-                                        gcast $ Const (mkEq u' c) ann'
-                                    ) decl) of
-       Just (Just res) -> res
-       _ -> case l of
-         L.Symbol name -> case bound name of
-           Nothing -> Var name ann
-           Just expr -> entype (\expr' -> case gcast expr' of 
-                                   Nothing -> error $ "smtlib2: Variable "++show name++" is not of type "++show (typeOf u)++"."
-                                   Just x -> x)
-                        expr
-         L.List [L.Symbol "=",lhs,rhs] 
-           -> let lhs' = lispToExprU (\lhs' -> let rhs' = lispToExprT bound tps (extractAnnotation lhs') g rhs
-                                               in fgcast l $ App Eq [lhs',rhs']
-                                     ) bound tps g lhs
-              in case lhs' of
-                Just r -> r
-                Nothing -> let rhs' = lispToExprU 
-                                      (\rhs' -> let lhs'' = lispToExprT bound tps (extractAnnotation rhs') g lhs
-                                                in fgcast l $ App Eq [lhs'',rhs']
-                                      ) bound tps g rhs
-                           in case rhs' of
-                             Just r -> r
-                             Nothing -> error $ "Failed to parse expression "++show l
-         L.List [L.Symbol ">",lhs,rhs] -> let l' = lispToExprT bound tps () g lhs
-                                              r' = lispToExprT bound tps () g rhs
-                                          in fgcast l $ App Gt (l' :: SMTExpr Integer,r')
-         L.List [L.Symbol ">=",lhs,rhs] -> let l' = lispToExprT bound tps () g lhs
-                                               r' = lispToExprT bound tps () g rhs
-                                           in fgcast l $ App Ge (l' :: SMTExpr Integer,r')
-         L.List [L.Symbol "<",lhs,rhs] -> let l' = lispToExprT bound tps () g lhs
-                                              r' = lispToExprT bound tps () g rhs
-                                          in fgcast l $ App Lt (l' :: SMTExpr Integer,r')
-         L.List [L.Symbol "<=",lhs,rhs] -> let l' = lispToExprT bound tps () g lhs
-                                               r' = lispToExprT bound tps () g rhs
-                                           in fgcast l $ App Le (l' :: SMTExpr Integer,r')
-         L.List (L.Symbol "+":arg) -> let arg' = fmap (lispToExprT bound tps () g) arg
-                                      in fgcast l $ foldl1 (+) (arg' :: [SMTExpr Integer])
-         L.List [L.Symbol "-",lhs,rhs] -> let l' = lispToExprT bound tps () g lhs
-                                              r' = lispToExprT bound tps () g rhs
-                                          in fgcast l $ App Minus (l' :: SMTExpr Integer,r')
-         L.List (L.Symbol "*":arg) -> let arg' = fmap (lispToExprT bound tps () g) arg
-                                      in fgcast l $ foldl1 (*) (arg' :: [SMTExpr Integer])
-         L.List [L.Symbol "/",lhs,rhs] -> let l' = lispToExprT bound tps () g lhs
-                                              r' = lispToExprT bound tps () g rhs
-                                          in fgcast l $ App Div (l',r')
-         L.List [L.Symbol "div",lhs,rhs] -> let l' = lispToExprT bound tps () g lhs
-                                                r' = lispToExprT bound tps () g rhs
-                                            in fgcast l $ App Div (l',r')
-         L.List [L.Symbol "mod",lhs,rhs] -> let l' = lispToExprT bound tps () g lhs
-                                                r' = lispToExprT bound tps () g rhs
-                                            in fgcast l $ App Mod (l',r')
-         L.List [L.Symbol "rem",lhs,rhs] -> let l' = lispToExprT bound tps () g lhs
-                                                r' = lispToExprT bound tps () g rhs
-                                            in fgcast l $ App Rem (l',r')
-         L.List [L.Symbol "to_real",arg] 
-           -> let arg' = lispToExprT bound tps () g arg
-              in fgcast l $ App ToReal arg'
-         L.List [L.Symbol "to_int",arg] 
-           -> let arg' = lispToExprT bound tps () g arg
-              in fgcast l $ App ToInt arg'
-         L.List (L.Symbol "and":arg)
-           -> let arg' = fmap (lispToExprT bound tps () g) arg
-              in fgcast l $ App And arg'
-         L.List (L.Symbol "or":arg) 
-           -> let arg' = fmap (lispToExprT bound tps () g) arg
-              in fgcast l $ App Or arg'
-         L.List (L.Symbol "xor":arg)
-           -> let arg' = fmap (lispToExprT bound tps () g) arg
-              in fgcast l $ App XOr arg'
-         L.List [L.Symbol "ite",cond,lhs,rhs]
-           -> let c' = lispToExprT bound tps () g cond
-                  lhs' = lispToExprU (\lhs' -> let rhs' = lispToExprT bound tps (extractAnnotation lhs') g rhs
-                                               in fgcast l $ App ITE (c',lhs',rhs')
-                                     ) bound tps g lhs
-                  rhs' = lispToExprU (\rhs' -> let lhs'' = lispToExprT bound tps (extractAnnotation rhs') g lhs
-                                               in fgcast l $ App ITE (c',lhs'',rhs')
-                                     ) bound tps g rhs
-              in case lhs' of
-                Just r -> r
-                Nothing -> case rhs' of
-                  Just r -> r
-                  Nothing -> error $ "Failed to parse expression "++show l
-         L.List [L.Symbol "not",arg] -> fgcast l $ App Not $ lispToExprT bound tps () g arg
-         L.List [L.Symbol "let",L.List syms,arg] -> letToExpr bound tps g ann syms arg
-         L.List [L.Symbol "bvule",lhs,rhs]
-           -> fgcast l $ binBV (curry $ App BVULE) bound tps g lhs rhs
-         L.List [L.Symbol "bvult",lhs,rhs]
-           -> fgcast l $ binBV (curry $ App BVULT) bound tps g lhs rhs
-         L.List [L.Symbol "bvuge",lhs,rhs]
-           -> fgcast l $ binBV (curry $ App BVUGE) bound tps g lhs rhs
-         L.List [L.Symbol "bvugt",lhs,rhs]
-           -> fgcast l $ binBV (curry $ App BVUGT) bound tps g lhs rhs
-         L.List [L.Symbol "bvsle",lhs,rhs]
-           -> fgcast l $ binBV (curry $ App BVSLE) bound tps g lhs rhs
-         L.List [L.Symbol "bvslt",lhs,rhs]
-           -> fgcast l $ binBV (curry $ App BVSLT) bound tps g lhs rhs
-         L.List [L.Symbol "bvsge",lhs,rhs]
-           -> fgcast l $ binBV (curry $ App BVSGE) bound tps g lhs rhs
-         L.List [L.Symbol "bvsgt",lhs,rhs]
-           -> fgcast l $ binBV (curry $ App BVSGT) bound tps g lhs rhs
-         L.List [L.Symbol "forall",L.List vars,body] -> fgcast l $ quantToExpr Forall bound tps g vars body
-         L.List [L.Symbol "exists",L.List vars,body] -> fgcast l $ quantToExpr Exists bound tps g vars body
-         L.List (L.Symbol fn:arg) -> fnToExpr (fgcast l) bound tps g fn arg
-         {-L.List [L.List (L.Symbol "_":arg),expr] 
-           -> fgcast l $ App (InternalFun arg) $
-              lispToExprT bound tps () g expr-}
-         _ -> error $ "Cannot parse "++show l
-  where
-    letToExpr :: SMTType a => 
-                 (T.Text -> Maybe UntypedExpr) 
-                 -> Map.Map TyCon DeclaredType -> (T.Text -> TypeRep)
-                 -> SMTAnnotation a
-                 -> [L.Lisp] -> L.Lisp -> SMTExpr a
-    letToExpr bound tps' g' ann (L.List [L.Symbol name,expr]:rest) arg
-      = let res = lispToExprU 
-                  (\expr' -> let ann' = extractAnnotation expr'
-                             in Let ann' expr'
-                                (\sym -> letToExpr (\txt -> if txt==name
-                                                            then Just (UntypedExpr sym)
-                                                            else bound txt)
-                                         tps' (\txt -> if txt==name
-                                                       then typeOf $ getUndef expr'
-                                                       else g' txt) ann rest arg)
-                  ) bound tps' g' expr
-        in case res of
-          Just r -> r
-          Nothing -> error $ "Unparseable expression "++show expr++" in let expression"
-    letToExpr bound tps' g' ann [] arg = lispToExprT bound tps' ann g' arg
-    letToExpr _ _ _ _ (x:_) _ = error $ "Unparseable entry "++show x++" in let expression"
-    
-    withWitness :: (a -> SMTExpr a) -> SMTExpr a
-    withWitness f = f undefined
-    
-    mkEq :: a -> a -> a
-    mkEq = const id
-
-quantToExpr :: (forall a. Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool)
-               -> (T.Text -> Maybe UntypedExpr)
-               -> Map.Map TyCon DeclaredType -> (T.Text -> TypeRep) -> [L.Lisp] -> L.Lisp -> SMTExpr Bool
-quantToExpr q bound tps' g' (L.List [L.Symbol var,tp]:rest) body
-  = let decl = declForSMTType tp tps'
-        getForall :: Typeable a => a -> SMTExpr a -> SMTExpr a
-        getForall = const id
-    in withDeclaredType 
-       (\u ann ->
-         q ann $ \subst -> quantToExpr q (\txt -> if txt==var
-                                                  then Just $ UntypedExpr $ getForall u subst
-                                                  else bound txt)                                   
-                           tps' (\txt -> if txt==var
-                                         then declaredTypeRep decl
-                                         else g' txt) rest body) decl
-quantToExpr q bound tps' g' [] body = lispToExprT bound tps' () g' body
+iteParser :: FunctionParser
+iteParser
+  = FunctionParser $
+    \sym sort_arg sort_ret _ f -> case sym of
+      L.Symbol "ite" -> case sort_arg of
+        Just [_,s,_] -> withSort s $ \(_::t) _ -> Just $ f (ITE :: SMTITE t)
+        Just _ -> error "smtlib2: Wrong number of arguments to ite."
+        Nothing -> case sort_ret of
+          Just s -> withSort s $ \(_::t) _ -> Just $ f (ITE :: SMTITE t)
+          Nothing -> error "smtlib2: Must provide signature for overloaded symbol ite."
+      _ -> Nothing
 
 instance (SMTValue a) => LiftArgs (SMTExpr a) where
   type Unpacked (SMTExpr a) = a

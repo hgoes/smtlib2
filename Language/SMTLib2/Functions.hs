@@ -7,7 +7,7 @@ import Data.Text as T
 
 data SMTEq a = Eq deriving (Typeable,Eq)
 
-data SMTMap f a i r = SMTMap f deriving (Typeable,Eq)
+data SMTMap f i r = SMTMap f deriving (Typeable,Eq)
 
 -- | Represents a function in the SMT solver. /a/ is the argument of the function in SMT terms, /b/ is the argument in haskell types and /r/ is the result type of the function.
 data SMTFun a r = SMTFun T.Text (SMTAnnotation r)

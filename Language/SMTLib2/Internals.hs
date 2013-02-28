@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances,MultiParamTypeClasses,RankNTypes,DeriveDataTypeable,TypeSynonymInstances,TypeFamilies,FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances,MultiParamTypeClasses,RankNTypes,DeriveDataTypeable,TypeSynonymInstances,TypeFamilies,FlexibleContexts,CPP,ScopedTypeVariables #-}
 module Language.SMTLib2.Internals where
 
 import Data.Attoparsec
@@ -16,6 +16,10 @@ import Data.Typeable
 import Data.Map as Map hiding (assocs)
 import Data.Set as Set
 import Data.List as List (mapAccumL,find)
+#ifdef SMTLIB2_WITH_CONSTRAINTS
+import Data.Proxy
+import Data.Constraint
+#endif
 
 -- Monad stuff
 import Control.Applicative (Applicative(..))
@@ -39,6 +43,10 @@ class (Eq t,Typeable t,Eq (SMTAnnotation t),Typeable (SMTAnnotation t))
   declareType :: t -> SMTAnnotation t -> SMT ()
   additionalConstraints :: t -> SMTAnnotation t -> SMTExpr t -> [SMTExpr Bool]
   additionalConstraints _ _ _ = []
+  toSort :: t -> SMTAnnotation t -> Sort
+  toSort = Sort
+  fromSort :: t -> SortParser
+  fromSort _ = mempty
 
 -- | Haskell values which can be represented as SMT constants
 class SMTType t => SMTValue t where
@@ -76,7 +84,7 @@ class (SMTType a,SMTType b) => Extractable a b where
     extract' :: a -> b -> Integer -> Integer -> SMTAnnotation a -> SMTAnnotation b
 
 type SMTRead = (Handle, Handle)
-type SMTState = (Map String Integer,Map TyCon DeclaredType,Map T.Text TypeRep)
+type SMTState = (Map String Integer,Map TyCon DeclaredType,Map T.Text UntypedExpr)
 
 -- | The SMT monad used for communating with the SMT solver
 newtype SMT a = SMT { runSMT :: ReaderT SMTRead (Lazy.StateT SMTState IO) a }
@@ -161,8 +169,27 @@ data SMTExpr t where
   Named :: SMTExpr a -> Text -> SMTExpr a
   deriving Typeable
 
+data UntypedExpr where
+  UntypedExpr :: SMTType a => SMTExpr a -> UntypedExpr
+
+entype :: (forall a. SMTType a => SMTExpr a -> b) -> UntypedExpr -> b
+entype f (UntypedExpr x) = f x
+
+data Sort where
+  Sort :: SMTType t => t -> SMTAnnotation t -> Sort
+  ArraySort :: [Sort] -> Sort -> Sort
+
+newtype SortParser = SortParser { parseSort :: L.Lisp -> SortParser -> Maybe Sort }
+
+instance Monoid SortParser where
+  mempty = SortParser $ \_ _ -> Nothing
+  mappend p1 p2 = SortParser $ \sym rec -> case parseSort p1 sym rec of
+    Nothing -> parseSort p2 sym rec
+    Just r -> Just r
+
 class (Args (SMTFunArg a),
        SMTType (SMTFunRes a),
+       Liftable (SMTFunArg a),
        Typeable a,Eq a)
       => SMTFunction a where
   type SMTFunArg a
@@ -267,13 +294,19 @@ instance SMTInfo SMTSolverVersion where
 class (Eq a,Typeable a,Eq (ArgAnnotation a),Typeable (ArgAnnotation a)) 
       => Args a where
   type ArgAnnotation a
-  foldExprs :: (forall t. SMTType t => s -> SMTExpr t -> SMTAnnotation t -> (s,SMTExpr t)) -> s -> a -> ArgAnnotation a -> (s,a)
+  foldExprs :: (forall t. SMTType t => s -> SMTExpr t -> SMTAnnotation t -> (s,SMTExpr t)) 
+               -> s -> a -> ArgAnnotation a -> (s,a)
   extractArgAnnotation :: a -> ArgAnnotation a
+  toArgs :: [UntypedExpr] -> Maybe (a,[UntypedExpr])
+  toSorts :: a -> ArgAnnotation a -> [Sort]
 
-class (Args a) => Mapable a where
-  type MapArgument a i
-  getMapArgumentAnn :: forall i. (Args i,Args (MapArgument a i)) => a -> i -> ArgAnnotation a -> ArgAnnotation i -> ArgAnnotation (MapArgument a i)
-  inferMapAnnotation :: forall i. (Args i,Args (MapArgument a i)) => a -> i -> ArgAnnotation (MapArgument a i) -> (ArgAnnotation i,ArgAnnotation a)
+class (Args a) => Liftable a where
+  type Lifted a i
+  getLiftedArgumentAnn :: a -> i -> ArgAnnotation a -> ArgAnnotation i -> ArgAnnotation (Lifted a i)
+  inferLiftedAnnotation :: a -> i -> ArgAnnotation (Lifted a i) -> (ArgAnnotation i,ArgAnnotation a)
+#ifdef SMTLIB2_WITH_CONSTRAINTS
+  getConstraint :: Args i => p (a,i) -> Dict (Liftable (Lifted a i))
+#endif
 
 data DeclaredType where
   DeclaredType :: SMTType a => a -> SMTAnnotation a -> DeclaredType
@@ -527,3 +560,8 @@ functionGetSignature :: (SMTFunction f)
 functionGetSignature fun arg_ann res_ann 
   = let (uarg,ures) = getFunUndef fun
     in (argsSignature uarg arg_ann,getSort ures res_ann)
+
+getSortParser :: SMT SortParser
+getSortParser = do
+  (_,tps,_) <- getSMT
+  return $ mconcat $ fmap (withDeclaredType (\u _ -> fromSort u)) (Map.elems tps)

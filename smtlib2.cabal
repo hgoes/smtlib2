@@ -4,10 +4,18 @@ Author:         Henning Günther <h.guenther@tu-bs.de>
 Build-Type:     Simple
 Cabal-Version:  >=1.2
 
+Flag WithConstraints
+  Description: Enables the use of the constraint-kind extension which is needed to parse 'map'-expressions.
+  Default: True
+
 Library
   Build-Depends:        base >= 4,text,mtl,process,blaze-builder,bytestring,
                         attoparsec,atto-lisp >= 0.2,array,template-haskell,
                         containers, transformers, fgl
+  if flag(WithConstraints)
+    Build-Depends:      constraints,tagged
+    CPP-Options: -DSMTLIB2_WITH_CONSTRAINTS
+  
   GHC-Options: -fwarn-unused-imports -Wall
   Exposed-Modules:
     Language.SMTLib2
