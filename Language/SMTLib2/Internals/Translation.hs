@@ -2,7 +2,7 @@
 module Language.SMTLib2.Internals.Translation where
 
 import Language.SMTLib2.Internals
-import Language.SMTLib2.Internals.Instances (extractAnnotation)
+import Language.SMTLib2.Internals.Instances
 import Language.SMTLib2.Functions
 
 import qualified Data.AttoLisp as L
@@ -107,35 +107,6 @@ unmangleArray b expr = mapM (\i -> do
                                 return (i,v)
                             ) (range b) >>= return.array b
 
-withSort :: Sort -> (forall t. SMTType t => t -> SMTAnnotation t -> a) -> a
-withSort (Sort u ann) f = f u ann
-withSort (ArraySort i v) f = withArraySort i v f
-
-withArraySort :: [Sort] -> Sort -> (forall i v. (Args i,SMTType v) => SMTArray i v -> (ArgAnnotation i,SMTAnnotation v) -> a) -> a
-withArraySort idx v f
-  = withArgSort idx $
-    \(_::i) anni 
-    -> withSort v $
-       \(_::vt) annv -> f (undefined::SMTArray i vt) (anni,annv)
-
-withArgSort :: [Sort] -> (forall i. Args i => i -> ArgAnnotation i -> a) -> a
-withArgSort [] f = f () ()
-withArgSort [i] f = withSort i $
-                    \(_::ti) anni -> f (undefined::SMTExpr ti) anni
-withArgSort [i1,i2] f
-  = withSort i1 $
-    \(_::t1) ann1
-     -> withSort i2 $
-        \(_::t2) ann2 -> f (undefined::(SMTExpr t1,SMTExpr t2)) (ann1,ann2)
-withArgSort [i1,i2,i3] f
-  = withSort i1 $
-    \(_::t1) ann1
-     -> withSort i2 $
-        \(_::t2) ann2 
-        -> withSort i3 $
-           \(_::t3) ann3 -> f (undefined::(SMTExpr t1,SMTExpr t2,SMTExpr t3)) (ann1,ann2,ann3)
-withArgSort _ _ = error $ "smtlib2: Please provide more cases for withArgSort."
-
 exprsToLisp :: [SMTExpr t] -> Integer -> ([L.Lisp],Integer)
 exprsToLisp [] c = ([],c)
 exprsToLisp (e:es) c = let (e',c') = exprToLisp e c
@@ -196,12 +167,15 @@ createVarDeclared f d name
     eq :: a -> SMTExpr a -> SMTExpr a
     eq = const id
 
-newtype FunctionParser = FunctionParser { parseFun :: L.Lisp -> FunctionParser -> Maybe FunctionParser' }
+newtype FunctionParser = FunctionParser { parseFun :: L.Lisp
+                                                      -> FunctionParser
+                                                      -> SortParser
+                                                      -> Maybe FunctionParser' }
 
 instance Monoid FunctionParser where
-  mempty = FunctionParser $ \_ _ -> Nothing
-  mappend p1 p2 = FunctionParser $ \l fun -> case parseFun p1 l fun of
-    Nothing -> parseFun p2 l fun
+  mempty = FunctionParser $ \_ _ _ -> Nothing
+  mappend p1 p2 = FunctionParser $ \l fun sort -> case parseFun p1 l fun sort of
+    Nothing -> parseFun p2 l fun sort
     Just r -> Just r
 
 data FunctionParser'
@@ -209,9 +183,9 @@ data FunctionParser'
                      , parseOverloaded :: forall a. [Sort] -> Sort
                                           -> (forall f. SMTFunction f => f -> a)
                                           -> Maybe a }
-  | DefinedParser { definedArgSig :: Integer -> [Sort]
+  | DefinedParser { definedArgSig :: [Sort]
                   , definedRetSig :: Sort
-                  , parserDefined :: forall a. (forall f. SMTFunction f => f -> a)
+                  , parseDefined :: forall a. (forall f. SMTFunction f => f -> a)
                                      -> Maybe a }
 
 lispToExpr :: FunctionParser -> SortParser 
@@ -232,15 +206,12 @@ lispToExpr fun sort bound tps f expected l
         L.List [L.Symbol "let",L.List args',body]
           -> let struct = parseLetStruct fun sort bound tps expected args' body
              in Just $ convertLetStruct f struct
-        {-L.List [L.Symbol "_",L.Symbol "as-array",fsym]
-          -> case fun fsym of
+        L.List [L.Symbol "_",L.Symbol "as-array",fsym]
+          -> case parseFun fun fsym fun sort of
           Nothing -> Nothing
-          Just fun' -> let (arg_sort,res_sort) = case expected of
-                             Nothing -> (Nothing,Nothing)
-                             Just (ArraySort i v) -> (Just i,Just v)
-                       in parseFun fun' fsym arg_sort res_sort fun $
-                          \rfun -> f (AsArray rfun-}
-        L.List (fsym:args') -> case parseFun fun fsym fun of
+          Just (DefinedParser arg_sort ret_sort parse) 
+            -> parse $ \(rfun :: g) -> f (AsArray rfun (fst $ getArgAnnotation (undefined::SMTFunArg g) arg_sort))
+        L.List (fsym:args') -> case parseFun fun fsym fun sort of
           Nothing -> Nothing
           Just (OverloadedParser derive parse) 
             -> do
@@ -263,7 +234,7 @@ lispToExpr fun sort bound tps f expected l
                          Nothing -> error $ "smtlib2: Wrong arguments for function "++show fsym
           Just (DefinedParser arg_tps ret_tp parse) -> do
             nargs <- mapM (\(el,tp) -> lispToExpr fun sort bound tps UntypedExpr (Just tp) el)
-                     (zip args' (arg_tps $ genericLength args'))
+                     (zip args' arg_tps)
             parse $ \rfun -> case (do
                                       (rargs,rest) <- toArgs nargs
                                       case rest of
@@ -359,7 +330,8 @@ commonFunctions = mconcat $ fmap FunctionParser
                   ,divideParser
                   ,absParser
                   ,logicParser
-                  ,iteParser]
+                  ,iteParser
+                  ,sigParser]
 
 eqParser,
   mapParser,
@@ -371,18 +343,19 @@ eqParser,
   divideParser,
   absParser,
   logicParser,
-  iteParser :: L.Lisp -> FunctionParser -> Maybe FunctionParser'
-eqParser sym@(L.Symbol "=") _
+  iteParser,
+  sigParser :: L.Lisp -> FunctionParser -> SortParser -> Maybe FunctionParser'
+eqParser sym@(L.Symbol "=") _ _
   = Just $ OverloadedParser (const $ Just $ toSort (undefined::Bool) ()) $
     \sort_arg _ f -> withFirstArgSort sym sort_arg $
                      \(u::t) _ -> Just $ f (Eq :: SMTEq t)
-eqParser _ _ = Nothing
+eqParser _ _ _ = Nothing
 
 mapParser (L.List [L.Symbol "_"
                   ,L.Symbol "map"
-                  ,fun]) rec
+                  ,fun]) rec sort
 #ifdef SMTLIB2_WITH_CONSTRAINTS
-  = case parseFun rec fun rec of
+  = case parseFun rec fun rec sort of
     Nothing -> Nothing
     Just (DefinedParser arg_sig ret_sig parse)
       -> Just $ OverloadedParser 
@@ -402,9 +375,9 @@ mapParser (L.List [L.Symbol "_"
 #else
   = Just $ error "smtlib2: Compile smtlib2 with -fWithConstraints to enable parsing of map functions"
 #endif
-mapParser _ _ = Nothing
+mapParser _ _ _ = Nothing
 
-ordOpParser sym _
+ordOpParser sym _ _
   = case sym of
       L.Symbol ">=" -> p sym Ge
       L.Symbol ">" -> p sym Gt
@@ -416,7 +389,7 @@ ordOpParser sym _
     p sym op = Just $ OverloadedParser (const $ Just $ toSort (undefined::Bool) ()) $
                \sort_arg _ f -> withFirstArgSort sym sort_arg $ \(_::t) _ -> Just $ f (op::SMTOrdOp t)
 
-arithOpParser sym _
+arithOpParser sym _ _
   = case sym of
     L.Symbol "+" -> Just $ OverloadedParser (\sorts -> Just (head sorts)) $
                     \sort_arg sort_ret f
@@ -426,57 +399,74 @@ arithOpParser sym _
                     -> withAnySort sym sort_arg sort_ret $ \(_::t) _ -> Just $ f (Mult::SMTArithOp t)
     _ -> Nothing
 
-minusParser (L.Symbol "-") _
+minusParser (L.Symbol "-") _ _
   = Just $ OverloadedParser  (\sorts -> Just (head sorts)) $
     \sort_arg sort_ret f -> case sort_arg of
       [s] -> withSort s $ \(_::t) _ -> Just $ f (Neg::SMTNeg t)
       (s:_) -> withSort s $ \(_::t) _ -> Just $ f (Minus::SMTMinus t)
-minusParser _ _ = Nothing
+minusParser _ _ _ = Nothing
 
-intArithParser (L.Symbol "div") _ = Just $ DefinedParser 
-                                    (const [toSort (undefined::Integer) ()
-                                           ,toSort (undefined::Integer) ()])
-                                    (toSort (undefined::Integer) ()) $ \f -> Just $ f Div
-intArithParser (L.Symbol "mod") _ = Just $ DefinedParser 
-                                    (const [toSort (undefined::Integer) ()
-                                           ,toSort (undefined::Integer) ()])
-                                    (toSort (undefined::Integer) ()) $ \f -> Just $ f Mod
-intArithParser (L.Symbol "rem") _ = Just $ DefinedParser
-                                    (const [toSort (undefined::Integer) ()
-                                           ,toSort (undefined::Integer) ()])
-                                    (toSort (undefined::Integer) ()) $ \f -> Just $ f Rem
-intArithParser _ _ = Nothing
+intArithParser (L.Symbol "div") _ _
+  = Just $ DefinedParser 
+    [toSort (undefined::Integer) ()
+    ,toSort (undefined::Integer) ()]
+    (toSort (undefined::Integer) ()) $ \f -> Just $ f Div
+intArithParser (L.Symbol "mod") _ _
+  = Just $ DefinedParser 
+    [toSort (undefined::Integer) ()
+    ,toSort (undefined::Integer) ()]
+    (toSort (undefined::Integer) ()) $ \f -> Just $ f Mod
+intArithParser (L.Symbol "rem") _ _
+  = Just $ DefinedParser
+    [toSort (undefined::Integer) ()
+    ,toSort (undefined::Integer) ()]
+    (toSort (undefined::Integer) ()) $ \f -> Just $ f Rem
+intArithParser _ _ _ = Nothing
 
-divideParser (L.Symbol "/") _ = Just $ DefinedParser (const [toSort (undefined::Ratio Integer) ()
-                                                            ,toSort (undefined::Ratio Integer) ()])
-                                (toSort (undefined::Ratio Integer) ()) $ \f -> Just $ f Divide
-divideParser _ _ = Nothing
+divideParser (L.Symbol "/") _ _
+  = Just $ DefinedParser [toSort (undefined::Ratio Integer) ()
+                         ,toSort (undefined::Ratio Integer) ()]
+    (toSort (undefined::Ratio Integer) ()) $ \f -> Just $ f Divide
+divideParser _ _ _ = Nothing
 
-absParser sym@(L.Symbol "abs") _
+absParser sym@(L.Symbol "abs") _ _
   = Just $ OverloadedParser (\sorts -> Just $ head sorts) $
     \sort_arg sort_ret f 
     -> withAnySort sym sort_arg sort_ret $ \(_::t) _ -> Just $ f (Abs::SMTAbs t)
-absParser _ _ = Nothing
+absParser _ _ _ = Nothing
 
-logicParser (L.Symbol "not") _ = Just $ DefinedParser (const [toSort (undefined::Bool) ()]) (toSort (undefined::Bool) ()) 
-                                 $ \f -> Just $ f Not
-logicParser (L.Symbol "and") _ = Just $ DefinedParser (\n -> genericReplicate n $ toSort (undefined::Bool) ())
-                                 (toSort (undefined::Bool) ()) $ \f -> Just $ f And
-logicParser (L.Symbol "or") _ = Just $ DefinedParser (\n -> genericReplicate n $ toSort (undefined::Bool) ())
-                                (toSort (undefined::Bool) ()) $ \f -> Just $ f Or
-logicParser (L.Symbol "xor") _ = Just $ DefinedParser (\n -> genericReplicate n $ toSort (undefined::Bool) ())
-                                 (toSort (undefined::Bool) ()) $ \f -> Just $ f XOr
-logicParser (L.Symbol "=>") _ = Just $ DefinedParser (\n -> genericReplicate n $ toSort (undefined::Bool) ())
-                                (toSort (undefined::Bool) ()) $ \f -> Just $ f Implies
-logicParser _ _ = Nothing
+logicParser (L.Symbol "not") _ _ = Just $ DefinedParser [toSort (undefined::Bool) ()] (toSort (undefined::Bool) ()) 
+                                   $ \f -> Just $ f Not
+logicParser (L.Symbol "and") _ _ = Just $ OverloadedParser 
+                                   (const $ Just $ toSort (undefined::Bool) ())
+                                 $ \_ _ f -> Just $ f And
+logicParser (L.Symbol "or") _ _ = Just $ OverloadedParser 
+                                  (const $ Just $ toSort (undefined::Bool) ())
+                                 $ \_ _ f -> Just $ f Or
+logicParser (L.Symbol "xor") _ _ = Just $ OverloadedParser 
+                                   (const $ Just $ toSort (undefined::Bool) ())
+                                   $ \_ _ f -> Just $ f XOr
+logicParser (L.Symbol "=>") _ _ = Just $ OverloadedParser 
+                                  (const $ Just $ toSort (undefined::Bool) ())
+                                  $ \_ _ f -> Just $ f Implies
+logicParser _ _ _ = Nothing
                                      
-iteParser (L.Symbol "ite") _
+iteParser (L.Symbol "ite") _ _
   = Just $ OverloadedParser
     (\sorts -> case sorts of
         [_,s,_] -> Just s
         _ -> error "smtlib2: Wrong number of arguments to ite.") $
     \sort_arg sort_ret f -> withSort sort_ret $ \(_::t) _ -> Just $ f (ITE :: SMTITE t)
-iteParser _ _ = Nothing
+iteParser _ _ _ = Nothing
+
+sigParser (L.List [fsym,L.List sig,ret]) rec sort = do
+  rsig <- mapM (\l -> parseSort sort l sort) sig
+  rret <- parseSort sort ret sort
+  parser <- parseFun rec fsym rec sort
+  return $ DefinedParser rsig rret $
+    \f -> case parser of
+      OverloadedParser _ parse -> parse rsig rret f
+      DefinedParser _ _ parse -> parse f
 
 instance (SMTValue a) => LiftArgs (SMTExpr a) where
   type Unpacked (SMTExpr a) = a

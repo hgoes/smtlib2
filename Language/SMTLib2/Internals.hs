@@ -299,6 +299,7 @@ class (Eq a,Typeable a,Eq (ArgAnnotation a),Typeable (ArgAnnotation a))
   extractArgAnnotation :: a -> ArgAnnotation a
   toArgs :: [UntypedExpr] -> Maybe (a,[UntypedExpr])
   toSorts :: a -> ArgAnnotation a -> [Sort]
+  getArgAnnotation :: a -> [Sort] -> (ArgAnnotation a,[Sort])
 
 class (Args a) => Liftable a where
   type Lifted a i

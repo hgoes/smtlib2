@@ -34,6 +34,35 @@ extractAnnotation (Let _ x f) = extractAnnotation (f x)
 extractAnnotation (Named x _) = extractAnnotation x
 extractAnnotation (App f arg) = inferResAnnotation f (extractArgAnnotation arg)
 
+withSort :: Sort -> (forall t. SMTType t => t -> SMTAnnotation t -> a) -> a
+withSort (Sort u ann) f = f u ann
+withSort (ArraySort i v) f = withArraySort i v f
+
+withArraySort :: [Sort] -> Sort -> (forall i v. (Args i,SMTType v) => SMTArray i v -> (ArgAnnotation i,SMTAnnotation v) -> a) -> a
+withArraySort idx v f
+  = withArgSort idx $
+    \(_::i) anni 
+    -> withSort v $
+       \(_::vt) annv -> f (undefined::SMTArray i vt) (anni,annv)
+
+withArgSort :: [Sort] -> (forall i. Args i => i -> ArgAnnotation i -> a) -> a
+withArgSort [] f = f () ()
+withArgSort [i] f = withSort i $
+                    \(_::ti) anni -> f (undefined::SMTExpr ti) anni
+withArgSort [i1,i2] f
+  = withSort i1 $
+    \(_::t1) ann1
+     -> withSort i2 $
+        \(_::t2) ann2 -> f (undefined::(SMTExpr t1,SMTExpr t2)) (ann1,ann2)
+withArgSort [i1,i2,i3] f
+  = withSort i1 $
+    \(_::t1) ann1
+     -> withSort i2 $
+        \(_::t2) ann2 
+        -> withSort i3 $
+           \(_::t3) ann3 -> f (undefined::(SMTExpr t1,SMTExpr t2,SMTExpr t3)) (ann1,ann2,ann3)
+withArgSort _ _ = error $ "smtlib2: Please provide more cases for withArgSort."
+
 -- Bool
 
 instance SMTType Bool where
@@ -520,6 +549,7 @@ instance Args () where
   extractArgAnnotation _ = ()
   toArgs x = Just ((),x)
   toSorts _ _ = []
+  getArgAnnotation _ xs = ((),xs)
 
 instance (SMTType a) => Args (SMTExpr a) where
   type ArgAnnotation (SMTExpr a) = SMTAnnotation a
@@ -530,6 +560,9 @@ instance (SMTType a) => Args (SMTExpr a) where
     return (r,xs)
   toArgs [] = Nothing
   toSorts (_::SMTExpr a) ann = [toSort (undefined::a) ann]
+  getArgAnnotation _ (s:rest) = withSort s $ \_ ann -> case cast ann of
+    Nothing -> error "smtlib2: Sort provided to getArgAnnotation doesn't fit."
+    Just r -> (r,rest)
 
 instance (Args a,Args b) => Args (a,b) where
   type ArgAnnotation (a,b) = (ArgAnnotation a,ArgAnnotation b)
@@ -543,6 +576,10 @@ instance (Args a,Args b) => Args (a,b) where
     (r2,x2) <- toArgs x1
     return ((r1,r2),x2)
   toSorts ~(x1,x2) (ann1,ann2) = toSorts x1 ann1 ++ toSorts x2 ann2
+  getArgAnnotation (_::(a1,a2)) sorts
+    = let (ann1,r1) = getArgAnnotation (undefined::a1) sorts
+          (ann2,r2) = getArgAnnotation (undefined::a2) r1
+      in ((ann1,ann2),r2)
 
 instance (LiftArgs a,LiftArgs b) => LiftArgs (a,b) where
   type Unpacked (a,b) = (Unpacked a,Unpacked b)
@@ -567,7 +604,11 @@ instance (Args a,Args b,Args c) => Args (a,b,c) where
     (r2,x2) <- toArgs x1
     (r3,x3) <- toArgs x2
     return ((r1,r2,r3),x3)
-
+  getArgAnnotation (_::(a1,a2,a3)) sorts
+    = let (ann1,r1) = getArgAnnotation (undefined::a1) sorts
+          (ann2,r2) = getArgAnnotation (undefined::a2) r1
+          (ann3,r3) = getArgAnnotation (undefined::a3) r2
+      in ((ann1,ann2,ann3),r3)
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c) => LiftArgs (a,b,c) where
   type Unpacked (a,b,c) = (Unpacked a,Unpacked b,Unpacked c)
@@ -596,7 +637,12 @@ instance (Args a,Args b,Args c,Args d) => Args (a,b,c,d) where
     (r3,x3) <- toArgs x2
     (r4,x4) <- toArgs x3
     return ((r1,r2,r3,r4),x4)
-
+  getArgAnnotation (_::(a1,a2,a3,a4)) sorts
+    = let (ann1,r1) = getArgAnnotation (undefined::a1) sorts
+          (ann2,r2) = getArgAnnotation (undefined::a2) r1
+          (ann3,r3) = getArgAnnotation (undefined::a3) r2
+          (ann4,r4) = getArgAnnotation (undefined::a4) r3
+      in ((ann1,ann2,ann3,ann4),r4)
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d) => LiftArgs (a,b,c,d) where
   type Unpacked (a,b,c,d) = (Unpacked a,Unpacked b,Unpacked c,Unpacked d)
@@ -630,6 +676,13 @@ instance (Args a,Args b,Args c,Args d,Args e) => Args (a,b,c,d,e) where
     (r4,x4) <- toArgs x3
     (r5,x5) <- toArgs x4
     return ((r1,r2,r3,r4,r5),x5)
+  getArgAnnotation (_::(a1,a2,a3,a4,a5)) sorts
+    = let (ann1,r1) = getArgAnnotation (undefined::a1) sorts
+          (ann2,r2) = getArgAnnotation (undefined::a2) r1
+          (ann3,r3) = getArgAnnotation (undefined::a3) r2
+          (ann4,r4) = getArgAnnotation (undefined::a4) r3
+          (ann5,r5) = getArgAnnotation (undefined::a5) r4
+      in ((ann1,ann2,ann3,ann4,ann5),r5)
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d,LiftArgs e) => LiftArgs (a,b,c,d,e) where
   type Unpacked (a,b,c,d,e) = (Unpacked a,Unpacked b,Unpacked c,Unpacked d,Unpacked e)
@@ -667,6 +720,14 @@ instance (Args a,Args b,Args c,Args d,Args e,Args f) => Args (a,b,c,d,e,f) where
     (r5,x5) <- toArgs x4
     (r6,x6) <- toArgs x5
     return ((r1,r2,r3,r4,r5,r6),x6)
+  getArgAnnotation (_::(a1,a2,a3,a4,a5,a6)) sorts
+    = let (ann1,r1) = getArgAnnotation (undefined::a1) sorts
+          (ann2,r2) = getArgAnnotation (undefined::a2) r1
+          (ann3,r3) = getArgAnnotation (undefined::a3) r2
+          (ann4,r4) = getArgAnnotation (undefined::a4) r3
+          (ann5,r5) = getArgAnnotation (undefined::a5) r4
+          (ann6,r6) = getArgAnnotation (undefined::a6) r5
+      in ((ann1,ann2,ann3,ann4,ann5,ann6),r6)
     
 instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d,LiftArgs e,LiftArgs f) => LiftArgs (a,b,c,d,e,f) where
   type Unpacked (a,b,c,d,e,f) = (Unpacked a,Unpacked b,Unpacked c,Unpacked d,Unpacked e,Unpacked f)
@@ -693,6 +754,9 @@ instance Args a => Args [a] where
     (r,x') <- toArgs x
     (rs,x'') <- toArgs x'
     return (r:rs,x'')
+  getArgAnnotation (_::[a]) sorts = let (x,r1) = getArgAnnotation (undefined::a) sorts
+                                        (xs,r2) = getArgAnnotation (undefined::[a]) r1
+                                    in (x:xs,r2)
 
 instance LiftArgs a => LiftArgs [a] where
   type Unpacked [a] = [Unpacked a]
@@ -709,6 +773,7 @@ instance (Ord a,Typeable a,Args b) => Args (Map a b) where
   foldExprs f s mp anns = mapAccumWithKey (\s1 key ann -> foldExprs f s1 (mp!key) ann) s anns
   extractArgAnnotation = fmap extractArgAnnotation
   toArgs _ = error "smtlib2: Don't use Map as argument type for functions you want to read back."
+  getArgAnnotation _ = error "smtlib2: Don't use Map as argument type for functions you want to read back."
 
 instance (Ord a,Typeable a,LiftArgs b) => LiftArgs (Map a b) where
   type Unpacked (Map a b) = Map a (Unpacked b)
