@@ -175,35 +175,6 @@ exprToLisp (App fun x) c = let arg_ann = extractArgAnnotation x
 exprToLisp (Named expr name) c = let (expr',c') = exprToLisp expr c
                                  in (L.List [L.Symbol "!",expr',L.Symbol ":named",L.Symbol name],c')
 
-withUndef :: TypeRep -> (forall a. (SMTValue a,Typeable a,SMTAnnotation a ~ ()) => a -> b) -> b
-withUndef rep f
-  | rep == typeOf (undefined :: Bool) = f (undefined::Bool)
-  | rep == typeOf (undefined :: Integer) = f (undefined::Integer)
-  | rep == typeOf (undefined :: Word8) = f (undefined::Word8)
-  | rep == typeOf (undefined :: Word16) = f (undefined::Word16)
-  | rep == typeOf (undefined :: Word32) = f (undefined::Word32)
-  | rep == typeOf (undefined :: Word64) = f (undefined::Word64)
-  | otherwise = error $ "Language.SMTLib2.Instances.withUndef not implemented for "++show rep
-
-asType :: a -> g a -> g a
-asType = const id
-
-{-
-binT :: (SMTValue b1,Typeable b1,
-         SMTValue b2,Typeable b2,
-         SMTValue c,Typeable c,
-         SMTAnnotation b1 ~ (),
-         SMTAnnotation b2 ~ (),
-         SMTAnnotation c ~ ()) 
-        => (forall a. (SMTValue a,Typeable a,SMTAnnotation a ~ ()) => SMTExpr a -> d)
-        -> (SMTExpr b1 -> SMTExpr b2 -> SMTExpr c) 
-        -> (T.Text -> Maybe UntypedExpr)
-        -> Map.Map TyCon DeclaredType -> (T.Text -> TypeRep) -> L.Lisp -> L.Lisp -> Maybe d
-binT f con bound tps g lhs rhs 
-  = let lhs' = lispToExprT bound tps () g lhs
-        rhs' = lispToExprT bound tps () g rhs
-    in Just $ f (con lhs' rhs') -}
-
 unmangleDeclared :: ((forall a. (SMTValue a,Typeable a) => SMTExpr a -> b)) -> DeclaredType -> L.Lisp -> Maybe b
 unmangleDeclared f d l
   = case withDeclaredValueType
@@ -337,10 +308,7 @@ convertLetStructT (LetStruct ann x g) = Let ann x (\sym -> convertLetStructT (g 
 convertLetStruct :: (forall a. SMTType a => SMTExpr a -> b) -> LetStruct -> b
 convertLetStruct f x 
   = extractType 
-    (\u -> f (assertEq u (convertLetStructT x))) x
-  where
-    assertEq :: a -> SMTExpr a -> SMTExpr a
-    assertEq _ x = x
+    (\(u::t) -> f (convertLetStructT x :: SMTExpr t)) x
 
 withFirstArgSort :: L.Lisp -> Maybe [Sort] -> (forall t. SMTType t => t -> SMTAnnotation t -> a) -> a
 withFirstArgSort sym (Just (s:_)) f = withSort s f
