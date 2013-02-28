@@ -336,6 +336,9 @@ commonFunctions = mconcat $ fmap FunctionParser
                   ,absParser
                   ,logicParser
                   ,iteParser
+                  ,distinctParser
+                  ,toRealParser
+                  ,toIntParser
                   ,sigParser]
 
 eqParser,
@@ -349,6 +352,9 @@ eqParser,
   absParser,
   logicParser,
   iteParser,
+  distinctParser,
+  toRealParser,
+  toIntParser,
   sigParser :: L.Lisp -> FunctionParser -> SortParser -> Maybe FunctionParser'
 eqParser sym@(L.Symbol "=") _ _
   = Just $ OverloadedParser (const $ Just $ toSort (undefined::Bool) ()) $
@@ -455,7 +461,23 @@ logicParser (L.Symbol "=>") _ _ = Just $ OverloadedParser
                                   (const $ Just $ toSort (undefined::Bool) ())
                                   $ \_ _ f -> Just $ f Implies
 logicParser _ _ _ = Nothing
-                                     
+
+distinctParser sym@(L.Symbol "distinct") _ _
+  = Just $ OverloadedParser
+    (const $ Just $ toSort (undefined::Bool) ()) $
+    \sort_arg _ f -> withFirstArgSort sym sort_arg $ \(_::t) _ -> Just $ f (Distinct::SMTDistinct t)
+distinctParser _ _ _ = Nothing
+
+toRealParser (L.Symbol "to_real") _ _
+  = Just $ DefinedParser [toSort (undefined::Integer) ()] (toSort (undefined::Ratio Integer) ()) $
+    \f -> Just $ f ToReal
+toRealParser _ _ _ = Nothing
+
+toIntParser (L.Symbol "to_int") _ _
+  = Just $ DefinedParser [toSort (undefined::Ratio Integer) ()] (toSort (undefined::Integer) ()) $
+    \f -> Just $ f ToInt
+toIntParser _ _ _ = Nothing
+
 iteParser (L.Symbol "ite") _ _
   = Just $ OverloadedParser
     (\sorts -> case sorts of
