@@ -63,6 +63,9 @@ withArgSort [i1,i2,i3] f
            \(_::t3) ann3 -> f (undefined::(SMTExpr t1,SMTExpr t2,SMTExpr t3)) (ann1,ann2,ann3)
 withArgSort _ _ = error $ "smtlib2: Please provide more cases for withArgSort."
 
+instance Show Sort where
+  show sort = withSort sort (\u _ -> show (typeOf u))
+
 -- Bool
 
 instance SMTType Bool where
@@ -754,6 +757,7 @@ instance Args a => Args [a] where
     (r,x') <- toArgs x
     (rs,x'') <- toArgs x'
     return (r:rs,x'')
+  getArgAnnotation _ [] = ([],[])
   getArgAnnotation (_::[a]) sorts = let (x,r1) = getArgAnnotation (undefined::a) sorts
                                         (xs,r2) = getArgAnnotation (undefined::[a]) r1
                                     in (x:xs,r2)

@@ -118,7 +118,10 @@ exprToLisp (Var name _) c = (L.Symbol name,c)
 exprToLisp (Const x ann) c = (mangle x ann,c)
 exprToLisp (AsArray f arg) c 
   = let f' = getFunctionSymbol f arg
-    in (L.List [L.Symbol "_",L.Symbol "as-array",f'],c)
+        (sargs,sres) = functionGetSignature f arg (inferResAnnotation f arg)
+    in (L.List [L.Symbol "_",L.Symbol "as-array",if isOverloaded f
+                                                 then L.List [f',L.List sargs,sres]
+                                                 else f'],c)
 exprToLisp (Forall ann f) c = let (arg,tps,nc) = createArgs ann c
                                   (arg',nc') = exprToLisp (f arg) nc
                               in (L.List [L.Symbol "forall"
@@ -209,8 +212,10 @@ lispToExpr fun sort bound tps f expected l
         L.List [L.Symbol "_",L.Symbol "as-array",fsym]
           -> case parseFun fun fsym fun sort of
           Nothing -> Nothing
-          Just (DefinedParser arg_sort ret_sort parse) 
-            -> parse $ \(rfun :: g) -> f (AsArray rfun (fst $ getArgAnnotation (undefined::SMTFunArg g) arg_sort))
+          Just (DefinedParser arg_sort ret_sort parse)
+            -> parse $ \(rfun :: g) -> case getArgAnnotation (undefined::SMTFunArg g) arg_sort of
+            (ann,[]) -> f (AsArray rfun ann)
+            (_,xs) -> error "smtlib2: Arguments not wholy parsed."
         L.List (fsym:args') -> case parseFun fun fsym fun sort of
           Nothing -> Nothing
           Just (OverloadedParser derive parse) 

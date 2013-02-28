@@ -559,7 +559,7 @@ functionGetSignature :: (SMTFunction f)
                         -> SMTAnnotation (SMTFunRes f) 
                         -> ([L.Lisp],L.Lisp)
 functionGetSignature fun arg_ann res_ann 
-  = let (uarg,ures) = getFunUndef fun
+  = let ~(uarg,ures) = getFunUndef fun
     in (argsSignature uarg arg_ann,getSort ures res_ann)
 
 getSortParser :: SMT SortParser
