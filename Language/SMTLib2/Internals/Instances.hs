@@ -1113,7 +1113,7 @@ instance SMTType a => SMTFunction (SMTITE a) where
   getFunctionSymbol _ _ = L.Symbol "ite"
   inferResAnnotation _ ~(_,ann,_) = ann
 
-instance SMTBV a => SMTFunction (SMTBVComp a) where
+instance {-SMTBV a =>-} SMTType a => SMTFunction (SMTBVComp a) where
   type SMTFunArg (SMTBVComp a) = (SMTExpr a,SMTExpr a)
   type SMTFunRes (SMTBVComp a) = Bool
   isOverloaded _ = True
@@ -1127,7 +1127,7 @@ instance SMTBV a => SMTFunction (SMTBVComp a) where
   getFunctionSymbol BVSGT _ = L.Symbol "bvsgt"
   inferResAnnotation _ _ = ()
 
-instance SMTBV a => SMTFunction (SMTBVBinOp a) where
+instance {-SMTBV a =>-} SMTType a => SMTFunction (SMTBVBinOp a) where
   type SMTFunArg (SMTBVBinOp a) = (SMTExpr a,SMTExpr a)
   type SMTFunRes (SMTBVBinOp a) = a
   isOverloaded _ = True
@@ -1146,7 +1146,7 @@ instance SMTBV a => SMTFunction (SMTBVBinOp a) where
   getFunctionSymbol BVOr _ = L.Symbol "bvor"
   inferResAnnotation _ ~(ann,_) = ann
 
-instance SMTBV a => SMTFunction (SMTBVUnOp a) where
+instance {-SMTBV a =>-} SMTType a => SMTFunction (SMTBVUnOp a) where
   type SMTFunArg (SMTBVUnOp a) = SMTExpr a
   type SMTFunRes (SMTBVUnOp a) = a
   isOverloaded _ = True

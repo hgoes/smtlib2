@@ -339,6 +339,9 @@ commonFunctions = mconcat $ fmap FunctionParser
                   ,distinctParser
                   ,toRealParser
                   ,toIntParser
+                  ,bvCompParser
+                  ,bvBinOpParser
+                  ,bvUnOpParser
                   ,sigParser]
 
 eqParser,
@@ -355,6 +358,9 @@ eqParser,
   distinctParser,
   toRealParser,
   toIntParser,
+  bvCompParser,
+  bvBinOpParser,
+  bvUnOpParser,
   sigParser :: L.Lisp -> FunctionParser -> SortParser -> Maybe FunctionParser'
 eqParser sym@(L.Symbol "=") _ _
   = Just $ OverloadedParser (const $ Just $ toSort (undefined::Bool) ()) $
@@ -485,6 +491,49 @@ iteParser (L.Symbol "ite") _ _
         _ -> error "smtlib2: Wrong number of arguments to ite.") $
     \sort_arg sort_ret f -> withSort sort_ret $ \(_::t) _ -> Just $ f (ITE :: SMTITE t)
 iteParser _ _ _ = Nothing
+
+bvCompParser sym _ _ = case sym of
+  L.Symbol "bvule" -> p sym BVULE
+  L.Symbol "bvult" -> p sym BVULT
+  L.Symbol "bvuge" -> p sym BVUGE
+  L.Symbol "bvugt" -> p sym BVSLE
+  L.Symbol "bvsle" -> p sym BVSLE
+  L.Symbol "bvslt" -> p sym BVSLT
+  L.Symbol "bvsge" -> p sym BVSGE
+  L.Symbol "bvsgt" -> p sym BVSGT
+  _ -> Nothing
+  where
+    p :: L.Lisp -> (forall g. SMTBVComp g) -> Maybe FunctionParser'
+    p sym op = Just $ OverloadedParser (const $ Just $ toSort (undefined::Bool) ()) $
+               \sort_arg _ f -> withFirstArgSort sym sort_arg $ \(_::t) _ -> Just $ f (op::SMTBVComp t)
+
+bvBinOpParser sym _ _ = case sym of
+  L.Symbol "bvadd" -> p sym BVAdd
+  L.Symbol "bvsub" -> p sym BVSub
+  L.Symbol "bvmul" -> p sym BVMul
+  L.Symbol "bvurem" -> p sym BVURem
+  L.Symbol "bvsrem" -> p sym BVSRem
+  L.Symbol "bvudiv" -> p sym BVUDiv
+  L.Symbol "bvsdiv" -> p sym BVSDiv
+  L.Symbol "bvshl" -> p sym BVSHL
+  L.Symbol "bvlshr" -> p sym BVLSHR
+  L.Symbol "bvashr" -> p sym BVASHR
+  L.Symbol "bvxor" -> p sym BVXor
+  L.Symbol "bvand" -> p sym BVAnd
+  L.Symbol "bvor" -> p sym BVOr
+  _ -> Nothing
+  where
+    p :: L.Lisp -> (forall g. SMTBVBinOp g) -> Maybe FunctionParser'
+    p sym op = Just $ OverloadedParser (Just . head) $
+               \sort_arg _ f -> withFirstArgSort sym sort_arg $ \(_::t) _ -> Just $ f (op::SMTBVBinOp t)
+
+bvUnOpParser sym@(L.Symbol "bvnot") _ _
+  = Just $ OverloadedParser (Just . head) $
+    \sort_arg _ f -> withFirstArgSort sym sort_arg $ \(_::t) _ -> Just $ f (BVNot::SMTBVUnOp t)
+bvUnOpParser sym@(L.Symbol "bvneg") _ _
+  = Just $ OverloadedParser (Just . head) $
+    \sort_arg _ f -> withFirstArgSort sym sort_arg $ \(_::t) _ -> Just $ f (BVNeg::SMTBVUnOp t)
+bvUnOpParser _ _ _ = Nothing
 
 sigParser (L.List [fsym,L.List sig,ret]) rec sort = do
   rsig <- mapM (\l -> parseSort sort l sort) sig
