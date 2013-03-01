@@ -342,6 +342,9 @@ commonFunctions = mconcat $ fmap FunctionParser
                   ,bvCompParser
                   ,bvBinOpParser
                   ,bvUnOpParser
+                  ,selectParser
+                  ,storeParser
+                  ,constArrayParser
                   ,sigParser]
 
 eqParser,
@@ -361,6 +364,9 @@ eqParser,
   bvCompParser,
   bvBinOpParser,
   bvUnOpParser,
+  selectParser,
+  storeParser,
+  constArrayParser,
   sigParser :: L.Lisp -> FunctionParser -> SortParser -> Maybe FunctionParser'
 eqParser sym@(L.Symbol "=") _ _
   = Just $ OverloadedParser (const $ Just $ toSort (undefined::Bool) ()) $
@@ -525,15 +531,47 @@ bvBinOpParser sym _ _ = case sym of
   where
     p :: L.Lisp -> (forall g. SMTBVBinOp g) -> Maybe FunctionParser'
     p sym op = Just $ OverloadedParser (Just . head) $
-               \sort_arg _ f -> withFirstArgSort sym sort_arg $ \(_::t) _ -> Just $ f (op::SMTBVBinOp t)
+               \_ sort_ret f -> withSort sort_ret $ \(_::t) _ -> Just $ f (op::SMTBVBinOp t)
 
-bvUnOpParser sym@(L.Symbol "bvnot") _ _
+bvUnOpParser (L.Symbol "bvnot") _ _
   = Just $ OverloadedParser (Just . head) $
-    \sort_arg _ f -> withFirstArgSort sym sort_arg $ \(_::t) _ -> Just $ f (BVNot::SMTBVUnOp t)
-bvUnOpParser sym@(L.Symbol "bvneg") _ _
+    \_ sort_ret f -> withSort sort_ret $ \(_::t) _ -> Just $ f (BVNot::SMTBVUnOp t)
+bvUnOpParser (L.Symbol "bvneg") _ _
   = Just $ OverloadedParser (Just . head) $
-    \sort_arg _ f -> withFirstArgSort sym sort_arg $ \(_::t) _ -> Just $ f (BVNeg::SMTBVUnOp t)
+    \_ sort_ret f -> withSort sort_ret $ \(_::t) _ -> Just $ f (BVNeg::SMTBVUnOp t)
 bvUnOpParser _ _ _ = Nothing
+
+selectParser (L.Symbol "select") _ _
+  = Just $ OverloadedParser (\sort_arg -> case sort_arg of
+                                (ArraySort _ vsort:_) -> Just vsort
+                                _ -> error "smtlib2: Wrong arguments for select function.") $
+    \sort_arg sort_ret f -> case sort_arg of
+      (ArraySort isort1 vsort:_) -> withArgSort isort1 $ 
+                                    \(_::i) _ -> withSort sort_ret $ 
+                                                 \(_::v) _ -> Just $ f (Select::SMTSelect i v)
+      _ -> error "smtlib2: Wrong arguments for select function."
+selectParser _ _ _ = Nothing
+
+storeParser (L.Symbol "store") _ _
+  = Just $ OverloadedParser (\sort_arg -> case sort_arg of
+                                s:_ -> Just s
+                                _ -> error "smtlib2: Wrong arguments for store function.") $
+    \_ sort_ret f -> case sort_ret of
+      ArraySort idx val -> withArraySort idx val $ \(_::SMTArray i v) _ -> Just $ f (Store::SMTStore i v)
+      _ -> error "smtlib2: Wrong arguments for store function."
+storeParser _ _ _ = Nothing
+
+constArrayParser (L.List [L.Symbol "as"
+                         ,L.Symbol "const"
+                         ,s]) _ sort
+  = case parseSort sort s sort of
+    Just rsort@(ArraySort idx val)
+      -> Just $ DefinedParser [val] rsort $
+         \f -> withArraySort idx val $
+               \(_::SMTArray i v) (i_ann,_) 
+               -> Just $ f (ConstArray i_ann::SMTConstArray i v)
+    _ -> Nothing
+constArrayParser _ _ _ = Nothing
 
 sigParser (L.List [fsym,L.List sig,ret]) rec sort = do
   rsig <- mapM (\l -> parseSort sort l sort) sig
@@ -543,6 +581,7 @@ sigParser (L.List [fsym,L.List sig,ret]) rec sort = do
     \f -> case parser of
       OverloadedParser _ parse -> parse rsig rret f
       DefinedParser _ _ parse -> parse f
+sigParser _ _ _ = Nothing
 
 instance (SMTValue a) => LiftArgs (SMTExpr a) where
   type Unpacked (SMTExpr a) = a

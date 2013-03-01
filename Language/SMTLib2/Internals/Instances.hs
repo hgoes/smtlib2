@@ -38,14 +38,14 @@ withSort :: Sort -> (forall t. SMTType t => t -> SMTAnnotation t -> a) -> a
 withSort (Sort u ann) f = f u ann
 withSort (ArraySort i v) f = withArraySort i v f
 
-withArraySort :: [Sort] -> Sort -> (forall i v. (Args i,SMTType v) => SMTArray i v -> (ArgAnnotation i,SMTAnnotation v) -> a) -> a
+withArraySort :: [Sort] -> Sort -> (forall i v. (Liftable i,SMTType v) => SMTArray i v -> (ArgAnnotation i,SMTAnnotation v) -> a) -> a
 withArraySort idx v f
   = withArgSort idx $
     \(_::i) anni 
     -> withSort v $
        \(_::vt) annv -> f (undefined::SMTArray i vt) (anni,annv)
 
-withArgSort :: [Sort] -> (forall i. Args i => i -> ArgAnnotation i -> a) -> a
+withArgSort :: [Sort] -> (forall i. Liftable i => i -> ArgAnnotation i -> a) -> a
 withArgSort [] f = f () ()
 withArgSort [i] f = withSort i $
                     \(_::ti) anni -> f (undefined::SMTExpr ti) anni
@@ -222,6 +222,13 @@ instance (Args idx,SMTType val) => SMTType (SMTArray idx val) where
       splitLast _ [x] = ([],x)
       splitLast sym (x:xs) = let ~(xs',x') = splitLast sym xs
                              in (x:xs',x')
+
+instance Liftable () where
+  type Lifted () i = ()
+  getLiftedArgumentAnn _ _ _ _ = ()
+#ifdef SMTLIB2_WITH_CONSTRAINTS
+  getConstraint _ = Dict
+#endif  
 
 instance (SMTType a) => Liftable (SMTExpr a) where
   type Lifted (SMTExpr a) i = SMTExpr (SMTArray i a)
