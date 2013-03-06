@@ -1,6 +1,6 @@
 {- | Implements various instance declarations for 'Language.SMTLib2.SMTType',
      'Language.SMTLib2.SMTValue', etc. -}
-{-# LANGUAGE FlexibleInstances,OverloadedStrings,MultiParamTypeClasses,RankNTypes,TypeFamilies,GeneralizedNewtypeDeriving,DeriveDataTypeable,GADTs,FlexibleContexts,CPP,ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleInstances,OverloadedStrings,MultiParamTypeClasses,RankNTypes,TypeFamilies,GeneralizedNewtypeDeriving,DeriveDataTypeable,GADTs,FlexibleContexts,CPP,ScopedTypeVariables,TypeOperators #-}
 module Language.SMTLib2.Internals.Instances where
 
 import Language.SMTLib2.Internals
@@ -37,6 +37,7 @@ extractAnnotation (App f arg) = inferResAnnotation f (extractArgAnnotation arg)
 withSort :: Sort -> (forall t. SMTType t => t -> SMTAnnotation t -> a) -> a
 withSort (Sort u ann) f = f u ann
 withSort (ArraySort i v) f = withArraySort i v f
+withSort (BVSort i) f = reifyNat i $ \(_::Proxy n) -> f (undefined::BitVector (BVTyped n)) ()
 
 withArraySort :: [Sort] -> Sort -> (forall i v. (Liftable i,SMTType v) => SMTArray i v -> (ArgAnnotation i,SMTAnnotation v) -> a) -> a
 withArraySort idx v f
@@ -62,6 +63,10 @@ withArgSort [i1,i2,i3] f
         -> withSort i3 $
            \(_::t3) ann3 -> f (undefined::(SMTExpr t1,SMTExpr t2,SMTExpr t3)) (ann1,ann2,ann3)
 withArgSort _ _ = error $ "smtlib2: Please provide more cases for withArgSort."
+
+withBVSort :: Sort -> (Integer -> a) -> Maybe a
+withBVSort (BVSort i) f = Just (f i)
+withBVSort _ _ = Nothing
 
 instance Show Sort where
   show sort = withSort sort (\u _ -> show (typeOf u))
@@ -288,16 +293,6 @@ bv n = L.List [L.Symbol "_"
               ,L.Symbol "BitVec"
               ,L.Number $ L.I (fromIntegral n)]
 
-instance SMTType Word8 where
-  type SMTAnnotation Word8 = ()
-  getSortBase _ = bv (8::Integer)
-  declareType = defaultDeclareValue
-
-instance SMTType Int8 where
-  type SMTAnnotation Int8 = ()
-  getSortBase _ = bv (8::Integer)
-  declareType = defaultDeclareValue
-
 -- | Helper function which applies a given function to the 'undefined' value.
 withUndef1 :: (a -> g a) -> g a
 withUndef1 f = f undefined
@@ -356,200 +351,6 @@ putBVValue' len x
                                             then '1'
                                             else '0'
                                             | i <- Prelude.reverse [0..(len-1)] ]))
-
-instance SMTValue Word8 where
-  unmangle = getBVValue
-  mangle = putBVValue
-
-instance SMTValue Int8 where
-  unmangle = getBVValue
-  mangle = putBVValue
-
-instance SMTBV Word8
-instance SMTBV Int8
-
-instance SMTOrd Word8 where
-  (.<.) = curry (App BVULT)
-  (.<=.) = curry (App BVULE)
-  (.>.) = curry (App BVUGT)
-  (.>=.) = curry (App BVUGE)
-
-instance SMTOrd Int8 where
-  (.<.) = curry (App BVSLT)
-  (.<=.) = curry (App BVSLE)
-  (.>.) = curry (App BVSGT)
-  (.>=.) = curry (App BVSGE)
-
-instance SMTType Word16 where
-  type SMTAnnotation Word16 = ()
-  getSortBase _ = bv (16::Integer)
-  declareType = defaultDeclareValue
-
-instance SMTType Int16 where
-  type SMTAnnotation Int16 = ()
-  getSortBase _ = bv (16::Integer)
-  declareType = defaultDeclareValue
-
-instance SMTValue Word16 where
-  unmangle = getBVValue
-  mangle = putBVValue
-
-instance SMTValue Int16 where
-  unmangle = getBVValue
-  mangle = putBVValue
-
-instance SMTBV Word16
-instance SMTBV Int16
-
-instance SMTOrd Word16 where
-  (.<.) = curry (App BVULT)
-  (.<=.) = curry (App BVULE)
-  (.>.) = curry (App BVUGT)
-  (.>=.) = curry (App BVUGE)
-
-instance SMTOrd Int16 where
-  (.<.) = curry (App BVSLT)
-  (.<=.) = curry (App BVSLE)
-  (.>.) = curry (App BVSGT)
-  (.>=.) = curry (App BVSGE)
-
-instance SMTType Word32 where
-  type SMTAnnotation Word32 = ()
-  getSortBase _ = bv (32::Integer)
-  declareType = defaultDeclareValue
-
-instance SMTType Int32 where
-  type SMTAnnotation Int32 = ()
-  getSortBase _ = bv (32::Integer)
-  declareType = defaultDeclareValue
-
-instance SMTValue Word32 where
-  unmangle = getBVValue
-  mangle = putBVValue
-
-instance SMTValue Int32 where
-  unmangle = getBVValue
-  mangle = putBVValue
-
-instance SMTBV Word32
-instance SMTBV Int32
-
-instance SMTOrd Word32 where
-  (.<.) = curry (App BVULT)
-  (.<=.) = curry (App BVULE)
-  (.>.) = curry (App BVUGT)
-  (.>=.) = curry (App BVUGE)
-
-instance SMTOrd Int32 where
-  (.<.) = curry (App BVSLT)
-  (.<=.) = curry (App BVSLE)
-  (.>.) = curry (App BVSGT)
-  (.>=.) = curry (App BVSGE)
-
-instance SMTType Word64 where
-  type SMTAnnotation Word64 = ()
-  getSortBase _ = bv (64::Integer)
-  declareType = defaultDeclareValue
-  
-instance SMTType Int64 where
-  type SMTAnnotation Int64 = ()
-  getSortBase _ = bv (64::Integer)
-  declareType = defaultDeclareValue
-
-instance SMTValue Word64 where
-  unmangle = getBVValue
-  mangle = putBVValue
-
-instance SMTValue Int64 where
-  unmangle = getBVValue
-  mangle = putBVValue
-
-instance SMTBV Word64
-instance SMTBV Int64
-
-instance SMTOrd Word64 where
-  (.<.) = curry (App BVULT)
-  (.<=.) = curry (App BVULE)
-  (.>.) = curry (App BVUGT)
-  (.>=.) = curry (App BVUGE)
-
-instance SMTOrd Int64 where
-  (.<.) = curry (App BVSLT)
-  (.<=.) = curry (App BVSLE)
-  (.>.) = curry (App BVSGT)
-  (.>=.) = curry (App BVSGE)
-
-instance Num (SMTExpr Word8) where
-  fromInteger x = Const (fromInteger x) ()
-  (+) = curry $ App BVAdd
-  (-) = curry $ App BVSub
-  (*) = curry $ App BVMul
-  negate = App BVNeg
-  abs x = x
-  signum _ = Const 1 ()
-
-instance Num (SMTExpr Int8) where
-  fromInteger x = Const (fromInteger x) ()
-  (+) = curry $ App BVAdd
-  (-) = curry $ App BVSub
-  (*) = curry $ App BVMul
-  negate = App BVNeg
-  abs x = App ITE (App BVSGE (x,Const 0 ()),x,App BVSub (Const 0 (),x))
-  signum x = App ITE (App BVSGE (x,Const 0 ()),Const 1 (),Const (-1) ())
-
-instance Num (SMTExpr Word16) where
-  fromInteger x = Const (fromInteger x) ()
-  (+) = curry $ App BVAdd
-  (-) = curry $ App BVSub
-  (*) = curry $ App BVMul
-  negate = App BVNeg
-  abs x = x
-  signum _ = Const 1 ()
-
-instance Num (SMTExpr Int16) where
-  fromInteger x = Const (fromInteger x) ()
-  (+) = curry $ App BVAdd
-  (-) = curry $ App BVSub
-  (*) = curry $ App BVMul
-  negate = App BVNeg
-  abs x = App ITE (App BVSGE (x,Const 0 ()),x,App BVSub (Const 0 (),x))
-  signum x = App ITE (App BVSGE (x,Const 0 ()),Const 1 (),Const (-1) ())
-
-instance Num (SMTExpr Word32) where
-  fromInteger x = Const (fromInteger x) ()
-  (+) = curry $ App BVAdd
-  (-) = curry $ App BVSub
-  (*) = curry $ App BVMul
-  negate = App BVNeg
-  abs x = x
-  signum _ = Const 1 ()
-
-instance Num (SMTExpr Int32) where
-  fromInteger x = Const (fromInteger x) ()
-  (+) = curry $ App BVAdd
-  (-) = curry $ App BVSub
-  (*) = curry $ App BVMul
-  negate = App BVNeg
-  abs x = App ITE (App BVSGE (x,Const 0 ()),x,App BVSub (Const 0 (),x))
-  signum x = App ITE (App BVSGE (x,Const 0 ()),Const 1 (),Const (-1) ())
-
-instance Num (SMTExpr Word64) where
-  fromInteger x = Const (fromInteger x) ()
-  (+) = curry $ App BVAdd
-  (-) = curry $ App BVSub
-  (*) = curry $ App BVMul
-  negate = App BVNeg
-  abs x = x
-  signum _ = Const 1 ()
-
-instance Num (SMTExpr Int64) where
-  fromInteger x = Const (fromInteger x) ()
-  (+) = curry $ App BVAdd
-  (-) = curry $ App BVSub
-  (*) = curry $ App BVMul
-  negate = App BVNeg
-  abs x = App ITE (App BVSGE (x,Const 0 ()),x,App BVSub (Const 0 (),x))
-  signum x = App ITE (App BVSGE (x,Const 0 ()),Const 1 (),Const (-1) ())
 
 -- Arguments
 
@@ -867,114 +668,30 @@ instance SMTValue BS.ByteString where
           bs2int :: BS.ByteString -> Integer
           bs2int = BS.foldl (\cv w -> (cv `shiftL` 8) .|. (fromIntegral w)) 0
 
-instance Concatable BS.ByteString BS.ByteString where
-    type ConcatResult BS.ByteString BS.ByteString = BS.ByteString
-    concat' b1 _ b2 _ = BS.append b1 b2
-    concatAnn _ _ = (+)
-
 -- BitVector implementation
 
 -- | A bitvector is a list of bits which can be used to represent binary numbers.
 --   It is represented as an `Integer`, which represents the value of the bitvector.
-newtype BitVector = BitVector Integer deriving (Eq,Ord,Num,Show,Typeable)
 
-instance SMTType BitVector where
-  type SMTAnnotation BitVector = Integer
+instance SMTType (BitVector BVUntyped) where
+  type SMTAnnotation (BitVector BVUntyped) = Integer
   getSort _ l = bv l
   getSortBase _ = error "smtlib2: No getSortBase implementation for BitVector"
   declareType = defaultDeclareValue
 
-instance SMTValue BitVector where
+instance SMTValue (BitVector BVUntyped) where
   unmangle v l = fmap BitVector $ getBVValue' l v
   mangle (BitVector v) l = putBVValue' l v
 
-instance Concatable BitVector BitVector where
-  type ConcatResult BitVector BitVector = BitVector
-  concat' (BitVector x) _ (BitVector y) l2 = BitVector $ (x `shiftL` (fromIntegral l2)) .|. y
-  concatAnn _ _ = (+)
+instance TypeableNat n => SMTType (BitVector (BVTyped n)) where
+  type SMTAnnotation (BitVector (BVTyped n)) = ()
+  getSort _ _ = bv (reflectNat (Proxy::Proxy n) 0)
+  getSortBase _ = error "smtlib2: No getSortBase implementation for BitVector"
+  declareType = defaultDeclareValue
 
-instance Concatable BitVector Word8 where
-  type ConcatResult BitVector Word8 = BitVector
-  concat' (BitVector x) _ w () = BitVector $ (x `shiftL` 8) .|. (fromIntegral w)
-  concatAnn _ _ l () = l+8
-
-instance Concatable BitVector Word16 where
-  type ConcatResult BitVector Word16 = BitVector
-  concat' (BitVector x) _ w () = BitVector $ (x `shiftL` 16) .|. (fromIntegral w)
-  concatAnn _ _ l () = l+16
-
-instance Concatable BitVector Word32 where
-  type ConcatResult BitVector Word32 = BitVector
-  concat' (BitVector x) _ w () = BitVector $ (x `shiftL` 32) .|. (fromIntegral w)
-  concatAnn _ _ l () = l+32
-
-instance Concatable BitVector Word64 where
-  type ConcatResult BitVector Word64 = BitVector
-  concat' (BitVector x) _ w () = BitVector $ (x `shiftL` 64) .|. (fromIntegral w)
-  concatAnn _ _ l () = l+64
-
-instance Extractable BitVector BitVector where
-  extract' _ _ u l _ = u-l+1
-
-instance Extractable BitVector Word8 where
-  extract' _ _ _ _ _ = ()
-
-instance Extractable BitVector Word16 where
-  extract' _ _ _ _ _ = ()
-
-instance Extractable BitVector Word32 where
-  extract' _ _ _ _ _ = ()
-
-instance Extractable BitVector Word64 where
-  extract' _ _ _ _ _ = ()
-
-instance SMTBV BitVector
-
--- Concat instances
-
-instance Concatable Word8 Word8 where
-    type ConcatResult Word8 Word8 = Word16
-    concat' x _ y _ = ((fromIntegral x) `shiftL` 8) .|. (fromIntegral y)
-    concatAnn _ _ _ _ = ()
-
-instance Concatable Int8 Word8 where
-    type ConcatResult Int8 Word8 = Int16
-    concat' x _ y _ = ((fromIntegral x) `shiftL` 8) .|. (fromIntegral y)
-    concatAnn _ _ _ _ = ()
-
-instance Concatable Word16 Word16 where
-    type ConcatResult Word16 Word16 = Word32
-    concat' x _ y _ = ((fromIntegral x) `shiftL` 16) .|. (fromIntegral y)
-    concatAnn _ _ _ _ = ()
-
-instance Concatable Int16 Word16 where
-    type ConcatResult Int16 Word16 = Int32
-    concat' x _ y _ = ((fromIntegral x) `shiftL` 16) .|. (fromIntegral y)
-    concatAnn _ _ _ _ = ()
-
-instance Concatable Word32 Word32 where
-    type ConcatResult Word32 Word32 = Word64
-    concat' x _ y _ = ((fromIntegral x) `shiftL` 32) .|. (fromIntegral y)
-    concatAnn _ _ _ _ = ()
-
-instance Concatable Int32 Word32 where
-    type ConcatResult Int32 Word32 = Int64
-    concat' x _ y _ = ((fromIntegral x) `shiftL` 32) .|. (fromIntegral y)
-    concatAnn _ _ _ _ = ()
-
--- Extract instances
-instance Extractable Word16 Word8 where
-    extract' _ _ _ _ _ = ()
-instance Extractable Word32 Word16 where
-    extract' _ _ _ _ _ = ()
-instance Extractable Word32 Word8 where
-    extract' _ _ _ _ _ = ()
-instance Extractable Word64 Word32 where
-    extract' _ _ _ _ _ = ()
-instance Extractable Word64 Word16 where
-    extract' _ _ _ _ _ = ()
-instance Extractable Word64 Word8 where
-    extract' _ _ _ _ _ = ()
+instance TypeableNat n => SMTValue (BitVector (BVTyped n)) where
+  unmangle v _ = fmap BitVector $ getBVValue' (reflectNat (Proxy::Proxy n) 0) v
+  mangle (BitVector v) _ = putBVValue' (reflectNat (Proxy::Proxy n) 0) v
 
 -- Functions
 
@@ -1120,42 +837,70 @@ instance SMTType a => SMTFunction (SMTITE a) where
   getFunctionSymbol _ _ = L.Symbol "ite"
   inferResAnnotation _ ~(_,ann,_) = ann
 
-instance {-SMTBV a =>-} SMTType a => SMTFunction (SMTBVComp a) where
-  type SMTFunArg (SMTBVComp a) = (SMTExpr a,SMTExpr a)
-  type SMTFunRes (SMTBVComp a) = Bool
+instance SMTFunction (SMTBVComp BVUntyped) where
+  type SMTFunArg (SMTBVComp BVUntyped) = (SMTExpr (BitVector BVUntyped),SMTExpr (BitVector BVUntyped))
+  type SMTFunRes (SMTBVComp BVUntyped) = Bool
   isOverloaded _ = True
-  getFunctionSymbol BVULE _ = L.Symbol "bvule"
-  getFunctionSymbol BVULT _ = L.Symbol "bvult"
-  getFunctionSymbol BVUGE _ = L.Symbol "bvuge"
-  getFunctionSymbol BVUGT _ = L.Symbol "bvugt"
-  getFunctionSymbol BVSLE _ = L.Symbol "bvsle"
-  getFunctionSymbol BVSLT _ = L.Symbol "bvslt"
-  getFunctionSymbol BVSGE _ = L.Symbol "bvsge"
-  getFunctionSymbol BVSGT _ = L.Symbol "bvsgt"
+  getFunctionSymbol s _ = bvCompSymbol s
   inferResAnnotation _ _ = ()
 
-instance {-SMTBV a =>-} SMTType a => SMTFunction (SMTBVBinOp a) where
-  type SMTFunArg (SMTBVBinOp a) = (SMTExpr a,SMTExpr a)
-  type SMTFunRes (SMTBVBinOp a) = a
+instance TypeableNat a => SMTFunction (SMTBVComp (BVTyped a)) where
+  type SMTFunArg (SMTBVComp (BVTyped a)) = (SMTExpr (BitVector (BVTyped a)),SMTExpr (BitVector (BVTyped a)))
+  type SMTFunRes (SMTBVComp (BVTyped a)) = Bool
   isOverloaded _ = True
-  getFunctionSymbol BVAdd _ = L.Symbol "bvadd"
-  getFunctionSymbol BVSub _ = L.Symbol "bvsub"
-  getFunctionSymbol BVMul _ = L.Symbol "bvmul"
-  getFunctionSymbol BVURem _ = L.Symbol "bvurem"
-  getFunctionSymbol BVSRem _ = L.Symbol "bvsrem"
-  getFunctionSymbol BVUDiv _ = L.Symbol "bvudiv"
-  getFunctionSymbol BVSDiv _ = L.Symbol "bvsdiv"
-  getFunctionSymbol BVSHL _ = L.Symbol "bvshl"
-  getFunctionSymbol BVLSHR _ = L.Symbol "bvlshr"
-  getFunctionSymbol BVASHR _ = L.Symbol "bvashr"
-  getFunctionSymbol BVXor _ = L.Symbol "bvxor"
-  getFunctionSymbol BVAnd _ = L.Symbol "bvand"
-  getFunctionSymbol BVOr _ = L.Symbol "bvor"
+  getFunctionSymbol s _ = bvCompSymbol s
+  inferResAnnotation _ _ = ()
+
+bvCompSymbol :: SMTBVComp a -> L.Lisp
+bvCompSymbol BVULE = L.Symbol "bvule"
+bvCompSymbol BVULT = L.Symbol "bvult"
+bvCompSymbol BVUGE = L.Symbol "bvuge"
+bvCompSymbol BVUGT = L.Symbol "bvugt"
+bvCompSymbol BVSLE = L.Symbol "bvsle"
+bvCompSymbol BVSLT = L.Symbol "bvslt"
+bvCompSymbol BVSGE = L.Symbol "bvsge"
+bvCompSymbol BVSGT = L.Symbol "bvsgt"
+
+instance SMTFunction (SMTBVBinOp BVUntyped) where
+  type SMTFunArg (SMTBVBinOp BVUntyped) = (SMTExpr (BitVector BVUntyped),SMTExpr (BitVector BVUntyped))
+  type SMTFunRes (SMTBVBinOp BVUntyped) = BitVector BVUntyped
+  isOverloaded _ = True
+  getFunctionSymbol s _ = bvBinOpSymbol s
   inferResAnnotation _ ~(ann,_) = ann
 
-instance {-SMTBV a =>-} SMTType a => SMTFunction (SMTBVUnOp a) where
-  type SMTFunArg (SMTBVUnOp a) = SMTExpr a
-  type SMTFunRes (SMTBVUnOp a) = a
+instance TypeableNat a => SMTFunction (SMTBVBinOp (BVTyped a)) where
+  type SMTFunArg (SMTBVBinOp (BVTyped a)) = (SMTExpr (BitVector (BVTyped a)),SMTExpr (BitVector (BVTyped a)))
+  type SMTFunRes (SMTBVBinOp (BVTyped a)) = BitVector (BVTyped a)
+  isOverloaded _ = True
+  getFunctionSymbol s _ = bvBinOpSymbol s
+  inferResAnnotation _ ~(ann,_) = ann
+
+bvBinOpSymbol :: SMTBVBinOp a -> L.Lisp
+bvBinOpSymbol BVAdd = L.Symbol "bvadd"
+bvBinOpSymbol BVSub = L.Symbol "bvsub"
+bvBinOpSymbol BVMul = L.Symbol "bvmul"
+bvBinOpSymbol BVURem = L.Symbol "bvurem"
+bvBinOpSymbol BVSRem = L.Symbol "bvsrem"
+bvBinOpSymbol BVUDiv = L.Symbol "bvudiv"
+bvBinOpSymbol BVSDiv = L.Symbol "bvsdiv"
+bvBinOpSymbol BVSHL = L.Symbol "bvshl"
+bvBinOpSymbol BVLSHR = L.Symbol "bvlshr"
+bvBinOpSymbol BVASHR = L.Symbol "bvashr"
+bvBinOpSymbol BVXor = L.Symbol "bvxor"
+bvBinOpSymbol BVAnd = L.Symbol "bvand"
+bvBinOpSymbol BVOr = L.Symbol "bvor"
+
+instance SMTFunction (SMTBVUnOp BVUntyped) where
+  type SMTFunArg (SMTBVUnOp BVUntyped) = SMTExpr (BitVector BVUntyped)
+  type SMTFunRes (SMTBVUnOp BVUntyped) = BitVector BVUntyped
+  isOverloaded _ = True
+  getFunctionSymbol BVNot _ = L.Symbol "bvnot"
+  getFunctionSymbol BVNeg _ = L.Symbol "bvneg"
+  inferResAnnotation _ x = x
+
+instance TypeableNat a => SMTFunction (SMTBVUnOp (BVTyped a)) where
+  type SMTFunArg (SMTBVUnOp (BVTyped a)) = SMTExpr (BitVector (BVTyped a))
+  type SMTFunRes (SMTBVUnOp (BVTyped a)) = BitVector (BVTyped a)
   isOverloaded _ = True
   getFunctionSymbol BVNot _ = L.Symbol "bvnot"
   getFunctionSymbol BVNeg _ = L.Symbol "bvneg"
@@ -1189,32 +934,51 @@ instance (Args i,SMTType v) => SMTFunction (SMTConstArray i v) where
       withUndef _ f = f undefined
   inferResAnnotation (ConstArray i_ann) v_ann = (i_ann,v_ann)
 
-instance (Concatable t1 t2) => SMTFunction (SMTConcat t1 t2) where
-  type SMTFunArg (SMTConcat t1 t2) = (SMTExpr t1,SMTExpr t2)
-  type SMTFunRes (SMTConcat t1 t2) = ConcatResult t1 t2
+instance SMTFunction (SMTConcat BVUntyped BVUntyped) where
+  type SMTFunArg (SMTConcat BVUntyped BVUntyped) = (SMTExpr (BitVector BVUntyped),SMTExpr (BitVector BVUntyped))
+  type SMTFunRes (SMTConcat BVUntyped BVUntyped) = BitVector BVUntyped
   isOverloaded _ = True
   getFunctionSymbol _ _ = L.Symbol "concat"
-  inferResAnnotation f ~(ann1,ann2)
-    = withUndef f $
-      \u1 u2 -> concatAnn u1 u2 ann1 ann2
-    where
-      withUndef :: SMTConcat t1 t2 -> (t1 -> t2 -> a) -> a
-      withUndef _ f = f undefined undefined
+  inferResAnnotation _ ~(ann1,ann2) = ann1+ann2
 
-instance (Extractable t1 t2) => SMTFunction (SMTExtract t1 t2) where
-  type SMTFunArg (SMTExtract t1 t2) = SMTExpr t1
-  type SMTFunRes (SMTExtract t1 t2) = t2
+instance (TypeableNat n1,TypeableNat n2
+         ,TypeableNat (Add n1 n2)) => 
+         SMTFunction (SMTConcat (BVTyped (n1::Nat)) (BVTyped (n2::Nat))) where
+  type SMTFunArg (SMTConcat (BVTyped n1) (BVTyped n2)) = (SMTExpr (BitVector (BVTyped n1)),SMTExpr (BitVector (BVTyped n2)))
+  type SMTFunRes (SMTConcat (BVTyped n1) (BVTyped n2)) = BitVector (BVTyped (Add n1 n2))
   isOverloaded _ = True
-  getFunctionSymbol (BVExtract l u) _ = L.List [L.Symbol "_"
-                                               ,L.Symbol "extract"
-                                               ,L.toLisp l
-                                               ,L.toLisp u]
-  inferResAnnotation f@(BVExtract l u) ann1
-    = withUndef f $
-      \u1 u2 -> extract' u1 u2 l u ann1
-    where
-      withUndef :: SMTExtract t1 t2 -> (t1 -> t2 -> a) -> a
-      withUndef _ f = f undefined undefined
+  getFunctionSymbol _ _ = L.Symbol "concat"
+  inferResAnnotation _ _ = ()
+
+instance (TypeableNat n1,TypeableNat n2) 
+         => SMTFunction (SMTExtract BVUntyped n1 n2 BVUntyped) where
+  type SMTFunArg (SMTExtract BVUntyped n1 n2 BVUntyped) = SMTExpr (BitVector BVUntyped)
+  type SMTFunRes (SMTExtract BVUntyped n1 n2 BVUntyped) = BitVector BVUntyped
+  isOverloaded _ = True
+  getFunctionSymbol (_ :: SMTExtract BVUntyped n1 n2 BVUntyped) _
+    = L.List [L.Symbol "_"
+             ,L.Symbol "extract"
+             ,L.toLisp $ reflectNat (Proxy::Proxy n1) 0
+             ,L.toLisp $ reflectNat (Proxy::Proxy n2) 0]
+  inferResAnnotation (_::SMTExtract BVUntyped n1 n2 BVUntyped) _
+    = (reflectNat (Proxy::Proxy n2) 0) - (reflectNat (Proxy::Proxy n1) 0) + 1
+
+-- bvextract t l u = r
+-- r = u - l + 1
+-- r + l = u + 1
+
+instance (TypeableNat n1,TypeableNat n2,TypeableNat n3,TypeableNat n4
+         ,Add n4 n2 ~ S n3)
+         => SMTFunction (SMTExtract (BVTyped n1) n2 n3 (BVTyped n4)) where
+  type SMTFunArg (SMTExtract (BVTyped n1) n2 n3 (BVTyped n4)) = SMTExpr (BitVector (BVTyped n1))
+  type SMTFunRes (SMTExtract (BVTyped n1) n2 n3 (BVTyped n4)) = BitVector (BVTyped n4)
+  isOverloaded _ = True
+  getFunctionSymbol (_ :: SMTExtract (BVTyped n1) n2 n3 (BVTyped n4)) _
+    = L.List [L.Symbol "_"
+             ,L.Symbol "extract"
+             ,L.toLisp $ reflectNat (Proxy::Proxy n2) 0
+             ,L.toLisp $ reflectNat (Proxy::Proxy n3) 0]
+  inferResAnnotation _ _ = ()
 
 instance SMTType a => SMTFunction (SMTConTest a) where
   type SMTFunArg (SMTConTest a) = SMTExpr a

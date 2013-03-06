@@ -1,5 +1,5 @@
 {- | Defines the user-accessible interface of the smtlib2 library -}
-{-# LANGUAGE TypeFamilies,OverloadedStrings,FlexibleContexts,ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies,OverloadedStrings,FlexibleContexts,ScopedTypeVariables,CPP #-}
 module Language.SMTLib2.Internals.Interface where
 
 import Language.SMTLib2.Internals
@@ -15,6 +15,9 @@ import qualified Data.AttoLisp as L
 import Data.Unit
 import Data.Word
 import Data.List (genericReplicate)
+#ifdef SMTLIB2_WITH_DATAKINDS
+import Data.Proxy
+#endif
 
 -- | Create a new named variable
 varNamed :: (SMTType t,Typeable t,Unit (SMTAnnotation t)) => String -> SMT (SMTExpr t)
@@ -278,127 +281,197 @@ constArray :: (Args i,SMTType v) => SMTExpr v -- ^ This element will be at every
 constArray e i_ann = App (ConstArray i_ann) e
 
 -- | Bitvector and
-bvand :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvand = curry $ App BVAnd
+bvand :: (SMTFunction (SMTBVBinOp t),
+          SMTFunArg (SMTBVBinOp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+          SMTFunRes (SMTBVBinOp t) ~ BitVector t
+         ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvand (e1::SMTExpr (BitVector t)) e2 = App (BVAnd::SMTBVBinOp t) (e1,e2)
 
 -- | Bitvector or
-bvor :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvor = curry $ App BVOr
+bvor :: (SMTFunction (SMTBVBinOp t),
+         SMTFunArg (SMTBVBinOp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+         SMTFunRes (SMTBVBinOp t) ~ BitVector t
+        ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvor (e1::SMTExpr (BitVector t)) e2 = App (BVOr::SMTBVBinOp t) (e1,e2)
 
 -- | Bitvector not
-bvnot :: SMTBV t => SMTExpr t -> SMTExpr t
-bvnot = App BVNot
+bvnot :: (SMTFunction (SMTBVUnOp t), 
+          SMTFunArg (SMTBVUnOp t) ~ SMTExpr (BitVector t),
+          SMTFunRes (SMTBVUnOp t) ~ BitVector t
+         ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvnot (e::SMTExpr (BitVector t)) = App (BVNot::SMTBVUnOp t) e
 
 -- | Bitvector addition
-bvadd :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvadd = curry $ App BVAdd
+bvadd :: (SMTFunction (SMTBVBinOp t),
+         SMTFunArg (SMTBVBinOp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+         SMTFunRes (SMTBVBinOp t) ~ BitVector t
+        ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvadd (e1::SMTExpr (BitVector t)) e2 = App (BVAdd::SMTBVBinOp t) (e1,e2)
 
 -- | Bitvector subtraction
-bvsub :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvsub = curry $ App BVSub
+bvsub :: (SMTFunction (SMTBVBinOp t),
+         SMTFunArg (SMTBVBinOp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+         SMTFunRes (SMTBVBinOp t) ~ BitVector t
+        ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvsub (e1::SMTExpr (BitVector t)) e2 = App (BVSub::SMTBVBinOp t) (e1,e2)
 
 -- | Bitvector multiplication
-bvmul :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvmul = curry $ App BVMul
+bvmul :: (SMTFunction (SMTBVBinOp t),
+         SMTFunArg (SMTBVBinOp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+         SMTFunRes (SMTBVBinOp t) ~ BitVector t
+        ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvmul (e1::SMTExpr (BitVector t)) e2 = App (BVMul::SMTBVBinOp t) (e1,e2)
 
 -- | Bitvector unsigned remainder
-bvurem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvurem = curry $ App BVURem
+bvurem :: (SMTFunction (SMTBVBinOp t),
+           SMTFunArg (SMTBVBinOp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+           SMTFunRes (SMTBVBinOp t) ~ BitVector t
+          ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvurem (e1::SMTExpr (BitVector t)) e2 = App (BVURem::SMTBVBinOp t) (e1,e2)
 
 -- | Bitvector signed remainder
-bvsrem :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvsrem = curry $ App BVSRem
+bvsrem :: (SMTFunction (SMTBVBinOp t),
+           SMTFunArg (SMTBVBinOp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+           SMTFunRes (SMTBVBinOp t) ~ BitVector t
+          ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvsrem (e1::SMTExpr (BitVector t)) e2 = App (BVSRem::SMTBVBinOp t) (e1,e2)
 
 -- | Bitvector unsigned less-or-equal
-bvule :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvule = curry $ App BVULE
+bvule :: (SMTFunction (SMTBVComp t), 
+          SMTFunArg (SMTBVComp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+          SMTFunRes (SMTBVComp t) ~ Bool
+         ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
+bvule (e1::SMTExpr (BitVector t)) e2 = App (BVULE::SMTBVComp t) (e1,e2)
 
 -- | Bitvector unsigned less-than
-bvult :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvult = curry $ App BVULT
+bvult :: (SMTFunction (SMTBVComp t), 
+          SMTFunArg (SMTBVComp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+          SMTFunRes (SMTBVComp t) ~ Bool
+         ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
+bvult (e1::SMTExpr (BitVector t)) e2 = App (BVULT::SMTBVComp t) (e1,e2)
 
 -- | Bitvector unsigned greater-or-equal
-bvuge :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvuge = curry $ App BVUGE
+bvuge :: (SMTFunction (SMTBVComp t), 
+          SMTFunArg (SMTBVComp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+          SMTFunRes (SMTBVComp t) ~ Bool
+         ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
+bvuge (e1::SMTExpr (BitVector t)) e2 = App (BVUGE::SMTBVComp t) (e1,e2)
 
 -- | Bitvector unsigned greater-than
-bvugt :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvugt = curry $ App BVUGT
+bvugt :: (SMTFunction (SMTBVComp t), 
+          SMTFunArg (SMTBVComp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+          SMTFunRes (SMTBVComp t) ~ Bool
+         ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
+bvugt (e1::SMTExpr (BitVector t)) e2 = App (BVUGT::SMTBVComp t) (e1,e2)
 
 -- | Bitvector signed less-or-equal
-bvsle :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvsle = curry $ App BVSLE
+bvsle :: (SMTFunction (SMTBVComp t), 
+          SMTFunArg (SMTBVComp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+          SMTFunRes (SMTBVComp t) ~ Bool
+         ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
+bvsle (e1::SMTExpr (BitVector t)) e2 = App (BVSLE::SMTBVComp t) (e1,e2)
 
 -- | Bitvector signed less-than
-bvslt :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvslt = curry $ App BVSLT
+bvslt :: (SMTFunction (SMTBVComp t), 
+          SMTFunArg (SMTBVComp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+          SMTFunRes (SMTBVComp t) ~ Bool
+         ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
+bvslt (e1::SMTExpr (BitVector t)) e2 = App (BVSLT::SMTBVComp t) (e1,e2)
 
 -- | Bitvector signed greater-or-equal
-bvsge :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvsge = curry $ App BVSGE
+bvsge :: (SMTFunction (SMTBVComp t), 
+          SMTFunArg (SMTBVComp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+          SMTFunRes (SMTBVComp t) ~ Bool
+         ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
+bvsge (e1::SMTExpr (BitVector t)) e2 = App (BVSGE::SMTBVComp t) (e1,e2)
 
 -- | Bitvector signed greater-than
-bvsgt :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr Bool
-bvsgt = curry $ App BVSGT
+bvsgt :: (SMTFunction (SMTBVComp t), 
+          SMTFunArg (SMTBVComp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+          SMTFunRes (SMTBVComp t) ~ Bool
+         ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
+bvsgt (e1::SMTExpr (BitVector t)) e2 = App (BVSGT::SMTBVComp t) (e1,e2)
 
 -- | Bitvector shift left
-bvshl :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvshl = curry $ App BVSHL
+bvshl :: (SMTFunction (SMTBVBinOp t),
+          SMTFunArg (SMTBVBinOp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+          SMTFunRes (SMTBVBinOp t) ~ BitVector t
+         ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvshl (e1::SMTExpr (BitVector t)) e2 = App (BVSHL::SMTBVBinOp t) (e1,e2)
 
 -- | Bitvector logical right shift
-bvlshr :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvlshr = curry $ App BVLSHR
+bvlshr :: (SMTFunction (SMTBVBinOp t),
+           SMTFunArg (SMTBVBinOp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+           SMTFunRes (SMTBVBinOp t) ~ BitVector t
+          ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvlshr (e1::SMTExpr (BitVector t)) e2 = App (BVLSHR::SMTBVBinOp t) (e1,e2)
 
 -- | Bitvector arithmetical right shift
-bvashr :: SMTBV t => SMTExpr t -> SMTExpr t -> SMTExpr t
-bvashr = curry $ App BVASHR
+bvashr :: (SMTFunction (SMTBVBinOp t),
+           SMTFunArg (SMTBVBinOp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+           SMTFunRes (SMTBVBinOp t) ~ BitVector t
+          ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvashr (e1::SMTExpr (BitVector t)) e2 = App (BVASHR::SMTBVBinOp t) (e1,e2)
 
 -- | Concats two bitvectors into one.
-bvconcat :: (Concatable t1 t2,t3 ~ ConcatResult t1 t2)
-            => SMTExpr t1 -> SMTExpr t2 -> SMTExpr t3
-bvconcat = curry $ App BVConcat
+bvconcat :: (SMTFunction (SMTConcat t1 t2)
+            ,SMTFunArg (SMTConcat t1 t2) ~ (SMTExpr (BitVector t1),SMTExpr (BitVector t2))
+            ,SMTFunRes (SMTConcat t1 t2) ~ BitVector t3
+            ) => SMTExpr (BitVector t1) -> SMTExpr (BitVector t2) -> SMTExpr (BitVector t3)
+bvconcat (e1::SMTExpr (BitVector t1)) (e2::SMTExpr (BitVector t2)) = App (BVConcat::SMTConcat t1 t2) (e1,e2)
 
+{-
 -- | Extract a sub-vector out of a given bitvector.
-bvextract :: Extractable t t => Integer -- ^ The upper bound of the extracted region
-          -> Integer -- ^ The lower bound of the extracted region
-          -> SMTExpr t -- ^ The bitvector to extract from
-          -> SMTExpr t
-bvextract u l e = App (BVExtract u l) e
-
--- | A more general variant of `bvextract` which can fail if the bounds are invalid.
-bvextractUnsafe :: Extractable t1 t2 => Integer -> Integer -> SMTExpr t1 -> SMTExpr t2
-bvextractUnsafe u l e = App (BVExtract u l) e
+bvextract :: (SMTFunction (SMTExtract t1 n1 n2 t2)
+             ,SMTFunArg (SMTExtract t1 n1 n2 t2) ~ SMTExpr (BitVector t1)
+             ,SMTFunRes (SMTExtract t1 n1 n2 t2) ~ BitVector t2
+             )
+             => Proxy n1 -- ^ The upper bound of the extracted region
+             -> Proxy n2 -- ^ The lower bound of the extracted region
+             -> SMTExpr (BitVector t1) -- ^ The bitvector to extract from
+             -> SMTExpr (SMTFunRes (SMTExtract t1 n1 n2 t2))
+bvextract (_::Proxy n1) (_::Proxy n2) (e::SMTExpr (BitVector t1))
+  = App (BVExtract::SMTExtract t1 n1 n2 t2) e -}
 
 -- | Safely split a 16-bit bitvector into two 8-bit bitvectors.
-bvsplitu16to8 :: SMTExpr Word16 -> (SMTExpr Word8,SMTExpr Word8)
-bvsplitu16to8 e = (App (BVExtract 15 8) e,App (BVExtract 7 0) e)
+bvsplitu16to8 :: SMTExpr BV16 -> (SMTExpr BV8,SMTExpr BV8)
+bvsplitu16to8 e = (App (BVExtract::SMTExtract (BVTyped N16) N8 N15 (BVTyped N8)) e,
+                   App (BVExtract::SMTExtract (BVTyped N16) N0 N7 (BVTyped N8)) e)
 
 -- | Safely split a 32-bit bitvector into two 16-bit bitvectors.
-bvsplitu32to16 :: SMTExpr Word32 -> (SMTExpr Word16,SMTExpr Word16)
-bvsplitu32to16 e = (App (BVExtract 31 16) e,App (BVExtract 15 0) e)
+bvsplitu32to16 :: SMTExpr BV32 -> (SMTExpr BV16,SMTExpr BV16)
+bvsplitu32to16 e = (App (BVExtract::SMTExtract (BVTyped N32) N16 N31 (BVTyped N16)) e,
+                    App (BVExtract::SMTExtract (BVTyped N32) N0 N15 (BVTyped N16)) e)
 
 -- | Safely split a 32-bit bitvector into four 8-bit bitvectors.
-bvsplitu32to8 :: SMTExpr Word32 -> (SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8)
-bvsplitu32to8 e = (App (BVExtract 31 24) e,App (BVExtract 23 16) e,App (BVExtract 15 8) e,App (BVExtract 7 0) e)
+bvsplitu32to8 :: SMTExpr BV32 -> (SMTExpr BV8,SMTExpr BV8,SMTExpr BV8,SMTExpr BV8)
+bvsplitu32to8 e = (App (BVExtract::SMTExtract (BVTyped N32) N24 N31 (BVTyped N8)) e,
+                   App (BVExtract::SMTExtract (BVTyped N32) N16 N23 (BVTyped N8)) e,
+                   App (BVExtract::SMTExtract (BVTyped N32) N8  N15 (BVTyped N8)) e,
+                   App (BVExtract::SMTExtract (BVTyped N32) N0  N7 (BVTyped N8)) e)
 
 -- | Safely split a 64-bit bitvector into two 32-bit bitvectors.
-bvsplitu64to32 :: SMTExpr Word64 -> (SMTExpr Word32,SMTExpr Word32)
-bvsplitu64to32 e = (App (BVExtract 63 32) e,App (BVExtract 31 0) e)
+bvsplitu64to32 :: SMTExpr BV64 -> (SMTExpr BV32,SMTExpr BV32)
+bvsplitu64to32 e = (App (BVExtract::SMTExtract (BVTyped N64) N32 N63 (BVTyped N32)) e,
+                    App (BVExtract::SMTExtract (BVTyped N64) N0  N31 (BVTyped N32)) e)
 
 -- | Safely split a 64-bit bitvector into four 16-bit bitvectors.
-bvsplitu64to16 :: SMTExpr Word64 -> (SMTExpr Word16,SMTExpr Word16,SMTExpr Word16,SMTExpr Word16)
-bvsplitu64to16 e = (App (BVExtract 63 48) e,App (BVExtract 47 32) e,App (BVExtract 31 16) e,App (BVExtract 15 0) e)
+bvsplitu64to16 :: SMTExpr BV64 -> (SMTExpr BV16,SMTExpr BV16,SMTExpr BV16,SMTExpr BV16)
+bvsplitu64to16 e = (App (BVExtract::SMTExtract (BVTyped N64) N48 N63 (BVTyped N16)) e,
+                    App (BVExtract::SMTExtract (BVTyped N64) N32 N47 (BVTyped N16)) e,
+                    App (BVExtract::SMTExtract (BVTyped N64) N16 N31 (BVTyped N16)) e,
+                    App (BVExtract::SMTExtract (BVTyped N64) N0  N15 (BVTyped N16)) e)
 
 -- | Safely split a 64-bit bitvector into eight 8-bit bitvectors.
-bvsplitu64to8 :: SMTExpr Word64 -> (SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8,SMTExpr Word8)
-bvsplitu64to8 e = (App (BVExtract 63 56) e,
-                   App (BVExtract 55 48) e,
-                   App (BVExtract 47 40) e,
-                   App (BVExtract 39 32) e,
-                   App (BVExtract 31 24) e,
-                   App (BVExtract 23 16) e,
-                   App (BVExtract 15 8) e,
-                   App (BVExtract 7 0) e)
+bvsplitu64to8 :: SMTExpr BV64 -> (SMTExpr BV8,SMTExpr BV8,SMTExpr BV8,SMTExpr BV8,SMTExpr BV8,SMTExpr BV8,SMTExpr BV8,SMTExpr BV8)
+bvsplitu64to8 e = (App (BVExtract::SMTExtract (BVTyped N64) N56 N63 (BVTyped N8)) e,
+                   App (BVExtract::SMTExtract (BVTyped N64) N48 N55 (BVTyped N8)) e,
+                   App (BVExtract::SMTExtract (BVTyped N64) N40 N47 (BVTyped N8)) e,
+                   App (BVExtract::SMTExtract (BVTyped N64) N32 N39 (BVTyped N8)) e,
+                   App (BVExtract::SMTExtract (BVTyped N64) N24 N31 (BVTyped N8)) e,
+                   App (BVExtract::SMTExtract (BVTyped N64) N16 N23 (BVTyped N8)) e,
+                   App (BVExtract::SMTExtract (BVTyped N64) N8  N15 (BVTyped N8)) e,
+                   App (BVExtract::SMTExtract (BVTyped N64) N0  N7  (BVTyped N8)) e)
 
 -- | If the supplied function returns true for all possible values, the forall quantification returns true.
 forAll :: (Args a,Unit (ArgAnnotation a)) => (a -> SMTExpr Bool) -> SMTExpr Bool

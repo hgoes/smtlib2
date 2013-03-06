@@ -1,4 +1,4 @@
-{-# LANGUAGE RankNTypes,TypeFamilies,OverloadedStrings,GADTs,FlexibleContexts,ScopedTypeVariables,CPP #-}
+{-# LANGUAGE RankNTypes,TypeFamilies,OverloadedStrings,GADTs,FlexibleContexts,ScopedTypeVariables,CPP,IncoherentInstances #-}
 module Language.SMTLib2.Internals.Translation where
 
 import Language.SMTLib2.Internals
@@ -6,6 +6,7 @@ import Language.SMTLib2.Internals.Instances
 import Language.SMTLib2.Functions
 
 import qualified Data.AttoLisp as L
+import qualified Data.Attoparsec.Number as L
 import Data.Typeable
 import Data.Text as T hiding (foldl1,head,zip)
 import Data.Word
@@ -190,6 +191,10 @@ data FunctionParser'
                   , definedRetSig :: Sort
                   , parseDefined :: forall a. (forall f. SMTFunction f => f -> a)
                                      -> Maybe a }
+  | BVParser { deriveRetSortBV :: [Sort] -> Maybe Sort
+             , parseBV :: forall a. [Sort] -> Sort
+                          -> (forall f n. SMTFunction (f (BVTyped n)) => f (BVTyped n) -> a)
+                          -> Maybe a }
 
 lispToExpr :: FunctionParser -> SortParser 
               -> (T.Text -> Maybe UntypedExpr) 
@@ -345,6 +350,8 @@ commonFunctions = mconcat $ fmap FunctionParser
                   ,selectParser
                   ,storeParser
                   ,constArrayParser
+                  ,concatParser
+                  ,extractParser
                   ,sigParser]
 
 eqParser,
@@ -367,6 +374,8 @@ eqParser,
   selectParser,
   storeParser,
   constArrayParser,
+  concatParser,
+  extractParser,
   sigParser :: L.Lisp -> FunctionParser -> SortParser -> Maybe FunctionParser'
 eqParser sym@(L.Symbol "=") _ _
   = Just $ OverloadedParser (const $ Just $ toSort (undefined::Bool) ()) $
@@ -511,7 +520,8 @@ bvCompParser sym _ _ = case sym of
   where
     p :: L.Lisp -> (forall g. SMTBVComp g) -> Maybe FunctionParser'
     p sym op = Just $ OverloadedParser (const $ Just $ toSort (undefined::Bool) ()) $
-               \sort_arg _ f -> withFirstArgSort sym sort_arg $ \(_::t) _ -> Just $ f (op::SMTBVComp t)
+               \sort_arg _ f -> case sort_arg of
+                 (BVSort i:_) -> reifyNat i $ \(_::Proxy n) -> Just $ f (op::SMTBVComp (BVTyped n))
 
 bvBinOpParser sym _ _ = case sym of
   L.Symbol "bvadd" -> p sym BVAdd
@@ -531,14 +541,20 @@ bvBinOpParser sym _ _ = case sym of
   where
     p :: L.Lisp -> (forall g. SMTBVBinOp g) -> Maybe FunctionParser'
     p sym op = Just $ OverloadedParser (Just . head) $
-               \_ sort_ret f -> withSort sort_ret $ \(_::t) _ -> Just $ f (op::SMTBVBinOp t)
+               \_ sort_ret f -> case sort_ret of 
+                 BVSort i -> reifyNat i (\(_::Proxy n) -> Just $ f (op::SMTBVBinOp (BVTyped n)))
+                 _ -> Nothing
 
 bvUnOpParser (L.Symbol "bvnot") _ _
   = Just $ OverloadedParser (Just . head) $
-    \_ sort_ret f -> withSort sort_ret $ \(_::t) _ -> Just $ f (BVNot::SMTBVUnOp t)
+    \_ sort_ret f -> case sort_ret of
+      BVSort i -> reifyNat i $ \(_::Proxy n) -> Just $ f (BVNot::SMTBVUnOp (BVTyped n))
+      _ -> Nothing
 bvUnOpParser (L.Symbol "bvneg") _ _
   = Just $ OverloadedParser (Just . head) $
-    \_ sort_ret f -> withSort sort_ret $ \(_::t) _ -> Just $ f (BVNeg::SMTBVUnOp t)
+    \_ sort_ret f -> case sort_ret of
+      BVSort i -> reifyNat i $ \(_::Proxy n) -> Just $ f (BVNeg::SMTBVUnOp (BVTyped n))
+      _ -> Nothing
 bvUnOpParser _ _ _ = Nothing
 
 selectParser (L.Symbol "select") _ _
@@ -572,6 +588,38 @@ constArrayParser (L.List [L.Symbol "as"
                -> Just $ f (ConstArray i_ann::SMTConstArray i v)
     _ -> Nothing
 constArrayParser _ _ _ = Nothing
+
+concatParser (L.Symbol "concat") _ _
+  = Just $ OverloadedParser 
+    (\args -> Just $ BVSort (sum $ fmap (\(BVSort i) -> i) args))
+    (\sort_arg sort_ret f -> case sort_arg of
+        [BVSort i1,BVSort i2]
+          -> reifySum i1 i2 $
+             \(_::Proxy n1) (_::Proxy n2) _ 
+             -> Just $ f (BVConcat::SMTConcat (BVTyped n1) (BVTyped n2))
+        _ -> Nothing)
+concatParser _ _ _ = Nothing
+
+extractParser (L.List [L.Symbol "_"
+                      ,L.Symbol "extract"
+                      ,L.Number (L.I l)
+                      ,L.Number (L.I u)]) _ _
+  = Just $ OverloadedParser
+    (\args -> case args of
+        [BVSort t] -> if u < t && l > 0 && l <= u
+                      then Just $ BVSort (u-l+1)
+                      else error "smtlib2: Invalid parameters for extract."
+        _ -> error "smtlib2: Invalid parameters for extract.")
+    (\sort_arg sort_ret f -> case sort_arg of
+        [BVSort t] -> case sort_ret of
+          BVSort r -> if r+l == u+1
+                      then reifyExtract t l u $
+                           \(_::Proxy n1) (_::Proxy n2) (_::Proxy n3) (_::Proxy n4)
+                            -> Just $ f (BVExtract::SMTExtract (BVTyped n1) n2 n3 (BVTyped n4))
+                      else error "smtlib2: Invalid parameters for extract."
+          _ -> error "smtlib2: Wrong return type for extract."
+        _ -> error "smtlib2: Wrong argument type for extract.")
+extractParser _ _ _ = Nothing
 
 sigParser (L.List [fsym,L.List sig,ret]) rec sort = do
   rsig <- mapM (\l -> parseSort sort l sort) sig
