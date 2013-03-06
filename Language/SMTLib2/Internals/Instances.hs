@@ -653,14 +653,17 @@ instance (Typeable a,SMTValue a) => SMTValue [a] where
 
 -- BitVector implementation
 
--- | A bitvector is a list of bits which can be used to represent binary numbers.
---   It is represented as an `Integer`, which represents the value of the bitvector.
-
 instance SMTType (BitVector BVUntyped) where
   type SMTAnnotation (BitVector BVUntyped) = Integer
   getSort _ l = bv l
   getSortBase _ = error "smtlib2: No getSortBase implementation for BitVector"
   declareType = defaultDeclareValue
+  toSort _ l = BVSort l
+  fromSort _ = SortParser $ \l _ -> case l of
+    L.List [L.Symbol "_"
+           ,L.Symbol "BitVec"
+           ,L.Number (L.I w)] -> Just (BVSort w)
+    _ -> Nothing
 
 instance SMTValue (BitVector BVUntyped) where
   unmangle v l = fmap BitVector $ getBVValue' l v
@@ -675,6 +678,22 @@ instance TypeableNat n => SMTType (BitVector (BVTyped n)) where
 #endif
   getSortBase _ = error "smtlib2: No getSortBase implementation for BitVector"
   declareType = defaultDeclareValue
+#ifdef SMTLIB2_WITH_DATAKINDS
+  toSort _ _ = BVSort (reflectNat (Proxy::Proxy n) 0)
+#else
+  toSort _ _ = BVSort (reflectNat (undefined::n) 0)
+#endif
+  fromSort _ = SortParser $ \l _ -> case l of
+    L.List [L.Symbol "_"
+           ,L.Symbol "BitVec"
+#ifdef SMTLIB2_WITH_DATAKINDS            
+           ,L.Number (L.I w)] -> if w == reflectNat (Proxy::Proxy n) 0
+#else
+           ,L.Number (L.I w)] -> if w == reflectNat (undefined::n) 0
+#endif
+                                 then Just (BVSort w)
+                                 else Nothing
+    _ -> Nothing
 
 instance TypeableNat n => SMTValue (BitVector (BVTyped n)) where
 #ifdef SMTLIB2_WITH_DATAKINDS
