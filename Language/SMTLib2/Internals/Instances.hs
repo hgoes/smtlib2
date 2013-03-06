@@ -685,6 +685,14 @@ instance TypeableNat n => SMTValue (BitVector (BVTyped n)) where
   mangle (BitVector v) _ = putBVValue' (reflectNat (undefined::n) 0) v
 #endif
 
+instance TypeableNat n => Num (SMTExpr (BitVector (BVTyped n))) where
+  (+) (x::SMTExpr (BitVector (BVTyped n))) y = App (BVAdd::SMTBVBinOp (BVTyped n)) (x,y)
+  (-) (x::SMTExpr (BitVector (BVTyped n))) y = App (BVSub::SMTBVBinOp (BVTyped n)) (x,y)
+  (*) (x::SMTExpr (BitVector (BVTyped n))) y = App (BVMul::SMTBVBinOp (BVTyped n)) (x,y)
+  negate (x::SMTExpr (BitVector (BVTyped n))) = App (BVNeg::SMTBVUnOp (BVTyped n)) x
+  signum (x::SMTExpr (BitVector (BVTyped n))) = App ITE (App (BVUGT::SMTBVComp (BVTyped n)) (x,Const (BitVector 0) ()),Const (BitVector 1) (),Const (BitVector (-1)) ())
+  fromInteger i = Const (BitVector i) ()
+
 -- Functions
 
 instance SMTType a => SMTFunction (SMTEq a) where
