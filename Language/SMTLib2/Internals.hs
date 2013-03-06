@@ -220,6 +220,7 @@ eqExpr n lhs rhs = case (lhs,rhs) of
       Just f2' -> case cast arg2 of
         Nothing -> False
         Just arg2' -> f1 == f2' && arg1 == arg2'
+  (_,_) -> False
 
 -- | Represents a constructor of a datatype /a/
 --   Can be obtained by using the template haskell extension module
