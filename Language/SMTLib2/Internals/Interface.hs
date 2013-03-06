@@ -13,7 +13,6 @@ import Data.Map as Map hiding (assocs)
 import Data.Array
 import qualified Data.AttoLisp as L
 import Data.Unit
-import Data.Word
 import Data.List (genericReplicate)
 #ifdef SMTLIB2_WITH_DATAKINDS
 import Data.Proxy
