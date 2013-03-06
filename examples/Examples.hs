@@ -14,7 +14,7 @@ import qualified Data.ByteString as BS
 
 funTest :: SMT (Maybe Integer)
 funTest = do
-  f <- fun :: SMT (SMTExpr (SMTFun (SMTExpr Integer,SMTExpr Integer) Integer))
+  f <- fun :: SMT (SMTFun (SMTExpr Integer,SMTExpr Integer) Integer)
   g <- defFun (\x -> f `app` (x,x))
   q <- var
   assert $ forAll $ \x -> g `app` x .==. 2
@@ -39,7 +39,7 @@ quantifierTest = do
              return $ Just r1)
     else return Nothing
 
-bvTest :: SMT (Maybe Word8)
+bvTest :: SMT (Maybe BV8)
 bvTest = do
   v1 <- var
   v2 <- var
@@ -52,19 +52,24 @@ bvTest = do
     then fmap Just $ getValue v3
     else return Nothing
 
-bvTest2 :: SMT (Maybe BitVector)
+bvTest2 :: SMT (Maybe (BV8,BV8,BV8,BitVector (BVTyped N24)))
 bvTest2 = do
-  v1 <- var :: SMT (SMTExpr Word8)
-  v2 <- var
-  v3 <- var
-  res <- varAnn 24
+  v1 <- var :: SMT (SMTExpr BV8)
+  v2 <- var :: SMT (SMTExpr BV8)
+  v3 <- var :: SMT (SMTExpr BV8)
+  res <- var
   assert $ not' $ v1 .==. 0
   assert $ not' $ v2 .==. 0
   assert $ v3 .==. bvadd v1 v2
-  assert $ res .==. bvconcats [v1,v2,v3]
+  assert $ res .==. bvconcat v1 (bvconcat v2 v3)
   r <- checkSat
   if r
-    then fmap Just $ getValue res
+    then (do
+             r1 <- getValue v1
+             r2 <- getValue v2
+             r3 <- getValue v3
+             rr <- getValue res
+             return $ Just (r1,r2,r3,rr))
     else return Nothing
 
 transposeTest :: SMT ([Integer],Bool)
@@ -90,13 +95,11 @@ transposeTest = do
 
 add :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer -> SMT ()
 add x y c r rc = assert (ite 
-                         ((plus [x,y,c]) .>=. 10)
-                         (and'
-                          [r .==. ((plus [x,y,c]) - 10)
-                          ,rc .==. 1])
-                         (and'
-                          [r .==. (plus [x,y,c])
-                          ,rc .==. 0]
+                         ((app plus [x,y,c]) .>=. 10)
+                         ((r .==. ((app plus [x,y,c]) - 10)) .&&.
+                          (rc .==. 1))
+                         ((r .==. (app plus [x,y,c])) .&&.
+                          (rc .==. 0)
                          )
                         )
 
@@ -108,12 +111,12 @@ sendMoreMoney = do
   [s,e,n,d,m,o,r,y,c0,c1,c2] <- replicateM 11 (var :: SMT (SMTExpr Integer))
   let alls = [s,e,n,d,m,o,r,y]
   assert (distinct alls)
-  assert (and' [v .>=. 0
-               | v <- alls
-               ])
-  assert (and' [v .<. 10
-               | v <- alls
-               ])
+  assert (app and' [v .>=. 0
+                   | v <- alls
+                   ])
+  assert (app and' [v .<. 10
+                   | v <- alls
+                   ])
   assert (not' (m .==. 0))
   add d e 0 y c0
   add n r c0 e c1
@@ -137,7 +140,7 @@ sendMoreMoney = do
       money = vm*10000+vo*1000+vn*100+ve*10+vy
   return (vs,ve,vn,vd,vm,vo,vr,vy,(vc0,vc1,vc2),send,more,money,send+more==money)
 
-type Problem = [[Maybe Int8]]
+type Problem = [[Maybe Word8]]
 
 emptyProblem :: Problem
 emptyProblem = replicate 9 (replicate 9 Nothing)
@@ -153,12 +156,12 @@ puzzle1 = [ [ Nothing, Just 6 , Nothing, Nothing, Nothing, Nothing, Nothing, Jus
           , [ Nothing, Nothing, Nothing, Just 7 , Just 9 , Just 4 , Nothing, Nothing, Nothing ]
           , [ Nothing, Just 5 , Nothing, Nothing, Nothing, Nothing, Nothing, Just 7 , Nothing ] ]
 
-sudoku :: Problem -> SMT (Maybe [[Int8]])
+sudoku :: Problem -> SMT (Maybe [[BV8]])
 sudoku prob = do
   setOption (PrintSuccess False)
   setOption (ProduceModels True)
   myfield <- mapM (\_ -> mapM (\_ -> var) [0..8]) [0..8]
-  mapM_ (mapM_ (\v -> assert $ and' [ v .<. 10, v .>. 0])) myfield
+  mapM_ (mapM_ (\v -> assert $ app and' [ bvult v 10, bvugt v 0])) myfield
   mapM_ (\line -> assert $ distinct line) myfield
   mapM_ (\i -> assert $ distinct [ line!!i | line <- myfield ]) [0..8]
   assert $ distinct [ myfield!!i!!j | i <- [0..2],j <- [0..2] ]
@@ -175,7 +178,7 @@ sudoku prob = do
 
   sequence_ [ sequence_ [ case el of
                             Nothing -> return ()
-                            Just n -> assert $ myfield!!i!!j .==. (constant n)
+                            Just n -> assert $ myfield!!i!!j .==. (constant $ BitVector $ fromIntegral n)
                           | (el,j) <- zip line [0..8]
                         ] 
               | (line,i) <- zip prob [0..8] ]
@@ -185,34 +188,21 @@ sudoku prob = do
     then fmap Just $ mapM (mapM getValue) myfield
     else return Nothing
 
-displaySolution :: [[Int8]] -> String
+displaySolution :: [[BV8]] -> String
 displaySolution = displayLines . fmap displayLine
     where
       displayLines [a,b,c,d,e,f,g,h,i] = unlines [a,b,c,"",d,e,f,"",g,h,i]
       displayLine [a,b,c,d,e,f,g,h,i] = show a ++ show b ++ show c ++ " " ++ show d ++ show e ++ show f ++ " " ++ show g ++ show h ++ show i
 
 -- Bitvector concat example
-concatExample :: SMT (Maybe Word16)
+concatExample :: SMT (Maybe BV16)
 concatExample = do
-  x1 <- var :: SMT (SMTExpr Word8)
-  x2 <- var :: SMT (SMTExpr Word8)
+  x1 <- var :: SMT (SMTExpr BV8)
+  x2 <- var :: SMT (SMTExpr BV8)
   res <- var
   assert $ res .==. bvconcat x1 x2
-  assert $ x1 .>. 2
-  assert $ x2 .>. 8
-  r <- checkSat
-  if r
-    then fmap Just $ getValue res
-    else return Nothing
-
-concatExample2 :: SMT (Maybe BS.ByteString)
-concatExample2 = do
-  v1 <- varAnn 2
-  v2 <- varAnn 1
-  res <- varAnn 3
-  assert $ v1 .==. (constantAnn (BS.pack [0xAA,0xBB]) 2)
-  assert $ v2 .==. (constantAnn (BS.pack [0x01]) 1)
-  assert $ res .==. bvconcat v1 v2
+  assert $ bvugt x1 2
+  assert $ bvugt x2 8
   r <- checkSat
   if r
     then fmap Just $ getValue res
@@ -319,7 +309,7 @@ unsatCoreTest = do
   (a1,_) <- named "First" (x .==. y1)
   (a2,_) <- named "Second" (not' $ z .<. 0)
   (a3,_) <- named "Third" (y1 .==. z)
-  b <- defConst (and' [x.==.y2,not' $ y2 .==. z])
+  b <- defConst (app and' [x.==.y2,not' $ y2 .==. z])
   
   assert a1
   assert a2
