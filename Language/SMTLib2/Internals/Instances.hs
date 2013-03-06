@@ -7,17 +7,12 @@ import Language.SMTLib2.Internals
 import Language.SMTLib2.Functions
 import qualified Data.AttoLisp as L
 import qualified Data.Attoparsec.Number as L
-import Data.Word
-import Data.Int
 import Numeric
 import Data.Bits
 import qualified Data.Text as T
 import Data.Ratio
 import Data.Typeable
-import qualified Data.ByteString as BS
-import Data.Map
 import Data.List (genericLength,genericReplicate)
-import Data.Traversable
 #ifdef SMTLIB2_WITH_CONSTRAINTS
 import Data.Constraint
 import Data.Proxy
@@ -51,7 +46,6 @@ withArraySort idx v f
        \(_::vt) annv -> f (undefined::SMTArray i vt) (anni,annv)
 
 withArgSort :: [Sort] -> (forall i. Liftable i => i -> ArgAnnotation i -> a) -> a
-withArgSort [] f = f () ()
 withArgSort [i] f = withSort i $
                     \(_::ti) anni -> f (undefined::SMTExpr ti) anni
 withArgSort [i1,i2] f
@@ -232,13 +226,6 @@ instance (Args idx,SMTType val) => SMTType (SMTArray idx val) where
       splitLast sym (x:xs) = let ~(xs',x') = splitLast sym xs
                              in (x:xs',x')
 
-instance Liftable () where
-  type Lifted () i = ()
-  getLiftedArgumentAnn _ _ _ _ = ()
-#ifdef SMTLIB2_WITH_CONSTRAINTS
-  getConstraint _ = Dict
-#endif  
-
 instance (SMTType a) => Liftable (SMTExpr a) where
   type Lifted (SMTExpr a) i = SMTExpr (SMTArray i a)
   getLiftedArgumentAnn _ _ a_ann i_ann = (i_ann,a_ann)
@@ -378,6 +365,7 @@ instance (SMTType a) => Args (SMTExpr a) where
   getArgAnnotation _ (s:rest) = withSort s $ \_ ann -> case cast ann of
     Nothing -> error "smtlib2: Sort provided to getArgAnnotation doesn't fit."
     Just r -> (r,rest)
+  getArgAnnotation _ [] = error "smtlib2: To few sorts provided."
 
 instance (Args a,Args b) => Args (a,b) where
   type ArgAnnotation (a,b) = (ArgAnnotation a,ArgAnnotation b)
@@ -424,6 +412,7 @@ instance (Args a,Args b,Args c) => Args (a,b,c) where
           (ann2,r2) = getArgAnnotation (undefined::a2) r1
           (ann3,r3) = getArgAnnotation (undefined::a3) r2
       in ((ann1,ann2,ann3),r3)
+  toSorts ~(x1,x2,x3) (ann1,ann2,ann3) = toSorts x1 ann1 ++ toSorts x2 ann2 ++ toSorts x3 ann3
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c) => LiftArgs (a,b,c) where
   type Unpacked (a,b,c) = (Unpacked a,Unpacked b,Unpacked c)
@@ -458,6 +447,11 @@ instance (Args a,Args b,Args c,Args d) => Args (a,b,c,d) where
           (ann3,r3) = getArgAnnotation (undefined::a3) r2
           (ann4,r4) = getArgAnnotation (undefined::a4) r3
       in ((ann1,ann2,ann3,ann4),r4)
+  toSorts ~(x1,x2,x3,x4) (ann1,ann2,ann3,ann4) 
+    = toSorts x1 ann1 ++ 
+      toSorts x2 ann2 ++
+      toSorts x3 ann3 ++
+      toSorts x4 ann4
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d) => LiftArgs (a,b,c,d) where
   type Unpacked (a,b,c,d) = (Unpacked a,Unpacked b,Unpacked c,Unpacked d)
@@ -498,6 +492,12 @@ instance (Args a,Args b,Args c,Args d,Args e) => Args (a,b,c,d,e) where
           (ann4,r4) = getArgAnnotation (undefined::a4) r3
           (ann5,r5) = getArgAnnotation (undefined::a5) r4
       in ((ann1,ann2,ann3,ann4,ann5),r5)
+  toSorts ~(x1,x2,x3,x4,x5) (ann1,ann2,ann3,ann4,ann5)
+    = toSorts x1 ann1 ++ 
+      toSorts x2 ann2 ++
+      toSorts x3 ann3 ++
+      toSorts x4 ann4 ++
+      toSorts x5 ann5
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d,LiftArgs e) => LiftArgs (a,b,c,d,e) where
   type Unpacked (a,b,c,d,e) = (Unpacked a,Unpacked b,Unpacked c,Unpacked d,Unpacked e)
@@ -543,6 +543,13 @@ instance (Args a,Args b,Args c,Args d,Args e,Args f) => Args (a,b,c,d,e,f) where
           (ann5,r5) = getArgAnnotation (undefined::a5) r4
           (ann6,r6) = getArgAnnotation (undefined::a6) r5
       in ((ann1,ann2,ann3,ann4,ann5,ann6),r6)
+  toSorts ~(x1,x2,x3,x4,x5,x6) (ann1,ann2,ann3,ann4,ann5,ann6)
+    = toSorts x1 ann1 ++ 
+      toSorts x2 ann2 ++
+      toSorts x3 ann3 ++
+      toSorts x4 ann4 ++
+      toSorts x5 ann5 ++
+      toSorts x6 ann6
     
 instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d,LiftArgs e,LiftArgs f) => LiftArgs (a,b,c,d,e,f) where
   type Unpacked (a,b,c,d,e,f) = (Unpacked a,Unpacked b,Unpacked c,Unpacked d,Unpacked e,Unpacked f)
@@ -573,6 +580,8 @@ instance Args a => Args [a] where
   getArgAnnotation (_::[a]) sorts = let (x,r1) = getArgAnnotation (undefined::a) sorts
                                         (xs,r2) = getArgAnnotation (undefined::[a]) r1
                                     in (x:xs,r2)
+  toSorts _ [] = []
+  toSorts ~(x:xs) (ann:anns) = toSorts x ann ++ toSorts xs anns
 
 instance LiftArgs a => LiftArgs [a] where
   type Unpacked [a] = [Unpacked a]
@@ -583,18 +592,6 @@ instance LiftArgs a => LiftArgs [a] where
     x' <- unliftArgs x
     xs' <- unliftArgs xs
     return (x':xs')
-
-instance (Ord a,Typeable a,Args b) => Args (Map a b) where
-  type ArgAnnotation (Map a b) = Map a (ArgAnnotation b)
-  foldExprs f s mp anns = mapAccumWithKey (\s1 key ann -> foldExprs f s1 (mp!key) ann) s anns
-  extractArgAnnotation = fmap extractArgAnnotation
-  toArgs _ = error "smtlib2: Don't use Map as argument type for functions you want to read back."
-  getArgAnnotation _ = error "smtlib2: Don't use Map as argument type for functions you want to read back."
-
-instance (Ord a,Typeable a,LiftArgs b) => LiftArgs (Map a b) where
-  type Unpacked (Map a b) = Map a (Unpacked b)
-  liftArgs mp anns = mapWithKey (\key ann -> liftArgs (mp!key) ann) anns
-  unliftArgs = Data.Traversable.mapM unliftArgs
 
 instance SMTType a => SMTType (Maybe a) where
   type SMTAnnotation (Maybe a) = SMTAnnotation a
@@ -709,6 +706,7 @@ instance TypeableNat n => Num (SMTExpr (BitVector (BVTyped n))) where
   (-) (x::SMTExpr (BitVector (BVTyped n))) y = App (BVSub::SMTBVBinOp (BVTyped n)) (x,y)
   (*) (x::SMTExpr (BitVector (BVTyped n))) y = App (BVMul::SMTBVBinOp (BVTyped n)) (x,y)
   negate (x::SMTExpr (BitVector (BVTyped n))) = App (BVNeg::SMTBVUnOp (BVTyped n)) x
+  abs (x::SMTExpr (BitVector (BVTyped n))) = App ITE (App (BVUGT::SMTBVComp (BVTyped n)) (x,Const (BitVector 0) ()),x,App (BVNeg::SMTBVUnOp (BVTyped n)) x)
   signum (x::SMTExpr (BitVector (BVTyped n))) = App ITE (App (BVUGT::SMTBVComp (BVTyped n)) (x,Const (BitVector 0) ()),Const (BitVector 1) (),Const (BitVector (-1)) ())
   fromInteger i = Const (BitVector i) ()
 
@@ -730,7 +728,7 @@ instance (SMTFunction f,Liftable r,r ~ Lifted (SMTFunArg f) i,
   isOverloaded _ = True
   getFunctionSymbol x@(SMTMap f) arg_ann
     = withUndef x $
-      \ua ui -> let (i_ann,a_ann) = inferLiftedAnnotation ua ui arg_ann
+      \ua ui -> let (_,a_ann) = inferLiftedAnnotation ua ui arg_ann
                     (sargs,sres) = functionGetSignature f a_ann (inferResAnnotation f a_ann)
                     sym = getFunctionSymbol f a_ann
                 in L.List [L.Symbol "_"
@@ -740,14 +738,14 @@ instance (SMTFunction f,Liftable r,r ~ Lifted (SMTFunArg f) i,
                            else sym]
     where
       withUndef :: SMTMap f i r -> (SMTFunArg f -> i -> b) -> b
-      withUndef _ f = f undefined undefined
+      withUndef _ f' = f' undefined undefined
   inferResAnnotation x@(SMTMap f) arg_ann
     = withUndef x $ \ua ui 
                     -> let (i_ann,a_ann) = inferLiftedAnnotation ua ui arg_ann
                        in (i_ann,inferResAnnotation f a_ann)
     where
       withUndef :: SMTMap f i r -> (SMTFunArg f -> i -> b) -> b
-      withUndef _ f = f undefined undefined
+      withUndef _ f' = f' undefined undefined
 
 instance SMTType a => SMTFunction (SMTOrdOp a) where
   type SMTFunArg (SMTOrdOp a) = (SMTExpr a,SMTExpr a)
@@ -950,7 +948,7 @@ instance (Args i,SMTType v) => SMTFunction (SMTConstArray i v) where
                        ,getSort u_arr (i_ann,v_ann)]
     where
       withUndef :: SMTConstArray i v -> (SMTArray i v -> a) -> a
-      withUndef _ f = f undefined
+      withUndef _ f' = f' undefined
   inferResAnnotation (ConstArray i_ann) v_ann = (i_ann,v_ann)
 
 instance SMTFunction (SMTConcat BVUntyped BVUntyped) where
