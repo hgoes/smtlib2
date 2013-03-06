@@ -647,7 +647,7 @@ reifyNat x f
     reifyNat' 0 f = f (Proxy :: Proxy Z)
     reifyNat' n f = reifyNat' (n-1) (\(_::Proxy n) -> f (Proxy::Proxy (S n)))
 
-data BitVector (b :: BVKind) = BitVector Integer deriving (Eq,Ord,Show)
+data BitVector (b :: BVKind) = BitVector Integer deriving (Eq,Ord)
 
 instance TypeableBVKind k => Typeable (BitVector k) where
   typeOf _ = mkTyConApp 
@@ -717,8 +717,11 @@ reifyExtract t l u f
                               \(_::n1) (_::n2) (_::n3) (_::n4)
                                -> f (undefined::n1) (undefined::n2) (undefined::S n3) (undefined::S n4)
 
-data BitVector (b :: *) = BitVector Integer deriving (Eq,Ord,Show,Typeable)
+data BitVector (b :: *) = BitVector Integer deriving (Eq,Ord,Typeable)
 #endif
+
+instance Show (BitVector a) where
+  show (BitVector x) = show x
 
 type N0 = Z
 type N1 = S N0
