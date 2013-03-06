@@ -321,10 +321,6 @@ withFirstArgSort :: L.Lisp -> [Sort] -> (forall t. SMTType t => t -> SMTAnnotati
 withFirstArgSort _ (s:_) f = withSort s f
 withFirstArgSort sym [] _ = error $ "smtlib2: Function "++show sym++" needs at least one argument."
 
-withAnySort :: L.Lisp -> [Sort] -> Sort -> (forall t. SMTType t => t -> SMTAnnotation t -> a) -> a
-withAnySort _ (s:_) _ f = withSort s f
-withAnySort _ _ s f = withSort s f
-
 commonFunctions :: FunctionParser
 commonFunctions = mconcat $ fmap FunctionParser 
                   [eqParser
@@ -420,11 +416,11 @@ ordOpParser sym _ _
 arithOpParser sym _ _
   = case sym of
     L.Symbol "+" -> Just $ OverloadedParser (\sorts -> Just (head sorts)) $
-                    \sort_arg sort_ret f
-                    -> withAnySort sym sort_arg sort_ret $ \(_::t) _ -> Just $ f (Plus::SMTArithOp t)
+                    \_ sort_ret f
+                    -> withSort sort_ret $ \(_::t) _ -> Just $ f (Plus::SMTArithOp t)
     L.Symbol "*" -> Just $ OverloadedParser (\sorts -> Just (head sorts)) $
-                    \sort_arg sort_ret f
-                    -> withAnySort sym sort_arg sort_ret $ \(_::t) _ -> Just $ f (Mult::SMTArithOp t)
+                    \_ sort_ret f
+                    -> withSort sort_ret $ \(_::t) _ -> Just $ f (Mult::SMTArithOp t)
     _ -> Nothing
 
 minusParser (L.Symbol "-") _ _
@@ -458,10 +454,10 @@ divideParser (L.Symbol "/") _ _
     (toSort (undefined::Ratio Integer) ()) $ \f -> Just $ f Divide
 divideParser _ _ _ = Nothing
 
-absParser sym@(L.Symbol "abs") _ _
+absParser (L.Symbol "abs") _ _
   = Just $ OverloadedParser (\sorts -> Just $ head sorts) $
-    \sort_arg sort_ret f 
-    -> withAnySort sym sort_arg sort_ret $ \(_::t) _ -> Just $ f (Abs::SMTAbs t)
+    \_ sort_ret f 
+    -> withSort sort_ret $ \(_::t) _ -> Just $ f (Abs::SMTAbs t)
 absParser _ _ _ = Nothing
 
 logicParser (L.Symbol "not") _ _ = Just $ DefinedParser [toSort (undefined::Bool) ()] (toSort (undefined::Bool) ()) 

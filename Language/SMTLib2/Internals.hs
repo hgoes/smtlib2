@@ -315,9 +315,6 @@ argSorts arg ann = Prelude.reverse res
     where
       (res,_) = foldExprs (\tps e ann' -> ((getSort (getUndef e) ann'):tps,e)) [] arg ann
 
-allOf :: Args a => (forall t. SMTExpr t) -> a
-allOf x = snd $ foldExprs (\_ _ _ -> ((),x)) () undefined undefined
-
 unpackArgs :: Args a => (forall t. SMTType t => SMTExpr t -> SMTAnnotation t -> Integer -> (c,Integer)) -> a -> ArgAnnotation a -> Integer -> ([c],Integer)
 unpackArgs f x ann i = fst $ foldExprs (\(res,ci) e ann' -> let (p,ni) = f e ann' ci
                                                             in ((res++[p],ni),e)

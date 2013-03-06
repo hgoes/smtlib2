@@ -284,22 +284,12 @@ bv n = L.List [L.Symbol "_"
               ,L.Symbol "BitVec"
               ,L.Number $ L.I (fromIntegral n)]
 
--- | Helper function which applies a given function to the 'undefined' value.
-withUndef1 :: (a -> g a) -> g a
-withUndef1 f = f undefined
-
--- | Parses a given SMT bitvector value into a numerical value within the SMT monad.
-getBVValue :: (Num a,Bits a,Read a) => L.Lisp -- ^ The SMT expression
-              -> b -- ^ Ignored
-              -> Maybe a
-getBVValue arg _ = withUndef1 $ \u -> getBVValue' (bitSize u) arg
-
 -- | Parses a given SMT bitvector value into a numerical value.
-getBVValue' :: (Num a,Bits a,Read a,Integral i) => i -- ^ The number of bits of the value.
+getBVValue :: (Num a,Bits a,Read a,Integral i) => i -- ^ The number of bits of the value.
                -> L.Lisp -- ^ The SMT expression representing the value.
                -> Maybe a
-getBVValue' _ (L.Number (L.I v)) = Just (fromInteger v)
-getBVValue' len (L.Symbol s) = case T.unpack s of
+getBVValue _ (L.Number (L.I v)) = Just (fromInteger v)
+getBVValue len (L.Symbol s) = case T.unpack s of
   '#':'b':rest -> if genericLength rest == len
                   then (case readInt 2
                                  (\x -> x=='0' || x=='1')
@@ -314,24 +304,20 @@ getBVValue' len (L.Symbol s) = case T.unpack s of
                           _ -> Nothing)
                   else Nothing
   _ -> Nothing
-getBVValue' len (L.List [L.Symbol "_",L.Symbol val,L.Number (L.I bits)])
+getBVValue len (L.List [L.Symbol "_",L.Symbol val,L.Number (L.I bits)])
   = if bits == (fromIntegral len)
     then (case T.unpack val of
             'b':'v':num -> Just (read num)
             _ -> Nothing)
     else Nothing
-getBVValue' _ _ = Nothing
-
--- | Helper function to help the formulation of 'Language.SMTLib2.Internals.mangle' functions for bitvectors.
-putBVValue :: (Bits a,Ord a,Integral a,Show a) => a -> b -> L.Lisp
-putBVValue x _ = putBVValue' (bitSize x) x
+getBVValue _ _ = Nothing
 
 -- | Convert a numerical value into its SMT bitvector representation
-putBVValue' :: (Bits a,Ord a,Integral a,Show a,Integral i) 
+putBVValue :: (Bits a,Ord a,Integral a,Show a,Integral i) 
                => i -- ^ The number of bits used for the representation
                -> a -- ^ The numerical value
                -> L.Lisp
-putBVValue' len x
+putBVValue len x
   | len `mod` 4 == 0 = let v' = if x < 0
                                 then complement (x-1)
                                 else x
@@ -663,8 +649,8 @@ instance SMTType (BitVector BVUntyped) where
     _ -> Nothing
 
 instance SMTValue (BitVector BVUntyped) where
-  unmangle v l = fmap BitVector $ getBVValue' l v
-  mangle (BitVector v) l = putBVValue' l v
+  unmangle v l = fmap BitVector $ getBVValue l v
+  mangle (BitVector v) l = putBVValue l v
 
 instance TypeableNat n => SMTType (BitVector (BVTyped n)) where
   type SMTAnnotation (BitVector (BVTyped n)) = ()
@@ -694,11 +680,11 @@ instance TypeableNat n => SMTType (BitVector (BVTyped n)) where
 
 instance TypeableNat n => SMTValue (BitVector (BVTyped n)) where
 #ifdef SMTLIB2_WITH_DATAKINDS
-  unmangle v _ = fmap BitVector $ getBVValue' (reflectNat (Proxy::Proxy n) 0) v
-  mangle (BitVector v) _ = putBVValue' (reflectNat (Proxy::Proxy n) 0) v
+  unmangle v _ = fmap BitVector $ getBVValue (reflectNat (Proxy::Proxy n) 0) v
+  mangle (BitVector v) _ = putBVValue (reflectNat (Proxy::Proxy n) 0) v
 #else
-  unmangle v _ = fmap BitVector $ getBVValue' (reflectNat (undefined::n) 0) v
-  mangle (BitVector v) _ = putBVValue' (reflectNat (undefined::n) 0) v
+  unmangle v _ = fmap BitVector $ getBVValue (reflectNat (undefined::n) 0) v
+  mangle (BitVector v) _ = putBVValue (reflectNat (undefined::n) 0) v
 #endif
 
 instance TypeableNat n => Num (SMTExpr (BitVector (BVTyped n))) where
