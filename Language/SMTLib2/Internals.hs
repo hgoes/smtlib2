@@ -14,14 +14,13 @@ import Control.Monad.State
 import Data.Text as T hiding (reverse)
 import Data.Typeable
 import Data.Map as Map hiding (assocs)
-import Data.Set as Set
-import Data.List as List (mapAccumL,find,genericReplicate)
+import Data.List as List (find)
 #ifdef SMTLIB2_WITH_CONSTRAINTS
 import Data.Constraint
-import Data.Proxy
 #endif
 #ifdef SMTLIB2_WITH_DATAKINDS
 import Data.Tagged
+import Data.Proxy
 #endif
     
 -- Monad stuff
@@ -206,36 +205,21 @@ eqExpr n lhs rhs = case (lhs,rhs) of
       Just arg2' -> f1 == f2' && arg1 == arg2'
   (Forall a1 f1,Forall a2 f2) -> let name i = T.pack $ "internal_eq_check"++show i
                                      (n',v) = foldExprs (\i _ ann -> (i+1,Var (name i) ann)) n undefined a1
-                                 in case cast f2 of
+                                 in case cast (a2,f2) of
                                    Nothing -> False
-                                   Just f2' -> eqExpr n' (f1 v) (f2' v)
+                                   Just (a2',f2') -> a1==a2' && eqExpr n' (f1 v) (f2' v)
   (Exists a1 f1,Exists a2 f2) -> let name i = T.pack $ "internal_eq_check"++show i
                                      (n',v) = foldExprs (\i _ ann -> (i+1,Var (name i) ann)) n undefined a1
-                                 in case cast f2 of
+                                 in case cast (a2,f2) of
                                    Nothing -> False
-                                   Just f2' -> eqExpr n' (f1 v) (f2' v)
-  (Let a1 x1 f1,Let a2 x2 f2) -> eqExpr n (f1 x1) (f2 x2)
+                                   Just (a2',f2') -> a1==a2' && eqExpr n' (f1 v) (f2' v)
+  (Let _ x1 f1,Let _ x2 f2) -> eqExpr n (f1 x1) (f2 x2)
   (Named e1 n1,Named e2 n2) -> eqExpr n e1 e2 && n1==n2
   (App f1 arg1,App f2 arg2) -> case cast f2 of
       Nothing -> False
       Just f2' -> case cast arg2 of
         Nothing -> False
         Just arg2' -> f1 == f2' && arg1 == arg2'
-  where
-    eqExpr' :: (Typeable a,Typeable b) => Integer -> SMTExpr a -> SMTExpr b -> Bool
-    eqExpr' n lhs rhs = case gcast rhs of
-      Nothing -> False
-      Just rhs' -> eqExpr n lhs rhs'
-
-    eqExprs' :: (Eq a,Typeable a,Typeable b) => Integer -> [SMTExpr a] -> [SMTExpr b] -> Bool
-    eqExprs' n xs ys = case cast ys of
-      Nothing -> False
-      Just ys' -> eqExprs n xs ys'
-
-    eqExprs :: (Eq a) => Integer -> [SMTExpr a] -> [SMTExpr a] -> Bool
-    eqExprs n (x:xs) (y:ys) = eqExpr n x y && eqExprs n xs ys
-    eqExprs _ [] [] = True
-    eqExprs _ _ _ = False
 
 -- | Represents a constructor of a datatype /a/
 --   Can be obtained by using the template haskell extension module
@@ -543,7 +527,7 @@ removeLets = removeLets' Map.empty
 argsSignature :: Args a => a -> ArgAnnotation a -> [L.Lisp]
 argsSignature arg ann 
   = reverse $ fst $ 
-    foldExprs (\sigs e ann -> ((getSort (getUndef e) ann):sigs,e))
+    foldExprs (\sigs e ann' -> ((getSort (getUndef e) ann'):sigs,e))
     [] arg ann
 
 functionGetSignature :: (SMTFunction f) 
@@ -679,8 +663,8 @@ reifyNat n f
   | otherwise = reifyNat' n f
   where
     reifyNat' :: (Num a,Eq a) => a -> (forall n. TypeableNat n => n -> r) -> r
-    reifyNat' 0 f = f (undefined::Z)
-    reifyNat' n f = reifyNat' (n-1) (f.g)
+    reifyNat' 0 f' = f' (undefined::Z)
+    reifyNat' n' f' = reifyNat' (n'-1) (f'.g)
 
     g :: n -> S n
     g _ = undefined
@@ -694,9 +678,9 @@ reifySum n1 n2 f
     reifySum' :: (Num a,Ord a) => a -> a 
                  -> (forall n1 n2. (TypeableNat n1,TypeableNat n2,TypeableNat (Add n1 n2)) 
                      => n1 -> n2 -> Add n1 n2 -> r) -> r
-    reifySum' 0 n2 f = reifyNat n2 $ \(_::i) -> f (undefined::Z) (undefined::i) (undefined::i)
-    reifySum' n1 n2 f = reifySum' (n1-1) n2 $ \(_::i1) (_::i2) (_::i3)
-                                               -> f (undefined::S i1) (undefined::i2) (undefined::S i3)
+    reifySum' 0 n2' f' = reifyNat n2' $ \(_::i) -> f' (undefined::Z) (undefined::i) (undefined::i)
+    reifySum' n1' n2' f' = reifySum' (n1'-1) n2' $ \(_::i1) (_::i2) (_::i3)
+                                                   -> f' (undefined::S i1) (undefined::i2) (undefined::S i3)
 
 reifyExtract :: (Num a,Ord a) => a -> a -> a
                 -> (forall n1 n2 n3 n4. (TypeableNat n1,TypeableNat n2,TypeableNat n3,TypeableNat n4,Add n4 n2 ~ S n3)
@@ -708,14 +692,14 @@ reifyExtract t l u f
     reifyExtract' :: (Num a,Ord a) => a -> a -> a -> a
                      -> (forall n1 n2 n3 n4. (TypeableNat n1,TypeableNat n2,TypeableNat n3,TypeableNat n4,Add n4 n2 ~ S n3)
                          => n1 -> n2 -> n3 -> n4 -> r) -> r
-    reifyExtract' t l u 0 f = reifyNat t $ 
-                              \(_::n1) 
-                              -> reifyNat u $
-                                 \(_::n3)
-                                  -> f (undefined::n1) (undefined::S n3) (undefined::n3) (undefined::Z)
-    reifyExtract' t l u r f = reifyExtract' t l (u-1) (r-1) $
-                              \(_::n1) (_::n2) (_::n3) (_::n4)
-                               -> f (undefined::n1) (undefined::n2) (undefined::S n3) (undefined::S n4)
+    reifyExtract' t' _ u' 0 f' = reifyNat t' $ 
+                                 \(_::n1) 
+                                 -> reifyNat u' $
+                                    \(_::n3)
+                                    -> f' (undefined::n1) (undefined::S n3) (undefined::n3) (undefined::Z)
+    reifyExtract' t' l' u' r' f' = reifyExtract' t' l' (u'-1) (r'-1) $
+                                   \(_::n1) (_::n2) (_::n3) (_::n4)
+                                   -> f' (undefined::n1) (undefined::n2) (undefined::S n3) (undefined::S n4)
 
 data BitVector (b :: *) = BitVector Integer deriving (Eq,Ord,Typeable)
 #endif
