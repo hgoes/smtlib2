@@ -651,27 +651,6 @@ instance (Typeable a,SMTValue a) => SMTValue [a] where
                              ,mangle x ann
                              ,mangle xs ann]
 
--- Bitvector implementations for ByteString
-
--- | Encodes the length of a `ByteString` to be used as a type annotation.
-newtype ByteStringLen = ByteStringLen Int deriving (Show,Eq,Ord,Num,Typeable)
-
-instance SMTType BS.ByteString where
-    type SMTAnnotation BS.ByteString = ByteStringLen
-    getSort _ (ByteStringLen l) = bv (l*8)
-    getSortBase _ = error "smtlib2: No getSortBase implementation for ByteString"
-    declareType = defaultDeclareValue
-
-instance SMTValue BS.ByteString where
-    unmangle v (ByteStringLen l) = fmap int2bs (getBVValue' (l*8) v)
-        where
-          int2bs :: Integer -> BS.ByteString
-          int2bs cv = BS.pack $ fmap (\i -> fromInteger $ cv `shiftR` i) (reverse [0..(l-1)])
-    mangle v (ByteStringLen l) = putBVValue' (l*8) (bs2int v)
-        where
-          bs2int :: BS.ByteString -> Integer
-          bs2int = BS.foldl (\cv w -> (cv `shiftL` 8) .|. (fromIntegral w)) 0
-
 -- BitVector implementation
 
 -- | A bitvector is a list of bits which can be used to represent binary numbers.
