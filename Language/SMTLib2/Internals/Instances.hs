@@ -37,7 +37,11 @@ extractAnnotation (App f arg) = inferResAnnotation f (extractArgAnnotation arg)
 withSort :: Sort -> (forall t. SMTType t => t -> SMTAnnotation t -> a) -> a
 withSort (Sort u ann) f = f u ann
 withSort (ArraySort i v) f = withArraySort i v f
+#ifdef SMTLIB2_WITH_DATAKINDS
 withSort (BVSort i) f = reifyNat i $ \(_::Proxy n) -> f (undefined::BitVector (BVTyped n)) ()
+#else
+withSort (BVSort i) f = reifyNat i $ \(_::n) -> f (undefined::BitVector (BVTyped n)) ()
+#endif
 
 withArraySort :: [Sort] -> Sort -> (forall i v. (Liftable i,SMTType v) => SMTArray i v -> (ArgAnnotation i,SMTAnnotation v) -> a) -> a
 withArraySort idx v f
@@ -685,13 +689,22 @@ instance SMTValue (BitVector BVUntyped) where
 
 instance TypeableNat n => SMTType (BitVector (BVTyped n)) where
   type SMTAnnotation (BitVector (BVTyped n)) = ()
+#ifdef SMTLIB2_WITH_DATAKINDS
   getSort _ _ = bv (reflectNat (Proxy::Proxy n) 0)
+#else
+  getSort _ _ = bv (reflectNat (undefined::n) 0)
+#endif
   getSortBase _ = error "smtlib2: No getSortBase implementation for BitVector"
   declareType = defaultDeclareValue
 
 instance TypeableNat n => SMTValue (BitVector (BVTyped n)) where
+#ifdef SMTLIB2_WITH_DATAKINDS
   unmangle v _ = fmap BitVector $ getBVValue' (reflectNat (Proxy::Proxy n) 0) v
   mangle (BitVector v) _ = putBVValue' (reflectNat (Proxy::Proxy n) 0) v
+#else
+  unmangle v _ = fmap BitVector $ getBVValue' (reflectNat (undefined::n) 0) v
+  mangle (BitVector v) _ = putBVValue' (reflectNat (undefined::n) 0) v
+#endif
 
 -- Functions
 
@@ -943,7 +956,7 @@ instance SMTFunction (SMTConcat BVUntyped BVUntyped) where
 
 instance (TypeableNat n1,TypeableNat n2
          ,TypeableNat (Add n1 n2)) => 
-         SMTFunction (SMTConcat (BVTyped (n1::Nat)) (BVTyped (n2::Nat))) where
+         SMTFunction (SMTConcat (BVTyped n1) (BVTyped n2)) where
   type SMTFunArg (SMTConcat (BVTyped n1) (BVTyped n2)) = (SMTExpr (BitVector (BVTyped n1)),SMTExpr (BitVector (BVTyped n2)))
   type SMTFunRes (SMTConcat (BVTyped n1) (BVTyped n2)) = BitVector (BVTyped (Add n1 n2))
   isOverloaded _ = True
@@ -956,12 +969,23 @@ instance (TypeableNat n1,TypeableNat n2)
   type SMTFunRes (SMTExtract BVUntyped n1 n2 BVUntyped) = BitVector BVUntyped
   isOverloaded _ = True
   getFunctionSymbol (_ :: SMTExtract BVUntyped n1 n2 BVUntyped) _
+#ifdef SMTLIB2_WITH_DATAKINDS
     = L.List [L.Symbol "_"
              ,L.Symbol "extract"
              ,L.toLisp $ reflectNat (Proxy::Proxy n1) 0
              ,L.toLisp $ reflectNat (Proxy::Proxy n2) 0]
+#else
+    = L.List [L.Symbol "_"
+             ,L.Symbol "extract"
+             ,L.toLisp $ reflectNat (undefined::n1) 0
+             ,L.toLisp $ reflectNat (undefined::n2) 0]
+#endif
   inferResAnnotation (_::SMTExtract BVUntyped n1 n2 BVUntyped) _
+#ifdef SMTLIB2_WITH_DATAKINDS
     = (reflectNat (Proxy::Proxy n2) 0) - (reflectNat (Proxy::Proxy n1) 0) + 1
+#else
+    = (reflectNat (undefined::n2) 0) - (reflectNat (undefined::n1) 0) + 1
+#endif
 
 -- bvextract t l u = r
 -- r = u - l + 1
@@ -974,10 +998,17 @@ instance (TypeableNat n1,TypeableNat n2,TypeableNat n3,TypeableNat n4
   type SMTFunRes (SMTExtract (BVTyped n1) n2 n3 (BVTyped n4)) = BitVector (BVTyped n4)
   isOverloaded _ = True
   getFunctionSymbol (_ :: SMTExtract (BVTyped n1) n2 n3 (BVTyped n4)) _
+#ifdef SMTLIB2_WITH_DATAKINDS
     = L.List [L.Symbol "_"
              ,L.Symbol "extract"
              ,L.toLisp $ reflectNat (Proxy::Proxy n2) 0
              ,L.toLisp $ reflectNat (Proxy::Proxy n3) 0]
+#else
+    = L.List [L.Symbol "_"
+             ,L.Symbol "extract"
+             ,L.toLisp $ reflectNat (undefined::n2) 0
+             ,L.toLisp $ reflectNat (undefined::n3) 0]
+#endif
   inferResAnnotation _ _ = ()
 
 instance SMTType a => SMTFunction (SMTConTest a) where

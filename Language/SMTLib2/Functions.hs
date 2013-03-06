@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable,CPP,ScopedTypeVariables #-}
+{-# LANGUAGE DeriveDataTypeable,CPP,ScopedTypeVariables,KindSignatures #-}
 module Language.SMTLib2.Functions where
 
 import Language.SMTLib2.Internals
@@ -164,7 +164,7 @@ instance (TypeableBVKind t1,TypeableNat n1,TypeableNat n2,TypeableBVKind t2)
              ,typeOfNat (Proxy::Proxy n2)
              ,typeOfBVKind (Proxy::Proxy t2)]
 #else
-data SMTExtract (t1 :: *) (t2 :: *) = BVExtract Integer Integer deriving (Typeable,Eq)
+data SMTExtract (t :: *) (n1 :: *) (n2 :: *) (r :: *) = BVExtract deriving (Typeable,Eq)
 #endif
 
 data SMTConTest (a :: *) = ConTest (Constructor a) deriving (Typeable,Eq)

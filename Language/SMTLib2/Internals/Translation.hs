@@ -520,7 +520,11 @@ bvCompParser sym _ _ = case sym of
     p :: L.Lisp -> (forall g. SMTBVComp g) -> Maybe FunctionParser'
     p sym op = Just $ OverloadedParser (const $ Just $ toSort (undefined::Bool) ()) $
                \sort_arg _ f -> case sort_arg of
+#ifdef SMTLIB2_WITH_DATAKINDS
                  (BVSort i:_) -> reifyNat i $ \(_::Proxy n) -> Just $ f (op::SMTBVComp (BVTyped n))
+#else
+                 (BVSort i:_) -> reifyNat i $ \(_::n) -> Just $ f (op::SMTBVComp (BVTyped n))
+#endif
 
 bvBinOpParser sym _ _ = case sym of
   L.Symbol "bvadd" -> p sym BVAdd
@@ -541,18 +545,30 @@ bvBinOpParser sym _ _ = case sym of
     p :: L.Lisp -> (forall g. SMTBVBinOp g) -> Maybe FunctionParser'
     p sym op = Just $ OverloadedParser (Just . head) $
                \_ sort_ret f -> case sort_ret of 
+#ifdef SMTLIB2_WITH_DATAKINDS
                  BVSort i -> reifyNat i (\(_::Proxy n) -> Just $ f (op::SMTBVBinOp (BVTyped n)))
+#else
+                 BVSort i -> reifyNat i (\(_::n) -> Just $ f (op::SMTBVBinOp (BVTyped n)))
+#endif
                  _ -> Nothing
 
 bvUnOpParser (L.Symbol "bvnot") _ _
   = Just $ OverloadedParser (Just . head) $
     \_ sort_ret f -> case sort_ret of
+#ifdef SMTLIB2_WITH_DATAKINDS
       BVSort i -> reifyNat i $ \(_::Proxy n) -> Just $ f (BVNot::SMTBVUnOp (BVTyped n))
+#else
+      BVSort i -> reifyNat i $ \(_::n) -> Just $ f (BVNot::SMTBVUnOp (BVTyped n))
+#endif
       _ -> Nothing
 bvUnOpParser (L.Symbol "bvneg") _ _
   = Just $ OverloadedParser (Just . head) $
     \_ sort_ret f -> case sort_ret of
+#ifdef SMTLIB2_WITH_DATAKINDS
       BVSort i -> reifyNat i $ \(_::Proxy n) -> Just $ f (BVNeg::SMTBVUnOp (BVTyped n))
+#else
+      BVSort i -> reifyNat i $ \(_::n) -> Just $ f (BVNeg::SMTBVUnOp (BVTyped n))
+#endif
       _ -> Nothing
 bvUnOpParser _ _ _ = Nothing
 
@@ -594,7 +610,11 @@ concatParser (L.Symbol "concat") _ _
     (\sort_arg sort_ret f -> case sort_arg of
         [BVSort i1,BVSort i2]
           -> reifySum i1 i2 $
+#ifdef SMTLIB2_WITH_DATAKINDS
              \(_::Proxy n1) (_::Proxy n2) _ 
+#else
+             \(_::n1) (_::n2) _
+#endif
              -> Just $ f (BVConcat::SMTConcat (BVTyped n1) (BVTyped n2))
         _ -> Nothing)
 concatParser _ _ _ = Nothing
@@ -613,7 +633,11 @@ extractParser (L.List [L.Symbol "_"
         [BVSort t] -> case sort_ret of
           BVSort r -> if r+l == u+1
                       then reifyExtract t l u $
+#ifdef SMTLIB2_WITH_DATAKINDS
                            \(_::Proxy n1) (_::Proxy n2) (_::Proxy n3) (_::Proxy n4)
+#else
+                           \(_::n1) (_::n2) (_::n3) (_::n4)
+#endif
                             -> Just $ f (BVExtract::SMTExtract (BVTyped n1) n2 n3 (BVTyped n4))
                       else error "smtlib2: Invalid parameters for extract."
           _ -> error "smtlib2: Wrong return type for extract."

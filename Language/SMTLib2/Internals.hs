@@ -565,77 +565,6 @@ getSortParser = do
 #ifdef SMTLIB2_WITH_DATAKINDS
 data Nat = Z | S Nat deriving Typeable
 
-type N0 = Z
-type N1 = S N0
-type N2 = S N1
-type N3 = S N2
-type N4 = S N3
-type N5 = S N4
-type N6 = S N5
-type N7 = S N6
-type N8 = S N7
-type N9 = S N8
-type N10 = S N9
-type N11 = S N10
-type N12 = S N11
-type N13 = S N12
-type N14 = S N13
-type N15 = S N14
-type N16 = S N15
-type N17 = S N16
-type N18 = S N17
-type N19 = S N18
-type N20 = S N19
-type N21 = S N20
-type N22 = S N21
-type N23 = S N22
-type N24 = S N23
-type N25 = S N24
-type N26 = S N25
-type N27 = S N26
-type N28 = S N27
-type N29 = S N28
-type N30 = S N29
-type N31 = S N30
-type N32 = S N31
-type N33 = S N32
-type N34 = S N33
-type N35 = S N34
-type N36 = S N35
-type N37 = S N36
-type N38 = S N37
-type N39 = S N38
-type N40 = S N39
-type N41 = S N40
-type N42 = S N41
-type N43 = S N42
-type N44 = S N43
-type N45 = S N44
-type N46 = S N45
-type N47 = S N46
-type N48 = S N47
-type N49 = S N48
-type N50 = S N49
-type N51 = S N50
-type N52 = S N51
-type N53 = S N52
-type N54 = S N53
-type N55 = S N54
-type N56 = S N55
-type N57 = S N56
-type N58 = S N57
-type N59 = S N58
-type N60 = S N59
-type N61 = S N60
-type N62 = S N61
-type N63 = S N62
-type N64 = S N63
-
-type BV8 = BitVector (BVTyped N8)
-type BV16 = BitVector (BVTyped N16)
-type BV32 = BitVector (BVTyped N32)
-type BV64 = BitVector (BVTyped N64)
-
 data BVKind = BVUntyped
             | BVTyped Nat
 
@@ -725,22 +654,139 @@ instance TypeableBVKind k => Typeable (BitVector k) where
              (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals" "BitVector")
              [typeOfBVKind (Proxy::Proxy k)]
 #else
-data Z = Z
-data S a = S
+data Z = Z deriving (Typeable)
+data S a = S deriving (Typeable)
 
+class Typeable a => TypeableNat a where
+  reflectNat :: a -> Integer -> Integer
+
+instance TypeableNat Z where
+  reflectNat _ = id
+
+instance TypeableNat n => TypeableNat (S n) where
+  reflectNat _ x = reflectNat (undefined::n) (x+1)
+
+type family Add n1 n2
+type instance Add Z n = n
+type instance Add (S n1) n2 = S (Add n1 n2)
+
+data BVUntyped = BVUntyped deriving (Eq,Ord,Show,Typeable)
 data BVTyped n = BVTyped deriving (Eq,Ord,Show,Typeable)
 
-reifyNat :: (Num a,Ord a) => a -> (forall n. BVTyped n -> r) -> r
+reifyNat :: (Num a,Ord a) => a -> (forall n. TypeableNat n => n -> r) -> r
 reifyNat n f
   | n < 0 = error "smtlib2: Can only reify numbers >= 0."
   | otherwise = reifyNat' n f
   where
-    reifyNat' :: (Num a,Eq a) => a -> (forall n. BVTyped n -> r) -> r
-    reifyNat' 0 f = f (BVTyped::BVTyped Z)
+    reifyNat' :: (Num a,Eq a) => a -> (forall n. TypeableNat n => n -> r) -> r
+    reifyNat' 0 f = f (undefined::Z)
     reifyNat' n f = reifyNat' (n-1) (f.g)
 
-    g :: BVTyped n -> BVTyped (S n)
-    g _ = BVTyped
+    g :: n -> S n
+    g _ = undefined
+
+reifySum :: (Num a,Ord a) => a -> a -> (forall n1 n2. (TypeableNat n1,TypeableNat n2,TypeableNat (Add n1 n2)) 
+                                        => n1 -> n2 -> Add n1 n2 -> r) -> r
+reifySum n1 n2 f
+  | n1 < 0 || n2 < 0 = error "smtlib2: Cann only reify numbers >= 0."
+  | otherwise = reifySum' n1 n2 f
+  where
+    reifySum' :: (Num a,Ord a) => a -> a 
+                 -> (forall n1 n2. (TypeableNat n1,TypeableNat n2,TypeableNat (Add n1 n2)) 
+                     => n1 -> n2 -> Add n1 n2 -> r) -> r
+    reifySum' 0 n2 f = reifyNat n2 $ \(_::i) -> f (undefined::Z) (undefined::i) (undefined::i)
+    reifySum' n1 n2 f = reifySum' (n1-1) n2 $ \(_::i1) (_::i2) (_::i3)
+                                               -> f (undefined::S i1) (undefined::i2) (undefined::S i3)
+
+reifyExtract :: (Num a,Ord a) => a -> a -> a
+                -> (forall n1 n2 n3 n4. (TypeableNat n1,TypeableNat n2,TypeableNat n3,TypeableNat n4,Add n4 n2 ~ S n3)
+                    => n1 -> n2 -> n3 -> n4 -> r) -> r
+reifyExtract t l u f
+  | t <= u || l > u || l < 0 = error "smtlib2: Invalid extract parameters."
+  | otherwise = reifyExtract' t l u (u - l + 1) f
+  where
+    reifyExtract' :: (Num a,Ord a) => a -> a -> a -> a
+                     -> (forall n1 n2 n3 n4. (TypeableNat n1,TypeableNat n2,TypeableNat n3,TypeableNat n4,Add n4 n2 ~ S n3)
+                         => n1 -> n2 -> n3 -> n4 -> r) -> r
+    reifyExtract' t l u 0 f = reifyNat t $ 
+                              \(_::n1) 
+                              -> reifyNat u $
+                                 \(_::n3)
+                                  -> f (undefined::n1) (undefined::S n3) (undefined::n3) (undefined::Z)
+    reifyExtract' t l u r f = reifyExtract' t l (u-1) (r-1) $
+                              \(_::n1) (_::n2) (_::n3) (_::n4)
+                               -> f (undefined::n1) (undefined::n2) (undefined::S n3) (undefined::S n4)
 
 data BitVector (b :: *) = BitVector Integer deriving (Eq,Ord,Show,Typeable)
 #endif
+
+type N0 = Z
+type N1 = S N0
+type N2 = S N1
+type N3 = S N2
+type N4 = S N3
+type N5 = S N4
+type N6 = S N5
+type N7 = S N6
+type N8 = S N7
+type N9 = S N8
+type N10 = S N9
+type N11 = S N10
+type N12 = S N11
+type N13 = S N12
+type N14 = S N13
+type N15 = S N14
+type N16 = S N15
+type N17 = S N16
+type N18 = S N17
+type N19 = S N18
+type N20 = S N19
+type N21 = S N20
+type N22 = S N21
+type N23 = S N22
+type N24 = S N23
+type N25 = S N24
+type N26 = S N25
+type N27 = S N26
+type N28 = S N27
+type N29 = S N28
+type N30 = S N29
+type N31 = S N30
+type N32 = S N31
+type N33 = S N32
+type N34 = S N33
+type N35 = S N34
+type N36 = S N35
+type N37 = S N36
+type N38 = S N37
+type N39 = S N38
+type N40 = S N39
+type N41 = S N40
+type N42 = S N41
+type N43 = S N42
+type N44 = S N43
+type N45 = S N44
+type N46 = S N45
+type N47 = S N46
+type N48 = S N47
+type N49 = S N48
+type N50 = S N49
+type N51 = S N50
+type N52 = S N51
+type N53 = S N52
+type N54 = S N53
+type N55 = S N54
+type N56 = S N55
+type N57 = S N56
+type N58 = S N57
+type N59 = S N58
+type N60 = S N59
+type N61 = S N60
+type N62 = S N61
+type N63 = S N62
+type N64 = S N63
+
+type BV8 = BitVector (BVTyped N8)
+type BV16 = BitVector (BVTyped N16)
+type BV32 = BitVector (BVTyped N32)
+type BV64 = BitVector (BVTyped N64)
