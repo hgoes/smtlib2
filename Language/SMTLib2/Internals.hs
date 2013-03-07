@@ -21,6 +21,7 @@ import Data.Constraint
 #ifdef SMTLIB2_WITH_DATAKINDS
 import Data.Tagged
 import Data.Proxy
+import Data.List as List (genericReplicate)
 #endif
     
 -- Monad stuff

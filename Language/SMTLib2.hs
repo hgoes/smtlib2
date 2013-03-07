@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances,MultiParamTypeClasses,FunctionalDependencies #-}
+{-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances,MultiParamTypeClasses,CPP #-}
 {- | Example usage: This program tries to find two numbers greater than zero which sum up to 5.
 
      @
@@ -68,7 +68,13 @@ module Language.SMTLib2
          bvule,bvult,bvuge,bvugt,
          bvsle,bvslt,bvsge,bvsgt,
          bvshl,bvlshr,bvashr,
-         BitVector(..),BVTyped,BVUntyped,BV8,BV16,BV32,BV64,
+         BitVector(..),
+#ifdef SMTLIB2_WITH_DATAKINDS
+         BVKind(..),
+#else
+         BVTyped,BVUntyped,
+#endif
+         BV8,BV16,BV32,BV64,
          N0,N1,N2,N3,N4,N5,N6,N7,N8,N9,N10,N11,N12,N13,N14,N15,N16,N17,N18,N19,N20,N21,N22,N23,N24,N25,N26,N27,N28,N29,N30,N31,N32,N33,N34,N35,N36,N37,N38,N39,N40,N41,N42,N43,N44,N45,N46,N47,N48,N49,N50,N51,N52,N53,N54,N55,N56,N57,N58,N59,N60,N61,N62,N63,N64,
          bvconcat,--bvextract,bvextractUnsafe,
          bvsplitu16to8,
