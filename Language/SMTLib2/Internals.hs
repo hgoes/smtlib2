@@ -697,8 +697,8 @@ reifyExtract t l u f
                      -> (forall n1 n2 n3 n4. (TypeableNat n1,TypeableNat n2,TypeableNat n3,TypeableNat n4,Add n4 n2 ~ S n3)
                          => n1 -> n2 -> n3 -> n4 -> r) -> r
     reifyExtract' t' 0 0  1 f'
-      = reifyNat t $
-        \(_::Proxy n1) -> f (undefined::n1) (undefined::Z) (undefined::Z) (undefined::S Z)
+      = reifyNat t' $
+        \(_::n1) -> f' (undefined::n1) (undefined::Z) (undefined::Z) (undefined::S Z)
     reifyExtract' t' _ u' 0 f' = reifyNat t' $ 
                                  \(_::n1) 
                                  -> reifyNat u' $
