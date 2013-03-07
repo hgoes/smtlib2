@@ -962,13 +962,13 @@ instance (TypeableNat n1,TypeableNat n2)
 #ifdef SMTLIB2_WITH_DATAKINDS
     = L.List [L.Symbol "_"
              ,L.Symbol "extract"
-             ,L.toLisp $ reflectNat (Proxy::Proxy n1) 0
-             ,L.toLisp $ reflectNat (Proxy::Proxy n2) 0]
+             ,L.toLisp $ reflectNat (Proxy::Proxy n2) 0
+             ,L.toLisp $ reflectNat (Proxy::Proxy n1) 0]
 #else
     = L.List [L.Symbol "_"
              ,L.Symbol "extract"
-             ,L.toLisp $ reflectNat (undefined::n1) 0
-             ,L.toLisp $ reflectNat (undefined::n2) 0]
+             ,L.toLisp $ reflectNat (undefined::n2) 0
+             ,L.toLisp $ reflectNat (undefined::n1) 0]
 #endif
   inferResAnnotation (_::SMTExtract BVUntyped n1 n2 BVUntyped) _
 #ifdef SMTLIB2_WITH_DATAKINDS
@@ -991,13 +991,13 @@ instance (TypeableNat n1,TypeableNat n2,TypeableNat n3,TypeableNat n4
 #ifdef SMTLIB2_WITH_DATAKINDS
     = L.List [L.Symbol "_"
              ,L.Symbol "extract"
-             ,L.toLisp $ reflectNat (Proxy::Proxy n2) 0
-             ,L.toLisp $ reflectNat (Proxy::Proxy n3) 0]
+             ,L.toLisp $ reflectNat (Proxy::Proxy n3) 0
+             ,L.toLisp $ reflectNat (Proxy::Proxy n2) 0]
 #else
     = L.List [L.Symbol "_"
              ,L.Symbol "extract"
-             ,L.toLisp $ reflectNat (undefined::n2) 0
-             ,L.toLisp $ reflectNat (undefined::n3) 0]
+             ,L.toLisp $ reflectNat (undefined::n3) 0
+             ,L.toLisp $ reflectNat (undefined::n2) 0]
 #endif
   inferResAnnotation _ _ = ()
 

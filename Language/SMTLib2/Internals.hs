@@ -611,11 +611,15 @@ reifyExtract t l u f
     reifyExtract' :: (Num a,Ord a) => a -> a -> a -> a
                      -> (forall n1 n2 n3 n4. (TypeableNat n1,TypeableNat n2,TypeableNat n3,TypeableNat n4,Add n4 n2 ~ S n3)
                          => Proxy (n1::Nat) -> Proxy (n2::Nat) -> Proxy (n3::Nat) -> Proxy (n4::Nat) -> r) -> r
-    reifyExtract' t l u 0 f = reifyNat t $ 
-                              \(_::Proxy n1) 
-                              -> reifyNat u $
-                                 \(_::Proxy n3)
-                                  -> f (Proxy::Proxy n1) (Proxy::Proxy (S n3)) (Proxy::Proxy n3) (Proxy::Proxy Z)
+    reifyExtract' t 0 0 1 f
+      = reifyNat t $
+        \(_::Proxy n1) -> f (Proxy::Proxy n1) (Proxy::Proxy Z) (Proxy::Proxy Z) (Proxy::Proxy (S Z))
+    reifyExtract' t l u 0 f
+      = reifyNat t $ 
+        \(_::Proxy n1) 
+        -> reifyNat u $
+           \(_::Proxy n3)
+           -> f (Proxy::Proxy n1) (Proxy::Proxy (S n3)) (Proxy::Proxy n3) (Proxy::Proxy Z)
     reifyExtract' t l u r f = reifyExtract' t l (u-1) (r-1) $
                               \(_::Proxy n1) (_::Proxy n2) (_::Proxy n3) (_::Proxy n4)
                                -> f (Proxy::Proxy n1) (Proxy::Proxy n2) (Proxy::Proxy (S n3)) (Proxy::Proxy (S n4))
@@ -691,6 +695,9 @@ reifyExtract t l u f
     reifyExtract' :: (Num a,Ord a) => a -> a -> a -> a
                      -> (forall n1 n2 n3 n4. (TypeableNat n1,TypeableNat n2,TypeableNat n3,TypeableNat n4,Add n4 n2 ~ S n3)
                          => n1 -> n2 -> n3 -> n4 -> r) -> r
+    reifyExtract' t' 0 0  1 f'
+      = reifyNat t $
+        \(_::Proxy n1) -> f (undefined::n1) (undefined::Z) (undefined::Z) (undefined::S Z)
     reifyExtract' t' _ u' 0 f' = reifyNat t' $ 
                                  \(_::n1) 
                                  -> reifyNat u' $

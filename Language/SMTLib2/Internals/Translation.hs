@@ -616,11 +616,11 @@ concatParser _ _ _ = Nothing
 
 extractParser (L.List [L.Symbol "_"
                       ,L.Symbol "extract"
-                      ,L.Number (L.I l)
-                      ,L.Number (L.I u)]) _ _
+                      ,L.Number (L.I u)
+                      ,L.Number (L.I l)]) _ _
   = Just $ OverloadedParser
     (\args' -> case args' of
-        [BVSort t] -> if u < t && l > 0 && l <= u
+        [BVSort t] -> if u < t && l >= 0 && l <= u
                       then Just $ BVSort (u-l+1)
                       else error "smtlib2: Invalid parameters for extract."
         _ -> error "smtlib2: Invalid parameters for extract.")
