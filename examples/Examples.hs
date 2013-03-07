@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings,TemplateHaskell,TypeFamilies,DeriveDataTypeable #-}
+{-# LANGUAGE OverloadedStrings,TemplateHaskell,TypeFamilies,DeriveDataTypeable,ScopedTypeVariables #-}
 module Examples where
 
 import Control.Monad
@@ -318,3 +318,19 @@ unsatCoreTest = do
   
   checkSat
   getUnsatCore
+
+interpolationTest :: SMT (SMTExpr Bool)
+interpolationTest = do
+  setOption (ProduceInterpolants True)
+  (x,y1,y2,z::SMTExpr Integer) <- argVars
+  g1 <- interpolationGroup
+  g2 <- interpolationGroup
+  g3 <- interpolationGroup
+  a1 <- defConst $ x .==. y1
+  a2 <- defConst $ y1 .==. z
+  b <- defConst $ (x .==. y2) .&&. (not' $ y2 .==. z)
+  assertInterp a1 g1
+  assertInterp a2 g2
+  assertInterp b g3
+  checkSat
+  getInterpolant [g1,g2]

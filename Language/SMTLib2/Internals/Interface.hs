@@ -106,6 +106,35 @@ assert :: SMTExpr Bool -> SMT ()
 assert expr = putRequest $ L.List [L.Symbol "assert"
                                   ,L.toLisp expr]
 
+-- | Create a new interpolation group
+interpolationGroup :: SMT InterpolationGroup
+interpolationGroup = do
+  rname <- freeName "interp"
+  return (InterpolationGroup rname)
+
+-- | Assert a boolean expression to be true and assign it to an interpolation group
+assertInterp :: SMTExpr Bool -> InterpolationGroup -> SMT ()
+assertInterp expr (InterpolationGroup g)
+  = putRequest $ L.List [L.Symbol "assert"
+                        ,L.List [L.Symbol "!"
+                                ,L.toLisp expr
+                                ,L.Symbol ":interpolation-group"
+                                ,L.Symbol g]]
+
+getInterpolant :: [InterpolationGroup] -> SMT (SMTExpr Bool)
+getInterpolant grps = do
+  putRequest $ L.List [L.Symbol "get-interpolant"
+                      ,L.List [ L.Symbol g | InterpolationGroup g <- grps ]
+                      ]
+  val <- parseResponse
+  (_,tps,mp) <- getSMT
+  sort_parser <- getSortParser
+  case lispToExpr commonFunctions sort_parser
+       (\n -> Map.lookup n mp) tps gcast (Just $ toSort (undefined::Bool) ()) val of
+    Just (Just x) -> return x
+    _ -> error $ "smtlib2: Failed to parse get-interpolant result: "++show val
+
+
 -- | Set an option for the underlying SMT solver
 setOption :: SMTOption -> SMT ()
 setOption opt = putRequest $ L.List $ [L.Symbol "set-option"]
@@ -118,13 +147,9 @@ setOption opt = putRequest $ L.List $ [L.Symbol "set-option"]
                                          ,L.Symbol $ if v then "true" else "false"]
                       ProduceUnsatCores v -> [L.Symbol ":produce-unsat-cores"
                                              ,L.Symbol $ if v then "true" else "false"]
+                      ProduceInterpolants v -> [L.Symbol ":produce-interpolants"
+                                               ,L.Symbol $ if v then "true" else "false"]
                   )
-
--- | Create a new interpolation group
-interpolationGroup :: SMT InterpolationGroup
-interpolationGroup = do
-  rname <- freeName "interp"
-  return (InterpolationGroup rname)
 
 -- | Create a new uniterpreted function with annotations for
 --   the argument and the return type.
@@ -557,22 +582,6 @@ named name expr = do
 -- | Like `named`, but defaults the name to "named".
 named' :: (SMTType a,SMTAnnotation a ~ ()) => SMTExpr a -> SMT (SMTExpr a,SMTExpr a)
 named' = named "named"
-
--- | Perform craig interpolation (<http://en.wikipedia.org/wiki/Craig_interpolation>) on the given terms and returns interpolants for them.
---   Note that not all SMT solvers support this.
-getInterpolants :: [SMTExpr Bool] -> SMT [SMTExpr Bool]
-getInterpolants exprs = do
-  (_,tps,mp) <- getSMT
-  sort_parser <- getSortParser
-  putRequest (L.List (L.Symbol "get-interpolants":fmap (\e -> let (r,_) = exprToLisp e 0 in r) exprs))
-  L.List res <- parseResponse
-  return $ fmap (\expr 
-                 -> case lispToExpr commonFunctions sort_parser 
-                         (\n -> Map.lookup n mp) tps gcast 
-                         (Just $ toSort (undefined::Bool) ()) expr of
-                      Just (Just x) -> x
-                      _ -> error $ "smtlib2: Couldn't parse interpolant "++show expr
-                ) res
   
 -- | After an unsuccessful 'checkSat' this method extracts a proof from the SMT solver that the instance is unsatisfiable.
 getProof :: SMT (SMTExpr Bool)

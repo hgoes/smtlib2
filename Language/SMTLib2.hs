@@ -43,7 +43,11 @@ module Language.SMTLib2
          checkSat,
          getValue,getValue',
          comment,
-         getInterpolants,getProof,getUnsatCore,simplify,
+         getProof,getUnsatCore,simplify,
+         -- ** Interpolation
+         interpolationGroup,
+         assertInterp,
+         getInterpolant,
          -- * Expressions
          var,varNamed,varNamedAnn,varAnn,argVars,argVarsAnn,argVarsAnnNamed,
          constant,constantAnn,

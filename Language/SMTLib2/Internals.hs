@@ -238,6 +238,7 @@ data SMTOption
      | ProduceModels Bool -- ^ Produce a satisfying assignment after each successful checkSat
      | ProduceProofs Bool -- ^ Produce a proof of unsatisfiability after each failed checkSat
      | ProduceUnsatCores Bool -- ^ Enable the querying of unsatisfiable cores after a failed checkSat
+     | ProduceInterpolants Bool -- ^ Enable the generation of craig interpolants
      deriving (Show,Eq,Ord)
 
 -- | A piece of information of type /r/ that can be obtained by the SMT solver
