@@ -289,10 +289,10 @@ parseLetStruct :: FunctionParser -> SortParser
 parseLetStruct fun sort bound tps expected (L.List [L.Symbol name,expr]:rest) arg
   = case lispToExpr fun sort bound tps
          (\expr' -> LetStruct (extractAnnotation expr') expr' $
-                    \_ -> parseLetStruct fun sort
-                          (\txt -> if txt==name
-                                   then Just $ UntypedExpr expr'
-                                   else bound txt) tps expected rest arg
+                    \sym -> parseLetStruct fun sort
+                            (\txt -> if txt==name
+                                     then Just $ UntypedExpr sym
+                                     else bound txt) tps expected rest arg
          ) Nothing expr of
       Nothing -> error $ "smtlib2: Failed to parse argument in let-expression "++show expr
       Just x -> x
