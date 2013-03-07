@@ -627,13 +627,21 @@ extractParser (L.List [L.Symbol "_"
     (\sort_arg sort_ret f -> case sort_arg of
         [BVSort t] -> case sort_ret of
           BVSort r -> if r+l == u+1
-                      then reifyExtract t l u $
+                      then reifyNat l $
 #ifdef SMTLIB2_WITH_DATAKINDS
-                           \(_::Proxy n1) (_::Proxy n2) (_::Proxy n3) (_::Proxy n4)
+                           \(_::Proxy start)
+                            -> reifyNat (u-l+1) $
+                               \(_::Proxy len)
+                                -> reifyNat t $
+                                   \(_::Proxy tp)
 #else
-                           \(_::n1) (_::n2) (_::n3) (_::n4)
+                           \(_::start)
+                            -> reifyNat (u-l+1) $
+                               \(_::len)
+                                -> reifyNat t $
+                                   \(_::tp)
 #endif
-                            -> Just $ f (BVExtract::SMTExtract (BVTyped n1) n2 n3 (BVTyped n4))
+                                    -> Just $ f (BVExtract::SMTExtract (BVTyped tp) start len)
                       else error "smtlib2: Invalid parameters for extract."
           _ -> error "smtlib2: Wrong return type for extract."
         _ -> error "smtlib2: Wrong argument type for extract.")

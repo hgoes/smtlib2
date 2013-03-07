@@ -444,58 +444,74 @@ bvconcat :: (SMTFunction (SMTConcat t1 t2)
             ) => SMTExpr (BitVector t1) -> SMTExpr (BitVector t2) -> SMTExpr (BitVector t3)
 bvconcat (e1::SMTExpr (BitVector t1)) (e2::SMTExpr (BitVector t2)) = App (BVConcat::SMTConcat t1 t2) (e1,e2)
 
-{-
 -- | Extract a sub-vector out of a given bitvector.
-bvextract :: (SMTFunction (SMTExtract t1 n1 n2 t2)
-             ,SMTFunArg (SMTExtract t1 n1 n2 t2) ~ SMTExpr (BitVector t1)
-             ,SMTFunRes (SMTExtract t1 n1 n2 t2) ~ BitVector t2
+#ifdef SMTLIB2_WITH_DATAKINDS
+bvextract :: (SMTFunction (SMTExtract tp start len)
+             ,SMTFunArg (SMTExtract tp start len) ~ SMTExpr (BitVector tp)
+             ,SMTFunRes (SMTExtract tp start len) ~ BitVector r
              )
-             => Proxy n1 -- ^ The upper bound of the extracted region
-             -> Proxy n2 -- ^ The lower bound of the extracted region
-             -> SMTExpr (BitVector t1) -- ^ The bitvector to extract from
-             -> SMTExpr (SMTFunRes (SMTExtract t1 n1 n2 t2))
-bvextract (_::Proxy n1) (_::Proxy n2) (e::SMTExpr (BitVector t1))
-  = App (BVExtract::SMTExtract t1 n1 n2 t2) e -}
+             => Proxy start -- ^ The start of the extracted region
+             -> Proxy len -- ^ The length of the extracted region
+             -> SMTExpr (BitVector tp) -- ^ The bitvector to extract from
+             -> SMTExpr (BitVector r)
+bvextract (_::Proxy start) (_::Proxy len) (e::SMTExpr (BitVector tp))
+  = App (BVExtract::SMTExtract tp start len) e
+#else
+bvextract :: (SMTFunction (SMTExtract tp start len)
+             ,SMTFunArg (SMTExtract tp start len) ~ SMTExpr (BitVector tp)
+             ,SMTFunRes (SMTExtract tp start len) ~ BitVector r
+             )
+             => start -- ^ The start of the extracted region
+             -> len -- ^ The length of the extracted region
+             -> SMTExpr (BitVector tp) -- ^ The bitvector to extract from
+             -> SMTExpr (BitVector r)
+bvextract (_::start) (_::len) (e::SMTExpr (BitVector tp))
+  = App (BVExtract::SMTExtract tp start len) e
+#endif
+
+bvextract' :: Integer -> Integer -> SMTExpr (BitVector BVUntyped) -> SMTExpr (BitVector BVUntyped)
+bvextract' start len = reifyNat start $
+                       \start' -> reifyNat len $ \len' -> bvextract start' len'
 
 -- | Safely split a 16-bit bitvector into two 8-bit bitvectors.
 bvsplitu16to8 :: SMTExpr BV16 -> (SMTExpr BV8,SMTExpr BV8)
-bvsplitu16to8 e = (App (BVExtract::SMTExtract (BVTyped N16) N8 N15 (BVTyped N8)) e,
-                   App (BVExtract::SMTExtract (BVTyped N16) N0 N7 (BVTyped N8)) e)
+bvsplitu16to8 e = (App (BVExtract::SMTExtract (BVTyped N16) N8 N8) e,
+                   App (BVExtract::SMTExtract (BVTyped N16) N0 N8) e)
 
 -- | Safely split a 32-bit bitvector into two 16-bit bitvectors.
 bvsplitu32to16 :: SMTExpr BV32 -> (SMTExpr BV16,SMTExpr BV16)
-bvsplitu32to16 e = (App (BVExtract::SMTExtract (BVTyped N32) N16 N31 (BVTyped N16)) e,
-                    App (BVExtract::SMTExtract (BVTyped N32) N0 N15 (BVTyped N16)) e)
+bvsplitu32to16 e = (App (BVExtract::SMTExtract (BVTyped N32) N16 N16) e,
+                    App (BVExtract::SMTExtract (BVTyped N32) N0  N16) e)
 
 -- | Safely split a 32-bit bitvector into four 8-bit bitvectors.
 bvsplitu32to8 :: SMTExpr BV32 -> (SMTExpr BV8,SMTExpr BV8,SMTExpr BV8,SMTExpr BV8)
-bvsplitu32to8 e = (App (BVExtract::SMTExtract (BVTyped N32) N24 N31 (BVTyped N8)) e,
-                   App (BVExtract::SMTExtract (BVTyped N32) N16 N23 (BVTyped N8)) e,
-                   App (BVExtract::SMTExtract (BVTyped N32) N8  N15 (BVTyped N8)) e,
-                   App (BVExtract::SMTExtract (BVTyped N32) N0  N7 (BVTyped N8)) e)
+bvsplitu32to8 e = (App (BVExtract::SMTExtract (BVTyped N32) N24 N8) e,
+                   App (BVExtract::SMTExtract (BVTyped N32) N16 N8) e,
+                   App (BVExtract::SMTExtract (BVTyped N32) N8  N8) e,
+                   App (BVExtract::SMTExtract (BVTyped N32) N0  N8) e)
 
 -- | Safely split a 64-bit bitvector into two 32-bit bitvectors.
 bvsplitu64to32 :: SMTExpr BV64 -> (SMTExpr BV32,SMTExpr BV32)
-bvsplitu64to32 e = (App (BVExtract::SMTExtract (BVTyped N64) N32 N63 (BVTyped N32)) e,
-                    App (BVExtract::SMTExtract (BVTyped N64) N0  N31 (BVTyped N32)) e)
+bvsplitu64to32 e = (App (BVExtract::SMTExtract (BVTyped N64) N32 N32) e,
+                    App (BVExtract::SMTExtract (BVTyped N64) N0  N32) e)
 
 -- | Safely split a 64-bit bitvector into four 16-bit bitvectors.
 bvsplitu64to16 :: SMTExpr BV64 -> (SMTExpr BV16,SMTExpr BV16,SMTExpr BV16,SMTExpr BV16)
-bvsplitu64to16 e = (App (BVExtract::SMTExtract (BVTyped N64) N48 N63 (BVTyped N16)) e,
-                    App (BVExtract::SMTExtract (BVTyped N64) N32 N47 (BVTyped N16)) e,
-                    App (BVExtract::SMTExtract (BVTyped N64) N16 N31 (BVTyped N16)) e,
-                    App (BVExtract::SMTExtract (BVTyped N64) N0  N15 (BVTyped N16)) e)
+bvsplitu64to16 e = (App (BVExtract::SMTExtract (BVTyped N64) N48 N16) e,
+                    App (BVExtract::SMTExtract (BVTyped N64) N32 N16) e,
+                    App (BVExtract::SMTExtract (BVTyped N64) N16 N16) e,
+                    App (BVExtract::SMTExtract (BVTyped N64) N0  N16) e)
 
 -- | Safely split a 64-bit bitvector into eight 8-bit bitvectors.
 bvsplitu64to8 :: SMTExpr BV64 -> (SMTExpr BV8,SMTExpr BV8,SMTExpr BV8,SMTExpr BV8,SMTExpr BV8,SMTExpr BV8,SMTExpr BV8,SMTExpr BV8)
-bvsplitu64to8 e = (App (BVExtract::SMTExtract (BVTyped N64) N56 N63 (BVTyped N8)) e,
-                   App (BVExtract::SMTExtract (BVTyped N64) N48 N55 (BVTyped N8)) e,
-                   App (BVExtract::SMTExtract (BVTyped N64) N40 N47 (BVTyped N8)) e,
-                   App (BVExtract::SMTExtract (BVTyped N64) N32 N39 (BVTyped N8)) e,
-                   App (BVExtract::SMTExtract (BVTyped N64) N24 N31 (BVTyped N8)) e,
-                   App (BVExtract::SMTExtract (BVTyped N64) N16 N23 (BVTyped N8)) e,
-                   App (BVExtract::SMTExtract (BVTyped N64) N8  N15 (BVTyped N8)) e,
-                   App (BVExtract::SMTExtract (BVTyped N64) N0  N7  (BVTyped N8)) e)
+bvsplitu64to8 e = (App (BVExtract::SMTExtract (BVTyped N64) N56 N8) e,
+                   App (BVExtract::SMTExtract (BVTyped N64) N48 N8) e,
+                   App (BVExtract::SMTExtract (BVTyped N64) N40 N8) e,
+                   App (BVExtract::SMTExtract (BVTyped N64) N32 N8) e,
+                   App (BVExtract::SMTExtract (BVTyped N64) N24 N8) e,
+                   App (BVExtract::SMTExtract (BVTyped N64) N16 N8) e,
+                   App (BVExtract::SMTExtract (BVTyped N64) N8  N8) e,
+                   App (BVExtract::SMTExtract (BVTyped N64) N0  N8) e)
 
 -- | If the supplied function returns true for all possible values, the forall quantification returns true.
 forAll :: (Args a,Unit (ArgAnnotation a)) => (a -> SMTExpr Bool) -> SMTExpr Bool

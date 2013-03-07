@@ -153,18 +153,17 @@ data SMTConcat (t1 :: *) (t2 :: *) = BVConcat deriving (Typeable,Eq)
 #endif
 
 #ifdef SMTLIB2_WITH_DATAKINDS
-data SMTExtract (t :: BVKind) (n1 :: Nat) (n2 :: Nat) (r :: BVKind) = BVExtract deriving Eq
+data SMTExtract (tp :: BVKind) (start :: Nat) (len :: Nat) = BVExtract deriving Eq
 
-instance (TypeableBVKind t1,TypeableNat n1,TypeableNat n2,TypeableBVKind t2)
-         => Typeable (SMTExtract t1 n1 n2 t2) where
+instance (TypeableBVKind tp,TypeableNat start,TypeableNat len)
+         => Typeable (SMTExtract tp start len) where
   typeOf _ = mkTyConApp
              (mkTyCon3 "smtlib2" "Language.SMTLib2.Functions" "SMTExtract")
-             [typeOfBVKind (Proxy::Proxy t1)
-             ,typeOfNat (Proxy::Proxy n1)
-             ,typeOfNat (Proxy::Proxy n2)
-             ,typeOfBVKind (Proxy::Proxy t2)]
+             [typeOfBVKind (Proxy::Proxy tp)
+             ,typeOfNat (Proxy::Proxy start)
+             ,typeOfNat (Proxy::Proxy len)]
 #else
-data SMTExtract (t :: *) (n1 :: *) (n2 :: *) (r :: *) = BVExtract deriving (Typeable,Eq)
+data SMTExtract (tp :: *) (start :: *) (len :: *) = BVExtract deriving (Typeable,Eq)
 #endif
 
 data SMTConTest (a :: *) = ConTest (Constructor a) deriving (Typeable,Eq)

@@ -953,51 +953,53 @@ instance (TypeableNat n1,TypeableNat n2
   getFunctionSymbol _ _ = L.Symbol "concat"
   inferResAnnotation _ _ = ()
 
-instance (TypeableNat n1,TypeableNat n2) 
-         => SMTFunction (SMTExtract BVUntyped n1 n2 BVUntyped) where
-  type SMTFunArg (SMTExtract BVUntyped n1 n2 BVUntyped) = SMTExpr (BitVector BVUntyped)
-  type SMTFunRes (SMTExtract BVUntyped n1 n2 BVUntyped) = BitVector BVUntyped
+instance (TypeableNat start,TypeableNat len)
+         => SMTFunction (SMTExtract BVUntyped start len) where
+  type SMTFunArg (SMTExtract BVUntyped start len) = SMTExpr (BitVector BVUntyped)
+  type SMTFunRes (SMTExtract BVUntyped start len) = BitVector BVUntyped
   isOverloaded _ = True
-  getFunctionSymbol (_ :: SMTExtract BVUntyped n1 n2 BVUntyped) _
+  getFunctionSymbol (_ :: SMTExtract BVUntyped start len) _
 #ifdef SMTLIB2_WITH_DATAKINDS
-    = L.List [L.Symbol "_"
-             ,L.Symbol "extract"
-             ,L.toLisp $ reflectNat (Proxy::Proxy n2) 0
-             ,L.toLisp $ reflectNat (Proxy::Proxy n1) 0]
+    = let start' = reflectNat (Proxy::Proxy start) 0
+          len' = reflectNat (Proxy::Proxy len) 0
+      in L.List [L.Symbol "_"
+                ,L.Symbol "extract"
+                ,L.toLisp $ start' + len' - 1
+                ,L.toLisp $ start']
 #else
-    = L.List [L.Symbol "_"
-             ,L.Symbol "extract"
-             ,L.toLisp $ reflectNat (undefined::n2) 0
-             ,L.toLisp $ reflectNat (undefined::n1) 0]
+    = let start' = reflectNat (undefined::start) 0
+          len' = reflectNat (undefined::len) 0
+      in L.List [L.Symbol "_"
+                ,L.Symbol "extract"
+                ,L.toLisp $ start' + len' - 1
+                ,L.toLisp $ start' ]
 #endif
-  inferResAnnotation (_::SMTExtract BVUntyped n1 n2 BVUntyped) _
 #ifdef SMTLIB2_WITH_DATAKINDS
-    = (reflectNat (Proxy::Proxy n2) 0) - (reflectNat (Proxy::Proxy n1) 0) + 1
+  inferResAnnotation (_::SMTExtract BVUntyped start len) _ = reflectNat (Proxy::Proxy len) 0
 #else
-    = (reflectNat (undefined::n2) 0) - (reflectNat (undefined::n1) 0) + 1
+  inferResAnnotation (_::SMTExtract BVUntyped start len) _ = reflectNat (undefined::len) 0
 #endif
 
--- bvextract t l u = r
--- r = u - l + 1
--- r + l = u + 1
-
-instance (TypeableNat n1,TypeableNat n2,TypeableNat n3,TypeableNat n4
-         ,Add n4 n2 ~ S n3)
-         => SMTFunction (SMTExtract (BVTyped n1) n2 n3 (BVTyped n4)) where
-  type SMTFunArg (SMTExtract (BVTyped n1) n2 n3 (BVTyped n4)) = SMTExpr (BitVector (BVTyped n1))
-  type SMTFunRes (SMTExtract (BVTyped n1) n2 n3 (BVTyped n4)) = BitVector (BVTyped n4)
+instance (TypeableNat tp,TypeableNat start,TypeableNat len)
+         => SMTFunction (SMTExtract (BVTyped tp) start len) where
+  type SMTFunArg (SMTExtract (BVTyped tp) start len) = SMTExpr (BitVector (BVTyped tp))
+  type SMTFunRes (SMTExtract (BVTyped tp) start len) = BitVector (BVTyped len)
   isOverloaded _ = True
-  getFunctionSymbol (_ :: SMTExtract (BVTyped n1) n2 n3 (BVTyped n4)) _
+  getFunctionSymbol (_ :: SMTExtract (BVTyped tp) start len) _
 #ifdef SMTLIB2_WITH_DATAKINDS
-    = L.List [L.Symbol "_"
-             ,L.Symbol "extract"
-             ,L.toLisp $ reflectNat (Proxy::Proxy n3) 0
-             ,L.toLisp $ reflectNat (Proxy::Proxy n2) 0]
+    = let start' = reflectNat (Proxy::Proxy start) 0
+          len' = reflectNat (Proxy::Proxy len) 0
+      in L.List [L.Symbol "_"
+                ,L.Symbol "extract"
+                ,L.toLisp $ start' + len' - 1
+                ,L.toLisp $ start' ]
 #else
-    = L.List [L.Symbol "_"
-             ,L.Symbol "extract"
-             ,L.toLisp $ reflectNat (undefined::n3) 0
-             ,L.toLisp $ reflectNat (undefined::n2) 0]
+    = let start' = reflectNat (undefined::start) 0
+          len' = reflectNat (undefined::len) 0
+      in L.List [L.Symbol "_"
+                ,L.Symbol "extract"
+                ,L.toLisp $ start' + len' - 1
+                ,L.toLisp $ start' ]
 #endif
   inferResAnnotation _ _ = ()
 
