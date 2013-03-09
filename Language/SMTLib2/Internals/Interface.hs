@@ -318,6 +318,13 @@ bvor :: (SMTFunction (SMTBVBinOp t),
         ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
 bvor (e1::SMTExpr (BitVector t)) e2 = App (BVOr::SMTBVBinOp t) (e1,e2)
 
+-- | Bitvector or
+bvxor :: (SMTFunction (SMTBVBinOp t),
+         SMTFunArg (SMTBVBinOp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+         SMTFunRes (SMTBVBinOp t) ~ BitVector t
+        ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvxor (e1::SMTExpr (BitVector t)) e2 = App (BVXor::SMTBVBinOp t) (e1,e2)
+
 -- | Bitvector not
 bvnot :: (SMTFunction (SMTBVUnOp t), 
           SMTFunArg (SMTBVUnOp t) ~ SMTExpr (BitVector t),
