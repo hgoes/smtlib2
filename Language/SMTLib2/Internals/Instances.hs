@@ -319,7 +319,7 @@ putBVValue :: (Bits a,Ord a,Integral a,Show a,Integral i)
                -> L.Lisp
 putBVValue len x
   | len `mod` 4 == 0 = let v' = if x < 0
-                                then complement (x-1)
+                                then 2^len + x
                                 else x
                            enc = showHex v' "" 
                            l = genericLength enc
