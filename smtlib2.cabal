@@ -9,7 +9,7 @@ Flag WithConstraints
   Default: True
 Flag WithDataKinds
   Description: Enables the use of the data-kinds extension which is needed for typed bitvectors.
-  Default: True
+  Default: False
 
 Library
   Build-Depends:        base >= 4,text,mtl,process,blaze-builder,bytestring,
