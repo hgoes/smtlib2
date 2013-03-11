@@ -140,13 +140,16 @@ exprToLisp (Let ann x f) c = let (arg,tps,nc) = createArgs ann c
                              in (L.List [L.Symbol "let"
                                         ,L.List [L.List [L.Symbol name,lisp] | ((name,_),lisp) <- Prelude.zip tps arg' ]
                                         ,arg''],nc'')
-exprToLisp (App fun x) c = let arg_ann = extractArgAnnotation x
-                               l = getFunctionSymbol fun arg_ann
-                               ~(x',c1) = unpackArgs (\e _ i -> exprToLisp e i) x
-                                          arg_ann c
-                           in if Prelude.null x'
-                              then (l,c1)
-                              else (L.List $ l:x',c1)
+exprToLisp (App fun x) c 
+  = case optimizeCall fun x of
+    Nothing -> let arg_ann = extractArgAnnotation x
+                   l = getFunctionSymbol fun arg_ann
+                   ~(x',c1) = unpackArgs (\e _ i -> exprToLisp e i) x
+                              arg_ann c
+               in if Prelude.null x'
+                  then (l,c1)
+                  else (L.List $ l:x',c1)
+    Just res -> exprToLisp res c
 exprToLisp (Named expr name) c = let (expr',c') = exprToLisp expr c
                                  in (L.List [L.Symbol "!",expr',L.Symbol ":named",L.Symbol name],c')
 

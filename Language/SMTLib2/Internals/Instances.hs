@@ -704,6 +704,9 @@ instance SMTType a => SMTFunction (SMTEq a) where
   isOverloaded _ = True
   getFunctionSymbol _ _ = L.Symbol "="
   inferResAnnotation _ _ = ()
+  optimizeCall f [] = Just (Const True ())
+  optimizeCall f [x] = Just (Const True ())
+  optimizeCall _ _ = Nothing
 
 instance (SMTFunction f,Liftable r,r ~ Lifted (SMTFunArg f) i,
           Args i,
@@ -804,6 +807,12 @@ instance SMTFunction SMTLogic where
   getFunctionSymbol XOr _ = L.Symbol "xor"
   getFunctionSymbol Implies _ = L.Symbol "=>"
   inferResAnnotation _ _ = ()
+  optimizeCall f [x] = Just x
+  optimizeCall And [] = Just $ Const True ()
+  optimizeCall Or [] = Just $ Const False ()
+  optimizeCall XOr [] = Just $ Const False ()
+  optimizeCall Implies [] = Just $ Const True ()
+  optimizeCall f xs = Nothing
 
 instance (Liftable a,SMTType r) => SMTFunction (SMTFun a r) where
   type SMTFunArg (SMTFun a r) = a

@@ -191,6 +191,8 @@ class (Args (SMTFunArg a),
   getFunctionSymbol :: a -> ArgAnnotation (SMTFunArg a) -> L.Lisp
   inferResAnnotation :: a -> ArgAnnotation (SMTFunArg a)
                         -> SMTAnnotation (SMTFunRes a)
+  optimizeCall :: a -> SMTFunArg a -> Maybe (SMTExpr (SMTFunRes a))
+  optimizeCall _ _ = Nothing
   
 instance Eq a => Eq (SMTExpr a) where
   (==) = eqExpr 0
