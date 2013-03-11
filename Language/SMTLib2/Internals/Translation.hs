@@ -31,10 +31,7 @@ instance Show (SMTExpr t) where
 --   The 'ProduceModels' option must be enabled for this.
 getValue :: SMTValue t => SMTExpr t -> SMT t
 getValue expr = do
-  let ann = case expr of
-        Var _ a -> a
-        Const _ a -> a
-        _ -> error "Can't use getValue on complex expressions. Use getValue' instead."
+  let ann = extractAnnotation expr
   getValue' ann expr
   
 -- | Extract values of compound expressions from the generated model.
