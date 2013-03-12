@@ -56,15 +56,16 @@ getRawValue expr = do
 defFun :: (Liftable a,SMTType r,Unit (ArgAnnotation a),Unit (SMTAnnotation r)) => (a -> SMTExpr r) -> SMT (SMTFun a r)
 defFun = defFunAnn unit unit
 
--- | Define a new constant
-defConst :: (SMTType r,Unit (SMTAnnotation r)) => SMTExpr r -> SMT (SMTExpr r)
-defConst = defConstAnn unit
+-- | Define a new constant.
+defConst :: SMTType r => SMTExpr r -> SMT (SMTExpr r)
+defConst = defConstNamed "constvar"
 
--- | Define a new constant with a type annotation.
-defConstAnn :: (SMTType r) => SMTAnnotation r -> SMTExpr r -> SMT (SMTExpr r)
-defConstAnn ann e = do
-  fname <- freeName "constvar"
+-- | Define a new constant with a name
+defConstNamed :: (SMTType r) => String -> SMTExpr r -> SMT (SMTExpr r)
+defConstNamed name e = do
+  fname <- freeName name
   let (expr',_) = exprToLisp e 0
+      ann = extractAnnotation e
   defineFun fname [] (getSort (getUndef e) ann) expr'
   return $ Var fname ann
 

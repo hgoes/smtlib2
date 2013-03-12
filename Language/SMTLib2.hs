@@ -86,7 +86,7 @@ module Language.SMTLib2
          bvsplitu64to32,bvsplitu64to16,bvsplitu64to8,
          bvextract,bvextract',
          -- ** Functions
-         funAnn,funAnnNamed,funAnnRet,fun,app,defFun,defConst,defFunAnn,defFunAnnNamed,defConstAnn,map',
+         funAnn,funAnnNamed,funAnnRet,fun,app,defFun,defConst,defConstNamed,defFunAnn,defFunAnnNamed,map',
          -- ** Data types
          is,(.#),
          -- ** Lists
