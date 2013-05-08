@@ -14,6 +14,7 @@ import Data.Array
 import qualified Data.AttoLisp as L
 import Data.Unit
 import Data.List (genericReplicate)
+import Data.Monoid
 #ifdef SMTLIB2_WITH_DATAKINDS
 import Data.Proxy
 #endif
@@ -611,13 +612,21 @@ getProof :: SMT (SMTExpr Bool)
 getProof = do
   (_,tps,mp) <- getSMT
   sort_parser <- getSortParser
-  let mp' = mp -- Map.union mp commonTheorems
   putRequest (L.List [L.Symbol "get-proof"])
   res <- parseResponse
-  case lispToExpr commonFunctions sort_parser
-       (\n -> Map.lookup n mp') tps gcast (Just $ toSort (undefined::Bool) ()) res of
+  let proof = case res of
+        L.List items -> case findProof items of
+          Nothing -> res
+          Just p -> p
+        _ -> res
+  case lispToExpr (commonFunctions `mappend` commonTheorems) sort_parser
+       (\n -> Map.lookup n mp) tps gcast (Just $ toSort (undefined::Bool) ()) proof of
     Just (Just x) -> return x
     _ -> error $ "smtlib2: Couldn't parse proof "++show res
+  where
+    findProof [] = Nothing
+    findProof ((L.List [L.Symbol "proof",proof]):_) = Just proof
+    findProof (x:xs) = findProof xs
 
 -- | Use the SMT solver to simplify a given expression.
 --   Currently only works with Z3.
@@ -650,13 +659,16 @@ getUnsatCore = do
     _ -> error $ "Language.SMTLib2.getUnsatCore: Unknown response "++show res++" to query."
 
 -- | A map which contains signatures for a few common theorems which can be used in the proofs which 'getProof' returns.
-commonTheorems :: Map T.Text TypeRep
-commonTheorems = Map.fromList
-  [(T.pack "|unit-resolution|",typeOf (undefined :: (Bool,Bool,Bool) -> Bool))
-  ,(T.pack "|and-elim|",typeOf (undefined :: (Bool,Bool) -> Bool))
-  ,(T.pack "asserted",typeOf (undefined :: Bool -> Bool))
-  ,(T.pack "monotonicity",typeOf (undefined :: (Bool,Bool) -> Bool))
-  ,(T.pack "trans",typeOf (undefined :: (Bool,Bool,Bool) -> Bool))
-  ,(T.pack "rewrite",typeOf (undefined :: Bool -> Bool))
-  ,(T.pack "mp",typeOf (undefined :: (Bool,Bool,Bool) -> Bool))
-  ]
+commonTheorems :: FunctionParser
+commonTheorems = mconcat
+                 [nameParser (L.Symbol "|unit-resolution|")
+                  (OverloadedParser
+                   (const $ Just $ toSort (undefined::Bool) ())
+                   $ \_ _ f -> Just $ f (SMTFun "|unit-resolution|" () :: SMTFun [SMTExpr Bool] Bool))
+                 ,simpleParser (SMTFun "asserted" () :: SMTFun (SMTExpr Bool) Bool)
+                 ,simpleParser (SMTFun "hypothesis" () :: SMTFun (SMTExpr Bool) Bool)
+                 ,simpleParser (SMTFun "lemma" () :: SMTFun (SMTExpr Bool) Bool)
+                 ,simpleParser (SMTFun "monotonicity" () :: SMTFun (SMTExpr Bool,SMTExpr Bool) Bool)
+                 ,simpleParser (SMTFun "trans" () :: SMTFun (SMTExpr Bool,SMTExpr Bool,SMTExpr Bool) Bool)
+                 ,simpleParser (SMTFun "rewrite" () :: SMTFun (SMTExpr Bool) Bool)
+                 ,simpleParser (SMTFun "mp" () :: SMTFun (SMTExpr Bool,SMTExpr Bool,SMTExpr Bool) Bool)]
