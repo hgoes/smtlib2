@@ -15,6 +15,7 @@ import Data.Text as T hiding (reverse)
 import Data.Typeable
 import Data.Map as Map hiding (assocs)
 import Data.List as List (find)
+import Data.Char (isDigit)
 #ifdef SMTLIB2_WITH_CONSTRAINTS
 import Data.Constraint
 #endif
@@ -496,9 +497,15 @@ declareSort :: T.Text -> Integer -> SMT ()
 declareSort name arity = putRequest (L.List [L.Symbol "declare-sort",L.Symbol name,L.toLisp arity])
 
 escapeName :: String -> String
-escapeName [] = []
-escapeName ('_':xs) = '_':'_':escapeName xs
-escapeName (x:xs) = x:escapeName xs
+escapeName (c:cs) = if isDigit c
+                    then "num"++escapeName' (c:cs)
+                    else escapeName' (c:cs)
+escapeName [] = ""
+
+escapeName' :: String -> String
+escapeName' [] = []
+escapeName' ('_':xs) = '_':'_':escapeName' xs
+escapeName' (x:xs) = x:escapeName' xs
 
 freeName :: String -> SMT Text
 freeName name = do
