@@ -333,6 +333,13 @@ bvnot :: (SMTFunction (SMTBVUnOp t),
          ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t)
 bvnot (e::SMTExpr (BitVector t)) = App (BVNot::SMTBVUnOp t) e
 
+-- | Bitvector signed negation
+bvneg :: (SMTFunction (SMTBVUnOp t),
+          SMTFunArg (SMTBVUnOp t) ~ SMTExpr (BitVector t),
+          SMTFunRes (SMTBVUnOp t) ~ BitVector t
+         ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvneg (e::SMTExpr (BitVector t)) = App (BVNeg::SMTBVUnOp t) e
+
 -- | Bitvector addition
 bvadd :: (SMTFunction (SMTBVBinOp t),
          SMTFunArg (SMTBVBinOp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
