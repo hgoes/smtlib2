@@ -13,6 +13,7 @@ import Data.Array
 import qualified Data.Map as Map (Map,lookup,elems)
 import Data.Monoid
 import Data.Unit
+import Control.Monad.Trans
 
 #ifdef SMTLIB2_WITH_CONSTRAINTS
 import Data.Constraint
@@ -27,20 +28,20 @@ instance Show (SMTExpr t) where
 
 -- | After a successful 'checkSat' call, extract values from the generated model.
 --   The 'ProduceModels' option must be enabled for this.
-getValue :: SMTValue t => SMTExpr t -> SMT t
+getValue :: (SMTValue t,MonadIO m) => SMTExpr t -> SMT' m t
 getValue expr = do
   let ann = extractAnnotation expr
   getValue' ann expr
 
 -- | Extract values of compound expressions from the generated model.
-getValue' :: SMTValue t => SMTAnnotation t -> SMTExpr t -> SMT t
+getValue' :: (SMTValue t,MonadIO m) => SMTAnnotation t -> SMTExpr t -> SMT' m t
 getValue' ann expr = do
-  res <- fmap removeLets $ getRawValue expr
+  res <- getRawValue expr >>= return . removeLets
   case unmangle res ann of
     Nothing -> error $ "Couldn't unmangle "++show res
     Just r -> return r
 
-getRawValue :: SMTType t => SMTExpr t -> SMT L.Lisp
+getRawValue :: (SMTType t,MonadIO m) => SMTExpr t -> SMT' m L.Lisp
 getRawValue expr = do
   clearInput
   putRequest $ L.List [L.Symbol "get-value"
@@ -51,15 +52,15 @@ getRawValue expr = do
     _ -> error $ "unknown response to get-value: "++show val
 
 -- | Define a new function with a body
-defFun :: (Liftable a,SMTType r,Unit (ArgAnnotation a),Unit (SMTAnnotation r)) => (a -> SMTExpr r) -> SMT (SMTFun a r)
+defFun :: (Liftable a,SMTType r,Unit (ArgAnnotation a),Unit (SMTAnnotation r),MonadIO m) => (a -> SMTExpr r) -> SMT' m (SMTFun a r)
 defFun = defFunAnn unit unit
 
 -- | Define a new constant.
-defConst :: SMTType r => SMTExpr r -> SMT (SMTExpr r)
+defConst :: (SMTType r,MonadIO m) => SMTExpr r -> SMT' m (SMTExpr r)
 defConst = defConstNamed "constvar"
 
 -- | Define a new constant with a name
-defConstNamed :: (SMTType r) => String -> SMTExpr r -> SMT (SMTExpr r)
+defConstNamed :: (SMTType r,MonadIO m) => String -> SMTExpr r -> SMT' m (SMTExpr r)
 defConstNamed name e = do
   fname <- freeName name
   let (expr',_) = exprToLisp e 0
@@ -68,7 +69,7 @@ defConstNamed name e = do
   return $ Var fname ann
 
 -- | Define a new function with a body and custom type annotations for arguments and result.
-defFunAnnNamed :: (Liftable a,SMTType r) => String -> ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT (SMTFun a r)
+defFunAnnNamed :: (Liftable a,SMTType r,MonadIO m) => String -> ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT' m (SMTFun a r)
 defFunAnnNamed name ann_arg ann_res f = do
   fname <- freeName name
   (names,_,_) <- getSMT
@@ -87,16 +88,16 @@ defFunAnnNamed name ann_arg ann_res f = do
   return res
 
 -- | Like `defFunAnnNamed`, but defaults the function name to "fun".
-defFunAnn :: (Liftable a,SMTType r) => ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT (SMTFun a r)
+defFunAnn :: (Liftable a,SMTType r,MonadIO m) => ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT' m (SMTFun a r)
 defFunAnn = defFunAnnNamed "fun"
 
 -- | Extract all values of an array by giving the range of indices.
 unmangleArray :: (Liftable i,LiftArgs i,Ix (Unpacked i),SMTValue v,
                   --Unit (SMTAnnotation (Unpacked i)),
-                  Unit (ArgAnnotation i))
+                  Unit (ArgAnnotation i),MonadIO m)
                  => (Unpacked i,Unpacked i)
                  -> SMTExpr (SMTArray i v)
-                 -> SMT (Array (Unpacked i) v)
+                 -> SMT' m (Array (Unpacked i) v)
 unmangleArray b expr = mapM (\i -> do
                                 v <- getValue (App Select (expr,liftArgs i unit))
                                 return (i,v)

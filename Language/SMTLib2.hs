@@ -21,7 +21,7 @@ main = withZ3 program >>= print
      @ -}
 module Language.SMTLib2 
        (-- * Data types
-         SMT(), MonadSMT(..),
+         SMT, SMT'(), MonadSMT(..),
          SMTType,
          SMTAnnotation,
          SMTValue,

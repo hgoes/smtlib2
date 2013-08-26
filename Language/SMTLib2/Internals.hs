@@ -44,7 +44,7 @@ class (Eq t,Typeable t,Eq (SMTAnnotation t),Typeable (SMTAnnotation t))
   getSort :: t -> SMTAnnotation t -> L.Lisp
   getSort u _ = getSortBase u
   getSortBase :: t -> L.Lisp
-  declareType :: t -> SMTAnnotation t -> SMT ()
+  declareType :: MonadIO m => t -> SMTAnnotation t -> SMT' m ()
   additionalConstraints :: t -> SMTAnnotation t -> SMTExpr t -> [SMTExpr Bool]
   additionalConstraints _ _ _ = []
   toSort :: t -> SMTAnnotation t -> Sort
@@ -79,36 +79,38 @@ data SMTArray (i :: *) (v :: *) = SMTArray deriving (Eq,Typeable)
 type SMTRead = (Handle, Handle)
 type SMTState = (Map String Integer,Map TyCon DeclaredType,Map T.Text UntypedExpr)
 
--- | The SMT monad used for communating with the SMT solver
-newtype SMT a = SMT { runSMT :: ReaderT SMTRead (Lazy.StateT SMTState IO) a }
+type SMT = SMT' IO
 
-instance Functor SMT where
+-- | The SMT monad used for communating with the SMT solver
+newtype SMT' m a = SMT { runSMT :: ReaderT SMTRead (Lazy.StateT SMTState m) a }
+
+instance Functor m => Functor (SMT' m) where
   fmap f = SMT . fmap f . runSMT
 
-instance Monad SMT where
+instance Monad m => Monad (SMT' m) where
   return = SMT . return
   m >>= f = SMT $ (runSMT m) >>= runSMT . f
 
-instance MonadIO SMT where
+instance MonadIO m => MonadIO (SMT' m) where
   liftIO = SMT . liftIO
 
-instance MonadFix SMT where
+instance MonadFix m => MonadFix (SMT' m) where
   mfix f = SMT $ mfix (runSMT . f)
 
-instance Applicative SMT where
+instance (Monad m,Functor m) => Applicative (SMT' m) where
   pure = return
   (<*>) = ap
 
-askSMT :: SMT SMTRead
+askSMT :: Monad m => SMT' m SMTRead
 askSMT = SMT ask
 
-getSMT :: SMT SMTState
+getSMT :: Monad m => SMT' m SMTState
 getSMT = SMT get
 
-putSMT :: SMTState -> SMT ()
+putSMT :: Monad m => SMTState -> SMT' m ()
 putSMT = SMT . put
 
-modifySMT :: (SMTState -> SMTState) -> SMT ()
+modifySMT :: Monad m => (SMTState -> SMTState) -> SMT' m ()
 modifySMT f = SMT $ modify f
 
 -- | Lift an SMT action into an arbitrary monad (like liftIO).
@@ -247,7 +249,7 @@ data SMTOption
 -- | A piece of information of type /r/ that can be obtained by the SMT solver
 class SMTInfo i where
   type SMTInfoResult i
-  getInfo :: i -> SMT (SMTInfoResult i)
+  getInfo :: MonadIO m => i -> SMT' m (SMTInfoResult i)
 
 -- | The name of the SMT solver
 data SMTSolverName = SMTSolverName deriving (Show,Eq,Ord)
@@ -325,11 +327,11 @@ unpackArgs f x ann i = fst $ foldExprs (\(res,ci) e ann' -> let (p,ni) = f e ann
                                                             in ((res++[p],ni),e)
                                        ) ([],i) x ann
 
-declareArgTypes :: Args a => a -> ArgAnnotation a -> SMT ()
+declareArgTypes :: (Args a,MonadIO m) => a -> ArgAnnotation a -> SMT' m ()
 declareArgTypes arg ann
   = fst $ foldExprs (\act e ann' -> (act >> declareType (getUndef e) ann',e)) (return ()) arg ann
 
-declareType' :: DeclaredType -> SMT () -> SMT ()
+declareType' :: Monad m => DeclaredType -> SMT' m () -> SMT' m ()
 declareType' decl act = do
   let con = declaredTypeCon decl
   (c,decls,mp) <- getSMT
@@ -339,10 +341,10 @@ declareType' decl act = do
              putSMT (c,Map.insert con decl decls,mp)
              act)
 
-defaultDeclareValue :: SMTValue a => a -> SMTAnnotation a -> SMT ()
+defaultDeclareValue :: (SMTValue a,Monad m) => a -> SMTAnnotation a -> SMT' m ()
 defaultDeclareValue u ann = declareType' (DeclaredValueType u ann) (return ())
 
-defaultDeclareType :: SMTType a => a -> SMTAnnotation a -> SMT ()
+defaultDeclareType :: (SMTType a,Monad m) => a -> SMTAnnotation a -> SMT' m ()
 defaultDeclareType u ann = declareType' (DeclaredType u ann) (return ())
 
 createArgs :: Args a => ArgAnnotation a -> Integer -> (a,[(Text,L.Lisp)],Integer)
@@ -358,7 +360,7 @@ class Args a => LiftArgs a where
   -- | Converts a haskell value into its SMT representation.
   liftArgs :: Unpacked a -> ArgAnnotation a -> a
   -- | Converts a SMT representation back into a haskell value.
-  unliftArgs :: a -> SMT (Unpacked a)
+  unliftArgs :: MonadIO m => a -> SMT' m (Unpacked a)
 
 firstJust :: [Maybe a] -> Maybe a
 firstJust [] = Nothing
@@ -375,7 +377,7 @@ getFunUndef _ = (error "Don't evaluate the first result of 'getFunUndef'",
 getArrayUndef :: Args i => SMTExpr (SMTArray i v) -> (i,Unpacked i,v)
 getArrayUndef _ = (undefined,undefined,undefined)
 
-declareFun :: Text -> [L.Lisp] -> L.Lisp -> SMT ()
+declareFun :: MonadIO m => Text -> [L.Lisp] -> L.Lisp -> SMT' m ()
 declareFun name tps rtp
   = putRequest $ L.List [L.Symbol "declare-fun"
                         ,L.Symbol name
@@ -383,7 +385,7 @@ declareFun name tps rtp
                         ,rtp
                         ]
 
-defineFun :: Text -> [(Text,L.Lisp)] -> L.Lisp -> L.Lisp -> SMT ()
+defineFun :: MonadIO m => Text -> [(Text,L.Lisp)] -> L.Lisp -> L.Lisp -> SMT' m ()
 defineFun name arg rtp body = putRequest $ L.List [L.Symbol "define-fun"
                                                   ,L.Symbol name
                                                   ,args [ L.List [ L.Symbol n, tp ]
@@ -391,7 +393,7 @@ defineFun name arg rtp body = putRequest $ L.List [L.Symbol "define-fun"
                                                   ,rtp
                                                   ,body ]
 
-declareDatatypes :: [Text] -> [(Text,[(Text,[(Text,L.Lisp)])])] -> SMT ()
+declareDatatypes :: MonadIO m => [Text] -> [(Text,[(Text,[(Text,L.Lisp)])])] -> SMT' m ()
 declareDatatypes params dts
   = putRequest $ L.List [L.Symbol "declare-datatypes"
                         ,args (fmap L.Symbol params)
@@ -409,7 +411,7 @@ args [] = L.Symbol "()"
 args xs = L.List xs
 
 -- | Check if the model is satisfiable (e.g. if there is a value for each variable so that every assertion holds)
-checkSat :: SMT Bool
+checkSat :: MonadIO m => SMT' m Bool
 checkSat = do
   (_,hout) <- askSMT
   clearInput
@@ -423,7 +425,7 @@ checkSat = do
     _ -> error $ "unknown check-sat response: "++show res
 
 -- | Perform a stacked operation, meaning that every assertion and declaration made in it will be undone after the operation.
-stack :: SMT a -> SMT a
+stack :: MonadIO m => SMT' m a -> SMT' m a
 stack act = do
   putRequest (L.List [L.Symbol "push",L.toLisp (1::Integer)])
   res <- act
@@ -432,15 +434,16 @@ stack act = do
 
 -- | Insert a comment into the SMTLib2 command stream.
 --   If you aren't looking at the command stream for debugging, this will do nothing.
-comment :: String -> SMT ()
+comment :: MonadIO m => String -> SMT' m ()
 comment msg = do
   (hin,_) <- askSMT
   liftIO $ IO.hPutStr hin $ Prelude.unlines (fmap (';':) (Prelude.lines msg))
 
 -- | Spawn a shell command that is used as a SMT solver via stdin/-out to process the given SMT operation.
-withSMTSolver :: String -- ^ The shell command to execute
-                 -> SMT a -- ^ The SMT operation to perform
-                 -> IO a
+withSMTSolver :: MonadIO m
+                 => String -- ^ The shell command to execute
+                 -> SMT' m a -- ^ The SMT operation to perform
+                 -> m a
 withSMTSolver solver f = do
   let cmd = CreateProcess { cmdspec = ShellCommand solver
                           , cwd = Nothing
@@ -451,19 +454,19 @@ withSMTSolver solver f = do
                           , close_fds = False
                           , create_group = False
                           }
-  (Just hin,Just hout,_,handle) <- createProcess cmd
+  (Just hin,Just hout,_,handle) <- liftIO $ createProcess cmd
   res <- evalStateT (runReaderT (runSMT $ do
                                  res <- f
                                  putRequest (L.List [L.Symbol "exit"])
                                  return res
                                 ) (hin,hout)) (Map.empty,Map.empty,Map.empty)
-  hClose hin
-  hClose hout
-  terminateProcess handle
-  _ <- waitForProcess handle
+  liftIO $ hClose hin
+  liftIO $ hClose hout
+  liftIO $ terminateProcess handle
+  _ <- liftIO $ waitForProcess handle
   return res
 
-clearInput :: SMT ()
+clearInput :: MonadIO m => SMT' m ()
 clearInput = do
   (_,hout) <- askSMT
   r <- liftIO $ hReady hout
@@ -473,7 +476,7 @@ clearInput = do
              clearInput)
     else return ()
 
-putRequest :: L.Lisp -> SMT ()
+putRequest :: MonadIO m => L.Lisp -> SMT' m ()
 putRequest e = do
   clearInput
   (hin,_) <- askSMT
@@ -481,7 +484,7 @@ putRequest e = do
   liftIO $ BS.hPutStrLn hin ""
   liftIO $ hFlush hin
 
-parseResponse :: SMT L.Lisp
+parseResponse :: MonadIO m => SMT' m L.Lisp
 parseResponse = do
   (_,hout) <- askSMT
   str <- liftIO $ BS.hGetLine hout
@@ -493,7 +496,7 @@ parseResponse = do
   liftIO $ continue $ parse L.lisp (BS8.snoc str '\n')
 
 -- | Declare a new sort with a specified arity
-declareSort :: T.Text -> Integer -> SMT ()
+declareSort :: MonadIO m => T.Text -> Integer -> SMT' m ()
 declareSort name arity = putRequest (L.List [L.Symbol "declare-sort",L.Symbol name,L.toLisp arity])
 
 escapeName :: String -> String
@@ -507,7 +510,7 @@ escapeName' [] = []
 escapeName' ('_':xs) = '_':'_':escapeName' xs
 escapeName' (x:xs) = x:escapeName' xs
 
-freeName :: String -> SMT Text
+freeName :: Monad m => String -> SMT' m Text
 freeName name = do
   (names,decl,mp) <- getSMT
   let c = case Map.lookup name names of
@@ -548,7 +551,7 @@ functionGetSignature fun arg_ann res_ann
   = let ~(uarg,ures) = getFunUndef fun
     in (argsSignature uarg arg_ann,getSort ures res_ann)
 
-getSortParser :: SMT SortParser
+getSortParser :: Monad m => SMT' m SortParser
 getSortParser = do
   (_,tps,_) <- getSMT
   return $ mconcat $ fmap (withDeclaredType (\u _ -> fromSort u)) (Map.elems tps)

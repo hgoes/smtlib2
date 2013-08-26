@@ -15,33 +15,34 @@ import qualified Data.AttoLisp as L
 import Data.Unit
 import Data.List (genericReplicate)
 import Data.Monoid
+import Control.Monad.Trans (MonadIO)
 #ifdef SMTLIB2_WITH_DATAKINDS
 import Data.Proxy
 #endif
 
 -- | Create a new named variable
-varNamed :: (SMTType t,Typeable t,Unit (SMTAnnotation t)) => String -> SMT (SMTExpr t)
+varNamed :: (SMTType t,Typeable t,Unit (SMTAnnotation t),MonadIO m) => String -> SMT' m (SMTExpr t)
 varNamed name = varNamedAnn name unit
 
 -- | Create a named and annotated variable.
-varNamedAnn :: (SMTType t,Typeable t) => String -> SMTAnnotation t -> SMT (SMTExpr t)
+varNamedAnn :: (SMTType t,Typeable t,MonadIO m) => String -> SMTAnnotation t -> SMT' m (SMTExpr t)
 varNamedAnn = argVarsAnnNamed
 
 -- | Create a annotated variable
-varAnn :: (SMTType t,Typeable t) => SMTAnnotation t -> SMT (SMTExpr t)
+varAnn :: (SMTType t,Typeable t,MonadIO m) => SMTAnnotation t -> SMT' m (SMTExpr t)
 varAnn ann = varNamedAnn "var" ann
 
 -- | Create a fresh new variable
-var :: (SMTType t,Typeable t,Unit (SMTAnnotation t)) => SMT (SMTExpr t)
+var :: (SMTType t,Typeable t,Unit (SMTAnnotation t),MonadIO m) => SMT' m (SMTExpr t)
 var = varNamed "var"
 
 -- | Like `argVarsAnnNamed`, but defaults the name to "var"
-argVarsAnn :: Args a => ArgAnnotation a -> SMT a
+argVarsAnn :: (Args a,MonadIO m) => ArgAnnotation a -> SMT' m a
 argVarsAnn = argVarsAnnNamed "var"
 
 -- | Create annotated named SMT variables of the `Args` class.
 --   If more than one variable is needed, they get a numerical suffix.
-argVarsAnnNamed :: Args a => String -> ArgAnnotation a -> SMT a
+argVarsAnnNamed :: (Args a,MonadIO m) => String -> ArgAnnotation a -> SMT' m a
 argVarsAnnNamed name ann = do
   (names,decl,mp) <- getSMT
   let ename = escapeName name
@@ -68,7 +69,7 @@ argVarsAnnNamed name ann = do
   return res
 
 -- | Like `argVarsAnn`, but can only be used for unit type annotations.
-argVars :: (Args a,Unit (ArgAnnotation a)) => SMT a
+argVars :: (Args a,Unit (ArgAnnotation a),MonadIO m) => SMT' m a
 argVars = argVarsAnn unit
 
 -- | A constant expression.
@@ -103,18 +104,18 @@ arrayEquals expr arr
       xs -> foldl1 (.&&.) xs
 
 -- | Asserts that a boolean expression is true
-assert :: SMTExpr Bool -> SMT ()
+assert :: MonadIO m => SMTExpr Bool -> SMT' m ()
 assert expr = putRequest $ L.List [L.Symbol "assert"
                                   ,L.toLisp expr]
 
 -- | Create a new interpolation group
-interpolationGroup :: SMT InterpolationGroup
+interpolationGroup :: Monad m => SMT' m InterpolationGroup
 interpolationGroup = do
   rname <- freeName "interp"
   return (InterpolationGroup rname)
 
 -- | Assert a boolean expression to be true and assign it to an interpolation group
-assertInterp :: SMTExpr Bool -> InterpolationGroup -> SMT ()
+assertInterp :: MonadIO m => SMTExpr Bool -> InterpolationGroup -> SMT' m ()
 assertInterp expr (InterpolationGroup g)
   = putRequest $ L.List [L.Symbol "assert"
                         ,L.List [L.Symbol "!"
@@ -122,7 +123,7 @@ assertInterp expr (InterpolationGroup g)
                                 ,L.Symbol ":interpolation-group"
                                 ,L.Symbol g]]
 
-getInterpolant :: [InterpolationGroup] -> SMT (SMTExpr Bool)
+getInterpolant :: MonadIO m => [InterpolationGroup] -> SMT' m (SMTExpr Bool)
 getInterpolant grps = do
   putRequest $ L.List [L.Symbol "get-interpolant"
                       ,L.List [ L.Symbol g | InterpolationGroup g <- grps ]
@@ -137,7 +138,7 @@ getInterpolant grps = do
 
 
 -- | Set an option for the underlying SMT solver
-setOption :: SMTOption -> SMT ()
+setOption :: MonadIO m => SMTOption -> SMT' m ()
 setOption opt = putRequest $ L.List $ [L.Symbol "set-option"]
                 ++(case opt of
                       PrintSuccess v -> [L.Symbol ":print-success"
@@ -154,12 +155,12 @@ setOption opt = putRequest $ L.List $ [L.Symbol "set-option"]
 
 -- | Create a new uniterpreted function with annotations for
 --   the argument and the return type.
-funAnn :: (Liftable a, SMTType r) => ArgAnnotation a -> SMTAnnotation r -> SMT (SMTFun a r)
+funAnn :: (Liftable a, SMTType r,MonadIO m) => ArgAnnotation a -> SMTAnnotation r -> SMT' m (SMTFun a r)
 funAnn = funAnnNamed "fun"
 
 -- | Create a new uninterpreted named function with annotation for
 --   the argument and the return type.
-funAnnNamed :: (Liftable a, SMTType r) => String -> ArgAnnotation a -> SMTAnnotation r -> SMT (SMTFun a r)
+funAnnNamed :: (Liftable a, SMTType r,MonadIO m) => String -> ArgAnnotation a -> SMTAnnotation r -> SMT' m (SMTFun a r)
 funAnnNamed name annArg annRet = do
   (names,decl,mp) <- getSMT
   let func = case Map.lookup name names of
@@ -183,11 +184,11 @@ funAnnNamed name annArg annRet = do
   return res
 
 -- | funAnn with an annotation only for the return type.
-funAnnRet :: (Liftable a, SMTType r, Unit (ArgAnnotation a)) => SMTAnnotation r -> SMT (SMTFun a r)
+funAnnRet :: (Liftable a, SMTType r, Unit (ArgAnnotation a), MonadIO m) => SMTAnnotation r -> SMT' m (SMTFun a r)
 funAnnRet = funAnn unit
 
 -- | Create a new uninterpreted function.
-fun :: (Liftable a,SMTType r,SMTAnnotation r ~ (),Unit (ArgAnnotation a)) => SMT (SMTFun a r)
+fun :: (Liftable a,SMTType r,SMTAnnotation r ~ (),Unit (ArgAnnotation a),MonadIO m) => SMT' m (SMTFun a r)
 fun = funAnn unit unit
 
 -- | Apply a function to an argument
@@ -600,22 +601,22 @@ isInsert :: SMTType a => SMTExpr [a] -> SMTExpr Bool
 isInsert e = is e (Constructor "insert")
 
 -- | Sets the logic used for the following program (Not needed for many solvers).
-setLogic :: Text -> SMT ()
+setLogic :: MonadIO m => Text -> SMT' m ()
 setLogic name = putRequest $ L.List [L.Symbol "set-logic"
                                     ,L.Symbol name]
 
 -- | Given an arbitrary expression, this creates a named version of it and a name to reference it later on.
-named :: (SMTType a,SMTAnnotation a ~ ()) => String -> SMTExpr a -> SMT (SMTExpr a,SMTExpr a)
+named :: (SMTType a,SMTAnnotation a ~ (),MonadIO m) => String -> SMTExpr a -> SMT' m (SMTExpr a,SMTExpr a)
 named name expr = do
   rname <- freeName name
   return (Named expr rname,Var rname ())
 
 -- | Like `named`, but defaults the name to "named".
-named' :: (SMTType a,SMTAnnotation a ~ ()) => SMTExpr a -> SMT (SMTExpr a,SMTExpr a)
+named' :: (SMTType a,SMTAnnotation a ~ (),MonadIO m) => SMTExpr a -> SMT' m (SMTExpr a,SMTExpr a)
 named' = named "named"
   
 -- | After an unsuccessful 'checkSat' this method extracts a proof from the SMT solver that the instance is unsatisfiable.
-getProof :: SMT (SMTExpr Bool)
+getProof :: MonadIO m => SMT' m (SMTExpr Bool)
 getProof = do
   (_,tps,mp) <- getSMT
   sort_parser <- getSortParser
@@ -637,7 +638,7 @@ getProof = do
 
 -- | Use the SMT solver to simplify a given expression.
 --   Currently only works with Z3.
-simplify :: SMTType t => SMTExpr t -> SMT (SMTExpr t)
+simplify :: (SMTType t,MonadIO m) => SMTExpr t -> SMT' m (SMTExpr t)
 simplify (expr::SMTExpr t) = do
   clearInput
   putRequest $ L.List [L.Symbol "simplify"
@@ -652,7 +653,7 @@ simplify (expr::SMTExpr t) = do
 
 -- | After an unsuccessful 'checkSat', return a list of names of named
 --   expression which make the instance unsatisfiable.
-getUnsatCore :: SMT [String]
+getUnsatCore :: MonadIO m => SMT' m [String]
 getUnsatCore = do
   putRequest (L.List [L.Symbol "get-unsat-core"])
   res <- parseResponse
