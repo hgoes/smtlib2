@@ -68,7 +68,7 @@ module Language.SMTLib2
          select,store,arrayEquals,unmangleArray,asArray,constArray,
          -- ** Bitvectors
          bvand,bvor,bvxor,bvnot,bvneg,
-         bvadd,bvsub,bvmul,bvurem,bvsrem,
+         bvadd,bvsub,bvmul,bvurem,bvsrem,bvudiv,bvsdiv,
          bvule,bvult,bvuge,bvugt,
          bvsle,bvslt,bvsge,bvsgt,
          bvshl,bvlshr,bvashr,
