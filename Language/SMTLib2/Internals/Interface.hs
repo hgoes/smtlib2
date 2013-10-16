@@ -384,6 +384,20 @@ bvsrem :: (SMTFunction (SMTBVBinOp t),
           ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
 bvsrem (e1::SMTExpr (BitVector t)) e2 = App (BVSRem::SMTBVBinOp t) (e1,e2)
 
+-- | Bitvector unsigned division
+bvudiv :: (SMTFunction (SMTBVBinOp t),
+           SMTFunArg (SMTBVBinOp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+           SMTFunRes (SMTBVBinOp t) ~ BitVector t
+          ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvudiv (e1::SMTExpr (BitVector t)) e2 = App (BVUDiv::SMTBVBinOp t) (e1,e2)
+
+-- | Bitvector signed division
+bvsdiv :: (SMTFunction (SMTBVBinOp t),
+           SMTFunArg (SMTBVBinOp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
+           SMTFunRes (SMTBVBinOp t) ~ BitVector t
+          ) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvsdiv (e1::SMTExpr (BitVector t)) e2 = App (BVSDiv::SMTBVBinOp t) (e1,e2)
+
 -- | Bitvector unsigned less-or-equal
 bvule :: (SMTFunction (SMTBVComp t), 
           SMTFunArg (SMTBVComp t) ~ (SMTExpr (BitVector t),SMTExpr (BitVector t)),
