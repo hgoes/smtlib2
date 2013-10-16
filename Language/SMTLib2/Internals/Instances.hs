@@ -12,7 +12,7 @@ import Data.Bits
 import qualified Data.Text as T
 import Data.Ratio
 import Data.Typeable
-import Data.List (genericLength,genericReplicate)
+import Data.List (genericLength,genericReplicate,zip4,zip5,zip6)
 #ifdef SMTLIB2_WITH_CONSTRAINTS
 import Data.Constraint
 import Data.Proxy
@@ -334,6 +334,7 @@ putBVValue len x
 instance Args () where
   type ArgAnnotation () = ()
   foldExprs _ s _ _ = (s,())
+  foldsExprs _ s args = (s,fmap (const ()) args)
   extractArgAnnotation _ = ()
   toArgs x = Just ((),x)
   toSorts _ _ = []
@@ -342,6 +343,7 @@ instance Args () where
 instance (SMTType a) => Args (SMTExpr a) where
   type ArgAnnotation (SMTExpr a) = SMTAnnotation a
   foldExprs f = f
+  foldsExprs f = f
   extractArgAnnotation = extractAnnotation
   toArgs (x:xs) = do
     r <- entype gcast x
@@ -358,6 +360,9 @@ instance (Args a,Args b) => Args (a,b) where
   foldExprs f s ~(e1,e2) ~(ann1,ann2) = let ~(s1,e1') = foldExprs f s e1 ann1
                                             ~(s2,e2') = foldExprs f s1 e2 ann2
                                         in (s2,(e1',e2'))
+  foldsExprs f s args = let ~(s1,e1) = foldsExprs f s (fmap (\((e1,_),(ann1,_)) -> (e1,ann1)) args)
+                            ~(s2,e2) = foldsExprs f s1 (fmap (\((_,e2),(_,ann2)) -> (e2,ann2)) args)
+                        in (s2,zip e1 e2)
   extractArgAnnotation ~(x,y) = (extractArgAnnotation x,
                                  extractArgAnnotation y)
   toArgs x = do
@@ -384,6 +389,10 @@ instance (Args a,Args b,Args c) => Args (a,b,c) where
                                                     ~(s2,e2') = foldExprs f s1 e2 ann2
                                                     ~(s3,e3') = foldExprs f s2 e3 ann3
                                                 in (s3,(e1',e2',e3'))
+  foldsExprs f s args = let ~(s1,e1) = foldsExprs f s (fmap (\((e1,_,_),(ann1,_,_)) -> (e1,ann1)) args)
+                            ~(s2,e2) = foldsExprs f s1 (fmap (\((_,e2,_),(_,ann2,_)) -> (e2,ann2)) args)
+                            ~(s3,e3) = foldsExprs f s2 (fmap (\((_,_,e3),(_,_,ann3)) -> (e3,ann3)) args)
+                        in (s3,zip3 e1 e2 e3)
   extractArgAnnotation ~(e1,e2,e3)
     = (extractArgAnnotation e1,
        extractArgAnnotation e2,
@@ -416,6 +425,11 @@ instance (Args a,Args b,Args c,Args d) => Args (a,b,c,d) where
                                                             ~(s3,e3') = foldExprs f s2 e3 ann3
                                                             ~(s4,e4') = foldExprs f s3 e4 ann4
                                                         in (s4,(e1',e2',e3',e4'))
+  foldsExprs f s args = let ~(s1,e1) = foldsExprs f s (fmap (\((e1,_,_,_),(ann1,_,_,_)) -> (e1,ann1)) args)
+                            ~(s2,e2) = foldsExprs f s1 (fmap (\((_,e2,_,_),(_,ann2,_,_)) -> (e2,ann2)) args)
+                            ~(s3,e3) = foldsExprs f s2 (fmap (\((_,_,e3,_),(_,_,ann3,_)) -> (e3,ann3)) args)
+                            ~(s4,e4) = foldsExprs f s3 (fmap (\((_,_,_,e4),(_,_,_,ann4)) -> (e4,ann4)) args)
+                        in (s4,zip4 e1 e2 e3 e4)
   extractArgAnnotation ~(e1,e2,e3,e4)
     = (extractArgAnnotation e1,
        extractArgAnnotation e2,
@@ -458,6 +472,12 @@ instance (Args a,Args b,Args c,Args d,Args e) => Args (a,b,c,d,e) where
           ~(s4,e4') = foldExprs f s3 e4 ann4
           ~(s5,e5') = foldExprs f s4 e5 ann5
       in (s5,(e1',e2',e3',e4',e5'))
+  foldsExprs f s args = let ~(s1,e1) = foldsExprs f s (fmap (\((e1,_,_,_,_),(ann1,_,_,_,_)) -> (e1,ann1)) args)
+                            ~(s2,e2) = foldsExprs f s1 (fmap (\((_,e2,_,_,_),(_,ann2,_,_,_)) -> (e2,ann2)) args)
+                            ~(s3,e3) = foldsExprs f s2 (fmap (\((_,_,e3,_,_),(_,_,ann3,_,_)) -> (e3,ann3)) args)
+                            ~(s4,e4) = foldsExprs f s3 (fmap (\((_,_,_,e4,_),(_,_,_,ann4,_)) -> (e4,ann4)) args)
+                            ~(s5,e5) = foldsExprs f s4 (fmap (\((_,_,_,_,e5),(_,_,_,_,ann5)) -> (e5,ann5)) args)
+                        in (s5,zip5 e1 e2 e3 e4 e5)
   extractArgAnnotation ~(e1,e2,e3,e4,e5)
     = (extractArgAnnotation e1,
        extractArgAnnotation e2,
@@ -506,6 +526,13 @@ instance (Args a,Args b,Args c,Args d,Args e,Args f) => Args (a,b,c,d,e,f) where
           ~(s5,e5') = foldExprs f s4 e5 ann5
           ~(s6,e6') = foldExprs f s5 e6 ann6
       in (s6,(e1',e2',e3',e4',e5',e6'))
+  foldsExprs f s args = let ~(s1,e1) = foldsExprs f s (fmap (\((e1,_,_,_,_,_),(ann1,_,_,_,_,_)) -> (e1,ann1)) args)
+                            ~(s2,e2) = foldsExprs f s1 (fmap (\((_,e2,_,_,_,_),(_,ann2,_,_,_,_)) -> (e2,ann2)) args)
+                            ~(s3,e3) = foldsExprs f s2 (fmap (\((_,_,e3,_,_,_),(_,_,ann3,_,_,_)) -> (e3,ann3)) args)
+                            ~(s4,e4) = foldsExprs f s3 (fmap (\((_,_,_,e4,_,_),(_,_,_,ann4,_,_)) -> (e4,ann4)) args)
+                            ~(s5,e5) = foldsExprs f s4 (fmap (\((_,_,_,_,e5,_),(_,_,_,_,ann5,_)) -> (e5,ann5)) args)
+                            ~(s6,e6) = foldsExprs f s5 (fmap (\((_,_,_,_,_,e6),(_,_,_,_,_,ann6)) -> (e6,ann6)) args)
+                        in (s6,zip6 e1 e2 e3 e4 e5 e6)
   extractArgAnnotation ~(e1,e2,e3,e4,e5,e6)
     = (extractArgAnnotation e1,
        extractArgAnnotation e2,
@@ -556,6 +583,13 @@ instance Args a => Args [a] where
   foldExprs f s ~(x:xs) (ann:anns) = let (s',x') = foldExprs f s x ann
                                          (s'',xs') = foldExprs f s' xs anns
                                      in (s'',x':xs')
+  foldsExprs f s args = case head args of
+    (_,[]) -> (s,fmap (const []) args)
+    _ -> let args_heads = fmap (\(xs,anns) -> (head xs,head anns)) args
+             args_tails = fmap (\(xs,anns) -> (tail xs,tail anns)) args
+             ~(s1,res_heads) = foldsExprs f s args_heads
+             ~(s2,res_tails) = foldsExprs f s args_tails
+         in (s2,zipWith (:) res_heads res_tails)
   extractArgAnnotation = fmap extractArgAnnotation
   toArgs [] = Just ([],[])
   toArgs x = do

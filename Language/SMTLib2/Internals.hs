@@ -281,6 +281,12 @@ class (Eq a,Typeable a,Eq (ArgAnnotation a),Typeable (ArgAnnotation a))
   type ArgAnnotation a
   foldExprs :: (forall t. SMTType t => s -> SMTExpr t -> SMTAnnotation t -> (s,SMTExpr t)) 
                -> s -> a -> ArgAnnotation a -> (s,a)
+  foldExprs f s x ann = let (s',[r]) = foldsExprs (\cs [(expr,ann')] -> let (cs',cr) = f cs expr ann'
+                                                                        in (cs',[cr])
+                                                  ) s [(x,ann)]
+                        in (s',r)
+  foldsExprs :: (forall t. SMTType t => s -> [(SMTExpr t,SMTAnnotation t)] -> (s,[SMTExpr t]))
+                -> s -> [(a,ArgAnnotation a)] -> (s,[a])
   extractArgAnnotation :: a -> ArgAnnotation a
   toArgs :: [UntypedExpr] -> Maybe (a,[UntypedExpr])
   toSorts :: a -> ArgAnnotation a -> [Sort]

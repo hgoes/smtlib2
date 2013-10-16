@@ -55,7 +55,7 @@ module Language.SMTLib2
          let',lets,letAnn,
          named,named',
          -- ** Basic logic
-         (.==.),
+         (.==.),argEq,
          distinct,
          ite,
          (.&&.),(.||.),and',or',xor,not',not'',(.=>.),

@@ -206,6 +206,14 @@ map' f = SMTMap f
 
 infix 4 .==.
 
+-- | A generalized version of `.==.`
+argEq :: Args a => a -> a -> SMTExpr Bool
+argEq xs ys = app and' $
+              fst $ foldsExprs
+              (\s [(arg1,_),(arg2,_)] -> ((arg1 .==. arg2):s,[arg1,arg2]))
+              []
+              [(xs,undefined),(ys,undefined)]
+
 -- | Declares all arguments to be distinct
 distinct :: SMTType a => [SMTExpr a] -> SMTExpr Bool
 distinct = App Distinct
