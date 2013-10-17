@@ -199,6 +199,7 @@ lispToExpr :: FunctionParser -> SortParser
               -> (forall a. SMTType a => SMTExpr a -> b) -> Maybe Sort -> L.Lisp -> Maybe b
 lispToExpr fun sort bound tps f expected l
   = firstJust $
+    [ unmangleBV f expected l ]++
     [ unmangleDeclared f tp l | tp <- Map.elems tps ] ++
     [case l of
         L.Symbol name -> case bound name of
@@ -679,3 +680,28 @@ instance (SMTValue a) => LiftArgs (SMTExpr a) where
   type Unpacked (SMTExpr a) = a
   liftArgs = Const
   unliftArgs = getValue
+
+unmangleBV :: (forall a. SMTType a => SMTExpr a -> b) -> Maybe Sort -> L.Lisp -> Maybe b
+unmangleBV f (Just (BVSort w untyped)) l = do
+  v <- getBVValue w l
+  if untyped
+    then Just $ f (Const (BitVector v) w :: SMTExpr (BitVector BVUntyped))
+    else (reifyNat w $
+#ifdef SMTLIB2_WITH_DATAKINDS
+            \(_::Proxy n)
+#else
+            \(_::n)
+#endif
+            -> Just $ f (Const (BitVector v) () :: SMTExpr (BitVector (BVTyped n))))
+unmangleBV f Nothing l = do
+  (v,len) <- getBVValue' l
+  case len of
+    Nothing -> Nothing
+    Just (rlen::Integer) -> reifyNat rlen $
+#ifdef SMTLIB2_WITH_DATAKINDS
+                  \(_::Proxy n)
+#else
+                  \(_::n)
+#endif
+                    -> Just $ f (Const (BitVector v) () :: SMTExpr (BitVector (BVTyped n)))
+unmangleBV _ _ _ = Nothing

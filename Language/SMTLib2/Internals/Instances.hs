@@ -42,7 +42,7 @@ withSort (BVSort i True) f = f (undefined::BitVector BVUntyped) i
 withArraySort :: [Sort] -> Sort -> (forall i v. (Liftable i,SMTType v) => SMTArray i v -> (ArgAnnotation i,SMTAnnotation v) -> a) -> a
 withArraySort idx v f
   = withArgSort idx $
-    \(_::i) anni 
+    \(_::i) anni
     -> withSort v $
        \(_::vt) annv -> f (undefined::SMTArray i vt) (anni,annv)
 
@@ -58,7 +58,7 @@ withArgSort [i1,i2,i3] f
   = withSort i1 $
     \(_::t1) ann1
      -> withSort i2 $
-        \(_::t2) ann2 
+        \(_::t2) ann2
         -> withSort i3 $
            \(_::t3) ann3 -> f (undefined::(SMTExpr t1,SMTExpr t2,SMTExpr t3)) (ann1,ann2,ann3)
 withArgSort _ _ = error $ "smtlib2: Please provide more cases for withArgSort."
@@ -213,7 +213,7 @@ instance (Args idx,SMTType val) => SMTType (SMTArray idx val) where
   toSort (_::SMTArray i v) (anni,annv) = ArraySort (toSorts (undefined::i) anni) (toSort (undefined::v) annv)
   fromSort _ = SortParser $ \sym rec -> case sym of
     L.List (L.Symbol "Array":args')
-      -> let (idx,v) = splitLast sym $ fmap 
+      -> let (idx,v) = splitLast sym $ fmap
                        (\arg -> case parseSort rec arg rec of
                            Nothing -> error $ "smtlib2: Failed to parse array argument sort "++show arg
                            Just s -> s
@@ -241,7 +241,7 @@ instance (SMTType a) => Liftable [SMTExpr a] where
   inferLiftedAnnotation _ _ ~(~(i,x):xs) = (i,x:(fmap snd xs))
 #ifdef SMTLIB2_WITH_CONSTRAINTS
   getConstraint _ = Dict
-#endif 
+#endif
 
 instance (Liftable a,Liftable b)
          => Liftable (a,b) where
@@ -260,7 +260,7 @@ instance (Liftable a,Liftable b)
 instance (Liftable a,Liftable b,Liftable c)
          => Liftable (a,b,c) where
   type Lifted (a,b,c) i = (Lifted a i,Lifted b i,Lifted c i)
-  getLiftedArgumentAnn ~(x1,x2,x3) i (ann1,ann2,ann3) i_ann 
+  getLiftedArgumentAnn ~(x1,x2,x3) i (ann1,ann2,ann3) i_ann
      = (getLiftedArgumentAnn x1 i ann1 i_ann,
         getLiftedArgumentAnn x2 i ann2 i_ann,
         getLiftedArgumentAnn x3 i ann3 i_ann)
@@ -286,35 +286,40 @@ bv n = L.List [L.Symbol "_"
               ,L.Number $ L.I (fromIntegral n)]
 
 -- | Parses a given SMT bitvector value into a numerical value.
-getBVValue :: (Num a,Bits a,Read a,Integral i) => i -- ^ The number of bits of the value.
-               -> L.Lisp -- ^ The SMT expression representing the value.
-               -> Maybe a
-getBVValue _ (L.Number (L.I v)) = Just (fromInteger v)
-getBVValue len (L.Symbol s) = case T.unpack s of
-  '#':'b':rest -> if genericLength rest == len
-                  then (case readInt 2
-                                 (\x -> x=='0' || x=='1')
-                                 (\x -> if x=='0' then 0 else 1) 
-                                 rest of
-                          [(v,_)] -> Just v
-                          _ -> Nothing)
-                  else Nothing
-  '#':'x':rest -> if (genericLength rest,0) == (len `divMod` 4)
-                  then (case readHex rest of
-                          [(v,_)] -> Just v
-                          _ -> Nothing)
-                  else Nothing
+getBVValue :: (Num a,Bits a,Read a,Integral i) => i
+              -> L.Lisp -- ^ The SMT expression representing the value.
+              -> Maybe a
+getBVValue len l = case getBVValue' l of
+  Nothing -> Nothing
+  Just (v,Nothing) -> Just v
+  Just (v,Just rlen) -> if len==rlen
+                        then Just v
+                        else Nothing
+
+getBVValue' :: (Num a,Bits a,Read a,Integral i) => L.Lisp -- ^ The SMT expression representing the value.
+              -> Maybe (a,Maybe i)
+getBVValue' (L.Number (L.I v)) = Just (fromInteger v,Nothing)
+getBVValue' (L.Symbol s) = case T.unpack s of
+  '#':'b':rest -> let len = genericLength rest
+                  in case readInt 2
+                          (\x -> x=='0' || x=='1')
+                          (\x -> if x=='0' then 0 else 1)
+                          rest of
+                       [(v,_)] -> Just (v,Just len)
+                       _ -> Nothing
+  '#':'x':rest -> let len = (genericLength rest)*4
+                  in case readHex rest of
+                    [(v,_)] -> Just (v,Just len)
+                    _ -> Nothing
   _ -> Nothing
-getBVValue len (L.List [L.Symbol "_",L.Symbol val,L.Number (L.I bits)])
-  = if bits == (fromIntegral len)
-    then (case T.unpack val of
-            'b':'v':num -> Just (read num)
-            _ -> Nothing)
-    else Nothing
-getBVValue _ _ = Nothing
+getBVValue' (L.List [L.Symbol "_",L.Symbol val,L.Number (L.I bits)])
+  = case T.unpack val of
+  'b':'v':num -> Just (read num,Just $ fromIntegral bits)
+  _ -> Nothing
+getBVValue' _ = Nothing
 
 -- | Convert a numerical value into its SMT bitvector representation
-putBVValue :: (Bits a,Ord a,Integral a,Show a,Integral i) 
+putBVValue :: (Bits a,Ord a,Integral a,Show a,Integral i)
                => i -- ^ The number of bits used for the representation
                -> a -- ^ The numerical value
                -> L.Lisp
@@ -322,7 +327,7 @@ putBVValue len x
   | len `mod` 4 == 0 = let v' = if x < 0
                                 then 2^len + x
                                 else x
-                           enc = showHex v' "" 
+                           enc = showHex v' ""
                            l = genericLength enc
                        in L.Symbol $ T.pack $ '#':'x':((genericReplicate ((len `div` 4)-l) '0')++enc)
   | otherwise = L.Symbol (T.pack ('#':'b':[ if testBit x (fromIntegral i)
@@ -448,8 +453,8 @@ instance (Args a,Args b,Args c,Args d) => Args (a,b,c,d) where
           (ann3,r3) = getArgAnnotation (undefined::a3) r2
           (ann4,r4) = getArgAnnotation (undefined::a4) r3
       in ((ann1,ann2,ann3,ann4),r4)
-  toSorts ~(x1,x2,x3,x4) (ann1,ann2,ann3,ann4) 
-    = toSorts x1 ann1 ++ 
+  toSorts ~(x1,x2,x3,x4) (ann1,ann2,ann3,ann4)
+    = toSorts x1 ann1 ++
       toSorts x2 ann2 ++
       toSorts x3 ann3 ++
       toSorts x4 ann4
@@ -500,7 +505,7 @@ instance (Args a,Args b,Args c,Args d,Args e) => Args (a,b,c,d,e) where
           (ann5,r5) = getArgAnnotation (undefined::a5) r4
       in ((ann1,ann2,ann3,ann4,ann5),r5)
   toSorts ~(x1,x2,x3,x4,x5) (ann1,ann2,ann3,ann4,ann5)
-    = toSorts x1 ann1 ++ 
+    = toSorts x1 ann1 ++
       toSorts x2 ann2 ++
       toSorts x3 ann3 ++
       toSorts x4 ann4 ++
@@ -558,13 +563,13 @@ instance (Args a,Args b,Args c,Args d,Args e,Args f) => Args (a,b,c,d,e,f) where
           (ann6,r6) = getArgAnnotation (undefined::a6) r5
       in ((ann1,ann2,ann3,ann4,ann5,ann6),r6)
   toSorts ~(x1,x2,x3,x4,x5,x6) (ann1,ann2,ann3,ann4,ann5,ann6)
-    = toSorts x1 ann1 ++ 
+    = toSorts x1 ann1 ++
       toSorts x2 ann2 ++
       toSorts x3 ann3 ++
       toSorts x4 ann4 ++
       toSorts x5 ann5 ++
       toSorts x6 ann6
-    
+
 instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d,LiftArgs e,LiftArgs f) => LiftArgs (a,b,c,d,e,f) where
   type Unpacked (a,b,c,d,e,f) = (Unpacked a,Unpacked b,Unpacked c,Unpacked d,Unpacked e,Unpacked f)
   liftArgs (x1,x2,x3,x4,x5,x6) ~(a1,a2,a3,a4,a5,a6)
@@ -704,7 +709,7 @@ instance TypeableNat n => SMTType (BitVector (BVTyped n)) where
   fromSort _ = SortParser $ \l _ -> case l of
     L.List [L.Symbol "_"
            ,L.Symbol "BitVec"
-#ifdef SMTLIB2_WITH_DATAKINDS            
+#ifdef SMTLIB2_WITH_DATAKINDS
            ,L.Number (L.I w)] -> if w == reflectNat (Proxy::Proxy n) 0
 #else
            ,L.Number (L.I w)] -> if w == reflectNat (undefined::n) 0
@@ -764,7 +769,7 @@ instance (SMTFunction f,Liftable r,r ~ Lifted (SMTFunArg f) i,
       withUndef :: SMTMap f i r -> (SMTFunArg f -> i -> b) -> b
       withUndef _ f' = f' undefined undefined
   inferResAnnotation x@(SMTMap f) arg_ann
-    = withUndef x $ \ua ui 
+    = withUndef x $ \ua ui
                     -> let (i_ann,a_ann) = inferLiftedAnnotation ua ui arg_ann
                        in (i_ann,inferResAnnotation f a_ann)
     where
@@ -988,7 +993,7 @@ instance SMTFunction (SMTConcat BVUntyped BVUntyped) where
   getFunctionSymbol _ _ = L.Symbol "concat"
   inferResAnnotation _ ~(ann1,ann2) = ann1+ann2
 
-instance (TypeableNat n1) => 
+instance (TypeableNat n1) =>
          SMTFunction (SMTConcat (BVTyped n1) BVUntyped) where
   type SMTFunArg (SMTConcat (BVTyped n1) BVUntyped) = (SMTExpr (BitVector (BVTyped n1)),SMTExpr (BitVector BVUntyped))
   type SMTFunRes (SMTConcat (BVTyped n1) BVUntyped) = BitVector BVUntyped
@@ -1004,7 +1009,7 @@ instance (TypeableNat n1) =>
                                        in ann1+(reflectNat (getProxy1 conc) 0)
 #endif
 
-instance (TypeableNat n1) => 
+instance (TypeableNat n1) =>
          SMTFunction (SMTConcat BVUntyped (BVTyped n1)) where
   type SMTFunArg (SMTConcat BVUntyped (BVTyped n1)) = (SMTExpr (BitVector BVUntyped),SMTExpr (BitVector (BVTyped n1)))
   type SMTFunRes (SMTConcat BVUntyped (BVTyped n1)) = BitVector BVUntyped
@@ -1021,7 +1026,7 @@ instance (TypeableNat n1) =>
 #endif
 
 instance (TypeableNat n1,TypeableNat n2
-         ,TypeableNat (Add n1 n2)) => 
+         ,TypeableNat (Add n1 n2)) =>
          SMTFunction (SMTConcat (BVTyped n1) (BVTyped n2)) where
   type SMTFunArg (SMTConcat (BVTyped n1) (BVTyped n2)) = (SMTExpr (BitVector (BVTyped n1)),SMTExpr (BitVector (BVTyped n2)))
   type SMTFunRes (SMTConcat (BVTyped n1) (BVTyped n2)) = BitVector (BVTyped (Add n1 n2))
@@ -1092,7 +1097,7 @@ instance (SMTRecordType a,SMTType f) => SMTFunction (SMTFieldSel a f) where
   type SMTFunRes (SMTFieldSel a f) = f
   isOverloaded _ = False
   getFunctionSymbol (FieldSel (Field name)) _ = L.Symbol name
-  inferResAnnotation (FieldSel field) ann 
+  inferResAnnotation (FieldSel field) ann
     = getFieldAnn field ann
 
 instance SMTType a => SMTFunction (SMTHead a) where
