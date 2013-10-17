@@ -8,7 +8,7 @@ import Language.SMTLib2.Functions
 import qualified Data.AttoLisp as L
 import qualified Data.Attoparsec.Number as L
 import Data.Typeable
-import Data.Text as T hiding (foldl1,head,zip)
+import Data.Text as T hiding (foldl1,head,zip,length)
 import Data.Array
 import qualified Data.Map as Map (Map,lookup,elems)
 import Data.Monoid
@@ -25,6 +25,9 @@ instance L.ToLisp (SMTExpr t) where
 
 instance Show (SMTExpr t) where
   show x = show $ fst (exprToLisp x 0)
+
+instance Show UntypedExpr where
+  show (UntypedExpr x) = show x
 
 -- | After a successful 'checkSat' call, extract values from the generated model.
 --   The 'ProduceModels' option must be enabled for this.
@@ -236,7 +239,7 @@ lispToExpr fun sort bound tps f expected l
                                   [] -> Just $ App rfun rargs
                                   _ -> Nothing) of
                          Just e -> f e
-                         Nothing -> error $ "smtlib2: Wrong arguments for function "++show fsym
+                         Nothing -> error $ "smtlib2: Wrong arguments for function "++show fsym++": "++show nargs++" (expected: "++show arg_tps++")"
           Just (DefinedParser arg_tps _ parse) -> do
             nargs <- mapM (\(el,tp) -> lispToExpr fun sort bound tps UntypedExpr (Just tp) el)
                      (zip args' arg_tps)
@@ -246,7 +249,7 @@ lispToExpr fun sort bound tps f expected l
                                         [] -> Just $ App rfun rargs
                                         _ -> Nothing) of
                                Just e -> f e
-                               Nothing -> error $ "smtlib2: Wrong arguments for function "++show fsym
+                               Nothing -> error $ "smtlib2: Wrong arguments for function "++show fsym++": "++show nargs
         _ -> Nothing
     ]
   where
@@ -474,7 +477,7 @@ iteParser = nameParser (L.Symbol "ite")
             (OverloadedParser
              (\sorts -> case sorts of
                  [_,s,_] -> Just s
-                 _ -> error "smtlib2: Wrong number of arguments to ite.") $
+                 _ -> error $ "smtlib2: Wrong number of arguments to ite (expected 3, got "++show (length sorts)++".") $
              \_ sort_ret f -> withSort sort_ret $ \(_::t) _ -> Just $ f (ITE :: SMTITE t))
 
 bvCompParser = FunctionParser $ \sym _ _ -> case sym of
