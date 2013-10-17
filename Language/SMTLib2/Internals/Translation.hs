@@ -184,7 +184,8 @@ instance Monoid FunctionParser where
     Just r -> Just r
 
 data FunctionParser'
-  = OverloadedParser { deriveRetSort :: [Sort] -> Maybe Sort
+  = OverloadedParser { sortConstraint :: [Sort] -> Bool
+                     , deriveRetSort :: [Sort] -> Maybe Sort
                      , parseOverloaded :: forall a. [Sort] -> Sort
                                           -> (forall f. SMTFunction f => f -> a)
                                           -> Maybe a }
@@ -201,7 +202,7 @@ lispToExpr fun sort bound tps f expected l
   = firstJust $
     [ unmangleBV f expected l ]++
     [ unmangleDeclared f tp l | tp <- Map.elems tps ] ++
-    [case l of
+    [case preprocessHack l of
         L.Symbol name -> case bound name of
           Nothing -> Nothing
           Just subst -> entype (\subst' -> Just $ f subst') subst
@@ -222,9 +223,9 @@ lispToExpr fun sort bound tps f expected l
           Just _ -> error "smtlib2: as-array can't handle overloaded functions."
         L.List (fsym:args') -> case parseFun fun fsym fun sort of
           Nothing -> Nothing
-          Just (OverloadedParser derive parse)
+          Just (OverloadedParser constr derive parse)
             -> do
-            nargs <- lispToExprs args'
+            nargs <- lispToExprs constr args'
             let arg_tps = fmap (entype $ \(expr::SMTExpr t)
                                          -> toSort (undefined::t) (extractAnnotation expr)
                                ) nargs
@@ -240,7 +241,7 @@ lispToExpr fun sort bound tps f expected l
                                   [] -> Just $ App rfun rargs
                                   _ -> Nothing) of
                          Just e -> f e
-                         Nothing -> error $ "smtlib2: Wrong arguments for function "++show fsym++": "++show nargs++" (expected: "++show arg_tps++")"
+                         Nothing -> error $ "smtlib2: Wrong arguments for function "++show fsym++": "++show nargs++" ("++show arg_tps++")"
           Just (DefinedParser arg_tps _ parse) -> do
             nargs <- mapM (\(el,tp) -> lispToExpr fun sort bound tps UntypedExpr (Just tp) el)
                      (zip args' arg_tps)
@@ -254,7 +255,33 @@ lispToExpr fun sort bound tps f expected l
         _ -> Nothing
     ]
   where
-    lispToExprs = mapM $ \arg -> lispToExpr fun sort bound tps (UntypedExpr) Nothing arg
+    lispToExprs constr exprs = do
+      res <- mapM (\arg -> lispToExpr fun sort bound tps (UntypedExpr) Nothing arg) exprs
+      let sorts = fmap (entype exprSort) res
+      if constr sorts
+        then return res
+        else (case generalizeSorts sorts of
+                 Just sorts' -> mapM (\(arg,sort') -> lispToExpr fun sort bound tps (UntypedExpr) (Just sort') arg) (zip exprs sorts')
+                 Nothing -> return res)
+    preprocessHack (L.List ((L.Symbol "concat"):args)) = foldl1 (\expr arg -> L.List [L.Symbol "concat",expr,arg]) args
+    preprocessHack x = x
+
+generalizeSort :: Sort -> Maybe Sort
+generalizeSort (BVSort i False) = Just $ BVSort i True
+generalizeSort _ = Nothing
+
+generalizeSorts :: [Sort] -> Maybe [Sort]
+generalizeSorts [] = Nothing
+generalizeSorts (x:xs) = case generalizeSort x of
+  Nothing -> case generalizeSorts xs of
+    Just xs' -> Just $ x:xs'
+    Nothing -> Nothing
+  Just x' -> case generalizeSorts xs of
+    Nothing -> Just $ x':xs
+    Just xs' -> Just $ x':xs'
+
+exprSort :: SMTType a => SMTExpr a -> Sort
+exprSort (expr::SMTExpr a) = toSort (undefined::a) (extractAnnotation expr)
 
 quantToExpr :: (forall a. Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool)
                -> FunctionParser -> SortParser
@@ -336,6 +363,10 @@ nameParser name sub = FunctionParser (\sym _ _ -> if sym==name
                                                   then Just sub
                                                   else Nothing)
 
+allEqConstraint :: [Sort] -> Bool
+allEqConstraint (x:xs) = all (==x) xs
+allEqConstraint [] = True
+
 simpleParser :: (SMTFunction f,Unit (ArgAnnotation (SMTFunArg f)),Unit (SMTAnnotation (SMTFunRes f))) => f -> FunctionParser
 simpleParser fun
   = let fsym = getFunctionSymbol fun unit
@@ -393,7 +424,7 @@ eqParser,
   extractParser,
   sigParser :: FunctionParser
 eqParser = nameParser (L.Symbol "=") $
-           OverloadedParser (const $ Just $ toSort (undefined::Bool) ()) $
+           OverloadedParser allEqConstraint (const $ Just $ toSort (undefined::Bool) ()) $
            \sort_arg _ f -> withFirstArgSort "=" sort_arg $
                             \(_::t) _ -> Just $ f (Eq :: SMTEq t)
 
@@ -407,7 +438,8 @@ mapParser = FunctionParser v
         Nothing -> Nothing
         Just (DefinedParser _ ret_sig parse)
           -> Just $ OverloadedParser
-            { deriveRetSort = \arg -> case arg of
+            { sortConstraint = const True
+            , deriveRetSort = \arg -> case arg of
                  ArraySort i _:_ -> Just (ArraySort i ret_sig)
                  _ -> error "smtlib2: map function must have arrays as arguments."
             , parseOverloaded = \_ ret f
@@ -434,20 +466,20 @@ ordOpParser = FunctionParser $ \sym _ _ -> case sym of
   _ -> Nothing
   where
     p :: L.Lisp -> (forall g. SMTOrdOp g) -> Maybe FunctionParser'
-    p sym op = Just $ OverloadedParser (const $ Just $ toSort (undefined::Bool) ()) $
+    p sym op = Just $ OverloadedParser allEqConstraint (const $ Just $ toSort (undefined::Bool) ()) $
                \sort_arg _ f -> withFirstArgSort sym sort_arg $ \(_::t) _ -> Just $ f (op::SMTOrdOp t)
 
 arithOpParser = FunctionParser $ \sym _ _ -> case sym of
-  L.Symbol "+" -> Just $ OverloadedParser (\sorts -> Just (head sorts)) $
+  L.Symbol "+" -> Just $ OverloadedParser allEqConstraint (\sorts -> Just (head sorts)) $
                   \_ sort_ret f
                   -> withSort sort_ret $ \(_::t) _ -> Just $ f (Plus::SMTArithOp t)
-  L.Symbol "*" -> Just $ OverloadedParser (\sorts -> Just (head sorts)) $
+  L.Symbol "*" -> Just $ OverloadedParser allEqConstraint (\sorts -> Just (head sorts)) $
                   \_ sort_ret f
                   -> withSort sort_ret $ \(_::t) _ -> Just $ f (Mult::SMTArithOp t)
   _ -> Nothing
 
 minusParser = nameParser (L.Symbol "-")
-              (OverloadedParser (\sorts -> Just (head sorts)) $
+              (OverloadedParser allEqConstraint (\sorts -> Just (head sorts)) $
                \sort_arg _ f -> case sort_arg of
                  [] -> error "smtlib2: minus function needs at least one argument"
                  [s] -> withSort s $ \(_::t) _ -> Just $ f (Neg::SMTNeg t)
@@ -460,20 +492,20 @@ intArithParser = mconcat [simpleParser Div
 divideParser = simpleParser Divide
 
 absParser = nameParser (L.Symbol "abs")
-            (OverloadedParser (\sorts -> Just $ head sorts) $
+            (OverloadedParser (const True) (\sorts -> Just $ head sorts) $
              \_ sort_ret f
              -> withSort sort_ret $ \(_::t) _ -> Just $ f (Abs::SMTAbs t))
 
 logicParser = mconcat $
               (simpleParser Not)
               :[ nameParser (L.Symbol name)
-                 (OverloadedParser
+                 (OverloadedParser (const True)
                   (const $ Just $ toSort (undefined::Bool) ())
                   $ \_ _ f -> Just $ f p)
                | (name,p) <- [("and",And),("or",Or),("xor",XOr),("=>",Implies)]]
 
 distinctParser = nameParser (L.Symbol "distinct")
-                 (OverloadedParser
+                 (OverloadedParser allEqConstraint
                   (const $ Just $ toSort (undefined::Bool) ()) $
                   \sort_arg _ f -> withFirstArgSort "distinct" sort_arg $ \(_::t) _ -> Just $ f (Distinct::SMTDistinct t))
 
@@ -481,7 +513,7 @@ toRealParser = simpleParser ToReal
 toIntParser = simpleParser ToInt
 
 iteParser = nameParser (L.Symbol "ite")
-            (OverloadedParser
+            (OverloadedParser allEqConstraint
              (\sorts -> case sorts of
                  [_,s,_] -> Just s
                  _ -> error $ "smtlib2: Wrong number of arguments to ite (expected 3, got "++show (length sorts)++".") $
@@ -499,7 +531,7 @@ bvCompParser = FunctionParser $ \sym _ _ -> case sym of
   _ -> Nothing
   where
     p :: (forall g. SMTBVComp g) -> Maybe FunctionParser'
-    p op = Just $ OverloadedParser (const $ Just $ toSort (undefined::Bool) ()) $
+    p op = Just $ OverloadedParser allEqConstraint (const $ Just $ toSort (undefined::Bool) ()) $
            \sort_arg _ f -> case sort_arg of
 #ifdef SMTLIB2_WITH_DATAKINDS
              (BVSort i False:_) -> reifyNat i $ \(_::Proxy n) -> Just $ f (op::SMTBVComp (BVTyped n))
@@ -526,7 +558,7 @@ bvBinOpParser = FunctionParser $ \sym _ _ -> case sym of
   _ -> Nothing
   where
     p :: (forall g. SMTBVBinOp g) -> Maybe FunctionParser'
-    p op = Just $ OverloadedParser (Just . head) $
+    p op = Just $ OverloadedParser allEqConstraint (Just . head) $
            \_ sort_ret f -> case sort_ret of
 #ifdef SMTLIB2_WITH_DATAKINDS
               BVSort i False -> reifyNat i (\(_::Proxy n) -> Just $ f (op::SMTBVBinOp (BVTyped n)))
@@ -538,7 +570,7 @@ bvBinOpParser = FunctionParser $ \sym _ _ -> case sym of
 
 bvUnOpParser = FunctionParser $ \sym _ _ -> case sym of
   L.Symbol "bvnot"
-    -> Just $ OverloadedParser (Just . head) $
+    -> Just $ OverloadedParser (const True) (Just . head) $
        \_ sort_ret f -> case sort_ret of
 #ifdef SMTLIB2_WITH_DATAKINDS
         BVSort i False -> reifyNat i $ \(_::Proxy n) -> Just $ f (BVNot::SMTBVUnOp (BVTyped n))
@@ -548,7 +580,7 @@ bvUnOpParser = FunctionParser $ \sym _ _ -> case sym of
         BVSort _ True -> Just $ f (BVNot::SMTBVUnOp BVUntyped)
         _ -> Nothing
   L.Symbol "bvneg"
-    -> Just $ OverloadedParser (Just . head) $
+    -> Just $ OverloadedParser (const True) (Just . head) $
       \_ sort_ret f -> case sort_ret of
 #ifdef SMTLIB2_WITH_DATAKINDS
         BVSort i False -> reifyNat i $ \(_::Proxy n) -> Just $ f (BVNeg::SMTBVUnOp (BVTyped n))
@@ -560,9 +592,10 @@ bvUnOpParser = FunctionParser $ \sym _ _ -> case sym of
   _ -> Nothing
 
 selectParser = nameParser (L.Symbol "select")
-               (OverloadedParser (\sort_arg -> case sort_arg of
-                                     (ArraySort _ vsort:_) -> Just vsort
-                                     _ -> error "smtlib2: Wrong arguments for select function.") $
+               (OverloadedParser (const True)
+                (\sort_arg -> case sort_arg of
+                    (ArraySort _ vsort:_) -> Just vsort
+                    _ -> error "smtlib2: Wrong arguments for select function.") $
                 \sort_arg sort_ret f -> case sort_arg of
                   (ArraySort isort1 _:_) -> withArgSort isort1 $
                                             \(_::i) _ -> withSort sort_ret $
@@ -570,9 +603,10 @@ selectParser = nameParser (L.Symbol "select")
                   _ -> error "smtlib2: Wrong arguments for select function.")
 
 storeParser = nameParser (L.Symbol "store")
-              (OverloadedParser (\sort_arg -> case sort_arg of
-                                    s:_ -> Just s
-                                    _ -> error "smtlib2: Wrong arguments for store function.") $
+              (OverloadedParser (const True)
+               (\sort_arg -> case sort_arg of
+                   s:_ -> Just s
+                   _ -> error "smtlib2: Wrong arguments for store function.") $
                \_ sort_ret f -> case sort_ret of
                  ArraySort idx val -> withArraySort idx val $ \(_::SMTArray i v) _ -> Just $ f (Store::SMTStore i v)
                  _ -> error "smtlib2: Wrong arguments for store function.")
@@ -592,7 +626,7 @@ constArrayParser = FunctionParser g
     g _ _ _ = Nothing
 
 concatParser = nameParser (L.Symbol "concat")
-               (OverloadedParser
+               (OverloadedParser (const True)
                 (\args' -> let lenSum = sum $ fmap (\(BVSort i _) -> i) args'
                                untypedRes = any (\(BVSort _ isUntyped) -> isUntyped) args'
                            in Just $ BVSort lenSum untypedRes)
@@ -631,7 +665,7 @@ extractParser = FunctionParser g
               ,L.Symbol "extract"
               ,L.Number (L.I u)
               ,L.Number (L.I l)]) _ _
-      = Just $ OverloadedParser
+      = Just $ OverloadedParser (const True)
         (\args' -> case args' of
             [BVSort t untyped] -> if u < t && l >= 0 && l <= u
                                   then Just $ BVSort (u-l+1) untyped
@@ -672,7 +706,7 @@ sigParser = FunctionParser g
       parser <- parseFun rec fsym rec sort
       return $ DefinedParser rsig rret $
         \f -> case parser of
-          OverloadedParser _ parse -> parse rsig rret f
+          OverloadedParser _ _ parse -> parse rsig rret f
           DefinedParser _ _ parse -> parse f
     g _ _ _ = Nothing
 

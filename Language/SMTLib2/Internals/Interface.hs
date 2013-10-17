@@ -692,7 +692,7 @@ getUnsatCore = do
 commonTheorems :: FunctionParser
 commonTheorems = mconcat
                  [nameParser (L.Symbol "|unit-resolution|")
-                  (OverloadedParser
+                  (OverloadedParser (const True)
                    (const $ Just $ toSort (undefined::Bool) ())
                    $ \_ _ f -> Just $ f (SMTFun "|unit-resolution|" () :: SMTFun [SMTExpr Bool] Bool))
                  ,simpleParser (SMTFun "asserted" () :: SMTFun (SMTExpr Bool) Bool)

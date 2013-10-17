@@ -175,6 +175,16 @@ data Sort where
   ArraySort :: [Sort] -> Sort -> Sort
   BVSort :: Integer -> Bool -> Sort
 
+instance Eq Sort where
+  (==) (Sort x _) (Sort y _) = let mkEqual :: (Typeable a,Typeable b) => a -> b -> Maybe a
+                                   mkEqual _ x = cast x
+                               in case mkEqual x y of
+                                 Nothing -> False
+                                 Just _ -> True
+  (==) (ArraySort idx1 res1) (ArraySort idx2 res2) = (idx1==idx2) && (res1==res2)
+  (==) (BVSort w1 unt1) (BVSort w2 unt2) = (w1==w2) && (unt1==unt2)
+  (==) _ _ = False
+
 newtype SortParser = SortParser { parseSort :: L.Lisp -> SortParser -> Maybe Sort }
 
 instance Monoid SortParser where
