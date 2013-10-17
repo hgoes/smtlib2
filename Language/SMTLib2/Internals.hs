@@ -173,7 +173,7 @@ entype f (UntypedExpr x) = f x
 data Sort where
   Sort :: SMTType t => t -> SMTAnnotation t -> Sort
   ArraySort :: [Sort] -> Sort -> Sort
-  BVSort :: Integer -> Sort
+  BVSort :: Integer -> Bool -> Sort
 
 newtype SortParser = SortParser { parseSort :: L.Lisp -> SortParser -> Maybe Sort }
 

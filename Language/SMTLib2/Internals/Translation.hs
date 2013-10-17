@@ -8,7 +8,7 @@ import Language.SMTLib2.Functions
 import qualified Data.AttoLisp as L
 import qualified Data.Attoparsec.Number as L
 import Data.Typeable
-import Data.Text as T hiding (foldl1,head,zip,length)
+import Data.Text as T (Text)
 import Data.Array
 import qualified Data.Map as Map (Map,lookup,elems)
 import Data.Monoid
@@ -321,7 +321,13 @@ convertLetStruct f x
     (\(_::t) -> f (convertLetStructT x :: SMTExpr t)) x
 
 withFirstArgSort :: L.Lisp -> [Sort] -> (forall t. SMTType t => t -> SMTAnnotation t -> a) -> a
-withFirstArgSort _ (s:_) f = withSort s f
+withFirstArgSort _ (s:rest) f = case s of
+  BVSort i False -> if any (\sort -> case sort of
+                               BVSort _ True -> True
+                               _ -> False) rest
+                    then withSort (BVSort i True) f
+                    else withSort s f
+  _ -> withSort s f
 withFirstArgSort sym [] _ = error $ "smtlib2: Function "++show sym++" needs at least one argument."
 
 nameParser :: L.Lisp -> FunctionParser' -> FunctionParser
@@ -495,10 +501,11 @@ bvCompParser = FunctionParser $ \sym _ _ -> case sym of
     p op = Just $ OverloadedParser (const $ Just $ toSort (undefined::Bool) ()) $
            \sort_arg _ f -> case sort_arg of
 #ifdef SMTLIB2_WITH_DATAKINDS
-             (BVSort i:_) -> reifyNat i $ \(_::Proxy n) -> Just $ f (op::SMTBVComp (BVTyped n))
+             (BVSort i False:_) -> reifyNat i $ \(_::Proxy n) -> Just $ f (op::SMTBVComp (BVTyped n))
 #else
-             (BVSort i:_) -> reifyNat i $ \(_::n) -> Just $ f (op::SMTBVComp (BVTyped n))
+             (BVSort i False:_) -> reifyNat i $ \(_::n) -> Just $ f (op::SMTBVComp (BVTyped n))
 #endif
+             (BVSort _ True:_) -> Just $ f (op::SMTBVComp BVUntyped)
              _ -> error "smtlib2: Bitvector comparision needs bitvector arguments."
 
 bvBinOpParser = FunctionParser $ \sym _ _ -> case sym of
@@ -521,10 +528,11 @@ bvBinOpParser = FunctionParser $ \sym _ _ -> case sym of
     p op = Just $ OverloadedParser (Just . head) $
            \_ sort_ret f -> case sort_ret of
 #ifdef SMTLIB2_WITH_DATAKINDS
-              BVSort i -> reifyNat i (\(_::Proxy n) -> Just $ f (op::SMTBVBinOp (BVTyped n)))
+              BVSort i False -> reifyNat i (\(_::Proxy n) -> Just $ f (op::SMTBVBinOp (BVTyped n)))
 #else
-              BVSort i -> reifyNat i (\(_::n) -> Just $ f (op::SMTBVBinOp (BVTyped n)))
+              BVSort i False -> reifyNat i (\(_::n) -> Just $ f (op::SMTBVBinOp (BVTyped n)))
 #endif
+              BVSort _ True -> Just $ f (op::SMTBVBinOp BVUntyped)
               _ -> Nothing
 
 bvUnOpParser = FunctionParser $ \sym _ _ -> case sym of
@@ -532,19 +540,21 @@ bvUnOpParser = FunctionParser $ \sym _ _ -> case sym of
     -> Just $ OverloadedParser (Just . head) $
        \_ sort_ret f -> case sort_ret of
 #ifdef SMTLIB2_WITH_DATAKINDS
-        BVSort i -> reifyNat i $ \(_::Proxy n) -> Just $ f (BVNot::SMTBVUnOp (BVTyped n))
+        BVSort i False -> reifyNat i $ \(_::Proxy n) -> Just $ f (BVNot::SMTBVUnOp (BVTyped n))
 #else
-        BVSort i -> reifyNat i $ \(_::n) -> Just $ f (BVNot::SMTBVUnOp (BVTyped n))
+        BVSort i False -> reifyNat i $ \(_::n) -> Just $ f (BVNot::SMTBVUnOp (BVTyped n))
 #endif
+        BVSort _ True -> Just $ f (BVNot::SMTBVUnOp BVUntyped)
         _ -> Nothing
   L.Symbol "bvneg"
     -> Just $ OverloadedParser (Just . head) $
       \_ sort_ret f -> case sort_ret of
 #ifdef SMTLIB2_WITH_DATAKINDS
-        BVSort i -> reifyNat i $ \(_::Proxy n) -> Just $ f (BVNeg::SMTBVUnOp (BVTyped n))
+        BVSort i False -> reifyNat i $ \(_::Proxy n) -> Just $ f (BVNeg::SMTBVUnOp (BVTyped n))
 #else
-        BVSort i -> reifyNat i $ \(_::n) -> Just $ f (BVNeg::SMTBVUnOp (BVTyped n))
+        BVSort i False -> reifyNat i $ \(_::n) -> Just $ f (BVNeg::SMTBVUnOp (BVTyped n))
 #endif
+        BVSort _ True -> Just $ f (BVNeg::SMTBVUnOp BVUntyped)
         _ -> Nothing
   _ -> Nothing
 
@@ -582,9 +592,11 @@ constArrayParser = FunctionParser g
 
 concatParser = nameParser (L.Symbol "concat")
                (OverloadedParser
-                (\args' -> Just $ BVSort (sum $ fmap (\(BVSort i) -> i) args'))
+                (\args' -> let lenSum = sum $ fmap (\(BVSort i _) -> i) args'
+                               untypedRes = any (\(BVSort _ isUntyped) -> isUntyped) args'
+                           in Just $ BVSort lenSum untypedRes)
                 (\sort_arg _ f -> case sort_arg of
-                    [BVSort i1,BVSort i2]
+                    [BVSort i1 False,BVSort i2 False]
                       -> reifySum i1 i2 $
 #ifdef SMTLIB2_WITH_DATAKINDS
                         \(_::Proxy n1) (_::Proxy n2) _
@@ -592,6 +604,24 @@ concatParser = nameParser (L.Symbol "concat")
                         \(_::n1) (_::n2) _
 #endif
                           -> Just $ f (BVConcat::SMTConcat (BVTyped n1) (BVTyped n2))
+                    [BVSort _ True,BVSort i2 False]
+                      -> reifyNat i2 $
+#ifdef SMTLIB2_WITH_DATAKINDS
+                        \(_::Proxy n2)
+#else
+                        \(_::n2)
+#endif
+                          -> Just $ f (BVConcat::SMTConcat BVUntyped (BVTyped n2))
+                    [BVSort i1 False,BVSort _ True]
+                      -> reifyNat i1 $
+#ifdef SMTLIB2_WITH_DATAKINDS
+                        \(_::Proxy n1)
+#else
+                        \(_::n1)
+#endif
+                          -> Just $ f (BVConcat::SMTConcat (BVTyped n1) BVUntyped)
+                    [BVSort _ True,BVSort _ True]
+                      -> Just $ f (BVConcat::SMTConcat BVUntyped BVUntyped)
                     _ -> Nothing))
 
 extractParser = FunctionParser g
@@ -602,29 +632,33 @@ extractParser = FunctionParser g
               ,L.Number (L.I l)]) _ _
       = Just $ OverloadedParser
         (\args' -> case args' of
-            [BVSort t] -> if u < t && l >= 0 && l <= u
-                          then Just $ BVSort (u-l+1)
-                          else error "smtlib2: Invalid parameters for extract."
+            [BVSort t untyped] -> if u < t && l >= 0 && l <= u
+                                  then Just $ BVSort (u-l+1) untyped
+                                  else error "smtlib2: Invalid parameters for extract."
             _ -> error "smtlib2: Invalid parameters for extract.")
         (\sort_arg sort_ret f -> case sort_arg of
-            [BVSort t] -> case sort_ret of
-              BVSort r -> if r+l == u+1
-                          then reifyNat l $
+            [BVSort t untA] -> case sort_ret of
+              BVSort r untR -> if r+l == u+1 && (untR == untA)
+                                then reifyNat l $
 #ifdef SMTLIB2_WITH_DATAKINDS
-                               \(_::Proxy start)
-                                -> reifyNat (u-l+1) $
-                                   \(_::Proxy len)
-                                    -> reifyNat t $
-                                       \(_::Proxy tp)
+                                     \(_::Proxy start)
+                                      -> reifyNat (u-l+1) $
+                                         \(_::Proxy len)
+                                          -> if not untR
+                                             then reifyNat t $
+                                                   \(_::Proxy tp)
+                                                    -> Just $ f (BVExtract::SMTExtract (BVTyped tp) start len)
+                                             else Just $ f (BVExtract::SMTExtract BVUntyped start len)
 #else
-                               \(_::start)
-                                -> reifyNat (u-l+1) $
-                                   \(_::len)
-                                    -> reifyNat t $
-                                       \(_::tp)
+                                     \(_::start)
+                                      -> reifyNat (u-l+1) $
+                                         \(_::len)
+                                          -> if not untR
+                                             then reifyNat t $
+                                                   \(_::tp) -> Just $ f (BVExtract::SMTExtract (BVTyped tp) start len)
+                                             else Just $ f (BVExtract::SMTExtract BVUntyped start len)
 #endif
-                                        -> Just $ f (BVExtract::SMTExtract (BVTyped tp) start len)
-                          else error "smtlib2: Invalid parameters for extract."
+                                else error "smtlib2: Invalid parameters for extract."
               _ -> error "smtlib2: Wrong return type for extract."
             _ -> error "smtlib2: Wrong argument type for extract.")
     g _ _ _ = Nothing

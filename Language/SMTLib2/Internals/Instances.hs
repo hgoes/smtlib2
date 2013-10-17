@@ -33,10 +33,11 @@ withSort :: Sort -> (forall t. SMTType t => t -> SMTAnnotation t -> a) -> a
 withSort (Sort u ann) f = f u ann
 withSort (ArraySort i v) f = withArraySort i v f
 #ifdef SMTLIB2_WITH_DATAKINDS
-withSort (BVSort i) f = reifyNat i $ \(_::Proxy n) -> f (undefined::BitVector (BVTyped n)) ()
+withSort (BVSort i False) f = reifyNat i $ \(_::Proxy n) -> f (undefined::BitVector (BVTyped n)) ()
 #else
-withSort (BVSort i) f = reifyNat i $ \(_::n) -> f (undefined::BitVector (BVTyped n)) ()
+withSort (BVSort i False) f = reifyNat i $ \(_::n) -> f (undefined::BitVector (BVTyped n)) ()
 #endif
+withSort (BVSort i True) f = f (undefined::BitVector BVUntyped) i
 
 withArraySort :: [Sort] -> Sort -> (forall i v. (Liftable i,SMTType v) => SMTArray i v -> (ArgAnnotation i,SMTAnnotation v) -> a) -> a
 withArraySort idx v f
@@ -63,7 +64,7 @@ withArgSort [i1,i2,i3] f
 withArgSort _ _ = error $ "smtlib2: Please provide more cases for withArgSort."
 
 withBVSort :: Sort -> (Integer -> a) -> Maybe a
-withBVSort (BVSort i) f = Just (f i)
+withBVSort (BVSort i _) f = Just (f i)
 withBVSort _ _ = Nothing
 
 instance Show Sort where
@@ -641,11 +642,11 @@ instance SMTType (BitVector BVUntyped) where
   getSort _ l = bv l
   getSortBase _ = error "smtlib2: No getSortBase implementation for BitVector"
   declareType = defaultDeclareValue
-  toSort _ l = BVSort l
+  toSort _ l = BVSort l True
   fromSort _ = SortParser $ \l _ -> case l of
     L.List [L.Symbol "_"
            ,L.Symbol "BitVec"
-           ,L.Number (L.I w)] -> Just (BVSort w)
+           ,L.Number (L.I w)] -> Just (BVSort w True)
     _ -> Nothing
 
 instance SMTValue (BitVector BVUntyped) where
@@ -662,9 +663,9 @@ instance TypeableNat n => SMTType (BitVector (BVTyped n)) where
   getSortBase _ = error "smtlib2: No getSortBase implementation for BitVector"
   declareType = defaultDeclareValue
 #ifdef SMTLIB2_WITH_DATAKINDS
-  toSort _ _ = BVSort (reflectNat (Proxy::Proxy n) 0)
+  toSort _ _ = BVSort (reflectNat (Proxy::Proxy n) 0) False
 #else
-  toSort _ _ = BVSort (reflectNat (undefined::n) 0)
+  toSort _ _ = BVSort (reflectNat (undefined::n) 0) False
 #endif
   fromSort _ = SortParser $ \l _ -> case l of
     L.List [L.Symbol "_"
@@ -674,7 +675,7 @@ instance TypeableNat n => SMTType (BitVector (BVTyped n)) where
 #else
            ,L.Number (L.I w)] -> if w == reflectNat (undefined::n) 0
 #endif
-                                 then Just (BVSort w)
+                                 then Just (BVSort w False)
                                  else Nothing
     _ -> Nothing
 
@@ -952,6 +953,38 @@ instance SMTFunction (SMTConcat BVUntyped BVUntyped) where
   isOverloaded _ = True
   getFunctionSymbol _ _ = L.Symbol "concat"
   inferResAnnotation _ ~(ann1,ann2) = ann1+ann2
+
+instance (TypeableNat n1) => 
+         SMTFunction (SMTConcat (BVTyped n1) BVUntyped) where
+  type SMTFunArg (SMTConcat (BVTyped n1) BVUntyped) = (SMTExpr (BitVector (BVTyped n1)),SMTExpr (BitVector BVUntyped))
+  type SMTFunRes (SMTConcat (BVTyped n1) BVUntyped) = BitVector BVUntyped
+  isOverloaded _ = True
+  getFunctionSymbol _ _ = L.Symbol "concat"
+#ifdef SMTLIB2_WITH_DATAKINDS
+  inferResAnnotation conc ~((),ann1) = let getProxy1 :: SMTConcat (BVTyped n1) a -> Proxy n1
+                                           getProxy1 _ = Proxy
+                                       in ann1+(reflectNat (getProxy1 conc) 0)
+#else
+  inferResAnnotation conc ~((),ann1) = let getProxy1 :: SMTConcat (BVTyped n1) a -> n1
+                                           getProxy1 _ = undefined
+                                       in ann1+(reflectNat (getProxy1 conc) 0)
+#endif
+
+instance (TypeableNat n1) => 
+         SMTFunction (SMTConcat BVUntyped (BVTyped n1)) where
+  type SMTFunArg (SMTConcat BVUntyped (BVTyped n1)) = (SMTExpr (BitVector BVUntyped),SMTExpr (BitVector (BVTyped n1)))
+  type SMTFunRes (SMTConcat BVUntyped (BVTyped n1)) = BitVector BVUntyped
+  isOverloaded _ = True
+  getFunctionSymbol _ _ = L.Symbol "concat"
+#ifdef SMTLIB2_WITH_DATAKINDS
+  inferResAnnotation conc ~(ann1,()) = let getProxy2 :: SMTConcat a (BVTyped n1) -> Proxy n1
+                                           getProxy2 _ = Proxy
+                                       in ann1+(reflectNat (getProxy2 conc) 0)
+#else
+  inferResAnnotation conc ~(ann1,()) = let getProxy2 :: SMTConcat a (BVTyped n1) -> n1
+                                           getProxy2 _ = undefined
+                                       in ann1+(reflectNat (getProxy2 conc) 0)
+#endif
 
 instance (TypeableNat n1,TypeableNat n2
          ,TypeableNat (Add n1 n2)) => 
