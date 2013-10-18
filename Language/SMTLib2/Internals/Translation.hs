@@ -342,7 +342,7 @@ parseLetStruct _ _ _ _ _ (el:_) _ = error $ "smtlib2: Invalid entry "++show el++
 
 extractType :: (forall a. SMTType a => a -> b) -> LetStruct -> b
 extractType f (EndLet x) = f (getUndef x)
-extractType f (LetStruct _ _ g) = extractType f (g $ error "smtlib2: Don't evaluate the argument to the let-function.")
+extractType f (LetStruct _ expr g) = extractType f (g expr)
 
 convertLetStructT :: SMTType a => LetStruct -> SMTExpr a
 convertLetStructT (EndLet x) = case gcast x of
