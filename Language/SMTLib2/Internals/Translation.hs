@@ -268,6 +268,13 @@ lispToExpr fun sort bound tps f expected l
 
 generalizeSort :: Sort -> Maybe Sort
 generalizeSort (BVSort i False) = Just $ BVSort i True
+generalizeSort (ArraySort idx cont) = case generalizeSorts idx of
+  Just idx' -> case generalizeSort cont of
+    Just cont' -> Just $ ArraySort idx' cont'
+    Nothing -> Just $ ArraySort idx' cont
+  Nothing -> case generalizeSort cont of
+    Just cont' -> Just $ ArraySort idx cont'
+    Nothing -> Nothing
 generalizeSort _ = Nothing
 
 generalizeSorts :: [Sort] -> Maybe [Sort]
@@ -603,13 +610,19 @@ selectParser = nameParser (L.Symbol "select")
                   _ -> error "smtlib2: Wrong arguments for select function.")
 
 storeParser = nameParser (L.Symbol "store")
-              (OverloadedParser (const True)
+              (OverloadedParser (\tps -> case tps of
+                                    (ArraySort idx res):tps' -> checkArraySort idx res tps'
+                                    _ -> False)
                (\sort_arg -> case sort_arg of
                    s:_ -> Just s
                    _ -> error "smtlib2: Wrong arguments for store function.") $
                \_ sort_ret f -> case sort_ret of
                  ArraySort idx val -> withArraySort idx val $ \(_::SMTArray i v) _ -> Just $ f (Store::SMTStore i v)
-                 _ -> error "smtlib2: Wrong arguments for store function.")
+                 _ -> error "smtlib2: Wrong return type for store function.")
+  where
+    checkArraySort [] cont [tp] = cont==tp
+    checkArraySort (arg:args) cont (tp:tps) = arg==tp && checkArraySort args cont tps
+    checkArraySort _ _ _ = False
 
 constArrayParser = FunctionParser g
   where
