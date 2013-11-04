@@ -23,7 +23,7 @@ Library
     Build-Depends:      tagged
     CPP-Options: -DSMTLIB2_WITH_DATAKINDS
   
-  GHC-Options: -fwarn-unused-imports -Wall
+  GHC-Options: -fwarn-unused-imports
   Exposed-Modules:
     Language.SMTLib2
     Language.SMTLib2.Solver

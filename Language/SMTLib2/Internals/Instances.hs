@@ -594,7 +594,7 @@ instance Args a => Args [a] where
     _ -> let args_heads = fmap (\(xs,anns) -> (head xs,head anns)) args
              args_tails = fmap (\(xs,anns) -> (tail xs,tail anns)) args
              ~(s1,res_heads) = foldsExprs f s args_heads
-             ~(s2,res_tails) = foldsExprs f s args_tails
+             ~(s2,res_tails) = foldsExprs f s1 args_tails
          in (s2,zipWith (:) res_heads res_tails)
   extractArgAnnotation = fmap extractArgAnnotation
   toArgs [] = Just ([],[])
@@ -746,6 +746,9 @@ instance SMTType a => SMTFunction (SMTEq a) where
   inferResAnnotation _ _ = ()
   optimizeCall _ [] = Just (Const True ())
   optimizeCall _ [_] = Just (Const True ())
+  optimizeCall _ [x,y] = case eqExpr 0 x y of
+    Nothing -> Nothing
+    Just res -> Just (Const res ())
   optimizeCall _ _ = Nothing
 
 instance (SMTFunction f,Liftable r,r ~ Lifted (SMTFunArg f) i,
@@ -848,11 +851,41 @@ instance SMTFunction SMTLogic where
   getFunctionSymbol Implies _ = L.Symbol "=>"
   inferResAnnotation _ _ = ()
   optimizeCall _ [x] = Just x
-  optimizeCall And [] = Just $ Const True ()
-  optimizeCall Or [] = Just $ Const False ()
+  optimizeCall And xs = case removeItems (\e -> case e of
+                                             Const False _ -> True
+                                             _ -> False) xs of
+                          Just _ -> Just $ Const False ()
+                          Nothing -> case removeItems (\e -> case e of
+                                                          Const True _ -> True
+                                                          _ -> False) xs of
+                                       Nothing -> Nothing
+                                       Just [] -> Just $ Const True ()
+                                       Just [x] -> Just x
+                                       Just xs' -> Just $ App And xs'
+  optimizeCall Or xs = case removeItems (\e -> case e of
+                                            Const True _ -> True
+                                            _ -> False) xs of
+                         Just _ -> Just $ Const True ()
+                         Nothing -> case removeItems (\e -> case e of
+                                                         Const False _ -> True
+                                                         _ -> False) xs of
+                                      Nothing -> Nothing
+                                      Just [] -> Just $ Const False ()
+                                      Just [x] -> Just x
+                                      Just xs' -> Just $ App Or xs'
   optimizeCall XOr [] = Just $ Const False ()
   optimizeCall Implies [] = Just $ Const True ()
   optimizeCall _ _ = Nothing
+
+removeItems :: (a -> Bool) -> [a] -> Maybe [a]
+removeItems f [] = Nothing
+removeItems f (x:xs) = if f x
+                       then (case removeItems f xs of
+                                Nothing -> Just xs
+                                Just xs' -> Just xs')
+                       else (case removeItems f xs of
+                                Nothing -> Nothing
+                                Just xs' -> Just (x:xs'))
 
 instance (Liftable a,SMTType r) => SMTFunction (SMTFun a r) where
   type SMTFunArg (SMTFun a r) = a
@@ -888,6 +921,11 @@ instance SMTType a => SMTFunction (SMTITE a) where
   isOverloaded _ = True
   getFunctionSymbol _ _ = L.Symbol "ite"
   inferResAnnotation _ ~(_,ann,_) = ann
+  optimizeCall _ (Const True _,ifT,_) = Just ifT
+  optimizeCall _ (Const False _,_,ifF) = Just ifF
+  optimizeCall _ (_,ifT,ifF) = case eqExpr 0 ifT ifF of
+    Just True -> Just ifT
+    _ -> Nothing
 
 instance SMTFunction (SMTBVComp BVUntyped) where
   type SMTFunArg (SMTBVComp BVUntyped) = (SMTExpr (BitVector BVUntyped),SMTExpr (BitVector BVUntyped))
@@ -919,6 +957,7 @@ instance SMTFunction (SMTBVBinOp BVUntyped) where
   isOverloaded _ = True
   getFunctionSymbol s _ = bvBinOpSymbol s
   inferResAnnotation _ ~(ann,_) = ann
+  optimizeCall = bvBinOpOptimize
 
 instance TypeableNat a => SMTFunction (SMTBVBinOp (BVTyped a)) where
   type SMTFunArg (SMTBVBinOp (BVTyped a)) = (SMTExpr (BitVector (BVTyped a)),SMTExpr (BitVector (BVTyped a)))
@@ -926,6 +965,7 @@ instance TypeableNat a => SMTFunction (SMTBVBinOp (BVTyped a)) where
   isOverloaded _ = True
   getFunctionSymbol s _ = bvBinOpSymbol s
   inferResAnnotation _ ~(ann,_) = ann
+  optimizeCall = bvBinOpOptimize
 
 bvBinOpSymbol :: SMTBVBinOp a -> L.Lisp
 bvBinOpSymbol BVAdd = L.Symbol "bvadd"
@@ -941,6 +981,12 @@ bvBinOpSymbol BVASHR = L.Symbol "bvashr"
 bvBinOpSymbol BVXor = L.Symbol "bvxor"
 bvBinOpSymbol BVAnd = L.Symbol "bvand"
 bvBinOpSymbol BVOr = L.Symbol "bvor"
+
+bvBinOpOptimize :: SMTBVBinOp a -> (SMTExpr (BitVector a),SMTExpr (BitVector a)) -> Maybe (SMTExpr (BitVector a))
+bvBinOpOptimize BVAdd (Const (BitVector 0) _,y) = Just y
+bvBinOpOptimize BVAdd (x,Const (BitVector 0) _) = Just x
+bvBinOpOptimize BVAdd (Const (BitVector x) w,Const (BitVector y) _) = Just (Const (BitVector $ x+y) w)
+bvBinOpOptimize _ _ = Nothing
 
 instance SMTFunction (SMTBVUnOp BVUntyped) where
   type SMTFunArg (SMTBVUnOp BVUntyped) = SMTExpr (BitVector BVUntyped)

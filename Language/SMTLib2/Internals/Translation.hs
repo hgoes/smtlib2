@@ -21,7 +21,9 @@ import Data.Proxy
 #endif
 
 instance L.ToLisp (SMTExpr t) where
-  toLisp e = fst $ exprToLisp e 0
+  toLisp e = case optimizeExpr e of
+    Just e' -> fst $ exprToLisp e' 0
+    Nothing -> fst $ exprToLisp e 0
 
 instance Show (SMTExpr t) where
   show x = show $ fst (exprToLisp x 0)
@@ -66,7 +68,7 @@ defConst = defConstNamed "constvar"
 defConstNamed :: (SMTType r,MonadIO m) => String -> SMTExpr r -> SMT' m (SMTExpr r)
 defConstNamed name e = do
   fname <- freeName name
-  let (expr',_) = exprToLisp e 0
+  let (expr',_) = optimizedExprToLisp e 0
       ann = extractAnnotation e
   defineFun fname [] (getSort (getUndef e) ann) expr'
   return $ Var fname ann
@@ -86,7 +88,7 @@ defFunAnnNamed name ann_arg ann_res f = do
 
       (au,tps,c_args') = createArgs ann_arg (c_args+1)
 
-      (expr',_) = exprToLisp (f au) c_args'
+      (expr',_) = optimizedExprToLisp (f au) c_args'
   defineFun fname tps (getSort rtp ann_res) expr'
   return res
 
@@ -111,6 +113,23 @@ exprsToLisp [] c = ([],c)
 exprsToLisp (e:es) c = let (e',c') = exprToLisp e c
                            (es',c'') = exprsToLisp es c'
                        in (e':es',c'')
+
+optimizeExpr :: SMTExpr t -> Maybe (SMTExpr t)
+optimizeExpr (App fun x) = let (opt,x') = foldExprs (\opt expr ann -> case optimizeExpr expr of
+                                                        Nothing -> (opt,expr)
+                                                        Just expr' -> (True,expr')
+                                                    ) False x (extractArgAnnotation x)
+                           in case optimizeCall fun x' of
+                             Nothing -> if opt
+                                        then Just $ App fun x'
+                                        else Nothing
+                             Just res -> Just res
+optimizeExpr _ = Nothing
+
+optimizedExprToLisp :: SMTExpr t -> Integer -> (L.Lisp,Integer)
+optimizedExprToLisp expr c = case optimizeExpr expr of
+  Just expr' -> exprToLisp expr' c
+  Nothing -> exprToLisp expr c
 
 exprToLisp :: SMTExpr t -> Integer -> (L.Lisp,Integer)
 exprToLisp (Var name _) c = (L.Symbol name,c)
@@ -141,15 +160,13 @@ exprToLisp (Let ann x f) c = let (arg,tps,nc) = createArgs ann c
                                         ,L.List [L.List [L.Symbol name,lisp] | ((name,_),lisp) <- Prelude.zip tps arg' ]
                                         ,arg''],nc'')
 exprToLisp (App fun x) c
-  = case optimizeCall fun x of
-    Nothing -> let arg_ann = extractArgAnnotation x
-                   l = getFunctionSymbol fun arg_ann
-                   ~(x',c1) = unpackArgs (\e _ i -> exprToLisp e i) x
-                              arg_ann c
-               in if Prelude.null x'
-                  then (l,c1)
-                  else (L.List $ l:x',c1)
-    Just res -> exprToLisp res c
+  = let arg_ann = extractArgAnnotation x
+        l = getFunctionSymbol fun arg_ann
+        ~(x',c1) = unpackArgs (\e _ i -> exprToLisp e i) x
+                   arg_ann c
+    in if Prelude.null x'
+       then (l,c1)
+       else (L.List $ l:x',c1)
 exprToLisp (Named expr name) c = let (expr',c') = exprToLisp expr c
                                  in (L.List [L.Symbol "!",expr',L.Symbol ":named",L.Symbol name],c')
 

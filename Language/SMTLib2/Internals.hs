@@ -24,7 +24,7 @@ import Data.Tagged
 import Data.Proxy
 import Data.List as List (genericReplicate)
 #endif
-    
+
 -- Monad stuff
 import Control.Applicative (Applicative(..))
 import Control.Monad.State.Lazy as Lazy (StateT)
@@ -38,7 +38,7 @@ import Control.Monad.Writer.Lazy as Lazy (WriterT)
 import Control.Monad.Writer.Strict as Strict (WriterT)
 
 -- | Haskell types which can be represented in SMT
-class (Eq t,Typeable t,Eq (SMTAnnotation t),Typeable (SMTAnnotation t)) 
+class (Eq t,Typeable t,Eq (SMTAnnotation t),Typeable (SMTAnnotation t))
       => SMTType t where
   type SMTAnnotation t
   getSort :: t -> SMTAnnotation t -> L.Lisp
@@ -154,7 +154,7 @@ instance (Monoid w, MonadSMT m) => MonadSMT (Strict.WriterT w m) where
 data SMTExpr t where
   Var :: SMTType t => Text -> SMTAnnotation t -> SMTExpr t
   Const :: SMTValue t => t -> SMTAnnotation t -> SMTExpr t
-  AsArray :: (SMTFunction f) 
+  AsArray :: (SMTFunction f)
              => f -> ArgAnnotation (SMTFunArg f)
              -> SMTExpr (SMTArray (SMTFunArg f) (SMTFunRes f))
   Forall :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
@@ -206,37 +206,52 @@ class (Args (SMTFunArg a),
                         -> SMTAnnotation (SMTFunRes a)
   optimizeCall :: a -> SMTFunArg a -> Maybe (SMTExpr (SMTFunRes a))
   optimizeCall _ _ = Nothing
-  
-instance Eq a => Eq (SMTExpr a) where
-  (==) = eqExpr 0
 
-eqExpr :: Integer -> SMTExpr a -> SMTExpr a -> Bool
+instance Eq a => Eq (SMTExpr a) where
+  (==) x y = case eqExpr 0 x y of
+    Just True -> True
+    _ -> False
+
+
+eqExpr :: Integer -> SMTExpr a -> SMTExpr a -> Maybe Bool
 eqExpr n lhs rhs = case (lhs,rhs) of
-  (Var v1 _,Var v2 _) -> v1 == v2
-  (Const v1 _,Const v2 _) -> v1 == v2
+  (Var v1 _,Var v2 _) -> if v1 == v2
+                         then Just True
+                         else Nothing
+  (Const v1 _,Const v2 _) -> Just $ v1 == v2
   (AsArray f1 arg1,AsArray f2 arg2) -> case cast f2 of
-    Nothing -> False
+    Nothing -> Nothing
     Just f2' -> case cast arg2 of
-      Nothing -> False 
-      Just arg2' -> f1 == f2' && arg1 == arg2'
+      Nothing -> Nothing
+      Just arg2' -> if f1 == f2' && arg1 == arg2'
+                    then Just True
+                    else Nothing
   (Forall a1 f1,Forall a2 f2) -> let name i = T.pack $ "internal_eq_check"++show i
                                      (n',v) = foldExprs (\i _ ann -> (i+1,Var (name i) ann)) n undefined a1
                                  in case cast (a2,f2) of
-                                   Nothing -> False
-                                   Just (a2',f2') -> a1==a2' && eqExpr n' (f1 v) (f2' v)
+                                   Nothing -> Nothing
+                                   Just (a2',f2') -> if a1==a2'
+                                                     then eqExpr n' (f1 v) (f2' v)
+                                                     else Nothing
   (Exists a1 f1,Exists a2 f2) -> let name i = T.pack $ "internal_eq_check"++show i
                                      (n',v) = foldExprs (\i _ ann -> (i+1,Var (name i) ann)) n undefined a1
                                  in case cast (a2,f2) of
-                                   Nothing -> False
-                                   Just (a2',f2') -> a1==a2' && eqExpr n' (f1 v) (f2' v)
+                                   Nothing -> Nothing
+                                   Just (a2',f2') -> if a1==a2'
+                                                     then eqExpr n' (f1 v) (f2' v)
+                                                     else Nothing
   (Let _ x1 f1,Let _ x2 f2) -> eqExpr n (f1 x1) (f2 x2)
-  (Named e1 n1,Named e2 n2) -> eqExpr n e1 e2 && n1==n2
+  (Named e1 n1,Named e2 n2) -> if n1==n2
+                               then eqExpr n e1 e2
+                               else Nothing
   (App f1 arg1,App f2 arg2) -> case cast f2 of
-      Nothing -> False
+      Nothing -> Nothing
       Just f2' -> case cast arg2 of
-        Nothing -> False
-        Just arg2' -> f1 == f2' && arg1 == arg2'
-  (_,_) -> False
+        Nothing -> Nothing
+        Just arg2' -> if f1 == f2' && arg1 == arg2'
+                      then Just True
+                      else Nothing
+  (_,_) -> Nothing
 
 -- | Represents a constructor of a datatype /a/
 --   Can be obtained by using the template haskell extension module
@@ -286,10 +301,10 @@ instance SMTInfo SMTSolverVersion where
       _ -> error "Invalid solver response to 'get-info' version query"
 
 -- | Instances of this class may be used as arguments for constructed functions and quantifiers.
-class (Eq a,Typeable a,Eq (ArgAnnotation a),Typeable (ArgAnnotation a)) 
+class (Eq a,Typeable a,Eq (ArgAnnotation a),Typeable (ArgAnnotation a))
       => Args a where
   type ArgAnnotation a
-  foldExprs :: (forall t. SMTType t => s -> SMTExpr t -> SMTAnnotation t -> (s,SMTExpr t)) 
+  foldExprs :: (forall t. SMTType t => s -> SMTExpr t -> SMTAnnotation t -> (s,SMTExpr t))
                -> s -> a -> ArgAnnotation a -> (s,a)
   foldExprs f s x ann = let (s',[r]) = foldsExprs (\cs [(expr,ann')] -> let (cs',cr) = f cs expr ann'
                                                                         in (cs',[cr])
@@ -414,8 +429,8 @@ declareDatatypes params dts
   = putRequest $ L.List [L.Symbol "declare-datatypes"
                         ,args (fmap L.Symbol params)
                         ,L.List
-                         [ L.List $ [L.Symbol name] 
-                           ++ [ L.List $ [L.Symbol conName] 
+                         [ L.List $ [L.Symbol name]
+                           ++ [ L.List $ [L.Symbol conName]
                                 ++ [ L.List [L.Symbol fieldName,tp]
                                    | (fieldName,tp) <- fields ]
                               | (conName,fields) <- constructor ]
@@ -541,7 +556,7 @@ removeLets :: L.Lisp -> L.Lisp
 removeLets = removeLets' Map.empty
   where
     removeLets' mp (L.List [L.Symbol "let",L.List decls,body])
-      = let nmp = Map.union mp 
+      = let nmp = Map.union mp
                   (Map.fromList
                    [ (name,removeLets' nmp expr)
                    | L.List [L.Symbol name,expr] <- decls ])
@@ -553,17 +568,17 @@ removeLets = removeLets' Map.empty
     removeLets' _ x = x
 
 argsSignature :: Args a => a -> ArgAnnotation a -> [L.Lisp]
-argsSignature arg ann 
-  = reverse $ fst $ 
+argsSignature arg ann
+  = reverse $ fst $
     foldExprs (\sigs e ann' -> ((getSort (getUndef e) ann'):sigs,e))
     [] arg ann
 
-functionGetSignature :: (SMTFunction f) 
+functionGetSignature :: (SMTFunction f)
                         => f
-                        -> ArgAnnotation (SMTFunArg f) 
-                        -> SMTAnnotation (SMTFunRes f) 
+                        -> ArgAnnotation (SMTFunArg f)
+                        -> SMTAnnotation (SMTFunRes f)
                         -> ([L.Lisp],L.Lisp)
-functionGetSignature fun arg_ann res_ann 
+functionGetSignature fun arg_ann res_ann
   = let ~(uarg,ures) = getFunUndef fun
     in (argsSignature uarg arg_ann,getSort ures res_ann)
 
@@ -589,13 +604,13 @@ class TypeableNat n where
   reflectNat :: Proxy n -> Integer -> Integer
 
 instance TypeableNat Z where
-  typeOfNat _ = mkTyConApp 
+  typeOfNat _ = mkTyConApp
                 (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals" "'Z")
                 []
   reflectNat _ x = x
 
 instance TypeableNat n => TypeableNat (S n) where
-  typeOfNat _ = mkTyConApp 
+  typeOfNat _ = mkTyConApp
                 (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals" "'S")
                 [typeOfNat (Proxy::Proxy n)]
   reflectNat _ x = reflectNat (Proxy::Proxy n) (x+1)
@@ -604,12 +619,12 @@ class TypeableBVKind n where
   typeOfBVKind :: Proxy n -> TypeRep
 
 instance TypeableBVKind BVUntyped where
-  typeOfBVKind _ = mkTyConApp 
+  typeOfBVKind _ = mkTyConApp
                    (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals" "'BVUntyped")
                    []
 
 instance TypeableNat n => TypeableBVKind (BVTyped n) where
-  typeOfBVKind _ = mkTyConApp 
+  typeOfBVKind _ = mkTyConApp
                    (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals" "'BVTyped")
                    [typeOfNat (Proxy::Proxy n)]
 
@@ -617,14 +632,14 @@ type family Add (n1 :: Nat) (n2 :: Nat) :: Nat
 type instance Add Z n = n
 type instance Add (S n1) n2 = S (Add n1 n2)
 
-reifySum :: (Num a,Ord a) => a -> a -> (forall n1 n2. (TypeableNat n1,TypeableNat n2,TypeableNat (Add n1 n2)) 
+reifySum :: (Num a,Ord a) => a -> a -> (forall n1 n2. (TypeableNat n1,TypeableNat n2,TypeableNat (Add n1 n2))
                                         => Proxy (n1::Nat) -> Proxy (n2::Nat) -> Proxy (Add n1 n2) -> r) -> r
 reifySum n1 n2 f
   | n1 < 0 || n2 < 0 = error "smtlib2: Cann only reify numbers >= 0."
   | otherwise = reifySum' n1 n2 f
   where
-    reifySum' :: (Num a,Ord a) => a -> a 
-                 -> (forall n1 n2. (TypeableNat n1,TypeableNat n2,TypeableNat (Add n1 n2)) 
+    reifySum' :: (Num a,Ord a) => a -> a
+                 -> (forall n1 n2. (TypeableNat n1,TypeableNat n2,TypeableNat (Add n1 n2))
                      => Proxy (n1::Nat) -> Proxy (n2::Nat) -> Proxy (Add n1 n2) -> r) -> r
     reifySum' 0 n2 f = reifyNat n2 $ \(_::Proxy i) -> f (Proxy::Proxy Z) (Proxy::Proxy i) (Proxy::Proxy i)
     reifySum' n1 n2 f = reifySum' (n1-1) n2 $ \(_::Proxy i1) (_::Proxy i2) (_::Proxy i3)
@@ -644,15 +659,15 @@ reifyExtract t l u f
       = reifyNat t $
         \(_::Proxy n1) -> f (Proxy::Proxy n1) (Proxy::Proxy Z) (Proxy::Proxy Z) (Proxy::Proxy (S Z))
     reifyExtract' t l u 0 f
-      = reifyNat t $ 
-        \(_::Proxy n1) 
+      = reifyNat t $
+        \(_::Proxy n1)
         -> reifyNat u $
            \(_::Proxy n3)
            -> f (Proxy::Proxy n1) (Proxy::Proxy (S n3)) (Proxy::Proxy n3) (Proxy::Proxy Z)
     reifyExtract' t l u r f = reifyExtract' t l (u-1) (r-1) $
                               \(_::Proxy n1) (_::Proxy n2) (_::Proxy n3) (_::Proxy n4)
                                -> f (Proxy::Proxy n1) (Proxy::Proxy n2) (Proxy::Proxy (S n3)) (Proxy::Proxy (S n4))
-    
+
 
 reifyNat :: (Num a,Ord a) => a -> (forall n. TypeableNat n => Proxy (n::Nat) -> r) -> r
 reifyNat x f
@@ -666,7 +681,7 @@ reifyNat x f
 data BitVector (b :: BVKind) = BitVector Integer deriving (Eq,Ord)
 
 instance TypeableBVKind k => Typeable (BitVector k) where
-  typeOf _ = mkTyConApp 
+  typeOf _ = mkTyConApp
              (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals" "BitVector")
              [typeOfBVKind (Proxy::Proxy k)]
 #else
@@ -701,14 +716,14 @@ reifyNat n f
     g :: n -> S n
     g _ = undefined
 
-reifySum :: (Num a,Ord a) => a -> a -> (forall n1 n2. (TypeableNat n1,TypeableNat n2,TypeableNat (Add n1 n2)) 
+reifySum :: (Num a,Ord a) => a -> a -> (forall n1 n2. (TypeableNat n1,TypeableNat n2,TypeableNat (Add n1 n2))
                                         => n1 -> n2 -> Add n1 n2 -> r) -> r
 reifySum n1 n2 f
   | n1 < 0 || n2 < 0 = error "smtlib2: Cann only reify numbers >= 0."
   | otherwise = reifySum' n1 n2 f
   where
-    reifySum' :: (Num a,Ord a) => a -> a 
-                 -> (forall n1 n2. (TypeableNat n1,TypeableNat n2,TypeableNat (Add n1 n2)) 
+    reifySum' :: (Num a,Ord a) => a -> a
+                 -> (forall n1 n2. (TypeableNat n1,TypeableNat n2,TypeableNat (Add n1 n2))
                      => n1 -> n2 -> Add n1 n2 -> r) -> r
     reifySum' 0 n2' f' = reifyNat n2' $ \(_::i) -> f' (undefined::Z) (undefined::i) (undefined::i)
     reifySum' n1' n2' f' = reifySum' (n1'-1) n2' $ \(_::i1) (_::i2) (_::i3)
@@ -727,8 +742,8 @@ reifyExtract t l u f
     reifyExtract' t' 0 0  1 f'
       = reifyNat t' $
         \(_::n1) -> f' (undefined::n1) (undefined::Z) (undefined::Z) (undefined::S Z)
-    reifyExtract' t' _ u' 0 f' = reifyNat t' $ 
-                                 \(_::n1) 
+    reifyExtract' t' _ u' 0 f' = reifyNat t' $
+                                 \(_::n1)
                                  -> reifyNat u' $
                                     \(_::n3)
                                     -> f' (undefined::n1) (undefined::S n3) (undefined::n3) (undefined::Z)
