@@ -875,6 +875,21 @@ instance SMTFunction SMTLogic where
                                       Just xs' -> Just $ App Or xs'
   optimizeCall XOr [] = Just $ Const False ()
   optimizeCall Implies [] = Just $ Const True ()
+  optimizeCall Implies xs = let (args,res) = splitLast xs
+                            in case res of
+                              Const True _ -> Just (Const True ())
+                              _ -> case removeItems (\e -> case e of
+                                                        Const False _ -> True
+                                                        _ -> False) args of
+                                     Just _ -> Just (Const True ())
+                                     Nothing -> case removeItems (\e -> case e of
+                                                                     Const True _ -> True
+                                                                     _ -> False) args of
+                                                  Nothing -> case args of
+                                                    [] -> Just res
+                                                    _ -> Nothing
+                                                  Just [] -> Just res
+                                                  Just args' -> Just $ App Implies (args'++[res])
   optimizeCall _ _ = Nothing
 
 removeItems :: (a -> Bool) -> [a] -> Maybe [a]
@@ -886,6 +901,11 @@ removeItems f (x:xs) = if f x
                        else (case removeItems f xs of
                                 Nothing -> Nothing
                                 Just xs' -> Just (x:xs'))
+
+splitLast :: [a] -> ([a],a)
+splitLast [x] = ([],x)
+splitLast (x:xs) = let (xs',last) = splitLast xs
+                   in (x:xs',last)
 
 instance (Liftable a,SMTType r) => SMTFunction (SMTFun a r) where
   type SMTFunArg (SMTFun a r) = a
