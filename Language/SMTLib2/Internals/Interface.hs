@@ -702,3 +702,8 @@ commonTheorems = mconcat
                  ,simpleParser (SMTFun "trans" () :: SMTFun (SMTExpr Bool,SMTExpr Bool,SMTExpr Bool) Bool)
                  ,simpleParser (SMTFun "rewrite" () :: SMTFun (SMTExpr Bool) Bool)
                  ,simpleParser (SMTFun "mp" () :: SMTFun (SMTExpr Bool,SMTExpr Bool,SMTExpr Bool) Bool)]
+
+optimizeExpr' :: SMTExpr a -> SMTExpr a
+optimizeExpr' e = case optimizeExpr e of
+  Nothing -> e
+  Just e' -> e'

@@ -54,7 +54,7 @@ module Language.SMTLib2
          extractAnnotation,
          let',lets,letAnn,
          named,named',
-         optimizeExpr,
+         optimizeExpr,optimizeExpr',
          -- ** Basic logic
          (.==.),argEq,
          distinct,
