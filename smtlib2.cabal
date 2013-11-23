@@ -1,6 +1,6 @@
 Name:           smtlib2
 Version:        0.1
-Author:         Henning Günther <h.guenther@tu-bs.de>
+Author:         Henning Günther <guenther@forsyte.at>
 Build-Type:     Simple
 Cabal-Version:  >=1.2
 
@@ -14,13 +14,15 @@ Flag WithDataKinds
 Library
   Build-Depends:        base >= 4,text,mtl,process,blaze-builder,bytestring,
                         attoparsec,atto-lisp >= 0.2,array,template-haskell,
-                        containers, transformers, fgl
+                        containers, transformers, fgl, data-fix, tagged
+  Extensions: GADTs,RankNTypes,CPP,ScopedTypeVariables,
+              MultiParamTypeClasses,FlexibleContexts,OverloadedStrings,
+              DeriveFunctor,FlexibleInstances,DeriveTraversable,DeriveFoldable
   if flag(WithConstraints)
-    Build-Depends:      constraints,tagged
+    Build-Depends:      constraints
     CPP-Options: -DSMTLIB2_WITH_CONSTRAINTS
   if flag(WithDataKinds)
     Extensions: DataKinds,PolyKinds
-    Build-Depends:      tagged
     CPP-Options: -DSMTLIB2_WITH_DATAKINDS
   
   GHC-Options: -fwarn-unused-imports
@@ -29,10 +31,10 @@ Library
     Language.SMTLib2.Solver
     Language.SMTLib2.TH
     Language.SMTLib2.Connection
-    Language.SMTLib2.Functions
     Language.SMTLib2.Internals
     Language.SMTLib2.Internals.Instances
-    Language.SMTLib2.Internals.Translation
     Language.SMTLib2.Internals.Interface
+    Language.SMTLib2.Internals.Optimize
+    Language.SMTLib2.Pipe
     Data.Unit
     

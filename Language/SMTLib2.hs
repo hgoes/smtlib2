@@ -21,7 +21,7 @@ main = withZ3 program >>= print
      @ -}
 module Language.SMTLib2 
        (-- * Data types
-         SMT, SMT'(), MonadSMT(..),
+         SMT'(),SMT,
          SMTType,
          SMTAnnotation,
          SMTValue,
@@ -29,19 +29,19 @@ module Language.SMTLib2
          SMTArith,
          SMTOrd(..),
          SMTExpr,
-         SMTFun,
+         SMTFunction,
          SMTOption(..),
          SMTArray,
          Constructor,
          Field,
          Args(..),LiftArgs(..),
          -- * Environment
-         withSMTSolver,
+         withSMTBackend,
          setOption,setLogic,
-         SMTInfo(),SMTSolverName(..),SMTSolverVersion(..),
+         SMTInfo(..),
          assert,stack,
          checkSat,
-         getValue,getValue',
+         getValue,
          comment,
          getProof,getUnsatCore,simplify,
          -- ** Interpolation
@@ -97,6 +97,5 @@ module Language.SMTLib2
 
 import Language.SMTLib2.Internals
 import Language.SMTLib2.Internals.Instances
-import Language.SMTLib2.Internals.Translation
+import Language.SMTLib2.Internals.Optimize
 import Language.SMTLib2.Internals.Interface
-import Language.SMTLib2.Functions

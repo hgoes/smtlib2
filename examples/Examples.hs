@@ -5,7 +5,11 @@ import Control.Monad
 import Control.Monad.Trans
 import Language.SMTLib2
 import Language.SMTLib2.TH
-import Language.SMTLib2.Internals (declareType)
+import Language.SMTLib2.Internals -- (declareType)
+
+import Language.SMTLib2.Internals.Instances
+import Data.Fix
+
 import Data.Typeable
 import Data.Array
 import Data.Word
@@ -14,7 +18,7 @@ import qualified Data.ByteString as BS
 
 funTest :: SMT (Maybe Integer)
 funTest = do
-  f <- fun :: SMT (SMTFun (SMTExpr Integer,SMTExpr Integer) Integer)
+  f <- fun :: SMT (SMTFunction (SMTExpr Integer,SMTExpr Integer) Integer)
   g <- defFun (\x -> f `app` (x,x))
   q <- var
   assert $ forAll $ \x -> g `app` x .==. 2
@@ -268,6 +272,208 @@ data BinTree a = BinTree
 
 -- $(deriveSMT ''BinNode)
 $(deriveSMT ''BinTree)
+{-
+tpCollBin
+  = (TypeCollection {argCount = 1,
+                     dataTypes = [DataType { dataTypeName = "BinTree",
+                                             dataTypeConstructors = [Constr { conName = "BinTree",
+                                                                              conFields = [DataField {fieldName = "leftBranch",
+                                                                                                      fieldSort = Fix
+                                                                                                                  (NormalSort
+                                                                                                                   (NamedSort
+                                                                                                                    "BinNode"
+                                                                                                                    [Fix
+                                                                                                                     (ArgumentSort
+                                                                                                                      0)])),
+                                                                                                      fieldGet = \ [p_a3sa]
+                                                                                                                   obj_a3sb
+                                                                                                                   f_a3sc
+                                                                                                                 -> withProxyArg
+                                                                                                                    p_a3sa
+                                                                                                                    (\ (_ :: tp_a3sd)
+                                                                                                                       ann_a3se
+                                                                                                                     -> case
+                                                                                                                       cast
+                                                                                                                       obj_a3sb
+                                                                                                                       of {
+                                                                                                                         Just (res_a3sf :: BinTree tp_a3sd)
+                                                                                                                         -> f_a3sc
+                                                                                                                            (leftBranch
+                                                                                                                             res_a3sf)
+                                                                                                                            (ann_a3se) })},
+                                                                                           DataField {fieldName = "rightBranch",
+                                                                                                      fieldSort = Fix
+                                                                                                                  (NormalSort
+                                                                                                                   (NamedSort
+                                                                                                                    "BinNode"
+                                                                                                                    [Fix
+                                                                                                                     (ArgumentSort
+                                                                                                                      0)])),
+                                                                                                      fieldGet = \ [p_a3sg]
+                                                                                                                   obj_a3sh
+                                                                                                                   f_a3si
+                                                                                                                 -> withProxyArg
+                                                                                                                    p_a3sg
+                                                                                                                    (\ (_ :: tp_a3sj)
+                                                                                                                       ann_a3sk
+                                                                                                                     -> case
+                                                                                                                       cast
+                                                                                                                       obj_a3sh
+                                                                                                                       of {
+                                                                                                                         Just (res_a3sl :: BinTree tp_a3sj)
+                                                                                                                         -> f_a3si
+                                                                                                                            (rightBranch
+                                                                                                                             res_a3sl)
+                                                                                                                            (ann_a3sk) })}]}],
+                                             dataTypeGetUndefined = \ [tp_a3sm]
+                                                                      f_a3sn
+                                                                    -> withProxyArg
+                                                                       tp_a3sm
+                                                                       (\ (_ :: tp_a3so)
+                                                                          ann_a3sp
+                                                                        -> f_a3sn
+                                                                           (undefined ::
+                                                                               BinTree tp_a3so)
+                                                                           (ann_a3sp))},
+                                  DataType {dataTypeName = "BinNode",
+                                            dataTypeConstructors = [Constr {conName = "BinNode",
+                                                                            conFields = [DataField {fieldName = "nodeVal",
+                                                                                                    fieldSort = Fix
+                                                                                                                (ArgumentSort
+                                                                                                                 0),
+                                                                                                    fieldGet = \ [p_a3sq]
+                                                                                                                 obj_a3sr
+                                                                                                                 f_a3ss
+                                                                                                               -> withProxyArg
+                                                                                                                  p_a3sq
+                                                                                                                  (\ (_ :: tp_a3st)
+                                                                                                                     ann_a3su
+                                                                                                                   -> case
+                                                                                                                     cast
+                                                                                                                     obj_a3sr
+                                                                                                                     of {
+                                                                                                                       Just (res_a3sv :: BinNode tp_a3st)
+                                                                                                                       -> f_a3ss
+                                                                                                                          (nodeVal
+                                                                                                                           res_a3sv)
+                                                                                                                          (ann_a3su) })},
+                                                                                         DataField {fieldName = "subTree",
+                                                                                                    fieldSort = Fix
+                                                                                                                (NormalSort
+                                                                                                                 (NamedSort
+                                                                                                                  "BinTree"
+                                                                                                                  [Fix
+                                                                                                                   (ArgumentSort
+                                                                                                                    0)])),
+                                                                                                    fieldGet = \ [p_a3sw]
+                                                                                                                 obj_a3sx
+                                                                                                                 f_a3sy
+                                                                                                               -> withProxyArg
+                                                                                                                  p_a3sw
+                                                                                                                  (\ (_ :: tp_a3sz)
+                                                                                                                     ann_a3sA
+                                                                                                                   -> case
+                                                                                                                     cast
+                                                                                                                     obj_a3sx
+                                                                                                                     of {
+                                                                                                                       Just (res_a3sB :: BinNode tp_a3sz)
+                                                                                                                       -> f_a3sy
+                                                                                                                          (subTree
+                                                                                                                           res_a3sB)
+                                                                                                                          (ann_a3sA) })}]},
+                                                                    Constr {conName = "TerminalBinNode",
+                                                                            conFields = []}],
+                                            dataTypeGetUndefined = \ [tp_a3sC]
+                                                                     f_a3sD
+                                                                   -> withProxyArg
+                                                                      tp_a3sC
+                                                                      (\ (_ :: tp_a3sE)
+                                                                         ann_a3sF
+                                                                       -> f_a3sD
+                                                                          (undefined ::
+                                                                              BinNode tp_a3sE)
+                                                                          (ann_a3sF))}]})
+
+instance SMTType a_a31t => SMTType (BinTree a_a31t) where
+  type SMTAnnotation (BinTree a_a31t) = SMTAnnotation a_a31t
+  getSort (_ :: BinTree a_a31t) (ann_a3s9)
+    = Fix
+      (NamedSort
+       "BinTree"
+       [getSort
+        (undefined :: a_a31t) ann_a3s9])
+  asDataType _
+    = Just ("BinTree", tpCollBin)
+
+instance (SMTValue a_a31t, SMTAnnotation a_a31t ~ ()) => SMTValue (BinTree a_a31t) where
+  mangle
+    alias_a3sI@(BinTree f_a3sG f_a3sH)
+    ann_a3sJ@(annF_a3sK)
+      = Language.SMTLib2.Internals.ConstrValue
+        "BinTree"
+        [Language.SMTLib2.Internals.mangle f_a3sG (annF_a3sK),
+         Language.SMTLib2.Internals.mangle f_a3sH (annF_a3sK)]
+        (Just (Language.SMTLib2.Internals.getSort alias_a3sI ann_a3sJ))
+  unmangle
+    (Language.SMTLib2.Internals.ConstrValue "BinTree"
+     [f_a3sL, f_a3sM]
+     _)
+    (ann_a3sN)
+      = do { fr_a3sO <- Language.SMTLib2.Internals.unmangle
+                        f_a3sL (ann_a3sN);
+             fr_a3sP <- Language.SMTLib2.Internals.unmangle f_a3sM (ann_a3sN);
+             Just (BinTree fr_a3sO fr_a3sP) }
+  unmangle _ _ = Nothing
+
+instance (SMTType a_a31t, SMTAnnotation a_a31t ~ ()) => SMTRecordType (BinTree a_a31t) where
+  getFieldAnn field_a3s8 _
+    = castField field_a3s8 ()
+
+instance SMTType a_a31u => SMTType (BinNode a_a31u) where
+  type SMTAnnotation (BinNode a_a31u) = SMTAnnotation a_a31u
+  getSort (_ :: BinNode a_a31u) (ann_a3sQ)
+    = Data.Fix.Fix
+      (Language.SMTLib2.Internals.NamedSort
+       "BinNode"
+       [Language.SMTLib2.Internals.getSort
+        (undefined :: a_a31u) ann_a3sQ])
+  asDataType _
+    = Just
+      ("BinNode",tpCollBin)
+
+instance (SMTValue a_a31u, SMTAnnotation a_a31u ~ ()) => SMTValue (BinNode a_a31u) where
+  mangle
+    alias_a3tp@(BinNode f_a3tn f_a3to)
+    ann_a3tq@(annF_a3tr)
+        = Language.SMTLib2.Internals.ConstrValue
+            "BinNode"
+            [Language.SMTLib2.Internals.mangle f_a3tn annF_a3tr,
+             Language.SMTLib2.Internals.mangle f_a3to (annF_a3tr)]
+            (Just (Language.SMTLib2.Internals.getSort alias_a3tp ann_a3tq))
+  mangle
+        alias_a3ts@TerminalBinNode
+        ann_a3tt@(annF_a3tu)
+        = Language.SMTLib2.Internals.ConstrValue
+            "TerminalBinNode"
+            []
+            (Just (Language.SMTLib2.Internals.getSort alias_a3ts ann_a3tt))
+  unmangle
+        (Language.SMTLib2.Internals.ConstrValue "BinNode"
+                                                [f_a3tv, f_a3tw]
+                                                _)
+        (ann_a3tx)
+        = do { fr_a3ty <- Language.SMTLib2.Internals.unmangle
+                            f_a3tv ann_a3tx;
+               fr_a3tz <- Language.SMTLib2.Internals.unmangle f_a3tw (ann_a3tx);
+               Just (BinNode fr_a3ty fr_a3tz) }
+  unmangle
+        (Language.SMTLib2.Internals.ConstrValue "TerminalBinNode" [] _)
+        ()
+        = Just TerminalBinNode
+  unmangle _ _ = Nothing
+instance (SMTType a_a31u, SMTAnnotation a_a31u ~ ()) => SMTRecordType (BinNode a_a31u) where
+  getFieldAnn field_a3s8 _
+    = Language.SMTLib2.TH.castField field_a3s8 ()-}
 
 datatypeTest2 :: SMT (BinNode Integer)
 datatypeTest2 = do
@@ -289,15 +495,16 @@ data MyTuple a b = MyTuple { myFst :: a, mySnd :: b } deriving (Eq, Show, Typeab
 data ReusingRecord a = ReusingRecord { someF :: MyTuple (Maybe a) Integer } deriving (Eq, Show, Typeable)
 
 -- $(deriveSMT ''MyTuple)
-$(deriveSMT ''ReusingRecord)
+-- $(deriveSMT ''ReusingRecord)
 
+{-
 datatypeTest3 :: SMT (ReusingRecord Integer)
 datatypeTest3 = do
   v <- var
   assert $ v .==. (constant r)
   checkSat
   getValue v
-  where r = ReusingRecord $ MyTuple (Just 1) 2
+  where r = ReusingRecord $ MyTuple (Just 1) 2 -}
 
 unsatCoreTest :: SMT [String]
 unsatCoreTest = do

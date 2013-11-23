@@ -4,19 +4,50 @@
 module Language.SMTLib2.Internals.Instances where
 
 import Language.SMTLib2.Internals
-import Language.SMTLib2.Functions
-import qualified Data.AttoLisp as L
-import qualified Data.Attoparsec.Number as L
-import Numeric
-import Data.Bits
-import qualified Data.Text as T
 import Data.Ratio
 import Data.Typeable
-import Data.List (genericLength,genericReplicate,zip4,zip5,zip6)
+import Data.List (genericReplicate,zip4,zip5,zip6,genericIndex)
 #ifdef SMTLIB2_WITH_CONSTRAINTS
 import Data.Constraint
 import Data.Proxy
 #endif
+import Data.Fix
+import qualified Data.Map as Map
+import Data.Maybe (fromJust)
+
+valueToHaskell :: DataTypeInfo
+                  -> (forall t. SMTType t => t -> SMTAnnotation t -> r)
+                  -> Maybe Sort
+                  -> Value
+                  -> r
+valueToHaskell _ f _ (BoolValue v) = f v ()
+valueToHaskell _ f _ (IntValue v) = f v ()
+valueToHaskell _ f _ (RealValue v) = f v ()
+valueToHaskell _ f (Just (Fix (BVSort { bvSortUntyped = True }))) (BVValue { bvValueWidth = w
+                                                                             , bvValueValue = v })
+  = f (BitVector v::BitVector BVUntyped) w
+valueToHaskell _ f _ (BVValue { bvValueWidth = w
+                                , bvValueValue = v })
+  = reifyNat w (\(_::Proxy tp) -> f (BitVector v::BitVector (BVTyped tp)) ())
+valueToHaskell dtInfo f sort (ConstrValue name args sort')
+  = case Map.lookup name (constructors dtInfo) of
+  Just (con,dt,struct)
+    -> let sort'' = case sort of
+             Just s -> Just s
+             Nothing -> sort'
+           argPrx = case sort'' of
+             Nothing -> Nothing
+             Just (Fix (NamedSort _ sortArgs))
+               -> Just $ fmap (\s -> withSort dtInfo s ProxyArg) sortArgs
+           sorts' = fmap (\field -> argumentSortToSort
+                                    (\i -> case sort'' of
+                                        Just (Fix (NamedSort _ sortArgs))
+                                          -> Just $ sortArgs `genericIndex` i
+                                        _ -> Nothing) (fieldSort field)
+                         ) (conFields con)
+           rargs :: [AnyValue]
+           rargs = fmap (\(val,s) -> valueToHaskell dtInfo AnyValue s val) (zip args sorts')
+       in construct con argPrx rargs f
 
 -- | Reconstruct the type annotation for a given SMT expression.
 extractAnnotation :: SMTExpr a -> SMTAnnotation a
@@ -29,100 +60,92 @@ extractAnnotation (Let _ x f) = extractAnnotation (f x)
 extractAnnotation (Named x _) = extractAnnotation x
 extractAnnotation (App f arg) = inferResAnnotation f (extractArgAnnotation arg)
 
-withSort :: Sort -> (forall t. SMTType t => t -> SMTAnnotation t -> a) -> a
-withSort (Sort u ann) f = f u ann
-withSort (ArraySort i v) f = withArraySort i v f
-#ifdef SMTLIB2_WITH_DATAKINDS
-withSort (BVSort i False) f = reifyNat i $ \(_::Proxy n) -> f (undefined::BitVector (BVTyped n)) ()
-#else
-withSort (BVSort i False) f = reifyNat i $ \(_::n) -> f (undefined::BitVector (BVTyped n)) ()
-#endif
-withSort (BVSort i True) f = f (undefined::BitVector BVUntyped) i
-
-withArraySort :: [Sort] -> Sort -> (forall i v. (Liftable i,SMTType v) => SMTArray i v -> (ArgAnnotation i,SMTAnnotation v) -> a) -> a
-withArraySort idx v f
-  = withArgSort idx $
-    \(_::i) anni
-    -> withSort v $
-       \(_::vt) annv -> f (undefined::SMTArray i vt) (anni,annv)
-
-withArgSort :: [Sort] -> (forall i. Liftable i => i -> ArgAnnotation i -> a) -> a
-withArgSort [i] f = withSort i $
-                    \(_::ti) anni -> f (undefined::SMTExpr ti) anni
-withArgSort [i1,i2] f
-  = withSort i1 $
-    \(_::t1) ann1
-     -> withSort i2 $
-        \(_::t2) ann2 -> f (undefined::(SMTExpr t1,SMTExpr t2)) (ann1,ann2)
-withArgSort [i1,i2,i3] f
-  = withSort i1 $
-    \(_::t1) ann1
-     -> withSort i2 $
-        \(_::t2) ann2
-        -> withSort i3 $
-           \(_::t3) ann3 -> f (undefined::(SMTExpr t1,SMTExpr t2,SMTExpr t3)) (ann1,ann2,ann3)
-withArgSort _ _ = error $ "smtlib2: Please provide more cases for withArgSort."
-
-withBVSort :: Sort -> (Integer -> a) -> Maybe a
-withBVSort (BVSort i _) f = Just (f i)
-withBVSort _ _ = Nothing
-
-instance Show Sort where
-  show sort = withSort sort (\u _ -> show (typeOf u))
+inferResAnnotation :: SMTFunction arg res -> ArgAnnotation arg -> SMTAnnotation res
+inferResAnnotation SMTEq _ = ()
+inferResAnnotation x@(SMTMap f) ann
+  = withUndef f x (\ua ui -> let (i_ann,a_ann) = inferLiftedAnnotation ua ui ann
+                             in (i_ann,inferResAnnotation f a_ann))
+  where
+    withUndef :: SMTFunction arg res -> SMTFunction (Lifted arg i) (SMTArray i res) -> (arg -> i -> b) -> b
+    withUndef _ _ f' = f' undefined undefined
+inferResAnnotation (SMTFun _ ann) _ = ann
+inferResAnnotation (SMTOrd _) _ = ()
+inferResAnnotation (SMTArith _) ~(ann:_) = ann
+inferResAnnotation SMTMinus ~(ann,_) = ann
+inferResAnnotation (SMTIntArith _) ~(ann,_) = ann
+inferResAnnotation SMTDivide ~(ann,_) = ann
+inferResAnnotation SMTNeg ann = ann
+inferResAnnotation SMTAbs ann = ann
+inferResAnnotation SMTNot _ = ()
+inferResAnnotation (SMTLogic _) _ = ()
+inferResAnnotation SMTDistinct _ = ()
+inferResAnnotation SMTToReal _ = ()
+inferResAnnotation SMTToInt _ = ()
+inferResAnnotation SMTITE ~(_,ann,_) = ann
+inferResAnnotation (SMTBVComp _) _ = ()
+inferResAnnotation (SMTBVBin _) ~(ann,_) = ann
+inferResAnnotation (SMTBVUn _) ann = ann
+inferResAnnotation SMTSelect ~(~(_,ann),_) = ann
+inferResAnnotation SMTStore ~(ann,_,_) = ann
+inferResAnnotation (SMTConstArray i_ann) v_ann = (i_ann,v_ann)
+inferResAnnotation x@SMTConcat ~(ann1,ann2)
+  = withUndef x $ \u1 u2 -> concatAnnotation u1 u2 ann1 ann2
+  where
+    withUndef :: SMTFunction (SMTExpr (BitVector a),SMTExpr (BitVector b)) res
+                 -> (a -> b -> c) -> c
+    withUndef _ f = f undefined undefined
+inferResAnnotation x@(SMTExtract _ prLen) ann
+  = withUndef x $ \u1 u2 -> extractAnn u1 u2 (reflectNat prLen 0) ann
+  where
+    withUndef :: SMTFunction (SMTExpr (BitVector a)) (BitVector res)
+                 -> (a -> res -> c) -> c
+    withUndef _ f = f undefined undefined
+--inferResAnnotation (SMTConstructor (Constructor name)) ann = 
+inferResAnnotation (SMTConTest _) _ = ()
+inferResAnnotation (SMTFieldSel f) ann = getFieldAnn f ann
 
 -- Bool
 
 instance SMTType Bool where
   type SMTAnnotation Bool = ()
-  getSortBase _ = L.Symbol "Bool"
-  declareType = defaultDeclareValue
-  fromSort _ = SortParser $ \sym _ -> case sym of
-    L.Symbol "Bool" -> Just $ Sort (undefined::Bool) ()
-    _ -> Nothing
+  getSort _ _ = Fix BoolSort
+  annotationFromSort _ _ = ()
+  asValueType x f = Just $ f x
 
 instance SMTValue Bool where
-  unmangle (L.Symbol "true") _ = Just True
-  unmangle (L.Symbol "false") _ = Just False
+  unmangle (BoolValue v) _ = Just v
   unmangle _ _ = Nothing
-  mangle True _ = L.Symbol "true"
-  mangle False _ = L.Symbol "false"
+  mangle v _ = BoolValue v
 
 -- Integer
 
 instance SMTType Integer where
   type SMTAnnotation Integer = ()
-  getSortBase _ = L.Symbol "Int"
-  declareType = defaultDeclareValue
-  fromSort _ = SortParser $ \sym _ -> case sym of
-    L.Symbol "Int" -> Just $ Sort (undefined::Integer) ()
-    _ -> Nothing
+  getSort _ _ = Fix IntSort
+  annotationFromSort _ _ = ()
+  asValueType x f = Just $ f x
 
 instance SMTValue Integer where
-  unmangle (L.Number (L.I v)) _ = Just v
-  unmangle (L.List [L.Symbol "-"
-                   ,L.Number (L.I v)]) _ = Just $ - v
+  unmangle (IntValue v) _ = Just v
   unmangle _ _ = Nothing
-  mangle v _
-    | v < 0 = L.List [L.Symbol "-"
-                     ,L.toLisp (-v)]
-    | otherwise = L.toLisp v
+  mangle v _ = IntValue v
 
 instance SMTArith Integer
 
 instance Num (SMTExpr Integer) where
   fromInteger x = Const x ()
-  (+) x y = App Plus [x,y]
-  (-) x y = App Minus (x,y)
-  (*) x y = App Mult [x,y]
-  negate x = App Neg x
-  abs x = App Abs x
-  signum x = App ITE (App Ge (x,Const 0 ()),Const 1 (),Const (-1) ())
+  (+) x y = App (SMTArith Plus) [x,y]
+  (-) x y = App SMTMinus (x,y)
+  (*) x y = App (SMTArith Mult) [x,y]
+  negate x = App SMTNeg x
+  abs x = App SMTAbs x
+  signum x = App SMTITE (App (SMTOrd Ge) (x,Const 0 ()),Const 1 (),Const (-1) ())
 
 instance SMTOrd Integer where
-  (.<.) x y = App Lt (x,y)
-  (.<=.) x y = App Le (x,y)
-  (.>.) x y = App Gt (x,y)
-  (.>=.) x y = App Ge (x,y)
+  (.<.) x y = App (SMTOrd Lt) (x,y)
+  (.<=.) x y = App (SMTOrd Le) (x,y)
+  (.>.) x y = App (SMTOrd Gt) (x,y)
+  (.>=.) x y = App (SMTOrd Ge) (x,y)
 
 instance Enum (SMTExpr Integer) where
   succ x = x + 1
@@ -146,86 +169,54 @@ instance Enum (SMTExpr Integer) where
 
 instance SMTType (Ratio Integer) where
   type SMTAnnotation (Ratio Integer) = ()
-  getSortBase _ = L.Symbol "Real"
-  declareType = defaultDeclareValue
-  fromSort _ = SortParser $ \sym _ -> case sym of
-    L.Symbol "Real" -> Just (toSort (undefined::Ratio Integer) ())
-    _ -> Nothing
+  getSort _ _ = Fix RealSort
+  annotationFromSort _ _ = ()
+  asValueType x f = Just $ f x
 
 instance SMTValue (Ratio Integer) where
-  unmangle (L.Number (L.I v)) _ = Just $ fromInteger v
-  unmangle (L.Number (L.D v)) _ = Just $ realToFrac v
-  unmangle (L.List [L.Symbol "/"
-                   ,x
-                   ,y]) _ = do
-                          q <- unmangle x ()
-                          r <- unmangle y ()
-                          return (q / r)
-  unmangle (L.List [L.Symbol "-",r]) _ = do
-    res <- unmangle r ()
-    return (-res)
+  unmangle (RealValue v) _ = Just v
   unmangle _ _ = Nothing
-  mangle v _ = L.List [L.Symbol "/"
-                      ,L.Symbol $ T.pack $ (show $ numerator v)++".0"
-                      ,L.Symbol $ T.pack $ (show $ denominator v)++".0"]
+  mangle v _ = RealValue v
 
 instance SMTArith (Ratio Integer)
 
 instance Num (SMTExpr (Ratio Integer)) where
   fromInteger x = Const (fromInteger x) ()
-  (+) x y = App Plus [x,y]
-  (-) x y = App Minus (x,y)
-  (*) x y = App Mult [x,y]
-  negate = App Neg
-  abs x = App ITE (App Ge (x,Const 0 ()),x,App Neg x)
-  signum x = App ITE (App Ge (x,Const 0 ()),Const 1 (),Const (-1) ())
+  (+) x y = App (SMTArith Plus) [x,y]
+  (-) x y = App SMTMinus (x,y)
+  (*) x y = App (SMTArith Mult) [x,y]
+  negate = App SMTNeg
+  abs x = App SMTITE (App (SMTOrd Ge) (x,Const 0 ()),x,App SMTNeg x)
+  signum x = App SMTITE (App (SMTOrd Ge) (x,Const 0 ()),Const 1 (),Const (-1) ())
 
 instance Fractional (SMTExpr (Ratio Integer)) where
-  (/) x y = App Divide (x,y)
+  (/) x y = App SMTDivide (x,y)
   fromRational x = Const x ()
 
 instance SMTOrd (Ratio Integer) where
-  (.<.) x y = App Lt (x,y)
-  (.<=.) x y = App Le (x,y)
-  (.>.) x y = App Gt (x,y)
-  (.>=.) x y = App Ge (x,y)
+  (.<.) x y = App (SMTOrd Lt) (x,y)
+  (.<=.) x y = App (SMTOrd Le) (x,y)
+  (.>.) x y = App (SMTOrd Gt) (x,y)
+  (.>=.) x y = App (SMTOrd Ge) (x,y)
 
 -- Arrays
 
 instance (Args idx,SMTType val) => SMTType (SMTArray idx val) where
   type SMTAnnotation (SMTArray idx val) = (ArgAnnotation idx,SMTAnnotation val)
-  getSort u (anni,annv) = L.List $ L.Symbol "Array":(argSorts (getIdx u) anni++[getSort (getVal u) annv])
+  getSort u (anni,annv) = Fix $ ArraySort (argSorts (getIdx u) anni) (getSort (getVal u) annv)
     where
       getIdx :: SMTArray i v -> i
       getIdx _ = undefined
       getVal :: SMTArray i v -> v
       getVal _ = undefined
-  getSortBase _ = L.Symbol "Array"
-  declareType u (anni,annv) = do
-      declareArgTypes (getIdx u) anni
-      declareType (getVal u) annv
-      defaultDeclareType u (anni,annv)
+  annotationFromSort u (Fix (ArraySort argSorts valSort)) = (argAnn,annotationFromSort (getVal u) valSort)
     where
+      (argAnn,[]) = getArgAnnotation (getIdx u) argSorts
       getIdx :: SMTArray i v -> i
       getIdx _ = undefined
       getVal :: SMTArray i v -> v
       getVal _ = undefined
-  toSort (_::SMTArray i v) (anni,annv) = ArraySort (toSorts (undefined::i) anni) (toSort (undefined::v) annv)
-  fromSort _ = SortParser $ \sym rec -> case sym of
-    L.List (L.Symbol "Array":args')
-      -> let (idx,v) = splitLast sym $ fmap
-                       (\arg -> case parseSort rec arg rec of
-                           Nothing -> error $ "smtlib2: Failed to parse array argument sort "++show arg
-                           Just s -> s
-                       ) args'
-         in Just $ ArraySort idx v
-    _ -> Nothing
-    where
-      splitLast :: L.Lisp -> [a] -> ([a],a)
-      splitLast sym [] = error $ "smtlib2: Invalid array type: "++show sym
-      splitLast _ [x] = ([],x)
-      splitLast sym (x:xs) = let ~(xs',x') = splitLast sym xs
-                             in (x:xs',x')
+  asValueType _ _ = Nothing
 
 instance (SMTType a) => Liftable (SMTExpr a) where
   type Lifted (SMTExpr a) i = SMTExpr (SMTArray i a)
@@ -276,64 +267,24 @@ instance (Liftable a,Liftable b,Liftable c)
         Dict -> Dict
 #endif
 
--- BitVectors
+instance (TypeableNat n1,TypeableNat n2,TypeableNat (Add n1 n2))
+         => Concatable (BVTyped n1) (BVTyped n2) where
+  type ConcatResult (BVTyped n1) (BVTyped n2) = BVTyped (Add n1 n2)
+  concatAnnotation _ _ _ _ = ()
 
--- | Create a SMT representation of a bitvector type with /n/ bits.
-bv :: Integral i => i -- ^ The number of bits (/n/)
-      -> L.Lisp
-bv n = L.List [L.Symbol "_"
-              ,L.Symbol "BitVec"
-              ,L.Number $ L.I (fromIntegral n)]
+instance (TypeableNat n2) => Concatable BVUntyped (BVTyped n2) where
+  type ConcatResult BVUntyped (BVTyped n2) = BVUntyped
+  concatAnnotation _ (_::BVTyped n2) ann1 _
+    = ann1+(reflectNat (Proxy::Proxy n2) 0)
 
--- | Parses a given SMT bitvector value into a numerical value.
-getBVValue :: (Num a,Bits a,Read a,Integral i) => i
-              -> L.Lisp -- ^ The SMT expression representing the value.
-              -> Maybe a
-getBVValue len l = case getBVValue' l of
-  Nothing -> Nothing
-  Just (v,Nothing) -> Just v
-  Just (v,Just rlen) -> if len==rlen
-                        then Just v
-                        else Nothing
+instance (TypeableNat n1) => Concatable (BVTyped n1) BVUntyped where
+  type ConcatResult (BVTyped n1) BVUntyped = BVUntyped
+  concatAnnotation (_::BVTyped n1) _ _ ann2
+    = (reflectNat (Proxy::Proxy n1) 0)+ann2
 
-getBVValue' :: (Num a,Bits a,Read a,Integral i) => L.Lisp -- ^ The SMT expression representing the value.
-              -> Maybe (a,Maybe i)
-getBVValue' (L.Number (L.I v)) = Just (fromInteger v,Nothing)
-getBVValue' (L.Symbol s) = case T.unpack s of
-  '#':'b':rest -> let len = genericLength rest
-                  in case readInt 2
-                          (\x -> x=='0' || x=='1')
-                          (\x -> if x=='0' then 0 else 1)
-                          rest of
-                       [(v,_)] -> Just (v,Just len)
-                       _ -> Nothing
-  '#':'x':rest -> let len = (genericLength rest)*4
-                  in case readHex rest of
-                    [(v,_)] -> Just (v,Just len)
-                    _ -> Nothing
-  _ -> Nothing
-getBVValue' (L.List [L.Symbol "_",L.Symbol val,L.Number (L.I bits)])
-  = case T.unpack val of
-  'b':'v':num -> Just (read num,Just $ fromIntegral bits)
-  _ -> Nothing
-getBVValue' _ = Nothing
-
--- | Convert a numerical value into its SMT bitvector representation
-putBVValue :: (Bits a,Ord a,Integral a,Show a,Integral i)
-               => i -- ^ The number of bits used for the representation
-               -> a -- ^ The numerical value
-               -> L.Lisp
-putBVValue len x
-  | len `mod` 4 == 0 = let v' = if x < 0
-                                then 2^len + x
-                                else x
-                           enc = showHex v' ""
-                           l = genericLength enc
-                       in L.Symbol $ T.pack $ '#':'x':((genericReplicate ((len `div` 4)-l) '0')++enc)
-  | otherwise = L.Symbol (T.pack ('#':'b':[ if testBit x (fromIntegral i)
-                                            then '1'
-                                            else '0'
-                                            | i <- Prelude.reverse [0..(len-1)] ]))
+instance Concatable BVUntyped BVUntyped where
+  type ConcatResult BVUntyped BVUntyped = BVUntyped
+  concatAnnotation _ _ ann1 ann2 = ann1+ann2
 
 -- Arguments
 
@@ -343,7 +294,7 @@ instance Args () where
   foldsExprs _ s args = (s,fmap (const ()) args)
   extractArgAnnotation _ = ()
   toArgs x = Just ((),x)
-  toSorts _ _ = []
+  getSorts _ _ = []
   getArgAnnotation _ xs = ((),xs)
 
 instance (SMTType a) => Args (SMTExpr a) where
@@ -355,10 +306,8 @@ instance (SMTType a) => Args (SMTExpr a) where
     r <- entype gcast x
     return (r,xs)
   toArgs [] = Nothing
-  toSorts (_::SMTExpr a) ann = [toSort (undefined::a) ann]
-  getArgAnnotation _ (s:rest) = withSort s $ \_ ann -> case cast ann of
-    Nothing -> error "smtlib2: Sort provided to getArgAnnotation doesn't fit."
-    Just r -> (r,rest)
+  getSorts (_::SMTExpr a) ann = [getSort (undefined::a) ann]
+  getArgAnnotation u (s:rest) = (annotationFromSort (getUndef u) s,rest)
   getArgAnnotation _ [] = error "smtlib2: To few sorts provided."
 
 instance (Args a,Args b) => Args (a,b) where
@@ -375,18 +324,23 @@ instance (Args a,Args b) => Args (a,b) where
     (r1,x1) <- toArgs x
     (r2,x2) <- toArgs x1
     return ((r1,r2),x2)
-  toSorts ~(x1,x2) (ann1,ann2) = toSorts x1 ann1 ++ toSorts x2 ann2
+  getSorts ~(x1,x2) (ann1,ann2) = getSorts x1 ann1 ++ getSorts x2 ann2
   getArgAnnotation (_::(a1,a2)) sorts
     = let (ann1,r1) = getArgAnnotation (undefined::a1) sorts
           (ann2,r2) = getArgAnnotation (undefined::a2) r1
       in ((ann1,ann2),r2)
 
+instance (SMTValue a) => LiftArgs (SMTExpr a) where
+  type Unpacked (SMTExpr a) = a
+  liftArgs = Const
+  unliftArgs expr f = f expr
+
 instance (LiftArgs a,LiftArgs b) => LiftArgs (a,b) where
   type Unpacked (a,b) = (Unpacked a,Unpacked b)
   liftArgs (x,y) ~(a1,a2) = (liftArgs x a1,liftArgs y a2)
-  unliftArgs (x,y) = do
-    rx <- unliftArgs x
-    ry <- unliftArgs y
+  unliftArgs (x,y) f = do
+    rx <- unliftArgs x f
+    ry <- unliftArgs y f
     return (rx,ry)
 
 instance (Args a,Args b,Args c) => Args (a,b,c) where
@@ -413,15 +367,15 @@ instance (Args a,Args b,Args c) => Args (a,b,c) where
           (ann2,r2) = getArgAnnotation (undefined::a2) r1
           (ann3,r3) = getArgAnnotation (undefined::a3) r2
       in ((ann1,ann2,ann3),r3)
-  toSorts ~(x1,x2,x3) (ann1,ann2,ann3) = toSorts x1 ann1 ++ toSorts x2 ann2 ++ toSorts x3 ann3
+  getSorts ~(x1,x2,x3) (ann1,ann2,ann3) = getSorts x1 ann1 ++ getSorts x2 ann2 ++ getSorts x3 ann3
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c) => LiftArgs (a,b,c) where
   type Unpacked (a,b,c) = (Unpacked a,Unpacked b,Unpacked c)
   liftArgs (x,y,z) ~(a1,a2,a3) = (liftArgs x a1,liftArgs y a2,liftArgs z a3)
-  unliftArgs (x,y,z) = do
-    rx <- unliftArgs x
-    ry <- unliftArgs y
-    rz <- unliftArgs z
+  unliftArgs (x,y,z) f = do
+    rx <- unliftArgs x f
+    ry <- unliftArgs y f
+    rz <- unliftArgs z f
     return (rx,ry,rz)
 
 instance (Args a,Args b,Args c,Args d) => Args (a,b,c,d) where
@@ -453,20 +407,20 @@ instance (Args a,Args b,Args c,Args d) => Args (a,b,c,d) where
           (ann3,r3) = getArgAnnotation (undefined::a3) r2
           (ann4,r4) = getArgAnnotation (undefined::a4) r3
       in ((ann1,ann2,ann3,ann4),r4)
-  toSorts ~(x1,x2,x3,x4) (ann1,ann2,ann3,ann4)
-    = toSorts x1 ann1 ++
-      toSorts x2 ann2 ++
-      toSorts x3 ann3 ++
-      toSorts x4 ann4
+  getSorts ~(x1,x2,x3,x4) (ann1,ann2,ann3,ann4)
+    = getSorts x1 ann1 ++
+      getSorts x2 ann2 ++
+      getSorts x3 ann3 ++
+      getSorts x4 ann4
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d) => LiftArgs (a,b,c,d) where
   type Unpacked (a,b,c,d) = (Unpacked a,Unpacked b,Unpacked c,Unpacked d)
   liftArgs (x1,x2,x3,x4) ~(a1,a2,a3,a4) = (liftArgs x1 a1,liftArgs x2 a2,liftArgs x3 a3,liftArgs x4 a4)
-  unliftArgs (x1,x2,x3,x4) = do
-    r1 <- unliftArgs x1
-    r2 <- unliftArgs x2
-    r3 <- unliftArgs x3
-    r4 <- unliftArgs x4
+  unliftArgs (x1,x2,x3,x4) f = do
+    r1 <- unliftArgs x1 f
+    r2 <- unliftArgs x2 f
+    r3 <- unliftArgs x3 f
+    r4 <- unliftArgs x4 f
     return (r1,r2,r3,r4)
 
 instance (Args a,Args b,Args c,Args d,Args e) => Args (a,b,c,d,e) where
@@ -504,22 +458,22 @@ instance (Args a,Args b,Args c,Args d,Args e) => Args (a,b,c,d,e) where
           (ann4,r4) = getArgAnnotation (undefined::a4) r3
           (ann5,r5) = getArgAnnotation (undefined::a5) r4
       in ((ann1,ann2,ann3,ann4,ann5),r5)
-  toSorts ~(x1,x2,x3,x4,x5) (ann1,ann2,ann3,ann4,ann5)
-    = toSorts x1 ann1 ++
-      toSorts x2 ann2 ++
-      toSorts x3 ann3 ++
-      toSorts x4 ann4 ++
-      toSorts x5 ann5
+  getSorts ~(x1,x2,x3,x4,x5) (ann1,ann2,ann3,ann4,ann5)
+    = getSorts x1 ann1 ++
+      getSorts x2 ann2 ++
+      getSorts x3 ann3 ++
+      getSorts x4 ann4 ++
+      getSorts x5 ann5
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d,LiftArgs e) => LiftArgs (a,b,c,d,e) where
   type Unpacked (a,b,c,d,e) = (Unpacked a,Unpacked b,Unpacked c,Unpacked d,Unpacked e)
   liftArgs (x1,x2,x3,x4,x5) ~(a1,a2,a3,a4,a5) = (liftArgs x1 a1,liftArgs x2 a2,liftArgs x3 a3,liftArgs x4 a4,liftArgs x5 a5)
-  unliftArgs (x1,x2,x3,x4,x5) = do
-    r1 <- unliftArgs x1
-    r2 <- unliftArgs x2
-    r3 <- unliftArgs x3
-    r4 <- unliftArgs x4
-    r5 <- unliftArgs x5
+  unliftArgs (x1,x2,x3,x4,x5) f = do
+    r1 <- unliftArgs x1 f
+    r2 <- unliftArgs x2 f
+    r3 <- unliftArgs x3 f
+    r4 <- unliftArgs x4 f
+    r5 <- unliftArgs x5 f
     return (r1,r2,r3,r4,r5)
 
 instance (Args a,Args b,Args c,Args d,Args e,Args f) => Args (a,b,c,d,e,f) where
@@ -562,25 +516,25 @@ instance (Args a,Args b,Args c,Args d,Args e,Args f) => Args (a,b,c,d,e,f) where
           (ann5,r5) = getArgAnnotation (undefined::a5) r4
           (ann6,r6) = getArgAnnotation (undefined::a6) r5
       in ((ann1,ann2,ann3,ann4,ann5,ann6),r6)
-  toSorts ~(x1,x2,x3,x4,x5,x6) (ann1,ann2,ann3,ann4,ann5,ann6)
-    = toSorts x1 ann1 ++
-      toSorts x2 ann2 ++
-      toSorts x3 ann3 ++
-      toSorts x4 ann4 ++
-      toSorts x5 ann5 ++
-      toSorts x6 ann6
+  getSorts ~(x1,x2,x3,x4,x5,x6) (ann1,ann2,ann3,ann4,ann5,ann6)
+    = getSorts x1 ann1 ++
+      getSorts x2 ann2 ++
+      getSorts x3 ann3 ++
+      getSorts x4 ann4 ++
+      getSorts x5 ann5 ++
+      getSorts x6 ann6
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d,LiftArgs e,LiftArgs f) => LiftArgs (a,b,c,d,e,f) where
   type Unpacked (a,b,c,d,e,f) = (Unpacked a,Unpacked b,Unpacked c,Unpacked d,Unpacked e,Unpacked f)
   liftArgs (x1,x2,x3,x4,x5,x6) ~(a1,a2,a3,a4,a5,a6)
     = (liftArgs x1 a1,liftArgs x2 a2,liftArgs x3 a3,liftArgs x4 a4,liftArgs x5 a5,liftArgs x6 a6)
-  unliftArgs (x1,x2,x3,x4,x5,x6) = do
-    r1 <- unliftArgs x1
-    r2 <- unliftArgs x2
-    r3 <- unliftArgs x3
-    r4 <- unliftArgs x4
-    r5 <- unliftArgs x5
-    r6 <- unliftArgs x6
+  unliftArgs (x1,x2,x3,x4,x5,x6) f = do
+    r1 <- unliftArgs x1 f
+    r2 <- unliftArgs x2 f
+    r3 <- unliftArgs x3 f
+    r4 <- unliftArgs x4 f
+    r5 <- unliftArgs x5 f
+    r6 <- unliftArgs x6 f
     return (r1,r2,r3,r4,r5,r6)
 
 instance Args a => Args [a] where
@@ -606,49 +560,80 @@ instance Args a => Args [a] where
   getArgAnnotation (_::[a]) sorts = let (x,r1) = getArgAnnotation (undefined::a) sorts
                                         (xs,r2) = getArgAnnotation (undefined::[a]) r1
                                     in (x:xs,r2)
-  toSorts _ [] = []
-  toSorts ~(x:xs) (ann:anns) = toSorts x ann ++ toSorts xs anns
+  getSorts _ [] = []
+  getSorts ~(x:xs) (ann:anns) = getSorts x ann ++ getSorts xs anns
 
 instance LiftArgs a => LiftArgs [a] where
   type Unpacked [a] = [Unpacked a]
   liftArgs _ [] = []
   liftArgs ~(x:xs) (ann:anns) = liftArgs x ann:liftArgs xs anns
-  unliftArgs [] = return []
-  unliftArgs (x:xs) = do
-    x' <- unliftArgs x
-    xs' <- unliftArgs xs
+  unliftArgs [] _ = return []
+  unliftArgs (x:xs) f = do
+    x' <- unliftArgs x f
+    xs' <- unliftArgs xs f
     return (x':xs')
 
 instance SMTType a => SMTType (Maybe a) where
   type SMTAnnotation (Maybe a) = SMTAnnotation a
-  getSort u ann = L.List [L.Symbol "Maybe",getSort (undef u) ann]
+  getSort u ann = Fix $ NamedSort "Maybe" [getSort (undefArg u) ann]
+  asDataType _ = Just ("Maybe",
+                       TypeCollection { argCount = 1
+                                      , dataTypes = [mbTp]
+                                      })
     where
-      undef :: Maybe a -> a
-      undef _ = undefined
-  getSortBase _ = L.Symbol "Maybe"
-  declareType u ann = do
-    declareType (undef u) ann
-    declareType' (DeclaredType u ann)
-      (declareDatatypes ["a"] [("Maybe",[("Nothing",[]),("Just",[("fromJust",L.Symbol "a")])])])
-    where
-      undef :: Maybe a -> a
-      undef _ = undefined
+      mbTp = DataType { dataTypeName = "Maybe"
+                      , dataTypeConstructors = [conNothing,
+                                                conJust]
+                      , dataTypeGetUndefined = \sorts f -> case sorts of
+                        [s] -> withProxyArg s $
+                               \(_::t) ann -> f (undefined::Maybe t) ann
+                      }
+      conNothing = Constr { conName = "Nothing"
+                          , conFields = []
+                          , construct = \args [] f
+                                        -> case args of
+                                          Just [prx]
+                                            -> withProxyArg prx $
+                                               \(_::t) ann -> f (Nothing::Maybe t) ann
+                          , conTest = \args x -> case args of
+                            [s] -> withProxyArg s $
+                                   \(_::t) _ -> case cast x of
+                                     Just (Nothing::Maybe t) -> True
+                                     _ -> False
+                          }
+      conJust = Constr { conName = "Just"
+                       , conFields = [DataField { fieldName = "fromJust"
+                                                , fieldSort = Fix $ ArgumentSort 0
+                                                , fieldGet = \args x f
+                                                             -> case args of
+                                                               [s] -> withProxyArg s $
+                                                                      \(_::t) ann
+                                                                      -> case cast x of
+                                                                        Just (arg::Maybe t) -> f (fromJust arg) ann
+                                                }]
+                       , construct = \sort args f -> case args of
+                         [v] -> withAnyValue v $
+                                \rv ann -> f (Just rv) ann
+                       , conTest = \args x -> case args of
+                         [s] -> withProxyArg s $
+                                \(_::t) _ -> case cast x of
+                                  Just (Just (_::t)) -> True
+                                  _ -> False
+                       }
+  getProxyArgs (_::Maybe t) ann = [ProxyArg (undefined::t) ann]
+  annotationFromSort u (Fix (NamedSort "Maybe" [argSort])) = annotationFromSort (undefArg u) argSort
+  asValueType (_::Maybe x) f = asValueType (undefined::x) $
+                               \(_::y) -> f (undefined::Maybe y)
 
 instance SMTValue a => SMTValue (Maybe a) where
-  unmangle (L.Symbol "Nothing") _ = Just Nothing
-  unmangle (L.List [L.Symbol "as"
-                   ,L.Symbol "Nothing"
-                   ,_]) _ = Just Nothing
-  unmangle (L.List [L.Symbol "Just"
-                   ,res]) ann = do
-    r <- unmangle res ann
-    return (Just r)
+  unmangle (ConstrValue "Nothing" [] sort) _ = Just Nothing
+  unmangle (ConstrValue "Just" [arg] _) ann = case unmangle arg ann of
+    Just v -> Just (Just v)
+    Nothing -> Nothing
+  --unmangle (AsValue v (Fix (NamedSort "Maybe" _))) ann = unmangle v ann
   unmangle _ _ = Nothing
-  mangle u@Nothing ann = L.List [L.Symbol "as"
-                                ,L.Symbol "Nothing"
-                                ,getSort u ann]
-  mangle (Just x) ann = L.List [L.Symbol "Just"
-                               ,mangle x ann]
+  mangle u@Nothing ann = ConstrValue "Nothing" [] (Just $ getSort u ann)
+  mangle u@(Just x) ann = ConstrValue "Just" [mangle x ann] (Just $ getSort u ann)
 
 -- | Get an undefined value of the type argument of a type.
 undefArg :: b a -> a
@@ -656,533 +641,158 @@ undefArg _ = undefined
 
 instance (Typeable a,SMTType a) => SMTType [a] where
   type SMTAnnotation [a] = SMTAnnotation a
-  getSort u ann = L.List [L.Symbol "List",getSort (undefArg u) ann]
-  declareType u ann = do
-    declareType (undefArg u) ann
-    defaultDeclareType u ann
-  getSortBase _ = L.Symbol "List"
+  getSort u ann = Fix (NamedSort "List" [getSort (undefArg u) ann])
+  asDataType _ = Just ("List",
+                       TypeCollection { argCount = 1
+                                      , dataTypes = [tpList] })
+    where
+      tpList = DataType { dataTypeName = "List"
+                        , dataTypeConstructors = [conNil,conCons]
+                        , dataTypeGetUndefined = \args f -> case args of
+                          [s] -> withProxyArg s (\(_::t) ann -> f (undefined::[t]) ann)
+                        }
+      conNil = Constr { conName = "nil"
+                      , conFields = []
+                      , construct = \sort args f -> case sort of
+                        Just [s] -> withProxyArg s $
+                                    \(_::t) ann -> f ([]::[t]) ann
+                      , conTest = \args x -> case args of
+                        [s] -> withProxyArg s $
+                               \(_::t) _ -> case cast x of
+                                 Just ([]::[t]) -> True
+                                 _ -> False
+                      }
+      conCons = Constr { conName = "cons"
+                       , conFields = [DataField { fieldName = "head"
+                                                , fieldSort = Fix (ArgumentSort 0)
+                                                , fieldGet = \args x f -> case args of
+                                                  [s] -> withProxyArg s $
+                                                         \(_::t) ann
+                                                         -> case cast x of
+                                                           Just (ys::[t]) -> f (head ys) ann }
+                                     ,DataField { fieldName = "tail"
+                                                , fieldSort = Fix (NormalSort (NamedSort "List" [Fix (ArgumentSort 0)]))
+                                                , fieldGet = \args x f -> case args of
+                                                  [s] -> withProxyArg s $
+                                                         \(_::t) ann
+                                                         -> case cast x of
+                                                           Just (ys::[t]) -> f (tail ys) ann }]
+                       , construct = \sort args f
+                                     -> case args of
+                                       [h,t] -> withAnyValue h $
+                                                \v ann
+                                                -> withAnyValue t $
+                                                   \vs _ -> case cast vs of
+                                                     Just vs' -> f (v:vs') ann
+                       , conTest = \args x -> case args of
+                         [s] -> withProxyArg s $
+                                \(_::t) _ -> case cast x of
+                                  Just ((_:_)::[t]) -> True
+                                  _ -> False
+                       }
+  getProxyArgs (_::[t]) ann = [ProxyArg (undefined::t) ann]
+  annotationFromSort u (Fix (NamedSort "List" [sort])) = annotationFromSort (undefArg u) sort
+  asValueType (_::[a]) f = asValueType (undefined::a) $
+                           \(_::b) -> f (undefined::[b])
 
 instance (Typeable a,SMTValue a) => SMTValue [a] where
-  unmangle (L.Symbol "nil") _ = Just []
-  unmangle (L.List [L.Symbol "insert",h,t]) ann = do
+  unmangle (ConstrValue "nil" [] _) _ = Just []
+  unmangle (ConstrValue "insert" [h,t] _) ann = do
     h' <- unmangle h ann
     t' <- unmangle t ann
     return (h':t')
   unmangle _ _ = Nothing
-  mangle [] _ = L.Symbol "nil"
-  mangle (x:xs) ann = L.List [L.Symbol "insert"
-                             ,mangle x ann
-                             ,mangle xs ann]
+  mangle u@[] ann = ConstrValue "nil" [] (Just $ getSort u ann)
+  mangle u@(x:xs) ann = ConstrValue "insert" [mangle x ann,mangle xs ann] (Just $ getSort u ann)
 
 -- BitVector implementation
 
 instance SMTType (BitVector BVUntyped) where
   type SMTAnnotation (BitVector BVUntyped) = Integer
-  getSort _ l = bv l
-  getSortBase _ = error "smtlib2: No getSortBase implementation for BitVector"
-  declareType = defaultDeclareValue
-  toSort _ l = BVSort l True
-  fromSort _ = SortParser $ \l _ -> case l of
-    L.List [L.Symbol "_"
-           ,L.Symbol "BitVec"
-           ,L.Number (L.I w)] -> Just (BVSort w True)
-    _ -> Nothing
+  getSort _ l = Fix (BVSort l True)
+  annotationFromSort _ (Fix (BVSort l _)) = l
+  asValueType x f = Just $ f x
 
 instance SMTValue (BitVector BVUntyped) where
-  unmangle v l = fmap BitVector $ getBVValue l v
-  mangle (BitVector v) l = putBVValue l v
+  unmangle (BVValue _ v) _ = Just (BitVector v)
+  unmangle _ _ = Nothing
+  mangle (BitVector v) l = BVValue l v
 
 instance TypeableNat n => SMTType (BitVector (BVTyped n)) where
   type SMTAnnotation (BitVector (BVTyped n)) = ()
-#ifdef SMTLIB2_WITH_DATAKINDS
-  getSort _ _ = bv (reflectNat (Proxy::Proxy n) 0)
-#else
-  getSort _ _ = bv (reflectNat (undefined::n) 0)
-#endif
-  getSortBase _ = error "smtlib2: No getSortBase implementation for BitVector"
-  declareType = defaultDeclareValue
-#ifdef SMTLIB2_WITH_DATAKINDS
-  toSort _ _ = BVSort (reflectNat (Proxy::Proxy n) 0) False
-#else
-  toSort _ _ = BVSort (reflectNat (undefined::n) 0) False
-#endif
-  fromSort _ = SortParser $ \l _ -> case l of
-    L.List [L.Symbol "_"
-           ,L.Symbol "BitVec"
-#ifdef SMTLIB2_WITH_DATAKINDS
-           ,L.Number (L.I w)] -> if w == reflectNat (Proxy::Proxy n) 0
-#else
-           ,L.Number (L.I w)] -> if w == reflectNat (undefined::n) 0
-#endif
-                                 then Just (BVSort w False)
-                                 else Nothing
-    _ -> Nothing
+  getSort _ _ = Fix (BVSort (reflectNat (Proxy::Proxy n) 0) False)
+  annotationFromSort _ _ = ()
+  asValueType x f = Just $ f x
 
 instance TypeableNat n => SMTValue (BitVector (BVTyped n)) where
-#ifdef SMTLIB2_WITH_DATAKINDS
-  unmangle v _ = fmap BitVector $ getBVValue (reflectNat (Proxy::Proxy n) 0) v
-  mangle (BitVector v) _ = putBVValue (reflectNat (Proxy::Proxy n) 0) v
-#else
-  unmangle v _ = fmap BitVector $ getBVValue (reflectNat (undefined::n) 0) v
-  mangle (BitVector v) _ = putBVValue (reflectNat (undefined::n) 0) v
-#endif
+  unmangle (BVValue w v) _
+    | (reflectNat (Proxy::Proxy n) 0)==w = Just (BitVector v)
+    | otherwise = Nothing
+  unmangle _ _ = Nothing
+  mangle (BitVector v) _ = BVValue (reflectNat (Proxy::Proxy n) 0) v
 
 instance TypeableNat n => Num (SMTExpr (BitVector (BVTyped n))) where
-  (+) (x::SMTExpr (BitVector (BVTyped n))) y = App (BVAdd::SMTBVBinOp (BVTyped n)) (x,y)
-  (-) (x::SMTExpr (BitVector (BVTyped n))) y = App (BVSub::SMTBVBinOp (BVTyped n)) (x,y)
-  (*) (x::SMTExpr (BitVector (BVTyped n))) y = App (BVMul::SMTBVBinOp (BVTyped n)) (x,y)
-  negate (x::SMTExpr (BitVector (BVTyped n))) = App (BVNeg::SMTBVUnOp (BVTyped n)) x
-  abs (x::SMTExpr (BitVector (BVTyped n))) = App ITE (App (BVUGT::SMTBVComp (BVTyped n)) (x,Const (BitVector 0) ()),x,App (BVNeg::SMTBVUnOp (BVTyped n)) x)
-  signum (x::SMTExpr (BitVector (BVTyped n))) = App ITE (App (BVUGT::SMTBVComp (BVTyped n)) (x,Const (BitVector 0) ()),Const (BitVector 1) (),Const (BitVector (-1)) ())
+  (+) (x::SMTExpr (BitVector (BVTyped n))) y = App (SMTBVBin BVAdd) (x,y)
+  (-) (x::SMTExpr (BitVector (BVTyped n))) y = App (SMTBVBin BVSub) (x,y)
+  (*) (x::SMTExpr (BitVector (BVTyped n))) y = App (SMTBVBin BVMul) (x,y)
+  negate (x::SMTExpr (BitVector (BVTyped n))) = App (SMTBVUn BVNeg) x
+  abs (x::SMTExpr (BitVector (BVTyped n))) = App SMTITE (App (SMTBVComp BVUGT) (x,Const (BitVector 0) ()),x,App (SMTBVUn BVNeg) x)
+  signum (x::SMTExpr (BitVector (BVTyped n))) = App SMTITE (App (SMTBVComp BVUGT) (x,Const (BitVector 0) ()),Const (BitVector 1) (),Const (BitVector (-1)) ())
   fromInteger i = Const (BitVector i) ()
 
--- Functions
+instance Extractable BVUntyped BVUntyped where
+  extractAnn _ _ len _ = len
+  getExtractLen _ _ len = len
 
-instance SMTType a => SMTFunction (SMTEq a) where
-  type SMTFunArg (SMTEq a) = [SMTExpr a]
-  type SMTFunRes (SMTEq a) = Bool
-  isOverloaded _ = True
-  getFunctionSymbol _ _ = L.Symbol "="
-  inferResAnnotation _ _ = ()
-  optimizeCall _ [] = Just (Const True ())
-  optimizeCall _ [_] = Just (Const True ())
-  optimizeCall _ [x,y] = case eqExpr 0 x y of
-    Nothing -> Nothing
-    Just res -> Just (Const res ())
-  optimizeCall _ _ = Nothing
+instance TypeableNat n => Extractable (BVTyped n) BVUntyped where
+  extractAnn _ _ len _ = len
+  getExtractLen _ _ len = len
 
-instance (SMTFunction f,Liftable r,r ~ Lifted (SMTFunArg f) i,
-          Args i,
-          Args r)
-         => SMTFunction (SMTMap f i r) where
-  type SMTFunArg (SMTMap f i r) = r
-  type SMTFunRes (SMTMap f i r) = SMTArray i (SMTFunRes f)
-  isOverloaded _ = True
-  getFunctionSymbol x@(SMTMap f) arg_ann
-    = withUndef x $
-      \ua ui -> let (_,a_ann) = inferLiftedAnnotation ua ui arg_ann
-                    (sargs,sres) = functionGetSignature f a_ann (inferResAnnotation f a_ann)
-                    sym = getFunctionSymbol f a_ann
-                in L.List [L.Symbol "_"
-                          ,L.Symbol "map"
-                          ,if isOverloaded f
-                           then L.List [sym,L.List sargs,sres]
-                           else sym]
-    where
-      withUndef :: SMTMap f i r -> (SMTFunArg f -> i -> b) -> b
-      withUndef _ f' = f' undefined undefined
-  inferResAnnotation x@(SMTMap f) arg_ann
-    = withUndef x $ \ua ui
-                    -> let (i_ann,a_ann) = inferLiftedAnnotation ua ui arg_ann
-                       in (i_ann,inferResAnnotation f a_ann)
-    where
-      withUndef :: SMTMap f i r -> (SMTFunArg f -> i -> b) -> b
-      withUndef _ f' = f' undefined undefined
+instance TypeableNat n => Extractable BVUntyped (BVTyped n) where
+  extractAnn _ _ _ _ = ()
+  getExtractLen _ (_::BVTyped n) _ = reflectNat (Proxy::Proxy n) 0
 
-instance SMTType a => SMTFunction (SMTOrdOp a) where
-  type SMTFunArg (SMTOrdOp a) = (SMTExpr a,SMTExpr a)
-  type SMTFunRes (SMTOrdOp a) = Bool
-  isOverloaded _ = True
-  getFunctionSymbol Ge _ = L.Symbol ">="
-  getFunctionSymbol Gt _ = L.Symbol ">"
-  getFunctionSymbol Le _ = L.Symbol "<="
-  getFunctionSymbol Lt _ = L.Symbol "<"
-  inferResAnnotation _ _ = ()
+instance (TypeableNat n1,TypeableNat n2) => Extractable (BVTyped n1) (BVTyped n2) where
+  extractAnn _ _ _ _ = ()
+  getExtractLen _ (_::BVTyped n) _ = reflectNat (Proxy::Proxy n) 0
 
-instance SMTType a => SMTFunction (SMTArithOp a) where
-  type SMTFunArg (SMTArithOp a) = [SMTExpr a]
-  type SMTFunRes (SMTArithOp a) = a
-  isOverloaded _ = True
-  getFunctionSymbol Plus _ = L.Symbol "+"
-  getFunctionSymbol Mult _ = L.Symbol "*"
-  inferResAnnotation _ = head
+withSort :: DataTypeInfo -> Sort -> (forall t. SMTType t => t -> SMTAnnotation t -> r) -> r
+withSort _ (Fix BoolSort) f = f (undefined::Bool) ()
+withSort _ (Fix IntSort) f = f (undefined::Integer) ()
+withSort _ (Fix RealSort) f = f (undefined::Rational) ()
+withSort _ (Fix (BVSort { bvSortWidth = w
+                        , bvSortUntyped = unt })) f
+  = if unt
+    then f (undefined::BitVector BVUntyped) w
+    else reifyNat w (\(_::Proxy tp) -> f (undefined::BitVector (BVTyped tp)) ())
+withSort mp (Fix (ArraySort args res)) f
+  = withSorts mp args $ \(_::rargs) argAnn
+                         -> withSort mp res $ \(_::rres) resAnn
+                                               -> f (undefined::SMTArray rargs rres) (argAnn,resAnn)
+withSort mp (Fix (NamedSort name args)) f
+  = case Map.lookup name (datatypes mp) of
+    Just (decl,_) -> dataTypeGetUndefined decl
+                     (fmap (\s -> withSort mp s ProxyArg) args) f
+    Nothing -> error $ "smtlib2: Datatype "++name++" not defined."
 
-instance SMTType a => SMTFunction (SMTMinus a) where
-  type SMTFunArg (SMTMinus a) = (SMTExpr a,SMTExpr a)
-  type SMTFunRes (SMTMinus a) = a
-  isOverloaded _ = True
-  getFunctionSymbol _ _ = L.Symbol "-"
-  inferResAnnotation _ = fst
+withSorts :: DataTypeInfo -> [Sort] -> (forall arg . Liftable arg => arg -> ArgAnnotation arg -> r) -> r
+withSorts mp [x] f = withSort mp x $ \(_::t) ann -> f (undefined::SMTExpr t) ann
+withSorts mp [x0,x1] f
+  = withSort mp x0 $
+    \(_::r1) ann1
+    -> withSort mp x1 $
+       \(_::r2) ann2 -> f (undefined::(SMTExpr r1,SMTExpr r2)) (ann1,ann2)
+withSorts mp [x0,x1,x2] f
+  = withSort mp x0 $
+    \(_::r1) ann1
+     -> withSort mp x1 $
+        \(_::r2) ann2
+         -> withSort mp x2 $
+            \(_::r3) ann3 -> f (undefined::(SMTExpr r1,SMTExpr r2,SMTExpr r3)) (ann1,ann2,ann3)
 
-instance SMTFunction SMTIntArith where
-  type SMTFunArg SMTIntArith = (SMTExpr Integer,SMTExpr Integer)
-  type SMTFunRes SMTIntArith = Integer
-  isOverloaded _ = False
-  getFunctionSymbol Div _ = L.Symbol "div"
-  getFunctionSymbol Mod _ = L.Symbol "mod"
-  getFunctionSymbol Rem _ = L.Symbol "rem"
-  inferResAnnotation _ _ = ()
-
-instance SMTFunction SMTDivide where
-  type SMTFunArg SMTDivide = (SMTExpr Rational,SMTExpr Rational)
-  type SMTFunRes SMTDivide = Rational
-  isOverloaded _ = False
-  getFunctionSymbol _ _ = L.Symbol "/"
-  inferResAnnotation _ _ = ()
-
-instance SMTType a => SMTFunction (SMTNeg a) where
-  type SMTFunArg (SMTNeg a) = SMTExpr a
-  type SMTFunRes (SMTNeg a) = a
-  isOverloaded _ = True
-  getFunctionSymbol _ _ = L.Symbol "-"
-  inferResAnnotation _ = id
-
-instance SMTType a => SMTFunction (SMTAbs a) where
-  type SMTFunArg (SMTAbs a) = SMTExpr a
-  type SMTFunRes (SMTAbs a) = a
-  isOverloaded _ = True
-  getFunctionSymbol _ _ = L.Symbol "abs"
-  inferResAnnotation _ = id
-
-instance SMTFunction SMTNot where
-  type SMTFunArg SMTNot = SMTExpr Bool
-  type SMTFunRes SMTNot = Bool
-  isOverloaded _ = False
-  getFunctionSymbol _ _ = L.Symbol "not"
-  inferResAnnotation _ _ = ()
-
-instance SMTFunction SMTLogic where
-  type SMTFunArg SMTLogic = [SMTExpr Bool]
-  type SMTFunRes SMTLogic = Bool
-  isOverloaded _ = False
-  getFunctionSymbol And _ = L.Symbol "and"
-  getFunctionSymbol Or _ = L.Symbol "or"
-  getFunctionSymbol XOr _ = L.Symbol "xor"
-  getFunctionSymbol Implies _ = L.Symbol "=>"
-  inferResAnnotation _ _ = ()
-  optimizeCall _ [x] = Just x
-  optimizeCall And xs = case removeItems (\e -> case e of
-                                             Const False _ -> True
-                                             _ -> False) xs of
-                          Just _ -> Just $ Const False ()
-                          Nothing -> case removeItems (\e -> case e of
-                                                          Const True _ -> True
-                                                          _ -> False) xs of
-                                       Nothing -> Nothing
-                                       Just [] -> Just $ Const True ()
-                                       Just [x] -> Just x
-                                       Just xs' -> Just $ App And xs'
-  optimizeCall Or xs = case removeItems (\e -> case e of
-                                            Const True _ -> True
-                                            _ -> False) xs of
-                         Just _ -> Just $ Const True ()
-                         Nothing -> case removeItems (\e -> case e of
-                                                         Const False _ -> True
-                                                         _ -> False) xs of
-                                      Nothing -> Nothing
-                                      Just [] -> Just $ Const False ()
-                                      Just [x] -> Just x
-                                      Just xs' -> Just $ App Or xs'
-  optimizeCall XOr [] = Just $ Const False ()
-  optimizeCall Implies [] = Just $ Const True ()
-  optimizeCall Implies xs = let (args,res) = splitLast xs
-                            in case res of
-                              Const True _ -> Just (Const True ())
-                              _ -> case removeItems (\e -> case e of
-                                                        Const False _ -> True
-                                                        _ -> False) args of
-                                     Just _ -> Just (Const True ())
-                                     Nothing -> case removeItems (\e -> case e of
-                                                                     Const True _ -> True
-                                                                     _ -> False) args of
-                                                  Nothing -> case args of
-                                                    [] -> Just res
-                                                    _ -> Nothing
-                                                  Just [] -> Just res
-                                                  Just args' -> Just $ App Implies (args'++[res])
-  optimizeCall _ _ = Nothing
-
-removeItems :: (a -> Bool) -> [a] -> Maybe [a]
-removeItems f [] = Nothing
-removeItems f (x:xs) = if f x
-                       then (case removeItems f xs of
-                                Nothing -> Just xs
-                                Just xs' -> Just xs')
-                       else (case removeItems f xs of
-                                Nothing -> Nothing
-                                Just xs' -> Just (x:xs'))
-
-splitLast :: [a] -> ([a],a)
-splitLast [x] = ([],x)
-splitLast (x:xs) = let (xs',last) = splitLast xs
-                   in (x:xs',last)
-
-instance (Liftable a,SMTType r) => SMTFunction (SMTFun a r) where
-  type SMTFunArg (SMTFun a r) = a
-  type SMTFunRes (SMTFun a r) = r
-  isOverloaded _ = False
-  getFunctionSymbol (SMTFun name _) _ = L.Symbol name
-  inferResAnnotation (SMTFun _ r) _ = r
-
-instance SMTType a => SMTFunction (SMTDistinct a) where
-  type SMTFunArg (SMTDistinct a) = [SMTExpr a]
-  type SMTFunRes (SMTDistinct a) = Bool
-  isOverloaded _ = True
-  getFunctionSymbol _ _ = L.Symbol "distinct"
-  inferResAnnotation _ _ = ()
-
-instance SMTFunction SMTToReal where
-  type SMTFunArg SMTToReal = SMTExpr Integer
-  type SMTFunRes SMTToReal = Rational
-  isOverloaded _ = False
-  getFunctionSymbol _ _ = L.Symbol "to_real"
-  inferResAnnotation _ _ = ()
-
-instance SMTFunction SMTToInt where
-  type SMTFunArg SMTToInt = SMTExpr Rational
-  type SMTFunRes SMTToInt = Integer
-  isOverloaded _ = False
-  getFunctionSymbol _ _ = L.Symbol "to_int"
-  inferResAnnotation _ _ = ()
-
-instance SMTType a => SMTFunction (SMTITE a) where
-  type SMTFunArg (SMTITE a) = (SMTExpr Bool,SMTExpr a,SMTExpr a)
-  type SMTFunRes (SMTITE a) = a
-  isOverloaded _ = True
-  getFunctionSymbol _ _ = L.Symbol "ite"
-  inferResAnnotation _ ~(_,ann,_) = ann
-  optimizeCall _ (Const True _,ifT,_) = Just ifT
-  optimizeCall _ (Const False _,_,ifF) = Just ifF
-  optimizeCall _ (_,ifT,ifF) = case eqExpr 0 ifT ifF of
-    Just True -> Just ifT
-    _ -> Nothing
-
-instance SMTFunction (SMTBVComp BVUntyped) where
-  type SMTFunArg (SMTBVComp BVUntyped) = (SMTExpr (BitVector BVUntyped),SMTExpr (BitVector BVUntyped))
-  type SMTFunRes (SMTBVComp BVUntyped) = Bool
-  isOverloaded _ = True
-  getFunctionSymbol s _ = bvCompSymbol s
-  inferResAnnotation _ _ = ()
-
-instance TypeableNat a => SMTFunction (SMTBVComp (BVTyped a)) where
-  type SMTFunArg (SMTBVComp (BVTyped a)) = (SMTExpr (BitVector (BVTyped a)),SMTExpr (BitVector (BVTyped a)))
-  type SMTFunRes (SMTBVComp (BVTyped a)) = Bool
-  isOverloaded _ = True
-  getFunctionSymbol s _ = bvCompSymbol s
-  inferResAnnotation _ _ = ()
-
-bvCompSymbol :: SMTBVComp a -> L.Lisp
-bvCompSymbol BVULE = L.Symbol "bvule"
-bvCompSymbol BVULT = L.Symbol "bvult"
-bvCompSymbol BVUGE = L.Symbol "bvuge"
-bvCompSymbol BVUGT = L.Symbol "bvugt"
-bvCompSymbol BVSLE = L.Symbol "bvsle"
-bvCompSymbol BVSLT = L.Symbol "bvslt"
-bvCompSymbol BVSGE = L.Symbol "bvsge"
-bvCompSymbol BVSGT = L.Symbol "bvsgt"
-
-instance SMTFunction (SMTBVBinOp BVUntyped) where
-  type SMTFunArg (SMTBVBinOp BVUntyped) = (SMTExpr (BitVector BVUntyped),SMTExpr (BitVector BVUntyped))
-  type SMTFunRes (SMTBVBinOp BVUntyped) = BitVector BVUntyped
-  isOverloaded _ = True
-  getFunctionSymbol s _ = bvBinOpSymbol s
-  inferResAnnotation _ ~(ann,_) = ann
-  optimizeCall = bvBinOpOptimize
-
-instance TypeableNat a => SMTFunction (SMTBVBinOp (BVTyped a)) where
-  type SMTFunArg (SMTBVBinOp (BVTyped a)) = (SMTExpr (BitVector (BVTyped a)),SMTExpr (BitVector (BVTyped a)))
-  type SMTFunRes (SMTBVBinOp (BVTyped a)) = BitVector (BVTyped a)
-  isOverloaded _ = True
-  getFunctionSymbol s _ = bvBinOpSymbol s
-  inferResAnnotation _ ~(ann,_) = ann
-  optimizeCall = bvBinOpOptimize
-
-bvBinOpSymbol :: SMTBVBinOp a -> L.Lisp
-bvBinOpSymbol BVAdd = L.Symbol "bvadd"
-bvBinOpSymbol BVSub = L.Symbol "bvsub"
-bvBinOpSymbol BVMul = L.Symbol "bvmul"
-bvBinOpSymbol BVURem = L.Symbol "bvurem"
-bvBinOpSymbol BVSRem = L.Symbol "bvsrem"
-bvBinOpSymbol BVUDiv = L.Symbol "bvudiv"
-bvBinOpSymbol BVSDiv = L.Symbol "bvsdiv"
-bvBinOpSymbol BVSHL = L.Symbol "bvshl"
-bvBinOpSymbol BVLSHR = L.Symbol "bvlshr"
-bvBinOpSymbol BVASHR = L.Symbol "bvashr"
-bvBinOpSymbol BVXor = L.Symbol "bvxor"
-bvBinOpSymbol BVAnd = L.Symbol "bvand"
-bvBinOpSymbol BVOr = L.Symbol "bvor"
-
-bvBinOpOptimize :: SMTBVBinOp a -> (SMTExpr (BitVector a),SMTExpr (BitVector a)) -> Maybe (SMTExpr (BitVector a))
-bvBinOpOptimize BVAdd (Const (BitVector 0) _,y) = Just y
-bvBinOpOptimize BVAdd (x,Const (BitVector 0) _) = Just x
-bvBinOpOptimize BVAdd (Const (BitVector x) w,Const (BitVector y) _) = Just (Const (BitVector $ x+y) w)
-bvBinOpOptimize _ _ = Nothing
-
-instance SMTFunction (SMTBVUnOp BVUntyped) where
-  type SMTFunArg (SMTBVUnOp BVUntyped) = SMTExpr (BitVector BVUntyped)
-  type SMTFunRes (SMTBVUnOp BVUntyped) = BitVector BVUntyped
-  isOverloaded _ = True
-  getFunctionSymbol BVNot _ = L.Symbol "bvnot"
-  getFunctionSymbol BVNeg _ = L.Symbol "bvneg"
-  inferResAnnotation _ x = x
-
-instance TypeableNat a => SMTFunction (SMTBVUnOp (BVTyped a)) where
-  type SMTFunArg (SMTBVUnOp (BVTyped a)) = SMTExpr (BitVector (BVTyped a))
-  type SMTFunRes (SMTBVUnOp (BVTyped a)) = BitVector (BVTyped a)
-  isOverloaded _ = True
-  getFunctionSymbol BVNot _ = L.Symbol "bvnot"
-  getFunctionSymbol BVNeg _ = L.Symbol "bvneg"
-  inferResAnnotation _ x = x
-
-instance (Liftable i,SMTType v) => SMTFunction (SMTSelect i v) where
-  type SMTFunArg (SMTSelect i v) = (SMTExpr (SMTArray i v),i)
-  type SMTFunRes (SMTSelect i v) = v
-  isOverloaded _ = True
-  getFunctionSymbol _ _ = L.Symbol "select"
-  inferResAnnotation _ ~(~(_,ann),_) = ann
-
-instance (Liftable i,SMTType v) => SMTFunction (SMTStore i v) where
-  type SMTFunArg (SMTStore i v) = (SMTExpr (SMTArray i v),i,SMTExpr v)
-  type SMTFunRes (SMTStore i v) = SMTArray i v
-  isOverloaded _ = True
-  getFunctionSymbol _ _ = L.Symbol "store"
-  inferResAnnotation _ ~(ann,_,_) = ann
-
-instance (Args i,SMTType v) => SMTFunction (SMTConstArray i v) where
-  type SMTFunArg (SMTConstArray i v) = SMTExpr v
-  type SMTFunRes (SMTConstArray i v) = SMTArray i v
-  isOverloaded _ = True
-  getFunctionSymbol f@(ConstArray i_ann) v_ann
-    = withUndef f $
-      \u_arr -> L.List [L.Symbol "as"
-                       ,L.Symbol "const"
-                       ,getSort u_arr (i_ann,v_ann)]
-    where
-      withUndef :: SMTConstArray i v -> (SMTArray i v -> a) -> a
-      withUndef _ f' = f' undefined
-  inferResAnnotation (ConstArray i_ann) v_ann = (i_ann,v_ann)
-
-instance SMTFunction (SMTConcat BVUntyped BVUntyped) where
-  type SMTFunArg (SMTConcat BVUntyped BVUntyped) = (SMTExpr (BitVector BVUntyped),SMTExpr (BitVector BVUntyped))
-  type SMTFunRes (SMTConcat BVUntyped BVUntyped) = BitVector BVUntyped
-  isOverloaded _ = True
-  getFunctionSymbol _ _ = L.Symbol "concat"
-  inferResAnnotation _ ~(ann1,ann2) = ann1+ann2
-
-instance (TypeableNat n1) =>
-         SMTFunction (SMTConcat (BVTyped n1) BVUntyped) where
-  type SMTFunArg (SMTConcat (BVTyped n1) BVUntyped) = (SMTExpr (BitVector (BVTyped n1)),SMTExpr (BitVector BVUntyped))
-  type SMTFunRes (SMTConcat (BVTyped n1) BVUntyped) = BitVector BVUntyped
-  isOverloaded _ = True
-  getFunctionSymbol _ _ = L.Symbol "concat"
-#ifdef SMTLIB2_WITH_DATAKINDS
-  inferResAnnotation conc ~((),ann1) = let getProxy1 :: SMTConcat (BVTyped n1) a -> Proxy n1
-                                           getProxy1 _ = Proxy
-                                       in ann1+(reflectNat (getProxy1 conc) 0)
-#else
-  inferResAnnotation conc ~((),ann1) = let getProxy1 :: SMTConcat (BVTyped n1) a -> n1
-                                           getProxy1 _ = undefined
-                                       in ann1+(reflectNat (getProxy1 conc) 0)
-#endif
-
-instance (TypeableNat n1) =>
-         SMTFunction (SMTConcat BVUntyped (BVTyped n1)) where
-  type SMTFunArg (SMTConcat BVUntyped (BVTyped n1)) = (SMTExpr (BitVector BVUntyped),SMTExpr (BitVector (BVTyped n1)))
-  type SMTFunRes (SMTConcat BVUntyped (BVTyped n1)) = BitVector BVUntyped
-  isOverloaded _ = True
-  getFunctionSymbol _ _ = L.Symbol "concat"
-#ifdef SMTLIB2_WITH_DATAKINDS
-  inferResAnnotation conc ~(ann1,()) = let getProxy2 :: SMTConcat a (BVTyped n1) -> Proxy n1
-                                           getProxy2 _ = Proxy
-                                       in ann1+(reflectNat (getProxy2 conc) 0)
-#else
-  inferResAnnotation conc ~(ann1,()) = let getProxy2 :: SMTConcat a (BVTyped n1) -> n1
-                                           getProxy2 _ = undefined
-                                       in ann1+(reflectNat (getProxy2 conc) 0)
-#endif
-
-instance (TypeableNat n1,TypeableNat n2
-         ,TypeableNat (Add n1 n2)) =>
-         SMTFunction (SMTConcat (BVTyped n1) (BVTyped n2)) where
-  type SMTFunArg (SMTConcat (BVTyped n1) (BVTyped n2)) = (SMTExpr (BitVector (BVTyped n1)),SMTExpr (BitVector (BVTyped n2)))
-  type SMTFunRes (SMTConcat (BVTyped n1) (BVTyped n2)) = BitVector (BVTyped (Add n1 n2))
-  isOverloaded _ = True
-  getFunctionSymbol _ _ = L.Symbol "concat"
-  inferResAnnotation _ _ = ()
-
-instance (TypeableNat start,TypeableNat len)
-         => SMTFunction (SMTExtract BVUntyped start len) where
-  type SMTFunArg (SMTExtract BVUntyped start len) = SMTExpr (BitVector BVUntyped)
-  type SMTFunRes (SMTExtract BVUntyped start len) = BitVector BVUntyped
-  isOverloaded _ = True
-  getFunctionSymbol (_ :: SMTExtract BVUntyped start len) _
-#ifdef SMTLIB2_WITH_DATAKINDS
-    = let start' = reflectNat (Proxy::Proxy start) 0
-          len' = reflectNat (Proxy::Proxy len) 0
-      in L.List [L.Symbol "_"
-                ,L.Symbol "extract"
-                ,L.toLisp $ start' + len' - 1
-                ,L.toLisp $ start']
-#else
-    = let start' = reflectNat (undefined::start) 0
-          len' = reflectNat (undefined::len) 0
-      in L.List [L.Symbol "_"
-                ,L.Symbol "extract"
-                ,L.toLisp $ start' + len' - 1
-                ,L.toLisp $ start' ]
-#endif
-#ifdef SMTLIB2_WITH_DATAKINDS
-  inferResAnnotation (_::SMTExtract BVUntyped start len) _ = reflectNat (Proxy::Proxy len) 0
-#else
-  inferResAnnotation (_::SMTExtract BVUntyped start len) _ = reflectNat (undefined::len) 0
-#endif
-
-instance (TypeableNat tp,TypeableNat start,TypeableNat len)
-         => SMTFunction (SMTExtract (BVTyped tp) start len) where
-  type SMTFunArg (SMTExtract (BVTyped tp) start len) = SMTExpr (BitVector (BVTyped tp))
-  type SMTFunRes (SMTExtract (BVTyped tp) start len) = BitVector (BVTyped len)
-  isOverloaded _ = True
-  getFunctionSymbol (_ :: SMTExtract (BVTyped tp) start len) _
-#ifdef SMTLIB2_WITH_DATAKINDS
-    = let start' = reflectNat (Proxy::Proxy start) 0
-          len' = reflectNat (Proxy::Proxy len) 0
-      in L.List [L.Symbol "_"
-                ,L.Symbol "extract"
-                ,L.toLisp $ start' + len' - 1
-                ,L.toLisp $ start' ]
-#else
-    = let start' = reflectNat (undefined::start) 0
-          len' = reflectNat (undefined::len) 0
-      in L.List [L.Symbol "_"
-                ,L.Symbol "extract"
-                ,L.toLisp $ start' + len' - 1
-                ,L.toLisp $ start' ]
-#endif
-  inferResAnnotation _ _ = ()
-
-instance SMTType a => SMTFunction (SMTConTest a) where
-  type SMTFunArg (SMTConTest a) = SMTExpr a
-  type SMTFunRes (SMTConTest a) = Bool
-  isOverloaded _ = False
-  getFunctionSymbol (ConTest (Constructor name)) _
-    = L.Symbol $ T.append "is-" name
-  inferResAnnotation _ _ = ()
-
-instance (SMTRecordType a,SMTType f) => SMTFunction (SMTFieldSel a f) where
-  type SMTFunArg (SMTFieldSel a f) = SMTExpr a
-  type SMTFunRes (SMTFieldSel a f) = f
-  isOverloaded _ = False
-  getFunctionSymbol (FieldSel (Field name)) _ = L.Symbol name
-  inferResAnnotation (FieldSel field) ann
-    = getFieldAnn field ann
-
-instance SMTType a => SMTFunction (SMTHead a) where
-  type SMTFunArg (SMTHead a) = SMTExpr [a]
-  type SMTFunRes (SMTHead a) = a
-  isOverloaded _ = True
-  getFunctionSymbol _ _ = L.Symbol "head"
-  inferResAnnotation _ ann = ann
-
-instance SMTType a => SMTFunction (SMTTail a) where
-  type SMTFunArg (SMTTail a) = SMTExpr [a]
-  type SMTFunRes (SMTTail a) = [a]
-  isOverloaded _ = True
-  getFunctionSymbol _ _ = L.Symbol "tail"
-  inferResAnnotation _ ann = ann
-
-instance SMTType a => SMTFunction (SMTInsert a) where
-  type SMTFunArg (SMTInsert a) = (SMTExpr a,SMTExpr [a])
-  type SMTFunRes (SMTInsert a) = [a]
-  isOverloaded _ = True
-  getFunctionSymbol _ _ = L.Symbol "insert"
-  inferResAnnotation _ = fst
+withArraySort :: DataTypeInfo -> [Sort] -> Sort -> (forall i v. (Liftable i,SMTType v) => SMTArray i v -> (ArgAnnotation i,SMTAnnotation v) -> a) -> a
+withArraySort mp idx v f
+  = withSorts mp idx $
+    \(_::i) anni
+    -> withSort mp v $
+       \(_::vt) annv -> f (undefined::SMTArray i vt) (anni,annv)

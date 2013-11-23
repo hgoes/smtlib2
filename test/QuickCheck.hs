@@ -4,9 +4,8 @@ module QuickCheck where
 import Test.QuickCheck as QC hiding ((.&&.),(.||.))
 import qualified Test.QuickCheck.Property as QCP
 import Language.SMTLib2 as SMT2
-import Language.SMTLib2.Functions
+import Language.SMTLib2.Pipe
 import Language.SMTLib2.Internals
-import Language.SMTLib2.Internals.Translation
 import Language.SMTLib2.Internals.Interface
 import Data.Text as T hiding (concat)
 import Data.Unit
@@ -18,15 +17,8 @@ import Data.AttoLisp as L
 import qualified Data.ByteString.Char8 as BS
 import Data.Attoparsec.ByteString as AP
 
-commonTypes :: Map TyCon DeclaredType
-commonTypes = Map.fromList [mkEntry (undefined::Bool)
-                           ,mkEntry (undefined::Integer)
-                           ,mkEntry' (undefined::SMTArray (SMTExpr Integer) Integer) ((),())
-                           ,mkEntry (undefined::BV16)
-                           ]
-  where
-    mkEntry u = (fst $ splitTyConApp $ typeOf u,DeclaredValueType u ())
-    mkEntry' u ann = (fst $ splitTyConApp $ typeOf u,DeclaredType u ann)
+commonTypes :: DataTypeInfo
+commonTypes = emptyDataTypeInfo
 
 eqTest = do
   quickCheck (QC.forAll genExpression ((\x -> x==x) :: SMTExpr Bool -> Bool))
@@ -35,10 +27,8 @@ eqTest = do
 translateId = do
   quickCheck (QC.forAll (genExpression::Gen (SMTExpr Bool)) translateCheck)
 
-commonSorts = mconcat $ fmap (withDeclaredType (\u _ -> fromSort u)) (Map.elems commonTypes)
-
 translateExpr :: (forall a. SMTType a => SMTExpr a -> b) -> L.Lisp -> Maybe b
-translateExpr f l = lispToExpr (commonFunctions `mappend` commonTheorems) commonSorts nameToVar commonTypes f Nothing l
+translateExpr f l = lispToExpr (commonFunctions `mappend` commonTheorems) nameToVar commonTypes f Nothing l
 
 parseLispSimple :: String -> L.Lisp
 parseLispSimple str = case AP.parse lisp (BS.pack str) of
@@ -68,9 +58,9 @@ testResults = mapM_ (\res -> case res of
 translateCheck :: SMTType a => SMTExpr a -> QCP.Result
 translateCheck (expr::SMTExpr a)
   = let (l,_) = exprToLisp expr 0
-        expr' = lispToExpr commonFunctions commonSorts
+        expr' = lispToExpr commonFunctions
                 nameToVar
-                commonTypes gcast (Just $ toSort (undefined::a) (extractAnnotation expr)) l
+                commonTypes gcast (Just $ getSort (undefined::a) (extractAnnotation expr)) l
     in QCP.MkResult { QCP.ok = Just $ Just (Just expr) == expr'
                     , QCP.expect = True
                     , QCP.reason = show expr ++ " is parsed back as " ++ show expr'
@@ -82,8 +72,8 @@ translateCheck (expr::SMTExpr a)
 
 nameToVar :: Text -> Maybe UntypedExpr
 nameToVar x = case T.unpack x of
-  'b':_ -> Just (UntypedExpr (Var x () :: SMTExpr Bool))
-  'i':_ -> Just (UntypedExpr (Var x () :: SMTExpr Integer))
+  'b':_ -> Just (UntypedExpr (Var (T.unpack x) () :: SMTExpr Bool))
+  'i':_ -> Just (UntypedExpr (Var (T.unpack x) () :: SMTExpr Integer))
   str -> Nothing
 
 type BoundVars = Map TypeRep [UExpr]
@@ -158,7 +148,7 @@ genVar = withUndef $ \u -> do
                                              xs -> xs `genericIndex` (i `mod` (genericLength xs)))
                                     else genUnbound u i
   where
-    genUnbound u i = Var (T.pack $ (tname u)++show (abs i::Integer)) unit
+    genUnbound u i = Var ((tname u)++show (abs i::Integer)) unit
     withUndef :: (a -> Gen (ExprGen (SMTExpr a))) -> Gen (ExprGen (SMTExpr a))
     withUndef f = f undefined
     tname u
@@ -196,9 +186,9 @@ genArith :: (Arbitrary (ExprGen (SMTExpr a)),SMTArith a) => Gen (ExprGen (SMTExp
 genArith = do
   lhs <- arbitrary
   rhs <- arbitrary
-  op <- elements [\(x,y) -> App Plus [x,y]
-                 ,App Minus
-                 ,\(x,y) -> App Mult [x,y]]
+  op <- elements [\(x,y) -> App (SMTArith Plus) [x,y]
+                 ,App SMTMinus
+                 ,\(x,y) -> App (SMTArith Mult) [x,y]]
   return $ ExprGen $ \b -> op (genExpr lhs b,genExpr rhs b)
 
 genDivModRem :: Gen (ExprGen (SMTExpr Integer))
@@ -206,7 +196,7 @@ genDivModRem = do
   lhs <- arbitrary
   rhs <- arbitrary
   op <- elements [Div,Mod,Rem]
-  return $ ExprGen $ \b -> App op (genExpr lhs b,genExpr rhs b)
+  return $ ExprGen $ \b -> App (SMTIntArith op) (genExpr lhs b,genExpr rhs b)
 
 genLogic :: Gen (ExprGen (SMTExpr Bool))
 genLogic = oneof [do
@@ -224,7 +214,7 @@ genLogic = oneof [do
                  ,do
                      x <- arbitrary
                      y <- arbitrary
-                     return $ ExprGen $ \b -> App XOr [genExpr x b,genExpr y b]
+                     return $ ExprGen $ \b -> App (SMTLogic XOr) [genExpr x b,genExpr y b]
                  ,do
                      x <- arbitrary
                      return $ ExprGen $ \b -> not' (genExpr x b)
@@ -235,7 +225,7 @@ genITE = do
   iftrue <- arbitrary
   iffalse <- arbitrary
   cond <- arbitrary
-  return $ ExprGen $ \b -> App ITE (genExpr cond b,genExpr iftrue b,genExpr iffalse b)
+  return $ ExprGen $ \b -> App SMTITE (genExpr cond b,genExpr iftrue b,genExpr iffalse b)
 
 genExistQuant :: Gen (ExprGen (SMTExpr Bool))
 genExistQuant = do
