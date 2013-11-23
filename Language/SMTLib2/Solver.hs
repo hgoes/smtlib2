@@ -4,7 +4,7 @@ module Language.SMTLib2.Solver where
 
 import Language.SMTLib2
 import Language.SMTLib2.Pipe
-import Control.Monad.Trans (MonadIO,liftIO)
+import Control.Monad.Trans (MonadIO)
 
 -- | Z3 is a solver by Microsoft <http://research.microsoft.com/en-us/um/redmond/projects/z3>.
 withZ3 :: MonadIO m => SMT' m a -> m a

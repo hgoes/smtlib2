@@ -1,13 +1,10 @@
 {-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances,MultiParamTypeClasses,RankNTypes,DeriveDataTypeable,TypeSynonymInstances,TypeFamilies,FlexibleContexts,CPP,ScopedTypeVariables #-}
 module Language.SMTLib2.Internals where
 
-import Data.Monoid
 import Control.Monad.Reader hiding (mapM,mapM_)
 import Control.Monad.State hiding (mapM,mapM_)
-import Data.Text as T hiding (reverse,foldl)
 import Data.Typeable
 import Data.Map as Map hiding (assocs,foldl)
-import Data.List as List (find,genericIndex)
 import Data.Char (isDigit)
 import Data.Ratio
 import Data.Proxy
@@ -19,8 +16,6 @@ import Data.Tagged
 import Data.List as List (genericReplicate)
 #endif
 import Data.Fix
-import Data.Set (Set)
-import qualified Data.Set as Set
 import Prelude hiding (mapM,mapM_,foldl)
 import Data.Foldable
 import Data.Traversable
@@ -28,14 +23,6 @@ import Data.Traversable
 -- Monad stuff
 import Control.Applicative (Applicative(..))
 import Control.Monad.State.Lazy as Lazy (StateT)
-import Control.Monad.Cont (ContT)
-import Control.Monad.Error (ErrorT, Error)
-import Control.Monad.Trans.Identity (IdentityT)
-import Control.Monad.List (ListT)
-import Control.Monad.Trans.Maybe (MaybeT)
-import Control.Monad.State.Strict as Strict (StateT)
-import Control.Monad.Writer.Lazy as Lazy (WriterT)
-import Control.Monad.Writer.Strict as Strict (WriterT)
 
 class Monad m => SMTBackend a m where
   smtSetLogic :: a -> String -> m ()

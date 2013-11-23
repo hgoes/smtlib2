@@ -11,7 +11,7 @@ module Language.SMTLib2.TH
 
 import Language.SMTLib2.Internals
 import Language.SMTLib2.Internals.Interface
-import Language.SMTLib2.Internals.Instances
+import Language.SMTLib2.Internals.Instances ()
 import Language.Haskell.TH
 import qualified Data.AttoLisp as L
 import qualified Data.Text as T hiding (foldl1)
@@ -22,7 +22,7 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Foldable
 import Prelude hiding (foldl,concat,elem,all,foldl1)
-import Data.List (findIndex,genericLength,genericReplicate)
+import Data.List (findIndex,genericLength)
 import Data.Fix
 
 data TypeGraph = TypeGraph { typeNodes :: Map Name Gr.Node
