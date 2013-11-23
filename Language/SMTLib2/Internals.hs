@@ -101,7 +101,6 @@ infix 4 .<., .<=., .>=., .>.
 data SMTArray (i :: *) (v :: *) = SMTArray deriving (Eq,Typeable)
 
 data SMTState = SMTState { nameCount :: Map String Integer
-                         , usedTypes :: Set String
                          , declaredDataTypes :: DataTypeInfo
                          , namedExprs :: Map String UntypedExpr }
 
@@ -461,7 +460,6 @@ withSMTBackend' :: AnyBackend m -> SMT' m a -> m a
 withSMTBackend' backend@(AnyBackend b) f = do
   res <- evalStateT (runReaderT (runSMT f) backend)
          (SMTState { nameCount = Map.empty
-                   , usedTypes = Set.empty
                    , declaredDataTypes = emptyDataTypeInfo
                    , namedExprs = Map.empty })
   smtExit b
@@ -533,16 +531,13 @@ declareType u ann = case asDataType u of
                              ) (dataTypeConstructors dt)
           ) (dataTypes dts)
     st <- getSMT
-    if Set.member dtName (usedTypes st)
+    if containsTypeCollection dts (declaredDataTypes st)
       then return ()
-      else (if containsTypeCollection dts (declaredDataTypes st)
-            then putSMT $ st { usedTypes = Set.insert dtName (usedTypes st) }
-            else (do
-                     putSMT $ st { declaredDataTypes = addDataTypeStructure dts (declaredDataTypes st)
-                                 , usedTypes = Set.insert dtName
-                                               (usedTypes st) }
-                     smtBackend (\backend -> do
-                                    lift $ smtDeclareDataTypes backend dts)))
+      else (do
+               putSMT $ st { declaredDataTypes = addDataTypeStructure dts (declaredDataTypes st)
+                           }
+               smtBackend (\backend -> do
+                              lift $ smtDeclareDataTypes backend dts))
 
 -- Data type info
 
