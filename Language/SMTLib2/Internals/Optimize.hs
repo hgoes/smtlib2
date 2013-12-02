@@ -64,6 +64,7 @@ optimizeExpr (App fun x) = let (opt,x') = foldExprs (\opt expr ann -> case optim
                                         then Just $ App fun x'
                                         else Nothing
                              Just res -> Just res
+
 optimizeExpr _ = Nothing
 
 optimizeCall :: SMTFunction arg res -> arg -> Maybe (SMTExpr res)
@@ -76,14 +77,18 @@ optimizeCall (SMTLogic _) [x] = Just x
 optimizeCall (SMTLogic And) xs = case removeConstsOf False xs of
   Just _ -> Just $ Const False ()
   Nothing -> case removeConstsOf True xs of
-    Nothing -> Nothing
+    Nothing -> case xs of
+      [] -> Just $ Const True ()
+      _ -> Nothing
     Just [] -> Just $ Const True ()
     Just [x] -> Just x
     Just xs' -> Just $ App (SMTLogic And) xs'
 optimizeCall (SMTLogic Or) xs = case removeConstsOf True xs of
   Just _ -> Just $ Const True ()
   Nothing -> case removeConstsOf False xs of
-    Nothing -> Nothing
+    Nothing -> case xs of
+      [] -> Just $ Const False ()
+      _ -> Nothing
     Just [] -> Just $ Const False ()
     Just [x] -> Just x
     Just xs' -> Just $ App (SMTLogic Or) xs'
