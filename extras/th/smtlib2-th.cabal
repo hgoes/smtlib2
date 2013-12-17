@@ -1,0 +1,12 @@
+Name:		smtlib2-th
+Description:	Automatically derive SMT instances for haskell data types
+Version:        0.1
+Author:         Henning Günther <guenther@forsyte.at>
+Build-Type:     Simple
+Cabal-Version:  >=1.2
+
+Library
+  Build-Depends:        base >= 4,data-fix,containers,fgl,text,
+                        atto-lisp,smtlib2,template-haskell
+  Exposed-Modules:
+    Language.SMTLib2.TH
