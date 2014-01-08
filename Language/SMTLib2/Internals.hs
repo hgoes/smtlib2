@@ -763,6 +763,19 @@ data BitVector (b :: *) = BitVector Integer deriving (Eq,Ord,Typeable)
 instance Show (BitVector a) where
   show (BitVector x) = show x
 
+instance Enum (BitVector a) where
+  succ (BitVector x) = BitVector (succ x)
+  pred (BitVector x) = BitVector (pred x)
+  toEnum x = BitVector (toEnum x)
+  fromEnum (BitVector x) = fromEnum x
+  enumFrom (BitVector x) = [ BitVector y | y <- enumFrom x ]
+  enumFromThen (BitVector x) (BitVector y)
+    = [ BitVector z | z <- enumFromThen x y ]
+  enumFromTo (BitVector x) (BitVector y)
+    = [ BitVector z | z <- enumFromTo x y ]
+  enumFromThenTo (BitVector x) (BitVector y) (BitVector z)
+    = [ BitVector p | p <- enumFromThenTo x y z ]
+
 type N0 = Z
 type N1 = S N0
 type N2 = S N1
