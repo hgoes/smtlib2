@@ -13,8 +13,8 @@ Flag WithDataKinds
 
 Library
   Build-Depends:        base >= 4,text,mtl,process,blaze-builder,bytestring,
-                        attoparsec,atto-lisp >= 0.2,array,template-haskell,
-                        containers, transformers, fgl, data-fix, tagged
+                        attoparsec,atto-lisp >= 0.2,array,
+                        containers, transformers, data-fix, tagged
   Extensions: GADTs,RankNTypes,CPP,ScopedTypeVariables,
               MultiParamTypeClasses,FlexibleContexts,OverloadedStrings,
               DeriveFunctor,FlexibleInstances,DeriveTraversable,DeriveFoldable
@@ -29,7 +29,6 @@ Library
   Exposed-Modules:
     Language.SMTLib2
     Language.SMTLib2.Solver
-    Language.SMTLib2.TH
     Language.SMTLib2.Connection
     Language.SMTLib2.Internals
     Language.SMTLib2.Internals.Instances
