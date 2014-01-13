@@ -630,7 +630,7 @@ valueToLisp (BVValue { bvValueWidth = w
   = L.List [L.Symbol "_"
            ,L.Symbol $ T.pack $ "bv"++(if v>=0
                                        then show v
-                                       else show (2^w + v + 1))
+                                       else show (2^w + v))
            ,L.Number $ L.I w]
 valueToLisp (ConstrValue name vals sort)
   = let constr = case sort of
