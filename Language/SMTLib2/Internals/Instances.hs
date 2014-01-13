@@ -737,6 +737,16 @@ instance TypeableNat n => SMTValue (BitVector (BVTyped n)) where
   unmangle _ _ = Nothing
   mangle (BitVector v) _ = BVValue (reflectNat (Proxy::Proxy n) 0) v
 
+bvUnsigned :: IsBitVector a => BitVector a -> SMTAnnotation (BitVector a) -> Integer
+bvUnsigned (BitVector x) _ = x
+
+bvSigned :: IsBitVector a => BitVector a -> SMTAnnotation (BitVector a) -> Integer
+bvSigned (BitVector x::BitVector a) ann
+  = let sz = getBVSize (Proxy::Proxy a) ann
+    in if x < 2^(sz-1)
+       then x
+       else x-2^sz
+
 instance TypeableNat n => Num (SMTExpr (BitVector (BVTyped n))) where
   (+) (x::SMTExpr (BitVector (BVTyped n))) y = App (SMTBVBin BVAdd) (x,y)
   (-) (x::SMTExpr (BitVector (BVTyped n))) y = App (SMTBVBin BVSub) (x,y)

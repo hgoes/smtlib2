@@ -413,35 +413,35 @@ bvsdiv :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector
 bvsdiv e1 e2 = App (SMTBVBin BVSDiv) (e1,e2)
 
 -- | Bitvector unsigned less-or-equal
-bvule :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
+bvule :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
 bvule e1 e2 = App (SMTBVComp BVULE) (e1,e2)
 
 -- | Bitvector unsigned less-than
-bvult :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
+bvult :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
 bvult e1 e2 = App (SMTBVComp BVULT) (e1,e2)
 
 -- | Bitvector unsigned greater-or-equal
-bvuge :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
+bvuge :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
 bvuge e1 e2 = App (SMTBVComp BVUGE) (e1,e2)
 
 -- | Bitvector unsigned greater-than
-bvugt :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
+bvugt :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
 bvugt e1 e2 = App (SMTBVComp BVUGT) (e1,e2)
 
 -- | Bitvector signed less-or-equal
-bvsle :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
+bvsle :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
 bvsle e1 e2 = App (SMTBVComp BVSLE) (e1,e2)
 
 -- | Bitvector signed less-than
-bvslt :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
+bvslt :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
 bvslt e1 e2 = App (SMTBVComp BVSLT) (e1,e2)
 
 -- | Bitvector signed greater-or-equal
-bvsge :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
+bvsge :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
 bvsge e1 e2 = App (SMTBVComp BVSGE) (e1,e2)
 
 -- | Bitvector signed greater-than
-bvsgt :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
+bvsgt :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
 bvsgt e1 e2 = App (SMTBVComp BVSGT) (e1,e2)
 
 -- | Bitvector shift left

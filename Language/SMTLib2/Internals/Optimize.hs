@@ -1,7 +1,7 @@
 module Language.SMTLib2.Internals.Optimize (optimizeBackend,optimizeExpr) where
 
 import Language.SMTLib2.Internals
-import Language.SMTLib2.Internals.Instances ()
+import Language.SMTLib2.Internals.Instances (bvSigned,bvUnsigned)
 import Data.Proxy
 import Data.Bits
 
@@ -75,6 +75,7 @@ optimizeCall SMTEq [_] = Just (Const True ())
 optimizeCall SMTEq [x,y] = case eqExpr 0 x y of
   Nothing -> Nothing
   Just res -> Just (Const res ())
+optimizeCall SMTNot (Const x _) = Just $ Const (not x) ()
 optimizeCall (SMTLogic _) [x] = Just x
 optimizeCall (SMTLogic And) xs = case removeConstsOf False xs of
   Just _ -> Just $ Const False ()
@@ -116,6 +117,7 @@ optimizeCall SMTITE (_,ifT,ifF) = case eqExpr 0 ifT ifF of
 optimizeCall (SMTBVBin op) args = bvBinOpOptimize op args
 optimizeCall SMTConcat (Const (BitVector v1::BitVector b1) ann1,Const (BitVector v2::BitVector b2) ann2)
   = Just (Const (BitVector $ (v1 `shiftL` (fromInteger $ getBVSize (Proxy::Proxy b2) ann2)) .|. v2) (concatAnnotation (undefined::b1) (undefined::b2) ann1 ann2))
+optimizeCall (SMTBVComp op) args = bvCompOptimize op args
 optimizeCall _ _ = Nothing
 
 removeConstsOf :: Bool -> [SMTExpr Bool] -> Maybe [SMTExpr Bool]
@@ -143,3 +145,21 @@ bvBinOpOptimize BVAdd (Const (BitVector 0) _,y) = Just y
 bvBinOpOptimize BVAdd (x,Const (BitVector 0) _) = Just x
 bvBinOpOptimize BVAdd (Const (BitVector x) w,Const (BitVector y) _) = Just (Const (BitVector $ x+y) w)
 bvBinOpOptimize _ _ = Nothing
+
+bvCompOptimize :: IsBitVector a => SMTBVCompOp -> (SMTExpr (BitVector a),SMTExpr (BitVector a)) -> Maybe (SMTExpr Bool)
+bvCompOptimize op (Const b1 ann1,Const b2 ann2)
+  = Just $ Const (case op of
+                     BVULE -> u1 <= u2
+                     BVULT -> u1 < u2
+                     BVUGE -> u1 >= u2
+                     BVUGT -> u1 > u2
+                     BVSLE -> s1 <= s2
+                     BVSLT -> s1 < s2
+                     BVSGE -> s1 >= s2
+                     BVSGT -> s1 > s2) ()
+  where
+    u1 = bvUnsigned b1 ann1
+    u2 = bvUnsigned b2 ann2
+    s1 = bvSigned b1 ann1
+    s2 = bvSigned b1 ann2
+bvCompOptimize _ _ = Nothing
