@@ -260,7 +260,10 @@ data SMTBVUnOp
   | BVNeg
   deriving (Typeable,Eq)
 
-class (SMTType (BitVector a),SMTType (BitVector b),SMTType (BitVector (ConcatResult a b)))
+class (SMTValue (BitVector a)) => IsBitVector a where
+  getBVSize :: Proxy a -> SMTAnnotation (BitVector a) -> Integer
+
+class (IsBitVector a,IsBitVector b,IsBitVector (ConcatResult a b))
       => Concatable a b where
   type ConcatResult a b
   concatAnnotation :: a -> b
@@ -268,7 +271,7 @@ class (SMTType (BitVector a),SMTType (BitVector b),SMTType (BitVector (ConcatRes
                       -> SMTAnnotation (BitVector b)
                       -> SMTAnnotation (BitVector (ConcatResult a b))
 
-class (SMTType (BitVector a),SMTType (BitVector b)) => Extractable a b where
+class (IsBitVector a,IsBitVector b) => Extractable a b where
   extractAnn :: a -> b -> Integer -> SMTAnnotation (BitVector a) -> SMTAnnotation (BitVector b)
   getExtractLen :: a -> b -> SMTAnnotation (BitVector b) -> Integer
 

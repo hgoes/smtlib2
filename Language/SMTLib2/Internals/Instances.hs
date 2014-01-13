@@ -713,6 +713,9 @@ instance SMTType (BitVector BVUntyped) where
   annotationFromSort _ (Fix (BVSort l _)) = l
   asValueType x f = Just $ f x
 
+instance IsBitVector BVUntyped where
+  getBVSize _ = id
+
 instance SMTValue (BitVector BVUntyped) where
   unmangle (BVValue _ v) _ = Just (BitVector v)
   unmangle _ _ = Nothing
@@ -723,6 +726,9 @@ instance TypeableNat n => SMTType (BitVector (BVTyped n)) where
   getSort _ _ = Fix (BVSort (reflectNat (Proxy::Proxy n) 0) False)
   annotationFromSort _ _ = ()
   asValueType x f = Just $ f x
+
+instance TypeableNat n => IsBitVector (BVTyped n) where
+  getBVSize (_::Proxy (BVTyped n)) _ = reflectNat (Proxy::Proxy n) 0
 
 instance TypeableNat n => SMTValue (BitVector (BVTyped n)) where
   unmangle (BVValue w v) _

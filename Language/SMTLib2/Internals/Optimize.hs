@@ -2,6 +2,8 @@ module Language.SMTLib2.Internals.Optimize (optimizeBackend,optimizeExpr) where
 
 import Language.SMTLib2.Internals
 import Language.SMTLib2.Internals.Instances ()
+import Data.Proxy
+import Data.Bits
 
 optimizeBackend :: b -> OptimizeBackend b
 optimizeBackend = OptB
@@ -112,6 +114,8 @@ optimizeCall SMTITE (_,ifT,ifF) = case eqExpr 0 ifT ifF of
   Just True -> Just ifT
   _ -> Nothing
 optimizeCall (SMTBVBin op) args = bvBinOpOptimize op args
+optimizeCall SMTConcat (Const (BitVector v1::BitVector b1) ann1,Const (BitVector v2::BitVector b2) ann2)
+  = Just (Const (BitVector $ (v1 `shiftL` (fromInteger $ getBVSize (Proxy::Proxy b2) ann2)) .|. v2) (concatAnnotation (undefined::b1) (undefined::b2) ann1 ann2))
 optimizeCall _ _ = Nothing
 
 removeConstsOf :: Bool -> [SMTExpr Bool] -> Maybe [SMTExpr Bool]
