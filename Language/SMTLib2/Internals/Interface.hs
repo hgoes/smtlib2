@@ -365,15 +365,15 @@ constArray :: (Args i,SMTType v) => SMTExpr v -- ^ This element will be at every
 constArray e i_ann = App (SMTConstArray i_ann) e
 
 -- | Bitvector and
-bvand :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvand :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
 bvand e1 e2 = App (SMTBVBin BVAnd) (e1,e2)
 
 -- | Bitvector or
-bvor :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvor :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
 bvor e1 e2 = App (SMTBVBin BVOr) (e1,e2)
 
 -- | Bitvector or
-bvxor :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvxor :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
 bvxor e1 e2 = App (SMTBVBin BVXor) (e1,e2)
 
 -- | Bitvector not
@@ -385,31 +385,31 @@ bvneg :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector 
 bvneg e = App (SMTBVUn BVNeg) e
 
 -- | Bitvector addition
-bvadd :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvadd :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
 bvadd e1 e2 = App (SMTBVBin BVAdd) (e1,e2)
 
 -- | Bitvector subtraction
-bvsub :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvsub :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
 bvsub e1 e2 = App (SMTBVBin BVSub) (e1,e2)
 
 -- | Bitvector multiplication
-bvmul :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvmul :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
 bvmul e1 e2 = App (SMTBVBin BVMul) (e1,e2)
 
 -- | Bitvector unsigned remainder
-bvurem :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvurem :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
 bvurem e1 e2 = App (SMTBVBin BVURem) (e1,e2)
 
 -- | Bitvector signed remainder
-bvsrem :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvsrem :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
 bvsrem e1 e2 = App (SMTBVBin BVSRem) (e1,e2)
 
 -- | Bitvector unsigned division
-bvudiv :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvudiv :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
 bvudiv e1 e2 = App (SMTBVBin BVUDiv) (e1,e2)
 
 -- | Bitvector signed division
-bvsdiv :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvsdiv :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
 bvsdiv e1 e2 = App (SMTBVBin BVSDiv) (e1,e2)
 
 -- | Bitvector unsigned less-or-equal
@@ -445,15 +445,15 @@ bvsgt :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SM
 bvsgt e1 e2 = App (SMTBVComp BVSGT) (e1,e2)
 
 -- | Bitvector shift left
-bvshl :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvshl :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
 bvshl e1 e2 = App (SMTBVBin BVSHL) (e1,e2)
 
 -- | Bitvector logical right shift
-bvlshr :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvlshr :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
 bvlshr e1 e2 = App (SMTBVBin BVLSHR) (e1,e2)
 
 -- | Bitvector arithmetical right shift
-bvashr :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvashr :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
 bvashr e1 e2 = App (SMTBVBin BVASHR) (e1,e2)
 
 -- | Concats two bitvectors into one.

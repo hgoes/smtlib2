@@ -747,6 +747,11 @@ bvSigned (BitVector x::BitVector a) ann
        then x
        else x-2^sz
 
+bvRestrict :: IsBitVector a => BitVector a -> SMTAnnotation (BitVector a) -> BitVector a
+bvRestrict (BitVector x::BitVector a) ann
+  = let sz = getBVSize (Proxy::Proxy a) ann
+    in BitVector (x `mod` (2^sz))
+
 instance TypeableNat n => Num (SMTExpr (BitVector (BVTyped n))) where
   (+) (x::SMTExpr (BitVector (BVTyped n))) y = App (SMTBVBin BVAdd) (x,y)
   (-) (x::SMTExpr (BitVector (BVTyped n))) y = App (SMTBVBin BVSub) (x,y)
