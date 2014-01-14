@@ -180,5 +180,5 @@ bvCompOptimize op (Const b1 ann1,Const b2 ann2)
     u1 = bvUnsigned b1 ann1
     u2 = bvUnsigned b2 ann2
     s1 = bvSigned b1 ann1
-    s2 = bvSigned b1 ann2
+    s2 = bvSigned b2 ann2
 bvCompOptimize _ _ = Nothing
