@@ -116,15 +116,17 @@ optimizeCall SMTITE (_,ifT,ifF) = case eqExpr 0 ifT ifF of
   _ -> Nothing
 optimizeCall (SMTBVBin op) args = bvBinOpOptimize op args
 optimizeCall SMTConcat (Const (BitVector v1::BitVector b1) ann1,Const (BitVector v2::BitVector b2) ann2)
-  = Just (Const (BitVector $ (v1 `shiftL` (fromInteger $ getBVSize (Proxy::Proxy b2) ann2)) .|. v2) (concatAnnotation (undefined::b1) (undefined::b2) ann1 ann2))
+  = Just (Const (BitVector $ (v1 `shiftL` (fromInteger $ getBVSize (Proxy::Proxy b2) ann2)) .|. v2)
+          (concatAnnotation (undefined::b1) (undefined::b2) ann1 ann2))
 optimizeCall (SMTExtract pstart plen) (Const from@(BitVector v) ann)
   = let start = reflectNat pstart 0
         undefFrom :: BitVector from -> from
         undefFrom _ = undefined
         undefLen :: SMTExpr (BitVector len) -> len
         undefLen _ = undefined
+        len = reflectNat plen 0
         res = Const (BitVector $ (v `shiftR` (fromInteger start)) .&. (1 `shiftL` (fromInteger $ reflectNat plen 0) - 1))
-              (extractAnn (undefFrom from) (undefLen res) start ann) 
+              (extractAnn (undefFrom from) (undefLen res) len ann)
     in Just res
 optimizeCall (SMTBVComp op) args = bvCompOptimize op args
 optimizeCall _ _ = Nothing
