@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell,OverloadedStrings,FlexibleContexts #-}
 {- | This module can be used to automatically lift haskell data-types into the SMT realm.
  -}
-module Language.SMTLib2.TH 
+module Language.SMTLib2.TH
        (deriveSMT,
         constructor,
         field,
@@ -20,10 +20,13 @@ import Data.Maybe (catMaybes)
 import qualified Data.Graph.Inductive as Gr
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Set (Set)
+import qualified Data.Set as Set
 import Data.Foldable
-import Prelude hiding (foldl,concat,elem,all,foldl1)
+import Prelude hiding (foldl,foldr,concat,elem,all,foldl1,init)
 import Data.List (findIndex,genericLength)
 import Data.Fix
+import Data.Unit
 
 data TypeGraph = TypeGraph { typeNodes :: Map Name Gr.Node
                            , typeGraph :: Gr.Gr Dec [Either Int Type] }
@@ -60,13 +63,13 @@ getTypeGraph tp = do
     addDependencies nd (NewtypeD ctx name tyvars con derives) gr = addDependenciesCon nd tyvars con gr
     addDependenciesCon nd tyvars (RecC con_name fields) gr = foldlM (\cgr (_,_,tp) -> fieldDependencies nd tyvars tp cgr) gr fields
     addDependenciesCon nd tyvars (NormalC con_name fields) gr = foldlM (\cgr (_,tp) -> fieldDependencies nd tyvars tp cgr) gr fields
-      
+
     unpackType :: Type -> Maybe (Name,[Type])
     unpackType (AppT t1 t2) = fmap (\(con,pars) -> (con,pars++[t2])) (unpackType t1)
     unpackType (ConT name) = Just (name,[])
     unpackType (TupleT n) = Just (tupleTypeName n,[])
     unpackType tp = Nothing
-    
+
     replaceVars :: Type -> Type -> Type
     replaceVars with (VarT name) = with
     replaceVars with (AppT t1 t2) = AppT (replaceVars with t1) (replaceVars with t2)
@@ -79,7 +82,7 @@ getTypeGraph tp = do
     typeFromDec (NewtypeD _ name tyvar _ _) = foldl (\t tyv -> AppT t (case tyv of
                                                                        PlainTV n -> VarT n
                                                                        KindedTV n _ -> VarT n)) (ConT name) tyvar
-    
+
     resolvePar :: [TyVarBndr] -> Type -> Either Int Type
     resolvePar tyvars (VarT name) = case findIndex (\tyvar -> case tyvar of
                                                        PlainTV name' -> name==name'
@@ -87,7 +90,7 @@ getTypeGraph tp = do
                                       Nothing -> error $ "Internal error: Unknown type variable "++show name
                                       Just idx -> Left idx
     resolvePar _ tp = Right tp
-    
+
     fieldDependencies nd tyvars tp gr = case unpackType tp of
       Nothing -> return gr
       Just (con,pars) -> do
@@ -107,7 +110,7 @@ getDeclGroups gr = if all (\grp -> checkGroup grp grp Nothing) comps
     checkGroup (x:xs) grp cur = case checkGroup' (Gr.lsuc (typeGraph gr) x) grp cur of
       Nothing -> False
       Just ncur -> checkGroup xs grp ncur
-    
+
     checkGroup' [] grp cur = Just cur
     checkGroup' ((nd,lnk):lnks) grp cur = if nd `elem` grp
                                           then (case cur of
@@ -156,10 +159,10 @@ allFieldsCon udef (NormalC name fields) = generate' 0 (length fields) fields
                                      letE [valD (tildeP $ conP name ((replicate i wildP)++[varP p]++(replicate (n-i-1) wildP))) (normalB udef) []] (varE p),tp)
                                  :(generate' (i+1) n tps)
 allFieldsCon udef (RecC name fields) = fmap (\(fname,_,tp) -> (appE (varE fname) udef,tp)) fields
-allFieldsCon udef (InfixC (_,tp1) name (_,tp2)) = [(do 
+allFieldsCon udef (InfixC (_,tp1) name (_,tp2)) = [(do
                                                        p <- newName "p"
                                                        letE [valD (tildeP $ infixP (varP p) name wildP) (normalB udef) []] (varE p),tp1)
-                                                  ,(do 
+                                                  ,(do
                                                        p <- newName "p"
                                                        letE [valD (tildeP $ infixP wildP name (varP p)) (normalB udef) []] (varE p),tp2)
                                                   ]
@@ -274,13 +277,68 @@ generateTypeCollection decls
               -> recConE 'Constr
                   [ fieldExp 'conName (stringE $ nameBase name)
                   , fieldExp 'conFields (listE (fields dName tyvars f))
-                  --, fieldExp 'construct
+                  , fieldExp 'construct (generateConstruct dName name tyvars f)
+                  , fieldExp 'conTest (generateConTest dName name tyvars f)
                   ]
             NormalC name []
               -> recConE 'Constr
                   [ fieldExp 'conName (stringE $ nameBase name)
-                  , fieldExp 'conFields (listE []) ]
+                  , fieldExp 'conFields (listE [])
+                  , fieldExp 'construct (generateConstruct dName name tyvars [])
+                  , fieldExp 'conTest (generateConTest dName name tyvars [])
+                  ]
         | con <- allCons decl ]
+    generateConstruct dName cName tyvars fs = do
+      let (rem,inf) = getInference (Set.fromList $ fmap tyVarBndrName tyvars) fs
+      f <- newName "f"
+      prxs <- mapM (const (newName "prx")) tyvars
+      tvs <- mapM (const (newName "tp")) tyvars
+      anns <- mapM (const (newName "ann")) tyvars
+      args <- mapM (const (newName "arg")) fs
+      rargs <- mapM (const (newName "rarg")) fs
+      lamE [if Set.null rem
+            then wildP
+            else conP 'Just [listP [ varP prx | prx <- prxs ]]
+           ,listP $ fmap varP args
+           ,varP f]
+           (foldr (\(prx,tv,ann) e
+                   -> appsE [varE 'withProxyArg
+                            ,varE prx
+                            ,lamE [sigP wildP (varT tv),varP ann] e]
+                  )
+              (foldr (\(inf,arg,rarg) e
+                      -> if Set.null rem && not inf
+                         then appsE [[| withAnyValue |]
+                                    ,varE arg
+                                    ,lamE [varP rarg,wildP] e]
+                         else letE [valD (conP 'Just [tupP [varP rarg,wildP]])
+                                         (normalB $ appE [| castAnyValue |] (varE arg)) []]
+                                   e)
+                 (appsE [varE f
+                        ,sigE (appsE ((conE cName):
+                                      (fmap varE rargs))) (foldl appT (conT dName) (fmap varT tvs))
+                        ,tupE (fmap varE anns)]) (zip3 inf args rargs))
+              (zip3 prxs tvs anns))
+    generateConTest dName cName tyvars fs = do
+      prxs <- mapM (const (newName "prx")) tyvars
+      tvs <- mapM (const (newName "tv")) tyvars
+      obj <- newName "obj"
+      lamE [listP $ fmap varP prxs,varP obj]
+           (foldr (\(prx,tv) e
+                   -> appsE [varE 'withProxyArg
+                            ,varE prx
+                            ,lamE [sigP wildP (varT tv),wildP] e]
+                  ) (caseE (appE (varE 'cast) (varE obj))
+                           [match (conP 'Just [sigP (conP cName (fmap (const wildP) fs)) (foldl appT (conT dName) (fmap varT tvs))])
+                                  (normalB (conE 'True)) []
+                           ,match wildP (normalB (conE 'False)) []]) (zip prxs tvs))
+
+    getInference tyvars [] = (tyvars,[])
+    getInference tyvars ((_,_,tp):fs)
+      = let tyvars' = allTyVars tp
+            (ntyvars,res) = getInference (Set.difference tyvars tyvars') fs
+        in (ntyvars,(Set.null (Set.intersection tyvars tyvars')):res)
+
     fields dName tyvars f
       = [ recConE 'DataField
             [ fieldExp 'fieldName (stringE $ nameBase fname)
@@ -307,36 +365,51 @@ generateTypeCollection decls
       ann <- newName "ann"
       appsE [ [| withProxyArg |]
             , varE x
-            , lamE [sigP wildP (varT tp),sigP (varP ann) (appT (conT ''SMTAnnotation) (varT tp))] (generateGet' dName xs obj f fname (tps++[(tp,ann)]))]
+            , lamE [sigP wildP (varT tp)
+                   ,{-sigP (-}varP ann{-) (appT (conT ''SMTAnnotation) (varT tp))-}]
+                   (generateGet' dName xs obj f fname (tps++[(tp,ann)]))]
     generateGet' dName [] obj f fname tps = do
       res <- newName "res"
       let complTp = foldl appT (conT dName) (fmap (varT . fst) tps)
       caseE (appE [| cast |] (varE obj))
         [match (conP 'Just [sigP (varP res) complTp])
-               (normalB $ appsE [varE f,appE (varE fname) (sigE (varE res) complTp)
+               (normalB $ appsE [varE f,appE (varE fname) (varE res)
                                 ,case tps of
                                    [(_,ann)] -> varE ann
                                    _ -> tupE [ varE ann | (_,ann) <- tps ] ]) []]
 
+allTyVars :: Type -> Set Name
+allTyVars (ForallT bound _ tp)
+  = Set.difference (allTyVars tp)
+                   (Set.fromList $ fmap tyVarBndrName bound)
+allTyVars (AppT t1 t2) = Set.union (allTyVars t1) (allTyVars t2)
+allTyVars (SigT tp _) = allTyVars tp
+allTyVars (VarT n) = Set.singleton n
+allTyVars _ = Set.empty
+
+tyVarBndrName :: TyVarBndr -> Name
+tyVarBndrName (PlainTV n) = n
+tyVarBndrName (KindedTV n _) = n
+
 getUndefFun :: Name -> [TyVarBndr] -> TyVarBndr -> ExpQ -> ExpQ
-getUndefFun con tyvars tvar udef 
+getUndefFun con tyvars tvar udef
   = do
-    appE 
-      (tupE 
+    appE
+      (tupE
          [sigE [| const undefined |]
-               (forallT tyvars (cxt []) $ 
-                appT 
-                 (appT arrowT 
+               (forallT tyvars (cxt []) $
+                appT
+                 (appT arrowT
                        (foldl appT (conT con) (fmap (varT.tyVarName) tyvars)))
                  (varT (tyVarName tvar)))]
       ) udef
-    
+
 --[| (const undefined :: $(foldl appT (conT con) (fmap (varT.tyVarName) tyvars)) -> $(varT (tyVarName tvar))) $(udef) |]
 
 sortExpr :: Name -> [TyVarBndr] -> ExpQ -> ExpQ
 sortExpr con [] _ = [| L.Symbol (T.pack $(stringE (nameBase con))) |]
 sortExpr con tyvars udef = [| L.List |] `appE` (listE $ [ [| L.Symbol (T.pack $(stringE (nameBase con))) |] ]
-                                                ++ [ [| getSort |] `appE` (getUndefFun con tyvars tv udef) 
+                                                ++ [ [| getSort |] `appE` (getUndefFun con tyvars tv udef)
                                                                    `appE` (tupE []) | tv <- tyvars ])
 
 -- | Given a data-type, this function derives an instance of both 'SMTType' and 'SMTValue' for it.
@@ -361,8 +434,33 @@ deriveSMT name = do
                                                                                                                          | tyvar <- tyvars ]),
                                        generateGetSort dec,
                                        funD 'asDataType [ clause [wildP] (normalB $ appsE [ [| Just |]
-                                                        , tupE [stringE $ nameBase $ dec_name
-                                                        , varE coll]]) []]
+                                                                                          , tupE [stringE $ nameBase $ dec_name
+                                                                                          , varE coll]]) []],
+                                       do
+                                         f <- newName "f"
+                                         tps <- mapM (const (newName "tp")) tyvars
+                                         tps2 <- mapM (const (newName "tp'")) tyvars
+                                         funD 'asValueType [clause [sigP wildP (foldl appT (conT dec_name) (fmap varT tps))
+                                                                   ,varP f]
+                                                                   (normalB $
+                                                                    (if null tyvars
+                                                                     then appE [| Just |]
+                                                                     else \arg
+                                                                          -> foldr (\(tp1,tp2) e
+                                                                                    -> appsE [[| asValueType |]
+                                                                                             ,sigE [| undefined |]
+                                                                                                   (varT tp1)
+                                                                                             ,lamE [sigP wildP (varT tp2)] e]
+                                                                                   ) arg (zip tps tps2)) (appE (varE f) (sigE [| undefined |] (foldl appT (conT dec_name) (fmap varT tps2))))
+                                                                   ) []],
+                                       do
+                                         args <- mapM (const (newName "arg")) tyvars
+                                         funD 'annotationFromSort [clause [sigP wildP fullType
+                                                                          ,conP 'Fix [conP 'NamedSort [wildP,listP $ fmap varP args]]]
+                                                                          (normalB $ tupE [ appsE [[| annotationFromSort |]
+                                                                                                  ,sigE [| undefined |] (varT $ tyVarName tv)
+                                                                                                  ,varE arg]
+                                                                                          | (arg,tv) <- zip args tyvars ]) []]
                                       ]
                              inst2 <- instanceD (cxt $ concat [[classP ''SMTValue [varT n]
                                                               ,equalP ((conT ''SMTAnnotation) `appT` (varT n)) (tupleT 0)] | n <- fmap tyVarName tyvars ])
@@ -425,7 +523,7 @@ reconstruct (ConT name) tps = (name,tps)
 reconstruct (AppT x tp) tps = reconstruct x (tp:tps)
 
 generateUnmangleFun :: Dec -> Q Dec
-generateUnmangleFun dec 
+generateUnmangleFun dec
   = do
     let (_,tyvars) = getDecInfo dec
         cons = case dec of
@@ -463,10 +561,19 @@ genClause tyvars (NormalC name []) = do
                             ,listP []
                             ,wildP]
          ,tupP []] (normalB $ appE [| Just |] (conE name)) []
+
 constructorType :: Type -> TypeQ
-constructorType (AppT _ tp) = constructorType tp
-constructorType (ForallT tyvars ctx tp) = forallT tyvars (return ctx) (constructorType tp)
-constructorType tp = [t| Constructor |] `appT` (return tp)
+constructorType tp = [t| Constructor |] `appT`
+                     (foldl appT (tupleT (length targs))
+                        [ [t| SMTExpr |] `appT` (return targ) | targ <- targs]) `appT` (return tres)
+  where
+    (targs,tres) = constructorType' tp
+
+constructorType' :: Type -> ([Type],Type)
+constructorType' (AppT (AppT ArrowT from) to)
+  = let (targ,tres) = constructorType' to
+    in (from:targ,tres)
+constructorType' tp = ([],tp)
 
 -- | Get the SMT representation for a given constructor.
 constructor :: Name -> Q Exp
@@ -508,4 +615,3 @@ matches exp pat = do
                                           _ -> False) cons
       [| foldl (.&&.) (constant True) $ (is $exp $(constructor name)): $(listE $ catMaybes [ matches' [| $exp .# $(field f) |] pat | ((f,_,_),pat) <- Prelude.zip fields pats ]) |]
     matches' exp (RecP name pats) = Just [| foldl (.&&.) (constant True) $ (is $exp $(constructor name)): $(listE $ catMaybes [ matches' [| $exp .# $(field f) |] pat | (f,pat) <- pats ]) |]
-    

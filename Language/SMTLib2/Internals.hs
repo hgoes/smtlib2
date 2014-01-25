@@ -506,6 +506,9 @@ argumentSortToSort f (Fix (NormalSort s)) = do
   res <- mapM (argumentSortToSort f) s
   return (Fix res)
 
+sortToArgumentSort :: Sort -> ArgumentSort
+sortToArgumentSort (Fix s) = Fix (NormalSort (fmap sortToArgumentSort s))
+
 declareType :: (Monad m,SMTType t) => t -> SMTAnnotation t -> SMT' m ()
 declareType u ann = case asDataType u of
   Nothing -> return ()
@@ -549,6 +552,9 @@ data AnyValue = forall t. SMTType t => AnyValue t (SMTAnnotation t)
 
 withAnyValue :: AnyValue -> (forall t. SMTType t => t -> SMTAnnotation t -> a) -> a
 withAnyValue (AnyValue x ann) f = f x ann
+
+castAnyValue :: SMTType t => AnyValue -> Maybe (t,SMTAnnotation t)
+castAnyValue (AnyValue x ann) = cast (x,ann)
 
 data DataType = DataType { dataTypeName :: String
                          , dataTypeConstructors :: [Constr]
