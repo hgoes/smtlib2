@@ -4,6 +4,7 @@ module Language.SMTLib2.STP where
 
 import Language.SMTLib2
 import Language.SMTLib2.Internals
+import Language.SMTLib2.Internals.Operators
 import Language.SMTLib2.Internals.Instances
 
 import Data.Map (Map)
@@ -47,7 +48,7 @@ instance SMTBackend STPBackend IO where
     mp <- readIORef (stpVars stp)
     expr' <- exprToSTP mp stp expr
     stpAssert (stpInstance stp) expr'
-  smtCheckSat stp = do
+  smtCheckSat stp _ = do
     t <- stpFalseExpr (stpInstance stp)
     res <- stpQuery (stpInstance stp) t
     case res of

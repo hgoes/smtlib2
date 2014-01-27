@@ -1,6 +1,9 @@
 {-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances,MultiParamTypeClasses,RankNTypes,DeriveDataTypeable,TypeSynonymInstances,TypeFamilies,FlexibleContexts,CPP,ScopedTypeVariables #-}
 module Language.SMTLib2.Internals where
 
+import Language.SMTLib2.Internals.Operators
+import Language.SMTLib2.Strategy
+
 import Control.Monad.Reader hiding (mapM,mapM_)
 import Control.Monad.State hiding (mapM,mapM_)
 import Data.Typeable
@@ -29,7 +32,7 @@ class Monad m => SMTBackend a m where
   smtGetInfo :: a -> SMTInfo i -> m i
   smtSetOption :: a -> SMTOption -> m ()
   smtAssert :: a -> SMTExpr Bool -> Maybe InterpolationGroup -> m ()
-  smtCheckSat :: a -> m Bool
+  smtCheckSat :: a -> Maybe Tactic -> m Bool
   smtDeclareDataTypes :: a -> TypeCollection -> m ()
   smtDeclareSort :: a -> String -> Integer -> m ()
   smtPush :: a -> m ()
@@ -43,6 +46,7 @@ class Monad m => SMTBackend a m where
   smtGetInterpolant :: a -> Map String UntypedExpr -> DataTypeInfo -> [InterpolationGroup] -> m (SMTExpr Bool)
   smtComment :: a -> String -> m ()
   smtExit :: a -> m ()
+  smtApply :: Tactic -> m [SMTExpr Bool]
 
 -- | Haskell types which can be represented in SMT
 class (Eq t,Typeable t,Eq (SMTAnnotation t),Typeable (SMTAnnotation t))
@@ -204,61 +208,6 @@ data SMTFunction arg res where
   SMTConTest :: (Args arg,SMTType dt) => Constructor arg dt -> SMTFunction (SMTExpr dt) Bool
   SMTFieldSel :: (SMTRecordType a,SMTType f) => Field a f -> SMTFunction (SMTExpr a) f
   deriving (Typeable)
-
-data SMTOrdOp
-  = Ge
-  | Gt
-  | Le
-  | Lt
-  deriving (Typeable,Eq)
-
-data SMTArithOp
-  = Plus
-  | Mult
-  deriving (Typeable,Eq)
-
-data SMTIntArithOp = Div
-                   | Mod
-                   | Rem
-                   deriving (Typeable,Eq)
-
-data SMTLogicOp = And
-                | Or
-                | XOr
-                | Implies
-                deriving (Typeable,Eq)
-
-data SMTBVCompOp
-  = BVULE
-  | BVULT
-  | BVUGE
-  | BVUGT
-  | BVSLE
-  | BVSLT
-  | BVSGE
-  | BVSGT
-  deriving (Typeable,Eq)
-
-data SMTBVBinOp
-  = BVAdd
-  | BVSub
-  | BVMul
-  | BVURem
-  | BVSRem
-  | BVUDiv
-  | BVSDiv
-  | BVSHL
-  | BVLSHR
-  | BVASHR
-  | BVXor
-  | BVAnd
-  | BVOr
-  deriving (Typeable,Eq)
-
-data SMTBVUnOp
-  = BVNot 
-  | BVNeg
-  deriving (Typeable,Eq)
 
 class (SMTValue (BitVector a)) => IsBitVector a where
   getBVSize :: Proxy a -> SMTAnnotation (BitVector a) -> Integer

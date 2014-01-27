@@ -17,7 +17,8 @@ Library
                         containers, transformers, data-fix, tagged
   Extensions: GADTs,RankNTypes,CPP,ScopedTypeVariables,
               MultiParamTypeClasses,FlexibleContexts,OverloadedStrings,
-              DeriveFunctor,FlexibleInstances,DeriveTraversable,DeriveFoldable
+              DeriveFunctor,FlexibleInstances,DeriveTraversable,DeriveFoldable,
+              DeriveDataTypeable
   if flag(WithConstraints)
     Build-Depends:      constraints
     CPP-Options: -DSMTLIB2_WITH_CONSTRAINTS
@@ -34,6 +35,8 @@ Library
     Language.SMTLib2.Internals.Instances
     Language.SMTLib2.Internals.Interface
     Language.SMTLib2.Internals.Optimize
+    Language.SMTLib2.Internals.Operators
     Language.SMTLib2.Pipe
+    Language.SMTLib2.Strategy
     Data.Unit
     

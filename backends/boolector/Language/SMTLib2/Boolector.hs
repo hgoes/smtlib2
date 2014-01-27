@@ -2,6 +2,7 @@ module Language.SMTLib2.Boolector (BoolectorBackend(),boolectorBackend,withBoole
 
 import Language.SMTLib2
 import Language.SMTLib2.Internals
+import Language.SMTLib2.Internals.Operators
 
 import Data.IORef
 import Data.Map (Map)
@@ -53,7 +54,7 @@ instance SMTBackend BoolectorBackend IO where
     if isAssume
       then boolectorAssume (boolectorInstance btor) nd
       else boolectorAssert (boolectorInstance btor) nd
-  smtCheckSat btor = boolectorSat (boolectorInstance btor)
+  smtCheckSat btor _ = boolectorSat (boolectorInstance btor)
   smtDeclareDataTypes _ _ = return ()
   smtDeclareSort _ _ _ = return ()
   smtPush btor = do

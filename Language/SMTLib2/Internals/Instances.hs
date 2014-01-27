@@ -4,6 +4,7 @@
 module Language.SMTLib2.Internals.Instances where
 
 import Language.SMTLib2.Internals
+import Language.SMTLib2.Internals.Operators
 import Data.Ratio
 import Data.Typeable
 import Data.List (genericReplicate,zip4,zip5,zip6,genericIndex)

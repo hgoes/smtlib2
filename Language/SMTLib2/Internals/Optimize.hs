@@ -2,6 +2,7 @@ module Language.SMTLib2.Internals.Optimize (optimizeBackend,optimizeExpr) where
 
 import Language.SMTLib2.Internals
 import Language.SMTLib2.Internals.Instances (bvSigned,bvUnsigned,bvRestrict)
+import Language.SMTLib2.Internals.Operators
 import Data.Proxy
 import Data.Bits
 

@@ -5,7 +5,9 @@ module Language.SMTLib2.Internals.Interface where
 import Language.SMTLib2.Internals
 import Language.SMTLib2.Internals.Instances (extractAnnotation)
 import Language.SMTLib2.Internals.Optimize
+import Language.SMTLib2.Internals.Operators
 import Language.SMTLib2.Pipe
+import Language.SMTLib2.Strategy
 
 import Data.Typeable
 import Data.Map as Map hiding (assocs)
@@ -18,7 +20,12 @@ import Data.Proxy
 -- | Check if the model is satisfiable (e.g. if there is a value for each variable so that every assertion holds)
 checkSat :: Monad m => SMT' m Bool
 checkSat = smtBackend $ \backend -> do
-  lift $ smtCheckSat backend
+  lift $ smtCheckSat backend Nothing
+
+-- | Check if the model is satisfiable using a given tactic. (Works only with Z3)
+checkSatUsing :: Monad m => Tactic -> SMT' m Bool
+checkSatUsing t = smtBackend $ \backend -> do
+  lift $ smtCheckSat backend (Just t)
 
 -- | Perform a stacked operation, meaning that every assertion and declaration made in it will be undone after the operation.
 stack :: Monad m => SMT' m a -> SMT' m a

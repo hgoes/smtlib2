@@ -1,7 +1,9 @@
 module Language.SMTLib2.Pipe (SMTPipe(),createSMTPipe,withPipe,exprToLisp,lispToExpr,commonFunctions,commonTheorems) where
 
-import Language.SMTLib2.Internals
+import Language.SMTLib2.Internals as SMT
 import Language.SMTLib2.Internals.Instances
+import Language.SMTLib2.Internals.Operators
+import Language.SMTLib2.Strategy as Strat
 import Data.Unit
 
 import Data.Monoid
@@ -61,9 +63,12 @@ instance MonadIO m => SMTBackend SMTPipe m where
                           ,lexpr
                           ,L.Symbol ":interpolation-group"
                           ,L.Symbol (T.pack gr)]]
-  smtCheckSat pipe = do
+  smtCheckSat pipe tactic = do
     putRequest pipe $
-      L.List [L.Symbol "check-sat"]
+      L.List (case tactic of
+                 Nothing -> [L.Symbol "check-sat"]
+                 Just t -> [L.Symbol "check-sat-using"
+                           ,tacticToLisp t])
     res <- liftIO $ BS.hGetLine (channelOut pipe)
     case res of
       "sat" -> return True
@@ -132,10 +137,10 @@ instance MonadIO m => SMTBackend SMTPipe m where
                               ,L.Symbol $ if v then "true" else "false"]
             ProduceModels v -> [L.Symbol ":produce-models"
                                ,L.Symbol $ if v then "true" else "false"]
-            ProduceProofs v -> [L.Symbol ":produce-proofs"
-                               ,L.Symbol $ if v then "true" else "false"]
-            ProduceUnsatCores v -> [L.Symbol ":produce-unsat-cores"
+            SMT.ProduceProofs v -> [L.Symbol ":produce-proofs"
                                    ,L.Symbol $ if v then "true" else "false"]
+            SMT.ProduceUnsatCores v -> [L.Symbol ":produce-unsat-cores"
+                                       ,L.Symbol $ if v then "true" else "false"]
             ProduceInterpolants v -> [L.Symbol ":produce-interpolants"
                                      ,L.Symbol $ if v then "true" else "false"]
         )
@@ -1226,3 +1231,89 @@ withPipe :: MonadIO m => String -> SMT' m a -> m a
 withPipe prog act = do
   pipe <- liftIO $ createSMTPipe prog
   withSMTBackend pipe act
+
+tacticToLisp :: Tactic -> L.Lisp
+tacticToLisp Skip = L.Symbol "skip"
+tacticToLisp (AndThen ts) = L.List ((L.Symbol "and-then"):fmap tacticToLisp ts)
+tacticToLisp (OrElse ts) = L.List ((L.Symbol "or-else"):fmap tacticToLisp ts)
+tacticToLisp (ParOr ts) = L.List ((L.Symbol "par-or"):fmap tacticToLisp ts)
+tacticToLisp (ParThen t1 t2) = L.List [L.Symbol "par-then"
+                                      ,tacticToLisp t1
+                                      ,tacticToLisp t2]
+tacticToLisp (TryFor t n) = L.List [L.Symbol "try-for"
+                                   ,tacticToLisp t
+                                   ,L.Number $ L.I n]
+tacticToLisp (If c t1 t2) = L.List [L.Symbol "if"
+                                   ,probeToLisp c
+                                   ,tacticToLisp t1
+                                   ,tacticToLisp t2]
+tacticToLisp (FailIf c) = L.List [L.Symbol "fail-if"
+                                 ,probeToLisp c]
+tacticToLisp (UsingParams (CustomTactic name) []) = L.Symbol (T.pack name)
+tacticToLisp (UsingParams (CustomTactic name) pars)
+  = L.List ([L.Symbol "using-params"
+            ,L.Symbol $ T.pack name]++
+            concat [ [L.Symbol (T.pack $ ':':pname)
+                     ,case par of
+                         ParBool True -> L.Symbol "true"
+                         ParBool False -> L.Symbol "false"
+                         ParInt i -> L.Number $ L.I i
+                         ParDouble i -> L.Number $ L.D i]
+                     | (pname,par) <- pars ])
+
+probeToLisp :: Probe a -> L.Lisp
+probeToLisp (ProbeBoolConst b)
+  = L.Symbol $ if b then "true" else "false"
+probeToLisp (ProbeIntConst i)
+  = L.Number $ L.I i
+probeToLisp (ProbeAnd ps)
+  = L.List ((L.Symbol "and"):
+            fmap probeToLisp ps)
+probeToLisp (ProbeOr ps)
+  = L.List ((L.Symbol "or"):
+            fmap probeToLisp ps)
+probeToLisp (ProbeNot p)
+  = L.List [L.Symbol "not"
+           ,probeToLisp p]
+probeToLisp (ProbeEq p1 p2)
+  = L.List [L.Symbol "="
+           ,probeToLisp p1
+           ,probeToLisp p2]
+probeToLisp (ProbeCompare cmp p1 p2)
+  = L.List [L.Symbol $ case cmp of
+               Ge -> ">="
+               Gt -> ">"
+               Le -> "<="
+               Lt -> "<"
+           ,probeToLisp p1
+           ,probeToLisp p2]
+probeToLisp IsPB = L.Symbol "is-pb"
+probeToLisp ArithMaxDeg = L.Symbol "arith-max-deg"
+probeToLisp ArithAvgDeg = L.Symbol "arith-avg-deg"
+probeToLisp ArithMaxBW = L.Symbol "arith-max-bw"
+probeToLisp ArithAvgBW = L.Symbol "arith-avg-bw"
+probeToLisp IsQFLIA = L.Symbol "is-qflia"
+probeToLisp IsQFLRA = L.Symbol "is-qflra"
+probeToLisp IsQFLIRA = L.Symbol "is-qflira"
+probeToLisp IsILP = L.Symbol "is-ilp"
+probeToLisp IsQFNIA = L.Symbol "is-qfnia"
+probeToLisp IsQFNRA = L.Symbol "is-qfnra"
+probeToLisp IsNIA = L.Symbol "is-nia"
+probeToLisp IsNRA = L.Symbol "is-nra"
+probeToLisp IsUnbounded = L.Symbol "is-unbounded"
+probeToLisp Memory = L.Symbol "memory"
+probeToLisp Depth = L.Symbol "depth"
+probeToLisp Size = L.Symbol "size"
+probeToLisp NumExprs = L.Symbol "num-exprs"
+probeToLisp NumConsts = L.Symbol "num-consts"
+probeToLisp NumBoolConsts = L.Symbol "num-bool-consts"
+probeToLisp NumArithConsts = L.Symbol "num-arith-consts"
+probeToLisp NumBVConsts = L.Symbol "num-bv-consts"
+probeToLisp Strat.ProduceProofs = L.Symbol "produce-proofs"
+probeToLisp ProduceModel = L.Symbol "produce-model"
+probeToLisp Strat.ProduceUnsatCores = L.Symbol "produce-unsat-cores"
+probeToLisp HasPatterns = L.Symbol "has-patterns"
+probeToLisp IsPropositional = L.Symbol "is-propositional"
+probeToLisp IsQFBV = L.Symbol "is-qfbv"
+probeToLisp IsQFBVEQ = L.Symbol "is-qfbv-eq"
+
