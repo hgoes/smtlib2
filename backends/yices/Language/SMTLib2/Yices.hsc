@@ -102,15 +102,33 @@ getModel b = do
                    return (Just mdl'))
     _ -> return Nothing
 
+getError :: IO String
+getError = do
+  code <- yicesErrorCode
+  return $ case code of
+    #{const NO_ERROR} -> "No error"
+    #{const INVALID_TYPE} -> "Invalid type"
+    #{const INVALID_TERM} -> "Invalid term"
+    #{const INVALID_VAR_INDEX} -> "Invalid variable index"
+    #{const INVALID_TUPLE_INDEX} -> "Invalid tuple index"
+    #{const INVALID_RATIONAL_FORMAT} -> "Invalid rational format"
+    #{const INVALID_FLOAT_FORMAT} -> "Invalid float format"
+    _ -> "Unknown code "++show code
+
+mkError :: String -> IO a
+mkError msg = do
+  msg2 <- getError
+  error $ "smtlib2-yices: "++msg++" ("++msg2++")"
+
 instance SMTBackend YicesBackend IO where
   smtSetLogic b l = do
     mcfg <- getConfig b
     case mcfg of
-      Nothing -> error "smtlib2-yices: Can't set logic after asserting formulas."
+      Nothing -> mkError "Can't set logic after asserting formulas."
       Just cfg -> do
         res <- withCString l $ yicesDefaultConfigForLogic cfg
         if res < 0
-          then error $ "smtlib2-yices: Unsupported logic "++l
+          then mkError $ "Unsupported logic "++l
           else return ()
   smtGetInfo _ SMTSolverName = return "yices"
   smtGetInfo _ SMTSolverVersion = peekCString yicesVersion
@@ -120,8 +138,10 @@ instance SMTBackend YicesBackend IO where
     mp <- readIORef (yicesExprs b)
     ctx <- getContext b True
     f' <- exprToTerm tps mp 0 f
-    yicesAssertFormula ctx f'
-    return ()
+    res <- yicesAssertFormula ctx f'
+    if res < 0
+      then mkError $ "Error while asserting formula "++show f++"."
+      else return ()
   smtCheckSat b _ = do
     ctx <- getContext b False
     params <- yicesNewParamRecord
@@ -131,8 +151,8 @@ instance SMTBackend YicesBackend IO where
     case res of
       #{const STATUS_SAT} -> return True
       #{const STATUS_UNSAT} -> return False
-      #{const STATUS_UNKNOWN} -> error "smtlib2-yices: The check-sat result is unknown."
-      #{const STATUS_INTERRUPTED} -> error "smtlib2-yices: The check-sat query was interrupted."
+      #{const STATUS_UNKNOWN} -> mkError "The check-sat result is unknown."
+      #{const STATUS_INTERRUPTED} -> mkError "The check-sat query was interrupted."
   smtDeclareDataTypes b tc
     = if argCount tc > 0
       then error "smtlib2-yices: No support for parametrized data types."
@@ -156,13 +176,13 @@ instance SMTBackend YicesBackend IO where
     ctx <- getContext b False
     res <- yicesPush ctx
     if res < 0
-      then error "smtlib2-yices: Error while pushing to stack."
+      then mkError "Error while pushing to stack."
       else return ()
   smtPop b = do
     ctx <- getContext b True
     res <- yicesPop ctx
     if res < 0
-      then error "smtlib2-yices: Error while popping from stack."
+      then mkError "Error while popping from stack."
       else return ()
   smtDefineFun b fname args body = do
     tps <- readIORef (yicesTypes b)
@@ -173,15 +193,19 @@ instance SMTBackend YicesBackend IO where
                       return (name,arg)
                   ) args
     body <- exprToTerm tps (Map.union mp (Map.fromList rargs)) 0 body
-    fun <- withArrayLen (fmap snd rargs) $
-           \len arr -> yicesLambda (fromIntegral len) arr body
+    fun <- if null rargs
+           then return body
+           else withArrayLen (fmap snd rargs) $
+                \len arr -> yicesLambda (fromIntegral len) arr body
     modifyIORef (yicesExprs b) (Map.insert fname fun)
   smtDeclareFun b fname argSorts retSort = do
     tps <- readIORef (yicesTypes b)
     argTps <- mapM (sortToType tps) argSorts
     retTp <- sortToType tps retSort
-    funTp <- withArrayLen argTps $
-             \len arr -> yicesFunctionType (fromIntegral len) arr retTp
+    funTp <- if null argTps
+             then return retTp
+             else withArrayLen argTps $
+                  \len arr -> yicesFunctionType (fromIntegral len) arr retTp
     fun <- yicesNewUninterpretedTerm funTp
     modifyIORef (yicesExprs b) (Map.insert fname fun)
   smtGetValue b _ dts (expr :: SMTExpr t) = do
@@ -296,7 +320,6 @@ exprToTerm tps _ _ (Const c ann) = do
       Nothing -> do
         let (_,tp,num) = findConstructor tps name
         yicesConstant tp (fromIntegral num)
-    
 exprToTerm tps mp i (AsArray (SMTFun fname _) _) = case Map.lookup fname mp of
   Just fterm -> return fterm
 exprToTerm tps mp i (AsArray fun ann) = do
@@ -492,6 +515,9 @@ foreign import capi "yices.h yices_exit"
 
 foreign import capi "yices.h yices_reset"
   yicesReset :: IO ()
+
+foreign import capi "yices.h yices_error_code"
+  yicesErrorCode :: IO CInt
 
 foreign import capi "yices.h yices_bool_type"
   yicesBoolType :: IO Type
