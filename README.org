@@ -2,7 +2,42 @@ This library provides a pure haskell interface to many SMT solvers by
 implementing the [[http://www.smtlib.org/][SMTLib2 language]]. SMT solving is done by spawning a
 SMT solver process and communicating with it.
 
+* Features
+  
+  - Communication via the SMTLIB2-format with solvers who support it
+    (Currently Z3, MathSAT and CVC4).
+  - Native bindings for solvers without a (proper) SMTLIB2 interface
+    (Currently stp, boolector and yices).
+  - Supports haskell data types (automatic instance generation
+    available via template-haskell).
+
+* Installation
+  To install this package, you need [[http://www.haskell.org/haskellwiki/Cabal-Install][cabal-install]].
+  The first package to install must be "smtlib2":
+
+  #+BEGIN_SRC sh
+  cabal install
+  #+END_SRC
+
+  After this, you can install the extra packages in whatever order you
+  wish.
+
+  | Package           | Location           |
+  |-------------------+--------------------|
+  | smtlib2-th        | extras/th          |
+  | smtlib2-stp       | backends/stp       |
+  | smtlib2-boolector | backends/boolector |
+  | smtlib2-yices     | backends/yices     |
+
 * Supported solvers
-For the moment, only [[http://research.microsoft.com/en-us/um/redmond/projects/z3/][Z3]] supports every feature implemented in this
-interface. [[http://mathsat4.disi.unitn.it/][MathSAT]] implements most features. [[http://www.cs.nyu.edu/acsys/cvc3][CVC]] is missing a
-machine-readable interface to be usable.
+  For the moment, only [[http://research.microsoft.com/en-us/um/redmond/projects/z3/][Z3]] supports every feature implemented in this
+  interface. [[http://mathsat4.disi.unitn.it/][MathSAT]] implements most features, except for data types.
+
+| Solver    | Version | SMTLib2 format | Bitvectors | Integer | Enumerations | Datatypes |
+|-----------+---------+----------------+------------+---------+--------------+-----------|
+| Z3        |     4.3 | yes            | yes        | yes     | yes          | yes       |
+| MathSAT   |  5.2.10 | yes            | yes        | yes     | no           | no        |
+| STP       |         | incomplete     | yes        | no      | no           | no        |
+| Yices     |   2.1.0 | no             | yes        | yes     | yes          | no        |
+| Boolector |   1.6.0 | incomplete     | yes        | no      | no           | no        |
+| CVC4      |     1.4 | yes            | yes        | yes     | no           | yes       |
