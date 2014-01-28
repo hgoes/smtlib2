@@ -131,7 +131,9 @@ instance SMTBackend YicesBackend IO where
           then mkError $ "Unsupported logic "++l
           else return ()
   smtGetInfo _ SMTSolverName = return "yices"
-  smtGetInfo _ SMTSolverVersion = peekCString yicesVersion
+  smtGetInfo _ SMTSolverVersion = do
+    ptr <- peek yicesVersion
+    peekCString ptr
   smtSetOption _ _ = return ()
   smtAssert b f Nothing = do
     tps <- readIORef (yicesTypes b)
@@ -505,7 +507,7 @@ exprToTerm tps mp i (App (SMTConTest (Constructor name)) x) = do
   yicesEq tx ty
 
 foreign import capi "yices.h &yices_version"
-  yicesVersion :: CString
+  yicesVersion :: Ptr CString
     
 foreign import capi "yices.h yices_init"
   yicesInit :: IO ()
