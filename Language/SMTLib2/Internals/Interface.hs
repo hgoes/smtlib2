@@ -208,6 +208,11 @@ setOption :: Monad m => SMTOption -> SMT' m ()
 setOption opt = smtBackend $ \backend -> do
   lift $ smtSetOption backend opt
 
+-- | Get information about the underlying SMT solver
+getInfo :: Monad m => SMTInfo i -> SMT' m i
+getInfo inf = smtBackend $ \backend -> do
+  lift $ smtGetInfo backend inf
+
 -- | Create a new uniterpreted function with annotations for
 --   the argument and the return type.
 funAnn :: (Liftable a,SMTType r,Monad m) => ArgAnnotation a -> SMTAnnotation r -> SMT' m (SMTFunction a r)

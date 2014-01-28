@@ -38,7 +38,7 @@ module Language.SMTLib2
          Args(..),LiftArgs(..),
          -- * Environment
          withSMTBackend,
-         setOption,setLogic,
+         setOption,getInfo,setLogic,
          SMTInfo(..),
          assert,stack,
          checkSat,checkSatUsing,
