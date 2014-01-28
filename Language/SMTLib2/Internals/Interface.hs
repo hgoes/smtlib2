@@ -27,12 +27,20 @@ checkSatUsing :: Monad m => Tactic -> SMT' m Bool
 checkSatUsing t = smtBackend $ \backend -> do
   lift $ smtCheckSat backend (Just t)
 
+-- | Push a new context on the stack
+push :: Monad m => SMT' m ()
+push = smtBackend $ \backend -> lift $ smtPush backend
+
+-- | Pop a new context from the stack
+pop :: Monad m => SMT' m ()
+pop = smtBackend $ \backend -> lift $ smtPop backend
+
 -- | Perform a stacked operation, meaning that every assertion and declaration made in it will be undone after the operation.
 stack :: Monad m => SMT' m a -> SMT' m a
-stack act = smtBackend $ \backend -> do
-  lift $ smtPush backend
+stack act = do
+  push
   res <- act
-  lift $ smtPop backend
+  pop
   return res
 
 -- | Insert a comment into the SMTLib2 command stream.

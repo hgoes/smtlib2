@@ -40,7 +40,7 @@ module Language.SMTLib2
          withSMTBackend,
          setOption,getInfo,setLogic,
          SMTInfo(..),
-         assert,stack,
+         assert,push,pop,stack,
          checkSat,checkSatUsing,
          getValue,
          comment,
