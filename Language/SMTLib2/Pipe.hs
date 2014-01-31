@@ -206,9 +206,9 @@ instance MonadIO m => SMTBackend SMTPipe m where
              Nothing -> error $ "smtlib2: Failed to parse value from "++show res
       _ -> error $ "smtlib2: Unexpected get-value response: "++show val
 
-createSMTPipe :: String -> IO SMTPipe
-createSMTPipe solver = do
-  let cmd = CreateProcess { cmdspec = ShellCommand solver
+createSMTPipe :: String -> [String] -> IO SMTPipe
+createSMTPipe solver args = do
+  let cmd = CreateProcess { cmdspec = RawCommand solver args
                           , cwd = Nothing
                           , env = Nothing
                           , std_in = CreatePipe
@@ -1227,9 +1227,9 @@ constructorParser dts
                                          }
         _ -> Nothing
 
-withPipe :: MonadIO m => String -> SMT' m a -> m a
-withPipe prog act = do
-  pipe <- liftIO $ createSMTPipe prog
+withPipe :: MonadIO m => String -> [String] -> SMT' m a -> m a
+withPipe prog args act = do
+  pipe <- liftIO $ createSMTPipe prog args
   withSMTBackend pipe act
 
 tacticToLisp :: Tactic -> L.Lisp

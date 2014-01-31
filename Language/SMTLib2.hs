@@ -37,7 +37,7 @@ module Language.SMTLib2
          Field,
          Args(..),LiftArgs(..),
          -- * Environment
-         withSMTBackend,
+         withSMTBackend,withSMTBackendExitCleanly,
          setOption,getInfo,setLogic,
          SMTInfo(..),
          assert,push,pop,stack,

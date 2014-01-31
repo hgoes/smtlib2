@@ -22,6 +22,7 @@ import Data.Fix
 import Prelude hiding (mapM,mapM_,foldl)
 import Data.Foldable
 import Data.Traversable
+import Control.Exception
 
 -- Monad stuff
 import Control.Applicative (Applicative(..))
@@ -392,16 +393,23 @@ getFunUndef _ = (error "Don't evaluate the first result of 'getFunUndef'",
 getArrayUndef :: Args i => SMTExpr (SMTArray i v) -> (i,Unpacked i,v)
 getArrayUndef _ = (undefined,undefined,undefined)
 
-withSMTBackend :: SMTBackend b m => b -> SMT' m a -> m a
-withSMTBackend backend act = withSMTBackend' (AnyBackend backend) act
+withSMTBackendExitCleanly :: SMTBackend b IO => b -> SMT a -> IO a
+withSMTBackendExitCleanly backend act
+  = bracket
+    (return backend)
+    (\backend -> smtExit backend)
+    (\backend -> withSMTBackend' (AnyBackend backend) False act)
 
-withSMTBackend' :: AnyBackend m -> SMT' m a -> m a
-withSMTBackend' backend@(AnyBackend b) f = do
+withSMTBackend :: SMTBackend b m => b -> SMT' m a -> m a
+withSMTBackend backend act = withSMTBackend' (AnyBackend backend) True act
+
+withSMTBackend' :: AnyBackend m -> Bool -> SMT' m a -> m a
+withSMTBackend' backend@(AnyBackend b) mustExit f = do
   res <- evalStateT (runReaderT (runSMT f) backend)
          (SMTState { nameCount = Map.empty
                    , declaredDataTypes = emptyDataTypeInfo
                    , namedExprs = Map.empty })
-  smtExit b
+  when mustExit (smtExit b)
   return res
 
 escapeName :: String -> String
