@@ -121,7 +121,7 @@ mkError msg = do
   error $ "smtlib2-yices: "++msg++" ("++msg2++")"
 
 instance SMTBackend YicesBackend IO where
-  smtSetLogic b l = do
+  smtHandle b _ (SMTSetLogic l) = do
     mcfg <- getConfig b
     case mcfg of
       Nothing -> mkError "Can't set logic after asserting formulas."
@@ -130,12 +130,12 @@ instance SMTBackend YicesBackend IO where
         if res < 0
           then mkError $ "Unsupported logic "++l
           else return ()
-  smtGetInfo _ SMTSolverName = return "yices"
-  smtGetInfo _ SMTSolverVersion = do
+  smtHandle _ _ (SMTGetInfo SMTSolverName) = return "yices"
+  smtHandle _ _ (SMTGetInfo SMTSolverVersion) = do
     ptr <- peek yicesVersion
     peekCString ptr
-  smtSetOption _ _ = return ()
-  smtAssert b f Nothing = do
+  smtHandle _ _ (SMTSetOption _) = return ()
+  smtHandle b _ (SMTAssert f Nothing) = do
     tps <- readIORef (yicesTypes b)
     mp <- readIORef (yicesExprs b)
     ctx <- getContext b True
@@ -144,7 +144,7 @@ instance SMTBackend YicesBackend IO where
     if res < 0
       then mkError $ "Error while asserting formula "++show f++"."
       else return ()
-  smtCheckSat b _ = do
+  smtHandle b _ (SMTCheckSat _) = do
     ctx <- getContext b False
     params <- yicesNewParamRecord
     -- TODO: Set parameters, maybe according to tactic
@@ -155,7 +155,7 @@ instance SMTBackend YicesBackend IO where
       #{const STATUS_UNSAT} -> return False
       #{const STATUS_UNKNOWN} -> mkError "The check-sat result is unknown."
       #{const STATUS_INTERRUPTED} -> mkError "The check-sat query was interrupted."
-  smtDeclareDataTypes b tc
+  smtHandle b _ (SMTDeclareDataTypes tc)
     = if argCount tc > 0
       then error "smtlib2-yices: No support for parametrized data types."
       else do
@@ -168,25 +168,25 @@ instance SMTBackend YicesBackend IO where
                             return (dataTypeName dt,(tp,cons))
                         ) (dataTypes tc)
         modifyIORef (yicesTypes b) (Map.union (Map.fromList new_tps))
-  smtDeclareSort b name par
+  smtHandle b _ (SMTDeclareSort name par)
     = if par > 0
       then error "smtlib2-yices: No support for parametrized data types."
       else do
         tp <- yicesNewUninterpretedType
         modifyIORef (yicesTypes b) (Map.insert name (tp,[]))
-  smtPush b = do
+  smtHandle b _ SMTPush = do
     ctx <- getContext b False
     res <- yicesPush ctx
     if res < 0
       then mkError "Error while pushing to stack."
       else return ()
-  smtPop b = do
+  smtHandle b _ SMTPop = do
     ctx <- getContext b True
     res <- yicesPop ctx
     if res < 0
       then mkError "Error while popping from stack."
       else return ()
-  smtDefineFun b fname args body = do
+  smtHandle b _ (SMTDefineFun fname args body) = do
     tps <- readIORef (yicesTypes b)
     mp <- readIORef (yicesExprs b)
     rargs <- mapM (\(name,sort) -> do
@@ -200,7 +200,7 @@ instance SMTBackend YicesBackend IO where
            else withArrayLen (fmap snd rargs) $
                 \len arr -> yicesLambda (fromIntegral len) arr body
     modifyIORef (yicesExprs b) (Map.insert fname fun)
-  smtDeclareFun b fname argSorts retSort = do
+  smtHandle b _ (SMTDeclareFun fname argSorts retSort) = do
     tps <- readIORef (yicesTypes b)
     argTps <- mapM (sortToType tps) argSorts
     retTp <- sortToType tps retSort
@@ -210,7 +210,7 @@ instance SMTBackend YicesBackend IO where
                   \len arr -> yicesFunctionType (fromIntegral len) arr retTp
     fun <- yicesNewUninterpretedTerm funTp
     modifyIORef (yicesExprs b) (Map.insert fname fun)
-  smtGetValue b _ dts (expr :: SMTExpr t) = do
+  smtHandle b st (SMTGetValue (expr :: SMTExpr t)) = do
     mmdl <- getModel b
     case mmdl of
       Nothing -> error $ "smtlib2-yices: No model available."
@@ -253,18 +253,18 @@ instance SMTBackend YicesBackend IO where
           Fix (NamedSort name []) -> alloca $ \res -> do
             yicesGetScalarValue mdl term res
             idx <- peek res
-            case Map.lookup name (datatypes dts) of
+            case Map.lookup name (datatypes $ declaredDataTypes st) of
               Just (dt,_) -> do
                 let constr = (dataTypeConstructors dt)!!(fromIntegral idx)
                 construct constr (Just []) [] $ \res _ -> do
                   case cast res of
                     Just ret -> return ret
-  smtGetProof _ _ _ = error "smtlib2-yices: Proof extraction not supported."
-  smtGetUnsatCore _ = error "smtlib2-yices: Unsat core extraction not supported."
-  smtSimplify _ _ _ = return
-  smtGetInterpolant _ _ _ _ = error "smtlib2-yices: Interpolation not supported."
-  smtComment _ _ = return ()
-  smtExit b = do
+  smtHandle _ _ SMTGetProof = error "smtlib2-yices: Proof extraction not supported."
+  smtHandle _ _ SMTGetUnsatCore = error "smtlib2-yices: Unsat core extraction not supported."
+  smtHandle _ _ (SMTSimplify expr) = return expr
+  smtHandle _ _ (SMTGetInterpolant _) = error "smtlib2-yices: Interpolation not supported."
+  smtHandle _ _ (SMTComment _) = return ()
+  smtHandle b _ SMTExit = do
     state <- readIORef (yicesState b)
     case state of
       NoContext cfg -> yicesFreeConfig cfg
@@ -273,7 +273,7 @@ instance SMTBackend YicesBackend IO where
           Nothing -> return ()
           Just mdl' -> yicesFreeModel mdl'
         yicesFreeContext ctx
-  smtApply _ = error "smtlib2-yices: No support for tactics."
+  smtHandle _ _ (SMTApply _) = error "smtlib2-yices: No support for tactics."
       
 
 sortToType :: Map String (Type,[String]) -> Sort -> IO Type

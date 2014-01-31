@@ -28,26 +28,29 @@ import Control.Exception
 import Control.Applicative (Applicative(..))
 import Control.Monad.State.Lazy as Lazy (StateT)
 
+data SMTRequest response where
+  SMTSetLogic :: String -> SMTRequest ()
+  SMTGetInfo :: SMTInfo i -> SMTRequest i
+  SMTSetOption :: SMTOption -> SMTRequest ()
+  SMTAssert :: SMTExpr Bool -> Maybe InterpolationGroup -> SMTRequest ()
+  SMTCheckSat :: Maybe Tactic -> SMTRequest Bool
+  SMTDeclareDataTypes :: TypeCollection -> SMTRequest ()
+  SMTDeclareSort :: String -> Integer -> SMTRequest ()
+  SMTPush :: SMTRequest ()
+  SMTPop :: SMTRequest ()
+  SMTDefineFun :: SMTType res => String -> [(String,Sort)] -> SMTExpr res -> SMTRequest ()
+  SMTDeclareFun :: String -> [Sort] -> Sort -> SMTRequest ()
+  SMTGetValue :: SMTValue t => SMTExpr t -> SMTRequest t
+  SMTGetProof :: SMTRequest (SMTExpr Bool)
+  SMTGetUnsatCore :: SMTRequest [String]
+  SMTSimplify :: SMTType t => SMTExpr t -> SMTRequest (SMTExpr t)
+  SMTGetInterpolant :: [InterpolationGroup] -> SMTRequest (SMTExpr Bool)
+  SMTComment :: String -> SMTRequest ()
+  SMTExit :: SMTRequest ()
+  SMTApply :: Tactic -> SMTRequest [SMTExpr Bool]
+
 class Monad m => SMTBackend a m where
-  smtSetLogic :: a -> String -> m ()
-  smtGetInfo :: a -> SMTInfo i -> m i
-  smtSetOption :: a -> SMTOption -> m ()
-  smtAssert :: a -> SMTExpr Bool -> Maybe InterpolationGroup -> m ()
-  smtCheckSat :: a -> Maybe Tactic -> m Bool
-  smtDeclareDataTypes :: a -> TypeCollection -> m ()
-  smtDeclareSort :: a -> String -> Integer -> m ()
-  smtPush :: a -> m ()
-  smtPop :: a -> m ()
-  smtDefineFun :: (SMTType res) => a -> String -> [(String,Sort)] -> SMTExpr res -> m ()
-  smtDeclareFun :: a -> String -> [Sort] -> Sort -> m ()
-  smtGetValue :: SMTValue t => a -> Map String UntypedExpr -> DataTypeInfo -> SMTExpr t -> m t
-  smtGetProof :: a -> Map String UntypedExpr -> DataTypeInfo -> m (SMTExpr Bool)
-  smtGetUnsatCore :: a -> m [String]
-  smtSimplify :: SMTType t => a -> Map String UntypedExpr -> DataTypeInfo -> SMTExpr t -> m (SMTExpr t)
-  smtGetInterpolant :: a -> Map String UntypedExpr -> DataTypeInfo -> [InterpolationGroup] -> m (SMTExpr Bool)
-  smtComment :: a -> String -> m ()
-  smtExit :: a -> m ()
-  smtApply :: Tactic -> m [SMTExpr Bool]
+  smtHandle :: a -> SMTState -> SMTRequest response -> m response
 
 -- | Haskell types which can be represented in SMT
 class (Eq t,Typeable t,Eq (SMTAnnotation t),Typeable (SMTAnnotation t))
@@ -397,19 +400,21 @@ withSMTBackendExitCleanly :: SMTBackend b IO => b -> SMT a -> IO a
 withSMTBackendExitCleanly backend act
   = bracket
     (return backend)
-    (\backend -> smtExit backend)
+    (\backend -> smtHandle backend emptySMTState SMTExit)
     (\backend -> withSMTBackend' (AnyBackend backend) False act)
 
 withSMTBackend :: SMTBackend b m => b -> SMT' m a -> m a
 withSMTBackend backend act = withSMTBackend' (AnyBackend backend) True act
 
+emptySMTState :: SMTState
+emptySMTState = SMTState { nameCount = Map.empty
+                         , declaredDataTypes = emptyDataTypeInfo
+                         , namedExprs = Map.empty }
+
 withSMTBackend' :: AnyBackend m -> Bool -> SMT' m a -> m a
 withSMTBackend' backend@(AnyBackend b) mustExit f = do
-  res <- evalStateT (runReaderT (runSMT f) backend)
-         (SMTState { nameCount = Map.empty
-                   , declaredDataTypes = emptyDataTypeInfo
-                   , namedExprs = Map.empty })
-  when mustExit (smtExit b)
+  (res,st) <- runStateT (runReaderT (runSMT f) backend) emptySMTState
+  when mustExit (smtHandle b st SMTExit)
   return res
 
 escapeName :: String -> String
@@ -487,7 +492,8 @@ declareType u ann = case asDataType u of
                putSMT $ st { declaredDataTypes = addDataTypeStructure dts (declaredDataTypes st)
                            }
                smtBackend (\backend -> do
-                              lift $ smtDeclareDataTypes backend dts))
+                              st <- getSMT
+                              lift $ smtHandle backend st (SMTDeclareDataTypes dts)))
 
 -- Data type info
 
@@ -814,21 +820,4 @@ type BV32 = BitVector (BVTyped N32)
 type BV64 = BitVector (BVTyped N64)
 
 instance Monad m => SMTBackend (AnyBackend m) m where
-  smtSetLogic (AnyBackend b) = smtSetLogic b
-  smtGetInfo (AnyBackend b) = smtGetInfo b
-  smtSetOption (AnyBackend b) = smtSetOption b
-  smtAssert (AnyBackend b) = smtAssert b
-  smtCheckSat (AnyBackend b) = smtCheckSat b
-  smtDeclareDataTypes (AnyBackend b) = smtDeclareDataTypes b
-  smtDeclareSort (AnyBackend b) = smtDeclareSort b
-  smtPush (AnyBackend b) = smtPush b
-  smtPop (AnyBackend b) = smtPop b
-  smtDefineFun (AnyBackend b) = smtDefineFun b
-  smtDeclareFun (AnyBackend b) = smtDeclareFun b
-  smtGetValue (AnyBackend b) = smtGetValue b
-  smtGetProof (AnyBackend b) = smtGetProof b
-  smtGetUnsatCore (AnyBackend b) = smtGetUnsatCore b
-  smtSimplify (AnyBackend b) = smtSimplify b
-  smtGetInterpolant (AnyBackend b) = smtGetInterpolant b
-  smtComment (AnyBackend b) = smtComment b
-  smtExit (AnyBackend b) = smtExit b
+  smtHandle (AnyBackend b) = smtHandle b

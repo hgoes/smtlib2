@@ -40,53 +40,53 @@ stpBackend = do
                      , stpVars = vars })
 
 instance SMTBackend STPBackend IO where
-  smtSetLogic _ _ = return ()
-  smtGetInfo _ SMTSolverName = return "stp"
-  smtGetInfo _ SMTSolverVersion = return "unknown"
-  smtSetOption _ _ = return ()
-  smtAssert stp expr Nothing = do
+  smtHandle _ _ (SMTSetLogic _) = return ()
+  smtHandle _ _ (SMTGetInfo SMTSolverName) = return "stp"
+  smtHandle _ _ (SMTGetInfo SMTSolverVersion) = return "unknown"
+  smtHandle _ _ (SMTSetOption _) = return ()
+  smtHandle stp _ (SMTAssert expr Nothing) = do
     mp <- readIORef (stpVars stp)
     expr' <- exprToSTP mp stp expr
     stpAssert (stpInstance stp) expr'
-  smtCheckSat stp _ = do
+  smtHandle stp _ (SMTCheckSat _) = do
     t <- stpFalseExpr (stpInstance stp)
     res <- stpQuery (stpInstance stp) t
     case res of
       1 -> return False
       0 -> return True
       _ -> error $ "smtlib2-stp: Invalid query result "++show res
-  smtDeclareDataTypes _ _ = return ()
-  smtDeclareSort _ _ _ = return ()
-  smtPush stp = stpPush (stpInstance stp)
-  smtPop stp = stpPop (stpInstance stp)
-  smtDefineFun stp name [] expr = do
+  smtHandle _ _ (SMTDeclareDataTypes _) = error "smtlib2-stp: No support for datatypes."
+  smtHandle _ _ (SMTDeclareSort _ _) = error "smtlib2-stp: No support for sorts."
+  smtHandle stp _ SMTPush = stpPush (stpInstance stp)
+  smtHandle stp _ SMTPop = stpPop (stpInstance stp)
+  smtHandle stp _ (SMTDefineFun name [] expr) = do
     mp <- readIORef (stpVars stp)
     expr' <- exprToSTP mp stp expr
     modifyIORef (stpVars stp) (Map.insert name expr')
-  smtDeclareFun stp name [] sort = do
+  smtHandle stp _ (SMTDeclareFun name [] sort) = do
     tp <- sortToSTP stp sort
     expr <- stpVarExpr (stpInstance stp) name tp
     modifyIORef (stpVars stp) (Map.insert name expr)
-  smtGetValue stp mp dts (expr::SMTExpr t) = do
+  smtHandle stp st (SMTGetValue (expr::SMTExpr t)) = do
     mp <- readIORef (stpVars stp)
     expr' <- exprToSTP mp stp expr
     resExpr <- stpGetCounterExample (stpInstance stp) expr'
-    stpToExpr dts (Just $ getSort (undefined::t) (extractAnnotation expr)) resExpr $
+    stpToExpr (declaredDataTypes st) (Just $ getSort (undefined::t) (extractAnnotation expr)) resExpr $
       \res -> case res of
         Const val _ -> case cast val of
           Just val' -> val'
-  smtGetProof _ _ _ = error $ "smtlib2-stp: STP doesn't support proof extraction."
-  smtGetUnsatCore _ = error $ "smtlib2-stp: STP doesn't support unsat core extraction."
-  smtSimplify stp mp dts (expr::SMTExpr t) = do
+  smtHandle _ _ SMTGetProof = error $ "smtlib2-stp: STP doesn't support proof extraction."
+  smtHandle _ _ SMTGetUnsatCore = error $ "smtlib2-stp: STP doesn't support unsat core extraction."
+  smtHandle stp st (SMTSimplify (expr::SMTExpr t)) = do
     mp <- readIORef (stpVars stp)
     expr' <- exprToSTP mp stp expr
     simpExpr <- stpSimplify (stpInstance stp) expr'
-    stpToExpr dts (Just $ getSort (undefined::t) (extractAnnotation expr)) simpExpr $
+    stpToExpr (declaredDataTypes st) (Just $ getSort (undefined::t) (extractAnnotation expr)) simpExpr $
       \res -> case cast res of
         Just res' -> res'
-  smtGetInterpolant _ _ _ _ = error $ "smtlib2-stp: STP doesn't support interpolation."
-  smtComment _ _ = return ()
-  smtExit stp = stpDestroy (stpInstance stp)
+  smtHandle _ _ (SMTGetInterpolant _) = error $ "smtlib2-stp: STP doesn't support interpolation."
+  smtHandle _ _ (SMTComment _) = return ()
+  smtHandle stp _ SMTExit = stpDestroy (stpInstance stp)
     
 sortToSTP :: STPBackend -> Sort -> IO STPType
 sortToSTP stp (Fix BoolSort) = stpBoolType (stpInstance stp)

@@ -39,36 +39,36 @@ boolectorBackend = do
                             , boolectorAssumeState = assumeState }
 
 instance SMTBackend BoolectorBackend IO where
-  smtSetLogic _ _ = return ()
-  smtGetInfo _ SMTSolverName = return "boolector"
-  smtGetInfo _ SMTSolverVersion = return "unknown"
-  smtSetOption btor (ProduceModels True) = boolectorEnableModelGen (boolectorInstance btor)
-  smtSetOption _ _ = return ()
-  smtDeclareFun btor name [] sort = do
+  smtHandle _ _ (SMTSetLogic _) = return ()
+  smtHandle _ _ (SMTGetInfo SMTSolverName) = return "boolector"
+  smtHandle _ _ (SMTGetInfo SMTSolverVersion) = return "unknown"
+  smtHandle btor _ (SMTSetOption (ProduceModels True)) = boolectorEnableModelGen (boolectorInstance btor)
+  smtHandle _ _ (SMTSetOption _) = return ()
+  smtHandle btor _ (SMTDeclareFun name [] sort) = do
     mkVar btor name sort
     return ()
-  smtAssert btor expr Nothing = do
+  smtHandle btor _ (SMTAssert expr Nothing) = do
     isAssume <- readIORef (boolectorAssumeState btor)
     mp <- readIORef (boolectorVars btor)
     nd <- exprToNode mp btor expr
     if isAssume
       then boolectorAssume (boolectorInstance btor) nd
       else boolectorAssert (boolectorInstance btor) nd
-  smtCheckSat btor _ = boolectorSat (boolectorInstance btor)
-  smtDeclareDataTypes _ _ = return ()
-  smtDeclareSort _ _ _ = return ()
-  smtPush btor = do
+  smtHandle btor _ (SMTCheckSat _) = boolectorSat (boolectorInstance btor)
+  smtHandle _ _ (SMTDeclareDataTypes _) = error "smtlib2-boolector: No support for data-types."
+  smtHandle _ _ (SMTDeclareSort _ _) = error "smtlib2-boolector: No support for sorts."
+  smtHandle btor _ SMTPush = do
     isAssume <- readIORef (boolectorAssumeState btor)
     if isAssume
       then error $ "smtlib2-boolector: Only one stack level is supported"
       else return ()
     writeIORef (boolectorAssumeState btor) True
-  smtPop btor = writeIORef (boolectorAssumeState btor) False
-  smtDefineFun btor name [] expr = do
+  smtHandle btor _ SMTPop = writeIORef (boolectorAssumeState btor) False
+  smtHandle btor _ (SMTDefineFun name [] expr) = do
     mp <- readIORef (boolectorVars btor)
     nd <- exprToNode mp btor expr
     modifyIORef (boolectorVars btor) (Map.insert name nd)
-  smtDefineFun btor name args expr = do
+  smtHandle btor _ (SMTDefineFun name args expr) = do
     params <- mapM (\(name,sort) -> do
                        let w = case sort of
                              Fix BoolSort -> 1
@@ -81,7 +81,7 @@ instance SMTBackend BoolectorBackend IO where
     nd <- exprToNode (Map.union mp (Map.fromList params)) btor expr
     fun <- boolectorFun (boolectorInstance btor) (fmap snd params) nd
     modifyIORef (boolectorVars btor) (Map.insert name fun)
-  smtGetValue btor mp dts (expr :: SMTExpr t) = do
+  smtHandle btor st (SMTGetValue (expr :: SMTExpr t)) = do
     mp <- readIORef (boolectorVars btor)
     nd <- exprToNode mp btor expr
     let sort = getSort (undefined::t) (extractAnnotation expr)
@@ -109,12 +109,12 @@ instance SMTBackend BoolectorBackend IO where
         case cast res of
           Just r -> return r
       _ -> error $ "smtlib2-boolector: Getting values of sort "++show sort++" not supported."
-  smtGetProof _ _ _ = error "smtlib2-boolector: Proof extraction not supported."
-  smtGetUnsatCore _ = error "smtlib2-boolector: Unsat core extraction not supported."
-  smtSimplify _ _ _ expr = return expr
-  smtGetInterpolant _ _ _ _ = error "smtlib2-boolector: Interpolant extraction not supported."
-  smtComment _ _ = return ()
-  smtExit btor = boolectorDelete (boolectorInstance btor)
+  smtHandle _ _ SMTGetProof = error "smtlib2-boolector: Proof extraction not supported."
+  smtHandle _ _ SMTGetUnsatCore = error "smtlib2-boolector: Unsat core extraction not supported."
+  smtHandle _ _ (SMTSimplify expr) = return expr
+  smtHandle _ _ (SMTGetInterpolant _) = error "smtlib2-boolector: Interpolant extraction not supported."
+  smtHandle _ _ (SMTComment _) = return ()
+  smtHandle btor _ SMTExit = boolectorDelete (boolectorInstance btor)
   
 exprToNode :: SMTType a => Map String BtorNode -> BoolectorBackend -> SMTExpr a -> IO BtorNode
 exprToNode mp btor (Var name ann) = do

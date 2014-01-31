@@ -20,20 +20,26 @@ import Data.Proxy
 -- | Check if the model is satisfiable (e.g. if there is a value for each variable so that every assertion holds)
 checkSat :: Monad m => SMT' m Bool
 checkSat = smtBackend $ \backend -> do
-  lift $ smtCheckSat backend Nothing
+  st <- getSMT
+  lift $ smtHandle backend st (SMTCheckSat Nothing)
 
 -- | Check if the model is satisfiable using a given tactic. (Works only with Z3)
 checkSatUsing :: Monad m => Tactic -> SMT' m Bool
 checkSatUsing t = smtBackend $ \backend -> do
-  lift $ smtCheckSat backend (Just t)
+  st <- getSMT
+  lift $ smtHandle backend st (SMTCheckSat (Just t))
 
 -- | Push a new context on the stack
 push :: Monad m => SMT' m ()
-push = smtBackend $ \backend -> lift $ smtPush backend
+push = smtBackend $ \backend -> do
+  st <- getSMT
+  lift $ smtHandle backend st SMTPush
 
 -- | Pop a new context from the stack
 pop :: Monad m => SMT' m ()
-pop = smtBackend $ \backend -> lift $ smtPop backend
+pop = smtBackend $ \backend -> do
+  st <- getSMT
+  lift $ smtHandle backend st SMTPop
 
 -- | Perform a stacked operation, meaning that every assertion and declaration made in it will be undone after the operation.
 stack :: Monad m => SMT' m a -> SMT' m a
@@ -47,7 +53,8 @@ stack act = do
 --   If you aren't looking at the command stream for debugging, this will do nothing.
 comment :: Monad m => String -> SMT' m ()
 comment msg = smtBackend $ \backend -> do
-  lift $ smtComment backend msg
+  st <- getSMT
+  lift $ smtHandle backend st (SMTComment msg)
 
 -- | Create a new named variable
 varNamed :: (SMTType t,Typeable t,Unit (SMTAnnotation t),Monad m) => String -> SMT' m (SMTExpr t)
@@ -88,7 +95,8 @@ argVarsAnnNamed name ann = do
                                in ((cc+1,
                                     act' >> (smtBackend $ \backend -> do
                                                 declareType (getUndef u) ann'
-                                                lift $ smtDeclareFun backend rname [] sort
+                                                st <- getSMT
+                                                lift $ smtHandle backend st (SMTDeclareFun rname [] sort)
                                                 mapM_ assert $ additionalConstraints (getUndef u) ann' (Var rname ann')),
                                     Map.insert rname (UntypedExpr resVar) cmp
                                    ),
@@ -113,7 +121,7 @@ constantAnn x ann = Const x ann
 getValue :: (SMTValue t,Monad m) => SMTExpr t -> SMT' m t
 getValue expr = smtBackend $ \backend -> do
   st <- getSMT
-  lift $ smtGetValue backend (namedExprs st) (declaredDataTypes st) expr
+  lift $ smtHandle backend st (SMTGetValue expr)
 
 -- | Extract all values of an array by giving the range of indices.
 unmangleArray :: (Liftable i,LiftArgs i,Ix (Unpacked i),SMTValue v,
@@ -139,8 +147,9 @@ defConst = defConstNamed "constvar"
 defConstNamed :: (SMTType r,Monad m) => String -> SMTExpr r -> SMT' m (SMTExpr r)
 defConstNamed name e = smtBackend $ \backend -> do
   fname <- freeName name
+  st <- getSMT
   let ann = extractAnnotation e
-  lift $ smtDefineFun backend fname [] {-(getSort (getUndef e) ann)-} e
+  lift $ smtHandle backend st (SMTDefineFun fname [] e)
   return $ Var fname ann
 
 -- | Define a new function with a body and custom type annotations for arguments and result.
@@ -158,7 +167,7 @@ defFunAnnNamed name ann_arg ann_res f = smtBackend $ \backend -> do
       (_,rtp) = getFunUndef res
 
       (au,tps,c_args') = createArgs ann_arg (c_args+1)
-  lift $ smtDefineFun backend fname tps {-(getSort rtp ann_res)-} (f au)
+  lift $ smtHandle backend st (SMTDefineFun fname tps (f au))
   return res
 
 -- | Like `defFunAnnNamed`, but defaults the function name to "fun".
@@ -192,7 +201,8 @@ arrayEquals expr arr
 -- | Asserts that a boolean expression is true
 assert :: Monad m => SMTExpr Bool -> SMT' m ()
 assert expr = smtBackend $ \backend -> do
-  lift $ smtAssert backend expr Nothing
+  st <- getSMT
+  lift $ smtHandle backend st (SMTAssert expr Nothing)
 
 -- | Create a new interpolation group
 interpolationGroup :: Monad m => SMT' m InterpolationGroup
@@ -203,7 +213,8 @@ interpolationGroup = do
 -- | Assert a boolean expression to be true and assign it to an interpolation group
 assertInterp :: Monad m => SMTExpr Bool -> InterpolationGroup -> SMT' m ()
 assertInterp expr interp = smtBackend $ \backend -> do
-  lift $ smtAssert backend expr (Just interp)
+  st <- getSMT
+  lift $ smtHandle backend st (SMTAssert expr (Just interp))
 
 getInterpolant :: Monad m => [InterpolationGroup] -> SMT' m (SMTExpr Bool)
 getInterpolant grps = smtBackend $ \backend -> do
@@ -214,12 +225,14 @@ getInterpolant grps = smtBackend $ \backend -> do
 -- | Set an option for the underlying SMT solver
 setOption :: Monad m => SMTOption -> SMT' m ()
 setOption opt = smtBackend $ \backend -> do
-  lift $ smtSetOption backend opt
+  st <- getSMT
+  lift $ smtHandle backend st (SMTSetOption opt)
 
 -- | Get information about the underlying SMT solver
 getInfo :: Monad m => SMTInfo i -> SMT' m i
 getInfo inf = smtBackend $ \backend -> do
-  lift $ smtGetInfo backend inf
+  st <- getSMT
+  lift $ smtHandle backend st (SMTGetInfo inf)
 
 -- | Create a new uniterpreted function with annotations for
 --   the argument and the return type.
@@ -248,7 +261,8 @@ funAnnNamed name annArg annRet = smtBackend $ \backend -> do
       (au2,tps,_) = createArgs annArg 0
       
   assertEq au au2 $ return ()
-  lift $ smtDeclareFun backend rname [ l | (_,l) <- tps ] (getSort rtp annRet)
+  st' <- getSMT
+  lift $ smtHandle backend st' (SMTDeclareFun rname [ l | (_,l) <- tps ] (getSort rtp annRet))
   return res
 
 -- | funAnn with an annotation only for the return type.
@@ -607,7 +621,8 @@ isInsert e = is e (Constructor "insert" :: Constructor (SMTExpr a,SMTExpr [a]) [
 -- | Sets the logic used for the following program (Not needed for many solvers).
 setLogic :: Monad m => String -> SMT' m ()
 setLogic name = smtBackend $ \backend -> do
-  lift $ smtSetLogic backend name
+  st <- getSMT
+  lift $ smtHandle backend st (SMTSetLogic name)
 
 -- | Given an arbitrary expression, this creates a named version of it and a name to reference it later on.
 named :: (SMTType a,SMTAnnotation a ~ (),Monad m)
@@ -625,20 +640,21 @@ named' = named "named"
 getProof :: Monad m => SMT' m (SMTExpr Bool)
 getProof = smtBackend $ \backend -> do
   st <- getSMT
-  lift $ smtGetProof backend (namedExprs st) (declaredDataTypes st)
+  lift $ smtHandle backend st SMTGetProof
 
 -- | Use the SMT solver to simplify a given expression.
 --   Currently only works with Z3.
 simplify :: (SMTType t,Monad m) => SMTExpr t -> SMT' m (SMTExpr t)
 simplify expr = smtBackend $ \backend -> do
   st <- getSMT
-  lift $ smtSimplify backend (namedExprs st) (declaredDataTypes st) expr
+  lift $ smtHandle backend st (SMTSimplify expr)
 
 -- | After an unsuccessful 'checkSat', return a list of names of named
 --   expression which make the instance unsatisfiable.
 getUnsatCore :: Monad m => SMT' m [String]
 getUnsatCore = smtBackend $ \backend -> do
-  lift $ smtGetUnsatCore backend
+  st <- getSMT
+  lift $ smtHandle backend st SMTGetUnsatCore
   
 optimizeExpr' :: SMTExpr a -> SMTExpr a
 optimizeExpr' e = case optimizeExpr e of

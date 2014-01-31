@@ -32,9 +32,10 @@ open solver = do
                         })
 
 -- | Closes an open SMT connection. Do not use the connection afterwards.
-close :: SMTBackend b m => SMTConnection b -> m ()
+close :: (MonadIO m,SMTBackend b m) => SMTConnection b -> m ()
 close conn = do
-  smtExit (backend conn)
+  st <- liftIO $ takeMVar (status conn)
+  smtHandle (backend conn) st SMTExit
   return ()
 
 -- | Perform an action in the SMT solver associated with this connection and return the result.
