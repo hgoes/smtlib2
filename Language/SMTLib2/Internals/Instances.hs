@@ -111,7 +111,7 @@ instance SMTType Bool where
   type SMTAnnotation Bool = ()
   getSort _ _ = Fix BoolSort
   annotationFromSort _ _ = ()
-  asValueType x f = Just $ f x
+  asValueType x ann f = Just $ f x ann
 
 instance SMTValue Bool where
   unmangle (BoolValue v) _ = Just v
@@ -124,7 +124,7 @@ instance SMTType Integer where
   type SMTAnnotation Integer = ()
   getSort _ _ = Fix IntSort
   annotationFromSort _ _ = ()
-  asValueType x f = Just $ f x
+  asValueType x ann f = Just $ f x ann
 
 instance SMTValue Integer where
   unmangle (IntValue v) _ = Just v
@@ -172,7 +172,7 @@ instance SMTType (Ratio Integer) where
   type SMTAnnotation (Ratio Integer) = ()
   getSort _ _ = Fix RealSort
   annotationFromSort _ _ = ()
-  asValueType x f = Just $ f x
+  asValueType x ann f = Just $ f x ann
 
 instance SMTValue (Ratio Integer) where
   unmangle (RealValue v) _ = Just v
@@ -217,7 +217,7 @@ instance (Args idx,SMTType val) => SMTType (SMTArray idx val) where
       getIdx _ = undefined
       getVal :: SMTArray i v -> v
       getVal _ = undefined
-  asValueType _ _ = Nothing
+  asValueType _ _ _ = Nothing
 
 instance (SMTType a) => Liftable (SMTExpr a) where
   type Lifted (SMTExpr a) i = SMTExpr (SMTArray i a)
@@ -623,8 +623,8 @@ instance SMTType a => SMTType (Maybe a) where
                        }
   getProxyArgs (_::Maybe t) ann = [ProxyArg (undefined::t) ann]
   annotationFromSort u (Fix (NamedSort "Maybe" [argSort])) = annotationFromSort (undefArg u) argSort
-  asValueType (_::Maybe x) f = asValueType (undefined::x) $
-                               \(_::y) -> f (undefined::Maybe y)
+  asValueType (_::Maybe x) ann f = asValueType (undefined::x) ann $
+                                   \(_::y) ann' -> f (undefined::Maybe y) ann'
 
 instance SMTValue a => SMTValue (Maybe a) where
   unmangle (ConstrValue "Nothing" [] sort) _ = Just Nothing
@@ -693,8 +693,8 @@ instance (Typeable a,SMTType a) => SMTType [a] where
                        }
   getProxyArgs (_::[t]) ann = [ProxyArg (undefined::t) ann]
   annotationFromSort u (Fix (NamedSort "List" [sort])) = annotationFromSort (undefArg u) sort
-  asValueType (_::[a]) f = asValueType (undefined::a) $
-                           \(_::b) -> f (undefined::[b])
+  asValueType (_::[a]) ann f = asValueType (undefined::a) ann $
+                               \(_::b) ann' -> f (undefined::[b]) ann'
 
 instance (Typeable a,SMTValue a) => SMTValue [a] where
   unmangle (ConstrValue "nil" [] _) _ = Just []
@@ -712,7 +712,7 @@ instance SMTType (BitVector BVUntyped) where
   type SMTAnnotation (BitVector BVUntyped) = Integer
   getSort _ l = Fix (BVSort l True)
   annotationFromSort _ (Fix (BVSort l _)) = l
-  asValueType x f = Just $ f x
+  asValueType x ann f = Just $ f x ann
 
 instance IsBitVector BVUntyped where
   getBVSize _ = id
@@ -726,7 +726,7 @@ instance TypeableNat n => SMTType (BitVector (BVTyped n)) where
   type SMTAnnotation (BitVector (BVTyped n)) = ()
   getSort _ _ = Fix (BVSort (reflectNat (Proxy::Proxy n) 0) False)
   annotationFromSort _ _ = ()
-  asValueType x f = Just $ f x
+  asValueType x ann f = Just $ f x ann
 
 instance TypeableNat n => IsBitVector (BVTyped n) where
   getBVSize (_::Proxy (BVTyped n)) _ = reflectNat (Proxy::Proxy n) 0

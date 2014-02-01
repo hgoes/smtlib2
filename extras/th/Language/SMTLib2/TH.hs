@@ -24,7 +24,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Foldable
 import Prelude hiding (foldl,foldr,concat,elem,all,foldl1,init)
-import Data.List (findIndex,genericLength)
+import Data.List (findIndex,genericLength,zip4)
 import Data.Fix
 import Data.Unit
 
@@ -440,18 +440,25 @@ deriveSMT name = do
                                          f <- newName "f"
                                          tps <- mapM (const (newName "tp")) tyvars
                                          tps2 <- mapM (const (newName "tp'")) tyvars
+                                         anns <- mapM (const (newName "ann")) tyvars
+                                         anns' <- mapM (const (newName "ann'")) tyvars
                                          funD 'asValueType [clause [sigP wildP (foldl appT (conT dec_name) (fmap varT tps))
+                                                                   ,tupP (fmap varP anns)
                                                                    ,varP f]
                                                                    (normalB $
                                                                     (if null tyvars
                                                                      then appE [| Just |]
                                                                      else \arg
-                                                                          -> foldr (\(tp1,tp2) e
+                                                                          -> foldr (\(tp1,tp2,ann,ann') e
                                                                                     -> appsE [[| asValueType |]
                                                                                              ,sigE [| undefined |]
                                                                                                    (varT tp1)
-                                                                                             ,lamE [sigP wildP (varT tp2)] e]
-                                                                                   ) arg (zip tps tps2)) (appE (varE f) (sigE [| undefined |] (foldl appT (conT dec_name) (fmap varT tps2))))
+                                                                                             ,varE ann
+                                                                                             ,lamE [sigP wildP (varT tp2),varP ann'] e]
+                                                                                   ) arg (zip4 tps tps2 anns anns'))
+                                                                    (appsE [varE f
+                                                                           ,sigE [| undefined |] (foldl appT (conT dec_name) (fmap varT tps2))
+                                                                           ,tupE (fmap varE anns')])
                                                                    ) []],
                                        do
                                          args <- mapM (const (newName "arg")) tyvars

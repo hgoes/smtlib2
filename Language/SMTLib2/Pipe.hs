@@ -653,8 +653,8 @@ lispToExpr :: FunctionParser -> (T.Text -> Maybe UntypedExpr)
 lispToExpr fun bound dts f expected l = case lispToValue dts expected l of
   Just val -> valueToHaskell dts
               (\(val'::t) ann
-               -> asValueType (undefined::t) $
-                  \(_::tv) -> case cast (val',ann) of
+               -> asValueType (undefined::t) ann $
+                  \(_::tv) ann' -> case cast (val',ann') of
                     Just (rval::tv,rann::SMTAnnotation tv) -> f $ Const rval rann
               ) expected val
   Nothing -> case preprocessHack l of

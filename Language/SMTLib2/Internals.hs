@@ -59,7 +59,7 @@ class (Eq t,Typeable t,Eq (SMTAnnotation t),Typeable (SMTAnnotation t))
   getSort :: t -> SMTAnnotation t -> Sort
   asDataType :: t -> Maybe (String,TypeCollection)
   asDataType _ = Nothing
-  asValueType :: t -> (forall v. SMTValue v => v -> r) -> Maybe r
+  asValueType :: t -> SMTAnnotation t -> (forall v. SMTValue v => v -> SMTAnnotation v -> r) -> Maybe r
   getProxyArgs :: t -> SMTAnnotation t -> [ProxyArg]
   getProxyArgs _ _ = []
   additionalConstraints :: t -> SMTAnnotation t -> SMTExpr t -> [SMTExpr Bool]
