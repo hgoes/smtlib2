@@ -296,29 +296,30 @@ generateTypeCollection decls
       anns <- mapM (const (newName "ann")) tyvars
       args <- mapM (const (newName "arg")) fs
       rargs <- mapM (const (newName "rarg")) fs
+      let body = foldr (\(inf,arg,rarg) e
+                        -> if Set.null rem || inf
+                           then appsE [[| withAnyValue |]
+                                      ,varE arg
+                                      ,lamE [varP rarg,wildP] e]
+                           else letE [valD (conP 'Just [tupP [varP rarg,wildP]])
+                                           (normalB $ appE [| castAnyValue |] (varE arg)) []]
+                                     e)
+                   (appsE [varE f
+                          ,sigE (appsE ((conE cName):
+                                        (fmap varE rargs))) (foldl appT (conT dName) (fmap varT tvs))
+                          ,tupE (fmap varE anns)]) (zip3 inf args rargs)
       lamE [if Set.null rem
             then wildP
             else conP 'Just [listP [ varP prx | prx <- prxs ]]
            ,listP $ fmap varP args
            ,varP f]
-           (foldr (\(prx,tv,ann) e
-                   -> appsE [varE 'withProxyArg
-                            ,varE prx
-                            ,lamE [sigP wildP (varT tv),varP ann] e]
-                  )
-              (foldr (\(inf,arg,rarg) e
-                      -> if Set.null rem && not inf
-                         then appsE [[| withAnyValue |]
-                                    ,varE arg
-                                    ,lamE [varP rarg,wildP] e]
-                         else letE [valD (conP 'Just [tupP [varP rarg,wildP]])
-                                         (normalB $ appE [| castAnyValue |] (varE arg)) []]
-                                   e)
-                 (appsE [varE f
-                        ,sigE (appsE ((conE cName):
-                                      (fmap varE rargs))) (foldl appT (conT dName) (fmap varT tvs))
-                        ,tupE (fmap varE anns)]) (zip3 inf args rargs))
-              (zip3 prxs tvs anns))
+           (if Set.null rem
+            then body
+            else foldr (\(prx,tv,ann) e
+                        -> appsE [varE 'withProxyArg
+                                 ,varE prx
+                                 ,lamE [sigP wildP (varT tv),varP ann] e]
+                       ) body (zip3 prxs tvs anns))
     generateConTest dName cName tyvars fs = do
       prxs <- mapM (const (newName "prx")) tyvars
       tvs <- mapM (const (newName "tv")) tyvars
@@ -570,17 +571,22 @@ genClause tyvars (NormalC name []) = do
          ,tupP []] (normalB $ appE [| Just |] (conE name)) []
 
 constructorType :: Type -> TypeQ
-constructorType tp = [t| Constructor |] `appT`
-                     (foldl appT (tupleT (length targs))
-                        [ [t| SMTExpr |] `appT` (return targ) | targ <- targs]) `appT` (return tres)
+constructorType tp = if null tbndr
+                     then tbody
+                     else forallT tbndr (cxt []) tbody
   where
-    (targs,tres) = constructorType' tp
+    tbody = [t| Constructor |] `appT`
+            (foldl appT (tupleT (length targs))
+             [ [t| SMTExpr |] `appT` (return targ) | targ <- targs]) `appT` (return tres)
+    (tbndr,targs,tres) = constructorType' tp
 
-constructorType' :: Type -> ([Type],Type)
+constructorType' :: Type -> ([TyVarBndr],[Type],Type)
+constructorType' (ForallT bndr _ tp) = let (tbndr,targ,tres) = constructorType' tp
+                                       in (bndr++tbndr,targ,tres)
 constructorType' (AppT (AppT ArrowT from) to)
-  = let (targ,tres) = constructorType' to
-    in (from:targ,tres)
-constructorType' tp = ([],tp)
+  = let (tbndr,targ,tres) = constructorType' to
+    in (tbndr,from:targ,tres)
+constructorType' tp = ([],[],tp)
 
 -- | Get the SMT representation for a given constructor.
 constructor :: Name -> Q Exp
