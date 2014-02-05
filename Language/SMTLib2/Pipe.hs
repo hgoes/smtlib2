@@ -18,6 +18,7 @@ import qualified Data.ByteString as BS hiding (reverse)
 import qualified Data.ByteString.Char8 as BS8
 import Blaze.ByteString.Builder
 import Data.Typeable
+import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Fix
 import Data.Proxy
@@ -29,6 +30,7 @@ import Numeric (readInt,readHex)
 import Data.Ratio
 import Control.Monad.Trans (MonadIO,liftIO)
 import Control.Monad.Identity
+import Data.Char (isDigit)
 
 data SMTPipe = SMTPipe { channelIn :: Handle
                        , channelOut :: Handle
@@ -49,8 +51,8 @@ instance MonadIO m => SMTBackend SMTPipe m where
     case res of
       L.List [L.Symbol ":version",L.String name] -> return $ T.unpack name
       _ -> error "Invalid solver response to 'get-info' version query"
-  smtHandle pipe _ (SMTAssert expr interp) = do
-    let (lexpr,_) = exprToLisp expr 0
+  smtHandle pipe st (SMTAssert expr interp) = do
+    let (lexpr,_) = exprToLisp expr (allVars st) (declaredDataTypes st)(nextVar st)
     case interp of
       Nothing -> putRequest pipe $
                  L.List [L.Symbol "assert"
@@ -61,7 +63,7 @@ instance MonadIO m => SMTBackend SMTPipe m where
                   ,L.List [L.Symbol "!"
                           ,lexpr
                           ,L.Symbol ":interpolation-group"
-                          ,L.Symbol (T.pack gr)]]
+                          ,L.Symbol (T.pack $ "i"++show gr)]]
   smtHandle pipe _ (SMTCheckSat tactic) = do
     putRequest pipe $
       L.List (case tactic of
@@ -98,20 +100,20 @@ instance MonadIO m => SMTBackend SMTPipe m where
   smtHandle pipe _ (SMTDeclareFun name tps rtp) = do
     putRequest pipe $
       L.List [L.Symbol "declare-fun"
-             ,L.Symbol $ T.pack name
+             ,L.Symbol $ T.pack $ getSMTName name
              ,args (fmap sortToLisp tps)
              ,sortToLisp rtp
              ]
-  smtHandle pipe _ (SMTDefineFun name arg definition) = do
+  smtHandle pipe st (SMTDefineFun name arg definition) = do
     let ann = extractAnnotation definition
         retSort = getSort (getUndef definition) ann
     putRequest pipe $
       L.List [L.Symbol "define-fun"
-             ,L.Symbol $ T.pack name
-             ,args [ L.List [ L.Symbol $ T.pack n, sortToLisp tp ]
-                   | (n,tp) <- arg ]
+             ,L.Symbol $ T.pack $ getSMTName name
+             ,args [ L.List [ L.Symbol $ T.pack $ getSMTName n, sortToLisp $ funInfoSort n ]
+                   | n <- arg ]
              ,sortToLisp retSort
-             ,fst $ exprToLisp definition 0]
+             ,fst $ exprToLisp definition (allVars st) (declaredDataTypes st) (nextVar st)]
   smtHandle pipe _ (SMTComment msg) = do
     liftIO $ IO.hPutStr (channelIn pipe) $ Prelude.unlines (fmap (';':) (Prelude.lines msg))
   smtHandle pipe _ SMTExit = do
@@ -123,11 +125,11 @@ instance MonadIO m => SMTBackend SMTPipe m where
     return ()
   smtHandle pipe st (SMTGetInterpolant grps) = do
     putRequest pipe $ L.List [L.Symbol "get-interpolant"
-                             ,L.List [ L.Symbol $ T.pack g | InterpolationGroup g <- grps ]
+                             ,L.List [ L.Symbol $ T.pack ("i"++show g) | InterpolationGroup g <- grps ]
                              ]
     val <- parseResponse pipe
     case lispToExpr commonFunctions
-         (\n -> Map.lookup (T.unpack n) (namedExprs st)) (declaredDataTypes st) gcast (Just $ Fix BoolSort) val of
+         (findName st) (declaredDataTypes st) gcast (Just $ Fix BoolSort) val of
       Just (Just x) -> return x
       _ -> error $ "smtlib2: Failed to parse get-interpolant result: "++show val
   smtHandle pipe _ (SMTSetOption opt) = do
@@ -156,7 +158,7 @@ instance MonadIO m => SMTBackend SMTPipe m where
             Just p -> p
           _ -> res
     case lispToExpr (commonFunctions `mappend` commonTheorems)
-         (\n -> Map.lookup (T.unpack n) (namedExprs st))
+         (findName st)
          (declaredDataTypes st) gcast (Just $ Fix BoolSort) proof of
       Just (Just x) -> return x
       _ -> error $ "smtlib2: Couldn't parse proof "++show res
@@ -178,12 +180,12 @@ instance MonadIO m => SMTBackend SMTPipe m where
       _ -> error $ "Language.SMTLib2.getUnsatCore: Unknown response "++show res++" to query."
   smtHandle pipe st (SMTSimplify (expr::SMTExpr t)) = do
     clearInput pipe
-    let (lexpr,_) = exprToLisp expr 0
+    let (lexpr,_) = exprToLisp expr (allVars st) (declaredDataTypes st) (nextVar st)
     putRequest pipe $ L.List [L.Symbol "simplify"
                              ,lexpr]
     val <- parseResponse pipe
     case lispToExpr commonFunctions
-         (\n -> Map.lookup (T.unpack n) (namedExprs st)) (declaredDataTypes st) gcast (Just $ getSort (undefined::t) (extractAnnotation expr)) val of
+         (findName st) (declaredDataTypes st) gcast (Just $ getSort (undefined::t) (extractAnnotation expr)) val of
       Just (Just x) -> return x
       _ -> error $ "smtlib2: Failed to parse simplify result: "++show val
   smtHandle pipe _ SMTPush = putRequest pipe $ L.List [L.Symbol "push",L.toLisp (1::Integer)]
@@ -192,7 +194,7 @@ instance MonadIO m => SMTBackend SMTPipe m where
     let ann = extractAnnotation expr
         sort = getSort (undefined::t) ann
     clearInput pipe
-    let (lexpr,_) = exprToLisp expr 0
+    let (lexpr,_) = exprToLisp expr (allVars st) (declaredDataTypes st) (nextVar st)
     putRequest pipe $ L.List [L.Symbol "get-value"
                              ,L.List [lexpr]]
     val <- parseResponse pipe
@@ -263,49 +265,126 @@ lispToSort (L.List (L.Symbol "Array":args))
 lispToSort (L.Symbol x) = Fix $ NamedSort (T.unpack x) []
 lispToSort (L.List ((L.Symbol x):args)) = Fix $ NamedSort (T.unpack x) (fmap lispToSort args)
 
-exprToLisp :: SMTExpr t -> Integer -> (L.Lisp,Integer)
-exprToLisp (Var name _) c = (L.Symbol $ T.pack name,c)
-exprToLisp (Const x ann) c = (valueToLisp $ mangle x ann,c)
-exprToLisp (AsArray f arg) c
-  = let f' = functionGetSymbol f arg
+getSMTName :: FunInfo -> String
+getSMTName info = case funInfoName info of
+  Nothing -> "var"++(case funInfoId info of
+                        0 -> ""
+                        n -> "_"++show n)
+  Just (name,nc) -> escapeName name nc
+
+escapeName :: String -> Integer -> String
+escapeName (c:cs) nc = (if isDigit c
+                        then "num"++escapeName' (c:cs)
+                        else escapeName' (c:cs))++(if nc==0
+                                                   then ""
+                                                   else "_"++show nc)
+escapeName [] 0 = "no_name"
+escapeName [] n = "no_name"++show n
+
+escapeName' :: String -> String
+escapeName' [] = []
+escapeName' ('_':xs) = '_':'_':escapeName' xs
+escapeName' (x:xs) = x:escapeName' xs
+
+unescapeName :: String -> Maybe (Either (String,Integer) Integer)
+unescapeName "var" = Just (Right 0)
+unescapeName ('v':'a':'r':'_':rest) = if all isDigit rest
+                                      then Just (Right (read rest))
+                                      else Nothing
+unescapeName xs = do
+  res <- unescapeName' xs
+  return $ Left res
+
+unescapeName' :: String -> Maybe (String,Integer)
+unescapeName' ('n':'o':'_':'n':'a':'m':'e':rest) = case rest of
+  [] -> Just ("",0)
+  xs -> if all isDigit xs
+        then Just ("",read xs)
+        else Nothing
+unescapeName' ('_':'_':rest) = do
+  (name,nc) <- unescapeName' rest
+  return ('_':name,nc)
+unescapeName' ('_':rest) = if all isDigit rest
+                           then return ("",read rest)
+                           else Nothing
+unescapeName' (x:xs) = do
+  (name,nc) <- unescapeName' xs
+  return (x:name,nc)
+unescapeName' "" = Just ("",0)
+
+findName :: SMTState -> T.Text -> Maybe UntypedExpr
+findName st name = case unescapeName (T.unpack name) of
+  Nothing -> Nothing
+  Just (Right idx) -> case Map.lookup idx (allVars st) of
+    Nothing -> Nothing
+    Just (FunInfo { funInfoProxy = _::Proxy (a,t)
+                  , funInfoResAnn = ann
+                  }) -> Just $ UntypedExpr (Var idx ann :: SMTExpr t)
+  Just (Left name') -> case Map.lookup name' (namedVars st) of
+    Nothing -> Nothing
+    Just idx -> case Map.lookup idx (allVars st) of
+      Nothing -> Nothing
+      Just (FunInfo { funInfoProxy = _::Proxy (a,t)
+                    , funInfoResAnn = ann
+                    }) -> Just $ UntypedExpr (Var idx ann :: SMTExpr t)
+
+varName :: Integer -> String
+varName 0 = "var"
+varName n = "var_"++show n
+
+exprToLisp :: SMTExpr t -> Map Integer FunInfo -> DataTypeInfo -> Integer -> (L.Lisp,Integer)
+exprToLisp (Var idx _) mp _ c = case Map.lookup idx mp of
+  Just info -> case funInfoName info of
+    Just (name,nc) -> let name' = escapeName name nc
+                      in (L.Symbol $ T.pack name',c)
+    Nothing -> let name = varName idx
+               in (L.Symbol $ T.pack name,c)
+  Nothing -> error $ "smtlib2: Variable "++show idx++" has no info."
+exprToLisp (Const x ann) _ dts c = (valueToLisp dts $ mangle x ann,c)
+exprToLisp (AsArray f arg) mp _ c
+  = let f' = functionGetSymbol mp f arg
         (sargs,sres) = functionSignature f arg
     in (L.List [L.Symbol "_",L.Symbol "as-array",if isOverloaded f
                                                  then L.List [f'
                                                              ,L.List $ fmap sortToLisp sargs
                                                              ,sortToLisp sres]
                                                  else f'],c)
-exprToLisp (Forall ann f) c = let (arg,tps,nc) = createArgs ann c
-                                  (arg',nc') = exprToLisp (f arg) nc
-                              in (L.List [L.Symbol "forall"
-                                         ,L.List [L.List [L.Symbol $ T.pack name,sortToLisp tp]
-                                                  | (name,tp) <- tps]
-                                         ,arg'],nc')
-exprToLisp (Exists ann f) c = let (arg,tps,nc) = createArgs ann c
-                                  (arg',nc') = exprToLisp (f arg) nc
-                              in (L.List [L.Symbol "exists"
-                                         ,L.List [L.List [L.Symbol $ T.pack name,sortToLisp tp]
-                                                  | (name,tp) <- tps ]
-                                         ,arg'],nc')
-exprToLisp (Let ann x f) c = let (arg,tps,nc) = createArgs ann c
-                                 (arg',nc') = unpackArgs (\e _ cc -> exprToLisp e cc
-                                                         ) x ann nc
-                                 (arg'',nc'') = exprToLisp (f arg) nc'
-                             in (L.List [L.Symbol "let"
-                                        ,L.List [L.List [L.Symbol $ T.pack name,lisp]
-                                                | ((name,_),lisp) <- Prelude.zip tps arg' ]
-                                        ,arg''],nc'')
-exprToLisp (App fun x) c
+exprToLisp (Forall ann f) mp dts c
+  = let (arg,tps,nc) = createArgs ann c
+        (arg',nc') = exprToLisp (f arg) mp dts nc
+    in (L.List [L.Symbol "forall"
+               ,L.List [L.List [L.Symbol $ T.pack (getSMTName info),sortToLisp $ funInfoSort info]
+                       | info <- tps]
+               ,arg'],nc')
+exprToLisp (Exists ann f) mp dts c
+  = let (arg,tps,nc) = createArgs ann c
+        (arg',nc') = exprToLisp (f arg) mp dts nc
+    in (L.List [L.Symbol "exists"
+               ,L.List [L.List [L.Symbol $ T.pack (getSMTName info),sortToLisp $ funInfoSort info]
+                       | info <- tps ]
+               ,arg'],nc')
+exprToLisp (Let ann x f) mp dts c
+  = let (arg,tps,nc) = createArgs ann c
+        (arg',nc') = unpackArgs (\e _ cc -> exprToLisp e mp dts cc
+                                ) x ann nc
+        (arg'',nc'') = exprToLisp (f arg) mp dts nc'
+    in (L.List [L.Symbol "let"
+               ,L.List [L.List [L.Symbol $ T.pack (getSMTName info),lisp]
+                       | (info,lisp) <- Prelude.zip tps arg' ]
+               ,arg''],nc'')
+exprToLisp (App fun x) mp dts c
   = let arg_ann = extractArgAnnotation x
-        l = functionGetSymbol fun arg_ann
-        ~(x',c1) = unpackArgs (\e _ i -> exprToLisp e i) x
+        l = functionGetSymbol mp fun arg_ann
+        ~(x',c1) = unpackArgs (\e _ i -> exprToLisp e mp dts i) x
                    arg_ann c
     in if Prelude.null x'
        then (l,c1)
        else (L.List $ l:x',c1)
-exprToLisp (Named expr name) c = let (expr',c') = exprToLisp expr c
-                                 in (L.List [L.Symbol "!",expr'
-                                            ,L.Symbol ":named"
-                                            ,L.Symbol $ T.pack name],c')
+exprToLisp (Named expr name nc) mp dts c
+  = let (expr',c') = exprToLisp expr mp dts c
+    in (L.List [L.Symbol "!",expr'
+               ,L.Symbol ":named"
+               ,L.Symbol $ T.pack $ escapeName name nc],c')
 
 isOverloaded :: SMTFunction a b -> Bool
 isOverloaded SMTEq = True
@@ -336,9 +415,9 @@ functionSignature f argAnn = withUndef f $
     withUndef :: SMTFunction a b -> (a -> b -> r) -> r
     withUndef _ f = f undefined undefined
 
-functionGetSymbol :: SMTFunction a b -> ArgAnnotation a -> L.Lisp
-functionGetSymbol SMTEq _ = L.Symbol "="
-functionGetSymbol fun@(SMTMap f) ann
+functionGetSymbol :: Map Integer FunInfo -> SMTFunction a b -> ArgAnnotation a -> L.Lisp
+functionGetSymbol _ SMTEq _ = L.Symbol "="
+functionGetSymbol mp fun@(SMTMap f) ann
   = L.List [L.Symbol "_",
             L.Symbol "map",
             sym]
@@ -350,41 +429,43 @@ functionGetSymbol fun@(SMTMap f) ann
     ui = getUndefI fun
     ua = getUndefA f
     (ann_i,ann_v) = inferLiftedAnnotation ua ui ann
-    sym' = functionGetSymbol f ann_v
+    sym' = functionGetSymbol mp f ann_v
     (sigArg,sigRes) = functionSignature f ann_v
     sym = if isOverloaded f
           then L.List [sym',
                        L.List (fmap sortToLisp sigArg),
                        sortToLisp sigRes]
           else sym'     
-functionGetSymbol (SMTFun name _) _ = L.Symbol (T.pack name)
-functionGetSymbol (SMTOrd op) _ = L.Symbol $ case op of
+functionGetSymbol mp (SMTFun name _) _ = case Map.lookup name mp of
+  Just info -> L.Symbol (T.pack $ getSMTName info)
+functionGetSymbol _ (SMTBuiltIn name _) _ = L.Symbol $ T.pack name
+functionGetSymbol _ (SMTOrd op) _ = L.Symbol $ case op of
   Ge -> ">="
   Gt -> ">"
   Le -> "<="
   Lt -> "<"
-functionGetSymbol (SMTArith op) _ = L.Symbol $ case op of
+functionGetSymbol _ (SMTArith op) _ = L.Symbol $ case op of
   Plus -> "+"
   Mult -> "*"
-functionGetSymbol SMTMinus _ = L.Symbol "-"
-functionGetSymbol (SMTIntArith op) _ = L.Symbol $ case op of
+functionGetSymbol _ SMTMinus _ = L.Symbol "-"
+functionGetSymbol _ (SMTIntArith op) _ = L.Symbol $ case op of
   Div -> "div"
   Mod -> "mod"
   Rem -> "rem"
-functionGetSymbol SMTDivide _ = L.Symbol "/"
-functionGetSymbol SMTNeg _ = L.Symbol "-"
-functionGetSymbol SMTAbs _ = L.Symbol "abs"
-functionGetSymbol SMTNot _ = L.Symbol "not"
-functionGetSymbol (SMTLogic op) _ = case op of
+functionGetSymbol _ SMTDivide _ = L.Symbol "/"
+functionGetSymbol _ SMTNeg _ = L.Symbol "-"
+functionGetSymbol _ SMTAbs _ = L.Symbol "abs"
+functionGetSymbol _ SMTNot _ = L.Symbol "not"
+functionGetSymbol _ (SMTLogic op) _ = case op of
   And -> L.Symbol "and"
   Or -> L.Symbol "or"
   XOr -> L.Symbol "xor"
   Implies -> L.Symbol "=>"
-functionGetSymbol SMTDistinct _ = L.Symbol "distinct"
-functionGetSymbol SMTToReal _ = L.Symbol "to-real"
-functionGetSymbol SMTToInt _ = L.Symbol "to-int"
-functionGetSymbol SMTITE _ = L.Symbol "ite"
-functionGetSymbol (SMTBVComp op) _ = L.Symbol $ case op of
+functionGetSymbol _ SMTDistinct _ = L.Symbol "distinct"
+functionGetSymbol _ SMTToReal _ = L.Symbol "to_real"
+functionGetSymbol _ SMTToInt _ = L.Symbol "to_int"
+functionGetSymbol _ SMTITE _ = L.Symbol "ite"
+functionGetSymbol _ (SMTBVComp op) _ = L.Symbol $ case op of
   BVULE -> "bvule"
   BVULT -> "bvult"
   BVUGE -> "bvuge"
@@ -393,7 +474,7 @@ functionGetSymbol (SMTBVComp op) _ = L.Symbol $ case op of
   BVSLT -> "bvslt"
   BVSGE -> "bvsge"
   BVSGT -> "bvsgt"
-functionGetSymbol (SMTBVBin op) _ = L.Symbol $ case op of
+functionGetSymbol _ (SMTBVBin op) _ = L.Symbol $ case op of
   BVAdd -> "bvadd"
   BVSub -> "bvsub"
   BVMul -> "bvmul"
@@ -407,12 +488,12 @@ functionGetSymbol (SMTBVBin op) _ = L.Symbol $ case op of
   BVXor -> "bvxor"
   BVAnd -> "bvand"
   BVOr -> "bvor"
-functionGetSymbol (SMTBVUn op) _ = case op of
+functionGetSymbol _ (SMTBVUn op) _ = case op of
   BVNot -> L.Symbol "bvnot"
   BVNeg -> L.Symbol "bvneg"
-functionGetSymbol SMTSelect _ = L.Symbol "select"
-functionGetSymbol SMTStore _ = L.Symbol "store"
-functionGetSymbol f@(SMTConstArray i_ann) v_ann
+functionGetSymbol _ SMTSelect _ = L.Symbol "select"
+functionGetSymbol _ SMTStore _ = L.Symbol "store"
+functionGetSymbol _ f@(SMTConstArray i_ann) v_ann
   = withUndef f $
     \u_arr -> L.List [L.Symbol "as"
                      ,L.Symbol "const"
@@ -421,8 +502,8 @@ functionGetSymbol f@(SMTConstArray i_ann) v_ann
     withUndef :: SMTFunction (SMTExpr v) (SMTArray i v)
                  -> (SMTArray i v -> a) -> a
     withUndef _ f' = f' undefined
-functionGetSymbol SMTConcat _ = L.Symbol "concat"
-functionGetSymbol f@(SMTExtract prStart prLen) ann
+functionGetSymbol _ SMTConcat _ = L.Symbol "concat"
+functionGetSymbol _ f@(SMTExtract prStart prLen) ann
   = L.List [L.Symbol "_"
            ,L.Symbol "extract"
            ,L.Number $ L.I (start+len-1)
@@ -430,9 +511,9 @@ functionGetSymbol f@(SMTExtract prStart prLen) ann
   where
     start = reflectNat prStart 0
     len = reflectNat prLen 0
-functionGetSymbol (SMTConstructor (Constructor name)) _ = L.Symbol $ T.pack name
-functionGetSymbol (SMTConTest (Constructor name)) _ = L.Symbol $ T.pack $ "is-"++name
-functionGetSymbol (SMTFieldSel (Field name)) _ = L.Symbol $ T.pack name
+functionGetSymbol _ (SMTConstructor (Constructor name)) _ = L.Symbol $ T.pack name
+functionGetSymbol _ (SMTConTest (Constructor name)) _ = L.Symbol $ T.pack $ "is-"++name
+functionGetSymbol _ (SMTFieldSel (Field name)) _ = L.Symbol $ T.pack name
 
 clearInput :: MonadIO m => SMTPipe -> m ()
 clearInput pipe = do
@@ -507,14 +588,14 @@ commonTheorems = mconcat
                  [nameParser (L.Symbol "|unit-resolution|")
                   (OverloadedParser (const True)
                    (const $ Just $ Fix BoolSort)
-                   $ \_ _ f -> Just $ f (SMTFun "|unit-resolution|" () :: SMTFunction [SMTExpr Bool] Bool))
-                 ,simpleParser (SMTFun "asserted" () :: SMTFunction (SMTExpr Bool) Bool)
-                 ,simpleParser (SMTFun "hypothesis" () :: SMTFunction (SMTExpr Bool) Bool)
-                 ,simpleParser (SMTFun "lemma" () :: SMTFunction (SMTExpr Bool) Bool)
-                 ,simpleParser (SMTFun "monotonicity" () :: SMTFunction (SMTExpr Bool,SMTExpr Bool) Bool)
-                 ,simpleParser (SMTFun "trans" () :: SMTFunction (SMTExpr Bool,SMTExpr Bool,SMTExpr Bool) Bool)
-                 ,simpleParser (SMTFun "rewrite" () :: SMTFunction (SMTExpr Bool) Bool)
-                 ,simpleParser (SMTFun "mp" () :: SMTFunction (SMTExpr Bool,SMTExpr Bool,SMTExpr Bool) Bool)]
+                   $ \_ _ f -> Just $ f (SMTBuiltIn "|unit-resolution|" () :: SMTFunction [SMTExpr Bool] Bool))
+                 ,simpleParser (SMTBuiltIn "asserted" () :: SMTFunction (SMTExpr Bool) Bool)
+                 ,simpleParser (SMTBuiltIn "hypothesis" () :: SMTFunction (SMTExpr Bool) Bool)
+                 ,simpleParser (SMTBuiltIn "lemma" () :: SMTFunction (SMTExpr Bool) Bool)
+                 ,simpleParser (SMTBuiltIn "monotonicity" () :: SMTFunction (SMTExpr Bool,SMTExpr Bool) Bool)
+                 ,simpleParser (SMTBuiltIn "trans" () :: SMTFunction (SMTExpr Bool,SMTExpr Bool,SMTExpr Bool) Bool)
+                 ,simpleParser (SMTBuiltIn "rewrite" () :: SMTFunction (SMTExpr Bool) Bool)
+                 ,simpleParser (SMTBuiltIn "mp" () :: SMTFunction (SMTExpr Bool,SMTExpr Bool,SMTExpr Bool) Bool)]
 
 lispToValue :: DataTypeInfo -> Maybe Sort -> L.Lisp -> Maybe Value
 lispToValue _ sort (L.Symbol "true") = case sort of
@@ -585,21 +666,37 @@ lispToValue _ _ _ = Nothing
 lispToValue' :: DataTypeInfo -> Maybe Sort -> L.Lisp -> Maybe Value
 lispToValue' dts sort l = case lispToValue dts sort l of
   Just res -> Just res
-  Nothing -> lispToConstr dts sort l
+  Nothing -> case sort of
+    Just (Fix (NamedSort name argSorts)) -> lispToConstr dts (Just (name,argSorts)) l
 
-lispToConstr :: DataTypeInfo -> Maybe Sort -> L.Lisp -> Maybe Value
-lispToConstr _ sort (L.Symbol n) = Just (ConstrValue (T.unpack n) [] sort)
+lispToConstr :: DataTypeInfo -> Maybe (String,[Sort]) -> L.Lisp -> Maybe Value
+lispToConstr dts sort (L.List [L.Symbol "as",
+                               expr,
+                               dt])
+  = let sort' = lispToSort dt
+    in case sort' of
+      Fix (NamedSort name args) -> lispToConstr dts (Just (name,args)) expr
+lispToConstr dts sort (L.Symbol n)
+  = let rn = T.unpack n
+    in case Map.lookup rn (constructors dts) of
+      Just (constr,dt,coll)
+        -> Just (ConstrValue rn [] (case sort of
+                                       Just (_,s) -> Just s
+                                       Nothing -> Nothing))
 lispToConstr dts sort (L.List ((L.Symbol name):args)) = do
-  let argSorts = case Map.lookup (T.unpack name) (constructors dts) of
-        Nothing -> Nothing
-        Just (constr,dt,_) -> Just $ fmap (\field -> getArgSort (fieldSort field)) (conFields constr)
-  args' <- case argSorts of
-    Nothing -> mapM (lispToValue' dts Nothing) args
-    Just sorts -> mapM (\(l,s) -> lispToValue' dts s l) (zip args sorts)
-  return $ ConstrValue (T.unpack name) args' sort
+  let (constr,dt,coll) = case Map.lookup (T.unpack name) (constructors dts) of
+        Just r -> r
+        Nothing -> error $ "smtlib2: Can't find constructor for "++(T.unpack name)
+      argSorts = fmap (\field -> getArgSort (fieldSort field)
+                      ) (conFields constr)
+  args' <- mapM (\(l,s) -> lispToValue' dts s l) (zip args argSorts)
+  return $ ConstrValue (T.unpack name) args'
+    (case sort of
+        Just (_,sort') -> Just sort'
+        Nothing -> Nothing)
   where
     getArgSort (Fix (ArgumentSort n)) = case sort of
-      Just (Fix (NamedSort _ args)) -> Just $ args `genericIndex` n
+      Just (_,args) -> Just $ args `genericIndex` n
       _ -> Nothing
     getArgSort (Fix (NormalSort s)) = case s of
       BoolSort -> Just $ Fix BoolSort
@@ -615,14 +712,14 @@ lispToConstr dts sort (L.List ((L.Symbol name):args)) = do
         return $ Fix $ NamedSort name args'
 lispToConstr _ _ _ = Nothing
 
-valueToLisp :: Value -> L.Lisp
-valueToLisp (BoolValue False) = L.Symbol "false"
-valueToLisp (BoolValue True) = L.Symbol "true"
-valueToLisp (IntValue i) = if i<0
-                           then L.List [L.Symbol "-"
-                                       ,L.Number $ L.I (abs i)]
-                           else L.Number $ L.I i
-valueToLisp (RealValue i)
+valueToLisp :: DataTypeInfo -> Value -> L.Lisp
+valueToLisp _ (BoolValue False) = L.Symbol "false"
+valueToLisp _ (BoolValue True) = L.Symbol "true"
+valueToLisp _ (IntValue i) = if i<0
+                             then L.List [L.Symbol "-"
+                                         ,L.Number $ L.I (abs i)]
+                             else L.Number $ L.I i
+valueToLisp _ (RealValue i)
   = let res = L.List [L.Symbol "/"
                      ,L.Number $ L.I (abs $ numerator i)
                      ,L.Number $ L.I $ denominator i]
@@ -630,29 +727,32 @@ valueToLisp (RealValue i)
        then L.List [L.Symbol "-"
                    ,res]
        else res
-valueToLisp (BVValue { bvValueWidth = w
-                     , bvValueValue = v })
+valueToLisp _ (BVValue { bvValueWidth = w
+                       , bvValueValue = v })
   = L.List [L.Symbol "_"
            ,L.Symbol $ T.pack $ "bv"++(if v>=0
                                        then show v
                                        else show (2^w + v))
            ,L.Number $ L.I w]
-valueToLisp (ConstrValue name vals sort)
+valueToLisp dts (ConstrValue name vals sort)
   = let constr = case sort of
-          Just sort' -> L.List [L.Symbol "as"
-                               ,L.Symbol $ T.pack name
-                               ,sortToLisp sort']
+          Just sort' -> case Map.lookup name (constructors dts) of
+            Just (_,dt,coll) -> L.List [L.Symbol "as"
+                                       ,L.Symbol $ T.pack name
+                                       ,if argCount coll > 0
+                                        then L.List $ [L.Symbol $ T.pack (dataTypeName dt)]++(fmap sortToLisp sort')
+                                        else L.Symbol $ T.pack $ dataTypeName dt]
           Nothing -> L.Symbol $ T.pack name
     in case vals of
       [] -> constr
-      _ -> L.List (constr:(fmap valueToLisp vals))
+      _ -> L.List (constr:(fmap (valueToLisp dts) vals))
 
 lispToExpr :: FunctionParser -> (T.Text -> Maybe UntypedExpr)
               -> DataTypeInfo
               -> (forall a. SMTType a => SMTExpr a -> b) -> Maybe Sort -> L.Lisp -> Maybe b
 lispToExpr fun bound dts f expected l = case lispToValue dts expected l of
   Just val -> valueToHaskell dts
-              (\(val'::t) ann
+              (\_ (val'::t) ann
                -> asValueType (undefined::t) ann $
                   \(_::tv) ann' -> case cast (val',ann') of
                     Just (rval::tv,rann::SMTAnnotation tv) -> f $ Const rval rann
@@ -660,7 +760,7 @@ lispToExpr fun bound dts f expected l = case lispToValue dts expected l of
   Nothing -> case preprocessHack l of
     L.Symbol name -> case bound name of
       Nothing -> Nothing
-      Just subst -> entype (\subst' -> Just $ f subst') subst
+      Just subst -> entype (\expr -> Just $ f expr) subst
     L.List [L.Symbol "forall",L.List args',body]
       -> fmap f $ quantToExpr Forall fun bound dts args' body
     L.List [L.Symbol "exists",L.List args',body]
@@ -835,7 +935,7 @@ allEqConstraint [] = True
 simpleParser :: (Liftable arg,SMTType res,Unit (ArgAnnotation arg),Unit (SMTAnnotation res))
                 => SMTFunction arg res -> FunctionParser
 simpleParser fun
-  = let fsym = functionGetSymbol fun unit
+  = let fsym = functionGetSymbol (error "smtlib2: Don't lookup names in simpleParser") fun unit
         (uargs,ures) = getFunUndef fun
     in nameParser fsym (DefinedParser
                         (getSorts uargs unit)

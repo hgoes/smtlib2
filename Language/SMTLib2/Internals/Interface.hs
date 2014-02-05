@@ -66,45 +66,34 @@ varNamedAnn = argVarsAnnNamed
 
 -- | Create a annotated variable
 varAnn :: (SMTType t,Typeable t,Monad m) => SMTAnnotation t -> SMT' m (SMTExpr t)
-varAnn ann = varNamedAnn "var" ann
+varAnn ann = argVarsAnn ann
 
 -- | Create a fresh new variable
 var :: (SMTType t,Typeable t,Unit (SMTAnnotation t),Monad m) => SMT' m (SMTExpr t)
-var = varNamed "var"
+var = argVarsAnn unit
 
 -- | Like `argVarsAnnNamed`, but defaults the name to "var"
 argVarsAnn :: (Args a,Monad m) => ArgAnnotation a -> SMT' m a
-argVarsAnn = argVarsAnnNamed "var"
+argVarsAnn = argVarsAnnNamed' Nothing
 
 -- | Create annotated named SMT variables of the `Args` class.
 --   If more than one variable is needed, they get a numerical suffix.
 argVarsAnnNamed :: (Args a,Monad m) => String -> ArgAnnotation a -> SMT' m a
-argVarsAnnNamed name ann = do
-  st <- getSMT
-  let ename = escapeName name
-      namec = case Map.lookup name (nameCount st) of
-        Nothing -> 0
-        Just c -> c
-      ((nc,act,mp'),res) = foldExprs
-                           (\(cc,act',cmp) u ann'
-                            -> let rname = case cc of
-                                     0 -> ename
-                                     _ -> ename++"_"++show cc
-                                   sort = getSort (getUndef u) ann'
-                                   resVar = Var rname ann'
-                               in ((cc+1,
-                                    act' >> (smtBackend $ \backend -> do
-                                                declareType (getUndef u) ann'
-                                                st <- getSMT
-                                                lift $ smtHandle backend st (SMTDeclareFun rname [] sort)
-                                                mapM_ assert $ additionalConstraints (getUndef u) ann' (Var rname ann')),
-                                    Map.insert rname (UntypedExpr resVar) cmp
-                                   ),
-                                   resVar)) (namec,return (),namedExprs st) undefined ann
-  putSMT $ st { nameCount = Map.insert name nc (nameCount st)
-              , namedExprs = mp' }
-  act
-  return res
+argVarsAnnNamed name = argVarsAnnNamed' (Just name)
+
+argVarsAnnNamed' :: (Args a,Monad m) => Maybe String -> ArgAnnotation a -> SMT' m a
+argVarsAnnNamed' name ann = do
+  (_,arg) <- foldExprs (\_ (_::SMTExpr t) ann' -> do
+                           (res,info) <- newVariable name ann'
+                           smtBackend $ \backend -> do
+                             let sort = getSort (undefined::t) ann'
+                             declareType (undefined::t) ann'
+                             st <- getSMT
+                             lift $ smtHandle backend st (SMTDeclareFun info [] sort)
+                             mapM_ assert $ additionalConstraints (undefined::t) ann' res
+                           return ((),res)
+                       ) () undefined ann
+  return arg
 
 -- | Like `argVarsAnn`, but can only be used for unit type annotations.
 argVars :: (Args a,Unit (ArgAnnotation a),Monad m) => SMT' m a
@@ -123,6 +112,9 @@ getValue expr = smtBackend $ \backend -> do
   st <- getSMT
   lift $ smtHandle backend st (SMTGetValue expr)
 
+getValues :: (LiftArgs arg,Monad m) => arg -> SMT' m (Unpacked arg)
+getValues args = unliftArgs args getValue
+
 -- | Extract all values of an array by giving the range of indices.
 unmangleArray :: (Liftable i,LiftArgs i,Ix (Unpacked i),SMTValue v,
                   Unit (ArgAnnotation i),Monad m)
@@ -135,9 +127,9 @@ unmangleArray b expr = mapM (\i -> do
                             ) (range b) >>= return.array b
 
 -- | Define a new function with a body
-defFun :: (Liftable a,SMTType r,Unit (ArgAnnotation a),Unit (SMTAnnotation r),Monad m)
+defFun :: (Liftable a,SMTType r,Unit (ArgAnnotation a),Monad m)
           => (a -> SMTExpr r) -> SMT' m (SMTFunction a r)
-defFun = defFunAnn unit unit
+defFun = defFunAnn unit
 
 -- | Define a new constant.
 defConst :: (SMTType r,Monad m) => SMTExpr r -> SMT' m (SMTExpr r)
@@ -145,35 +137,37 @@ defConst = defConstNamed "constvar"
 
 -- | Define a new constant with a name
 defConstNamed :: (SMTType r,Monad m) => String -> SMTExpr r -> SMT' m (SMTExpr r)
-defConstNamed name e = smtBackend $ \backend -> do
-  fname <- freeName name
-  st <- getSMT
+defConstNamed name = defConstNamed' (Just name)
+
+defConstNamed' :: (SMTType r,Monad m) => Maybe String -> SMTExpr r -> SMT' m (SMTExpr r)
+defConstNamed' name e = smtBackend $ \backend -> do
   let ann = extractAnnotation e
-  lift $ smtHandle backend st (SMTDefineFun fname [] e)
-  return $ Var fname ann
+  (fun,info) <- newVariable name ann
+  st <- getSMT
+  lift $ smtHandle backend st (SMTDefineFun info [] e)
+  return fun
 
 -- | Define a new function with a body and custom type annotations for arguments and result.
 defFunAnnNamed :: (Liftable a,SMTType r,Monad m)
-                  => String -> ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT' m (SMTFunction a r)
-defFunAnnNamed name ann_arg ann_res f = smtBackend $ \backend -> do
-  fname <- freeName name
+                  => String -> ArgAnnotation a -> (a -> SMTExpr r) -> SMT' m (SMTFunction a r)
+defFunAnnNamed name = defFunAnnNamed' (Just name)
+
+defFunAnnNamed' :: (Liftable a,SMTType r,Monad m)
+                  => Maybe String -> ArgAnnotation a -> (a -> SMTExpr r) -> SMT' m (SMTFunction a r)
+defFunAnnNamed' name ann_arg f = smtBackend $ \backend -> do
+  (au,tps) <- createArgs' ann_arg
+  let body = f au
+      ann_res = extractAnnotation body
+  
+  (fun,info) <- newFunction name ann_arg ann_res
   st <- getSMT
-  let c_args = case Map.lookup "arg" (nameCount st) of
-        Nothing -> 0
-        Just n -> n
-
-      res = SMTFun fname ann_res
-
-      (_,rtp) = getFunUndef res
-
-      (au,tps,c_args') = createArgs ann_arg (c_args+1)
-  lift $ smtHandle backend st (SMTDefineFun fname tps (f au))
-  return res
+  lift $ smtHandle backend st (SMTDefineFun info tps body)
+  return fun
 
 -- | Like `defFunAnnNamed`, but defaults the function name to "fun".
 defFunAnn :: (Liftable a,SMTType r,Monad m)
-             => ArgAnnotation a -> SMTAnnotation r -> (a -> SMTExpr r) -> SMT' m (SMTFunction a r)
-defFunAnn = defFunAnnNamed "fun"
+             => ArgAnnotation a -> (a -> SMTExpr r) -> SMT' m (SMTFunction a r)
+defFunAnn = defFunAnnNamed' Nothing
 
 -- | Boolean conjunction
 and' :: SMTFunction [SMTExpr Bool] Bool
@@ -207,8 +201,10 @@ assert expr = smtBackend $ \backend -> do
 -- | Create a new interpolation group
 interpolationGroup :: Monad m => SMT' m InterpolationGroup
 interpolationGroup = do
-  rname <- freeName "interp"
-  return (InterpolationGroup rname)
+  st <- getSMT
+  let intgr = nextInterpolationGroup st
+  putSMT $ st { nextInterpolationGroup = succ intgr }
+  return (InterpolationGroup intgr)
 
 -- | Assert a boolean expression to be true and assign it to an interpolation group
 assertInterp :: Monad m => SMTExpr Bool -> InterpolationGroup -> SMT' m ()
@@ -237,33 +233,20 @@ getInfo inf = smtBackend $ \backend -> do
 -- | Create a new uniterpreted function with annotations for
 --   the argument and the return type.
 funAnn :: (Liftable a,SMTType r,Monad m) => ArgAnnotation a -> SMTAnnotation r -> SMT' m (SMTFunction a r)
-funAnn = funAnnNamed "fun"
+funAnn = funAnnNamed' Nothing
 
 -- | Create a new uninterpreted named function with annotation for
 --   the argument and the return type.
 funAnnNamed :: (Liftable a, SMTType r,Monad m) => String -> ArgAnnotation a -> SMTAnnotation r -> SMT' m (SMTFunction a r)
-funAnnNamed name annArg annRet = smtBackend $ \backend -> do
+funAnnNamed name = funAnnNamed' (Just name)
+
+funAnnNamed' :: (Liftable a, SMTType r,Monad m) => Maybe String -> ArgAnnotation a -> SMTAnnotation r -> SMT' m (SMTFunction a r)
+funAnnNamed' name annArg annRet = smtBackend $ \backend -> do
+  (fun::SMTFunction a r,info) <- newFunction name annArg annRet
+  let argSorts = getSorts (undefined::a) annArg
   st <- getSMT
-  let func = case Map.lookup name (nameCount st) of
-        Nothing -> 0
-        Just c -> c
-  putSMT $ st { nameCount = Map.insert name (func+1) (nameCount st) }
-  let rname = (escapeName name)++(case func of
-                                     0 -> ""
-                                     _ -> "_"++show func)
-      res = SMTFun rname annRet
-      
-      (au,rtp) = getFunUndef res
-      
-      assertEq :: x -> x -> y -> y
-      assertEq _ _ p = p
-      
-      (au2,tps,_) = createArgs annArg 0
-      
-  assertEq au au2 $ return ()
-  st' <- getSMT
-  lift $ smtHandle backend st' (SMTDeclareFun rname [ l | (_,l) <- tps ] (getSort rtp annRet))
-  return res
+  lift $ smtHandle backend st (SMTDeclareFun info argSorts (getSort (undefined::r) annRet))
+  return fun
 
 -- | funAnn with an annotation only for the return type.
 funAnnRet :: (Liftable a,SMTType r,Unit (ArgAnnotation a),Monad m)
@@ -293,7 +276,7 @@ infix 4 .==.
 -- | A generalized version of `.==.`
 argEq :: Args a => a -> a -> SMTExpr Bool
 argEq xs ys = app and' $
-              fst $ foldsExprs
+              fst $ foldsExprsId
               (\s [(arg1,_),(arg2,_)] -> ((arg1 .==. arg2):s,[arg1,arg2]))
               []
               [(xs,undefined),(ys,undefined)]
@@ -600,15 +583,15 @@ is e con = App (SMTConTest con) e
 
 -- | Takes the first element of a list
 head' :: (SMTType a,Unit (SMTAnnotation a)) => SMTExpr [a] -> SMTExpr a
-head' = App (SMTFun "head" unit)
+head' = App (SMTBuiltIn "head" unit)
 
 -- | Drops the first element from a list
 tail' :: (SMTType a,Unit (SMTAnnotation a)) => SMTExpr [a] -> SMTExpr [a]
-tail' = App (SMTFun "tail" unit)
+tail' = App (SMTBuiltIn "tail" unit)
 
 -- | Put a new element at the front of the list
 insert' :: (SMTType a,Unit (SMTAnnotation a)) => SMTExpr a -> SMTExpr [a] -> SMTExpr [a]
-insert' = curry (App (SMTFun "insert" unit))
+insert' = curry (App (SMTBuiltIn "insert" unit))
 
 -- | Checks if a list is empty.
 isNil :: (SMTType a) => SMTExpr [a] -> SMTExpr Bool
@@ -628,8 +611,9 @@ setLogic name = smtBackend $ \backend -> do
 named :: (SMTType a,SMTAnnotation a ~ (),Monad m)
          => String -> SMTExpr a -> SMT' m (SMTExpr a,SMTExpr a)
 named name expr = do
-  rname <- freeName name
-  return (Named expr rname,Var rname ())
+  (var,info) <- newVariable (Just name) (extractAnnotation expr)
+  let Just (name,nc) = funInfoName info
+  return (Named expr name nc,var)
 
 -- | Like `named`, but defaults the name to "named".
 named' :: (SMTType a,SMTAnnotation a ~ (),Monad m)
@@ -662,4 +646,4 @@ optimizeExpr' e = case optimizeExpr e of
   Just e' -> e'
 
 instance Show (SMTExpr t) where
-  show expr = show $ fst $ exprToLisp expr 0
+  show expr = show $ fst $ exprToLisp expr Map.empty emptyDataTypeInfo 0

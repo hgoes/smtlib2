@@ -26,7 +26,7 @@ data SMTConnection b = SMTConnection { backend :: b
 open :: (MonadIO m,SMTBackend b m) => b -- ^ The backend for the SMT solver.
         -> m (SMTConnection b)
 open solver = do
-  st <- liftIO $ newMVar (SMTState Map.empty emptyDataTypeInfo Map.empty)
+  st <- liftIO $ newMVar emptySMTState
   return (SMTConnection { backend = solver
                         , status = st
                         })

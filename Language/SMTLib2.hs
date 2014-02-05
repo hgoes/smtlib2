@@ -42,7 +42,7 @@ module Language.SMTLib2
          SMTInfo(..),
          assert,push,pop,stack,
          checkSat,checkSatUsing,
-         getValue,
+         getValue,getValues,
          comment,
          getProof,getUnsatCore,simplify,
          -- ** Interpolation

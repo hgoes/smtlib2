@@ -50,10 +50,10 @@ instance SMTBackend b m => SMTBackend (OptimizeBackend b) m where
   smtHandle (OptB b) st req = smtHandle b st req
 
 optimizeExpr :: SMTExpr t -> Maybe (SMTExpr t)
-optimizeExpr (App fun x) = let (opt,x') = foldExprs (\opt expr ann -> case optimizeExpr expr of
-                                                        Nothing -> (opt,expr)
-                                                        Just expr' -> (True,expr')
-                                                    ) False x (extractArgAnnotation x)
+optimizeExpr (App fun x) = let (opt,x') = foldExprsId (\opt expr ann -> case optimizeExpr expr of
+                                                          Nothing -> (opt,expr)
+                                                          Just expr' -> (True,expr')
+                                                      ) False x (extractArgAnnotation x)
                            in case optimizeCall fun x' of
                              Nothing -> if opt
                                         then Just $ App fun x'

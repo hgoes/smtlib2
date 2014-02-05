@@ -17,34 +17,33 @@ import qualified Data.Map as Map
 import Data.Maybe (fromJust)
 
 valueToHaskell :: DataTypeInfo
-                  -> (forall t. SMTType t => t -> SMTAnnotation t -> r)
+                  -> (forall t. SMTType t => [ProxyArg] -> t -> SMTAnnotation t -> r)
                   -> Maybe Sort
                   -> Value
                   -> r
-valueToHaskell _ f _ (BoolValue v) = f v ()
-valueToHaskell _ f _ (IntValue v) = f v ()
-valueToHaskell _ f _ (RealValue v) = f v ()
+valueToHaskell _ f _ (BoolValue v) = f [] v ()
+valueToHaskell _ f _ (IntValue v) = f [] v ()
+valueToHaskell _ f _ (RealValue v) = f [] v ()
 valueToHaskell _ f (Just (Fix (BVSort { bvSortUntyped = True }))) (BVValue { bvValueWidth = w
                                                                              , bvValueValue = v })
-  = f (BitVector v::BitVector BVUntyped) w
+  = f [] (BitVector v::BitVector BVUntyped) w
 valueToHaskell _ f _ (BVValue { bvValueWidth = w
                                 , bvValueValue = v })
-  = reifyNat w (\(_::Proxy tp) -> f (BitVector v::BitVector (BVTyped tp)) ())
+  = reifyNat w (\(_::Proxy tp) -> f [] (BitVector v::BitVector (BVTyped tp)) ())
 valueToHaskell dtInfo f sort (ConstrValue name args sort')
   = case Map.lookup name (constructors dtInfo) of
   Just (con,dt,struct)
     -> let sort'' = case sort of
-             Just s -> Just s
+             Just (Fix (NamedSort _ args)) -> Just args
              Nothing -> sort'
            argPrx = case sort'' of
-             Nothing -> Nothing
-             Just (Fix (NamedSort _ sortArgs))
-               -> Just $ fmap (\s -> withSort dtInfo s ProxyArg) sortArgs
+             Just sort''' -> fmap (\s -> Just $ withSort dtInfo s ProxyArg) sort'''
+             Nothing -> genericReplicate (argCount struct) Nothing
            sorts' = fmap (\field -> argumentSortToSort
                                     (\i -> case sort'' of
-                                        Just (Fix (NamedSort _ sortArgs))
-                                          -> Just $ sortArgs `genericIndex` i
-                                        _ -> Nothing) (fieldSort field)
+                                        Nothing -> Nothing
+                                        Just sort''' -> Just $ sort''' `genericIndex` i)
+                                    (fieldSort field)
                          ) (conFields con)
            rargs :: [AnyValue]
            rargs = fmap (\(val,s) -> valueToHaskell dtInfo AnyValue s val) (zip args sorts')
@@ -58,7 +57,7 @@ extractAnnotation (AsArray f arg) = (arg,inferResAnnotation f arg)
 extractAnnotation (Forall _ _) = ()
 extractAnnotation (Exists _ _) = ()
 extractAnnotation (Let _ x f) = extractAnnotation (f x)
-extractAnnotation (Named x _) = extractAnnotation x
+extractAnnotation (Named x _ _) = extractAnnotation x
 extractAnnotation (App f arg) = inferResAnnotation f (extractArgAnnotation arg)
 
 inferResAnnotation :: SMTFunction arg res -> ArgAnnotation arg -> SMTAnnotation res
@@ -289,15 +288,6 @@ instance Concatable BVUntyped BVUntyped where
 
 -- Arguments
 
-instance Args () where
-  type ArgAnnotation () = ()
-  foldExprs _ s _ _ = (s,())
-  foldsExprs _ s args = (s,fmap (const ()) args)
-  extractArgAnnotation _ = ()
-  toArgs x = Just ((),x)
-  getSorts _ _ = []
-  getArgAnnotation _ xs = ((),xs)
-
 instance (SMTType a) => Args (SMTExpr a) where
   type ArgAnnotation (SMTExpr a) = SMTAnnotation a
   foldExprs f = f
@@ -313,12 +303,14 @@ instance (SMTType a) => Args (SMTExpr a) where
 
 instance (Args a,Args b) => Args (a,b) where
   type ArgAnnotation (a,b) = (ArgAnnotation a,ArgAnnotation b)
-  foldExprs f s ~(e1,e2) ~(ann1,ann2) = let ~(s1,e1') = foldExprs f s e1 ann1
-                                            ~(s2,e2') = foldExprs f s1 e2 ann2
-                                        in (s2,(e1',e2'))
-  foldsExprs f s args = let ~(s1,e1) = foldsExprs f s (fmap (\((e1,_),(ann1,_)) -> (e1,ann1)) args)
-                            ~(s2,e2) = foldsExprs f s1 (fmap (\((_,e2),(_,ann2)) -> (e2,ann2)) args)
-                        in (s2,zip e1 e2)
+  foldExprs f s ~(e1,e2) ~(ann1,ann2) = do
+    ~(s1,e1') <- foldExprs f s e1 ann1
+    ~(s2,e2') <- foldExprs f s1 e2 ann2
+    return (s2,(e1',e2'))
+  foldsExprs f s args = do
+    ~(s1,e1) <- foldsExprs f s (fmap (\((e1,_),(ann1,_)) -> (e1,ann1)) args)
+    ~(s2,e2) <- foldsExprs f s1 (fmap (\((_,e2),(_,ann2)) -> (e2,ann2)) args)
+    return (s2,zip e1 e2)
   extractArgAnnotation ~(x,y) = (extractArgAnnotation x,
                                  extractArgAnnotation y)
   toArgs x = do
@@ -346,14 +338,16 @@ instance (LiftArgs a,LiftArgs b) => LiftArgs (a,b) where
 
 instance (Args a,Args b,Args c) => Args (a,b,c) where
   type ArgAnnotation (a,b,c) = (ArgAnnotation a,ArgAnnotation b,ArgAnnotation c)
-  foldExprs f s ~(e1,e2,e3) ~(ann1,ann2,ann3) = let ~(s1,e1') = foldExprs f s e1 ann1
-                                                    ~(s2,e2') = foldExprs f s1 e2 ann2
-                                                    ~(s3,e3') = foldExprs f s2 e3 ann3
-                                                in (s3,(e1',e2',e3'))
-  foldsExprs f s args = let ~(s1,e1) = foldsExprs f s (fmap (\((e1,_,_),(ann1,_,_)) -> (e1,ann1)) args)
-                            ~(s2,e2) = foldsExprs f s1 (fmap (\((_,e2,_),(_,ann2,_)) -> (e2,ann2)) args)
-                            ~(s3,e3) = foldsExprs f s2 (fmap (\((_,_,e3),(_,_,ann3)) -> (e3,ann3)) args)
-                        in (s3,zip3 e1 e2 e3)
+  foldExprs f s ~(e1,e2,e3) ~(ann1,ann2,ann3) = do
+    ~(s1,e1') <- foldExprs f s e1 ann1
+    ~(s2,e2') <- foldExprs f s1 e2 ann2
+    ~(s3,e3') <- foldExprs f s2 e3 ann3
+    return (s3,(e1',e2',e3'))
+  foldsExprs f s args = do
+    ~(s1,e1) <- foldsExprs f s (fmap (\((e1,_,_),(ann1,_,_)) -> (e1,ann1)) args)
+    ~(s2,e2) <- foldsExprs f s1 (fmap (\((_,e2,_),(_,ann2,_)) -> (e2,ann2)) args)
+    ~(s3,e3) <- foldsExprs f s2 (fmap (\((_,_,e3),(_,_,ann3)) -> (e3,ann3)) args)
+    return (s3,zip3 e1 e2 e3)
   extractArgAnnotation ~(e1,e2,e3)
     = (extractArgAnnotation e1,
        extractArgAnnotation e2,
@@ -381,16 +375,18 @@ instance (LiftArgs a,LiftArgs b,LiftArgs c) => LiftArgs (a,b,c) where
 
 instance (Args a,Args b,Args c,Args d) => Args (a,b,c,d) where
   type ArgAnnotation (a,b,c,d) = (ArgAnnotation a,ArgAnnotation b,ArgAnnotation c,ArgAnnotation d)
-  foldExprs f s ~(e1,e2,e3,e4) ~(ann1,ann2,ann3,ann4) = let ~(s1,e1') = foldExprs f s e1 ann1
-                                                            ~(s2,e2') = foldExprs f s1 e2 ann2
-                                                            ~(s3,e3') = foldExprs f s2 e3 ann3
-                                                            ~(s4,e4') = foldExprs f s3 e4 ann4
-                                                        in (s4,(e1',e2',e3',e4'))
-  foldsExprs f s args = let ~(s1,e1) = foldsExprs f s (fmap (\((e1,_,_,_),(ann1,_,_,_)) -> (e1,ann1)) args)
-                            ~(s2,e2) = foldsExprs f s1 (fmap (\((_,e2,_,_),(_,ann2,_,_)) -> (e2,ann2)) args)
-                            ~(s3,e3) = foldsExprs f s2 (fmap (\((_,_,e3,_),(_,_,ann3,_)) -> (e3,ann3)) args)
-                            ~(s4,e4) = foldsExprs f s3 (fmap (\((_,_,_,e4),(_,_,_,ann4)) -> (e4,ann4)) args)
-                        in (s4,zip4 e1 e2 e3 e4)
+  foldExprs f s ~(e1,e2,e3,e4) ~(ann1,ann2,ann3,ann4) = do
+    ~(s1,e1') <- foldExprs f s e1 ann1
+    ~(s2,e2') <- foldExprs f s1 e2 ann2
+    ~(s3,e3') <- foldExprs f s2 e3 ann3
+    ~(s4,e4') <- foldExprs f s3 e4 ann4
+    return (s4,(e1',e2',e3',e4'))
+  foldsExprs f s args = do
+    ~(s1,e1) <- foldsExprs f s (fmap (\((e1,_,_,_),(ann1,_,_,_)) -> (e1,ann1)) args)
+    ~(s2,e2) <- foldsExprs f s1 (fmap (\((_,e2,_,_),(_,ann2,_,_)) -> (e2,ann2)) args)
+    ~(s3,e3) <- foldsExprs f s2 (fmap (\((_,_,e3,_),(_,_,ann3,_)) -> (e3,ann3)) args)
+    ~(s4,e4) <- foldsExprs f s3 (fmap (\((_,_,_,e4),(_,_,_,ann4)) -> (e4,ann4)) args)
+    return (s4,zip4 e1 e2 e3 e4)
   extractArgAnnotation ~(e1,e2,e3,e4)
     = (extractArgAnnotation e1,
        extractArgAnnotation e2,
@@ -426,19 +422,20 @@ instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d) => LiftArgs (a,b,c,d) whe
 
 instance (Args a,Args b,Args c,Args d,Args e) => Args (a,b,c,d,e) where
   type ArgAnnotation (a,b,c,d,e) = (ArgAnnotation a,ArgAnnotation b,ArgAnnotation c,ArgAnnotation d,ArgAnnotation e)
-  foldExprs f s ~(e1,e2,e3,e4,e5) ~(ann1,ann2,ann3,ann4,ann5)
-    = let ~(s1,e1') = foldExprs f s e1 ann1
-          ~(s2,e2') = foldExprs f s1 e2 ann2
-          ~(s3,e3') = foldExprs f s2 e3 ann3
-          ~(s4,e4') = foldExprs f s3 e4 ann4
-          ~(s5,e5') = foldExprs f s4 e5 ann5
-      in (s5,(e1',e2',e3',e4',e5'))
-  foldsExprs f s args = let ~(s1,e1) = foldsExprs f s (fmap (\((e1,_,_,_,_),(ann1,_,_,_,_)) -> (e1,ann1)) args)
-                            ~(s2,e2) = foldsExprs f s1 (fmap (\((_,e2,_,_,_),(_,ann2,_,_,_)) -> (e2,ann2)) args)
-                            ~(s3,e3) = foldsExprs f s2 (fmap (\((_,_,e3,_,_),(_,_,ann3,_,_)) -> (e3,ann3)) args)
-                            ~(s4,e4) = foldsExprs f s3 (fmap (\((_,_,_,e4,_),(_,_,_,ann4,_)) -> (e4,ann4)) args)
-                            ~(s5,e5) = foldsExprs f s4 (fmap (\((_,_,_,_,e5),(_,_,_,_,ann5)) -> (e5,ann5)) args)
-                        in (s5,zip5 e1 e2 e3 e4 e5)
+  foldExprs f s ~(e1,e2,e3,e4,e5) ~(ann1,ann2,ann3,ann4,ann5) = do
+    ~(s1,e1') <- foldExprs f s e1 ann1
+    ~(s2,e2') <- foldExprs f s1 e2 ann2
+    ~(s3,e3') <- foldExprs f s2 e3 ann3
+    ~(s4,e4') <- foldExprs f s3 e4 ann4
+    ~(s5,e5') <- foldExprs f s4 e5 ann5
+    return (s5,(e1',e2',e3',e4',e5'))
+  foldsExprs f s args = do
+    ~(s1,e1) <- foldsExprs f s (fmap (\((e1,_,_,_,_),(ann1,_,_,_,_)) -> (e1,ann1)) args)
+    ~(s2,e2) <- foldsExprs f s1 (fmap (\((_,e2,_,_,_),(_,ann2,_,_,_)) -> (e2,ann2)) args)
+    ~(s3,e3) <- foldsExprs f s2 (fmap (\((_,_,e3,_,_),(_,_,ann3,_,_)) -> (e3,ann3)) args)
+    ~(s4,e4) <- foldsExprs f s3 (fmap (\((_,_,_,e4,_),(_,_,_,ann4,_)) -> (e4,ann4)) args)
+    ~(s5,e5) <- foldsExprs f s4 (fmap (\((_,_,_,_,e5),(_,_,_,_,ann5)) -> (e5,ann5)) args)
+    return (s5,zip5 e1 e2 e3 e4 e5)
   extractArgAnnotation ~(e1,e2,e3,e4,e5)
     = (extractArgAnnotation e1,
        extractArgAnnotation e2,
@@ -479,21 +476,22 @@ instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d,LiftArgs e) => LiftArgs (a
 
 instance (Args a,Args b,Args c,Args d,Args e,Args f) => Args (a,b,c,d,e,f) where
   type ArgAnnotation (a,b,c,d,e,f) = (ArgAnnotation a,ArgAnnotation b,ArgAnnotation c,ArgAnnotation d,ArgAnnotation e,ArgAnnotation f)
-  foldExprs f s ~(e1,e2,e3,e4,e5,e6) ~(ann1,ann2,ann3,ann4,ann5,ann6)
-    = let ~(s1,e1') = foldExprs f s e1 ann1
-          ~(s2,e2') = foldExprs f s1 e2 ann2
-          ~(s3,e3') = foldExprs f s2 e3 ann3
-          ~(s4,e4') = foldExprs f s3 e4 ann4
-          ~(s5,e5') = foldExprs f s4 e5 ann5
-          ~(s6,e6') = foldExprs f s5 e6 ann6
-      in (s6,(e1',e2',e3',e4',e5',e6'))
-  foldsExprs f s args = let ~(s1,e1) = foldsExprs f s (fmap (\((e1,_,_,_,_,_),(ann1,_,_,_,_,_)) -> (e1,ann1)) args)
-                            ~(s2,e2) = foldsExprs f s1 (fmap (\((_,e2,_,_,_,_),(_,ann2,_,_,_,_)) -> (e2,ann2)) args)
-                            ~(s3,e3) = foldsExprs f s2 (fmap (\((_,_,e3,_,_,_),(_,_,ann3,_,_,_)) -> (e3,ann3)) args)
-                            ~(s4,e4) = foldsExprs f s3 (fmap (\((_,_,_,e4,_,_),(_,_,_,ann4,_,_)) -> (e4,ann4)) args)
-                            ~(s5,e5) = foldsExprs f s4 (fmap (\((_,_,_,_,e5,_),(_,_,_,_,ann5,_)) -> (e5,ann5)) args)
-                            ~(s6,e6) = foldsExprs f s5 (fmap (\((_,_,_,_,_,e6),(_,_,_,_,_,ann6)) -> (e6,ann6)) args)
-                        in (s6,zip6 e1 e2 e3 e4 e5 e6)
+  foldExprs f s ~(e1,e2,e3,e4,e5,e6) ~(ann1,ann2,ann3,ann4,ann5,ann6) = do
+    ~(s1,e1') <- foldExprs f s e1 ann1
+    ~(s2,e2') <- foldExprs f s1 e2 ann2
+    ~(s3,e3') <- foldExprs f s2 e3 ann3
+    ~(s4,e4') <- foldExprs f s3 e4 ann4
+    ~(s5,e5') <- foldExprs f s4 e5 ann5
+    ~(s6,e6') <- foldExprs f s5 e6 ann6
+    return (s6,(e1',e2',e3',e4',e5',e6'))
+  foldsExprs f s args = do
+    ~(s1,e1) <- foldsExprs f s (fmap (\((e1,_,_,_,_,_),(ann1,_,_,_,_,_)) -> (e1,ann1)) args)
+    ~(s2,e2) <- foldsExprs f s1 (fmap (\((_,e2,_,_,_,_),(_,ann2,_,_,_,_)) -> (e2,ann2)) args)
+    ~(s3,e3) <- foldsExprs f s2 (fmap (\((_,_,e3,_,_,_),(_,_,ann3,_,_,_)) -> (e3,ann3)) args)
+    ~(s4,e4) <- foldsExprs f s3 (fmap (\((_,_,_,e4,_,_),(_,_,_,ann4,_,_)) -> (e4,ann4)) args)
+    ~(s5,e5) <- foldsExprs f s4 (fmap (\((_,_,_,_,e5,_),(_,_,_,_,ann5,_)) -> (e5,ann5)) args)
+    ~(s6,e6) <- foldsExprs f s5 (fmap (\((_,_,_,_,_,e6),(_,_,_,_,_,ann6)) -> (e6,ann6)) args)
+    return  (s6,zip6 e1 e2 e3 e4 e5 e6)
   extractArgAnnotation ~(e1,e2,e3,e4,e5,e6)
     = (extractArgAnnotation e1,
        extractArgAnnotation e2,
@@ -540,17 +538,19 @@ instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d,LiftArgs e,LiftArgs f) => 
 
 instance Args a => Args [a] where
   type ArgAnnotation [a] = [ArgAnnotation a]
-  foldExprs _ s _ [] = (s,[])
-  foldExprs f s ~(x:xs) (ann:anns) = let (s',x') = foldExprs f s x ann
-                                         (s'',xs') = foldExprs f s' xs anns
-                                     in (s'',x':xs')
+  foldExprs _ s _ [] = return (s,[])
+  foldExprs f s ~(x:xs) (ann:anns) = do
+    (s',x') <- foldExprs f s x ann
+    (s'',xs') <- foldExprs f s' xs anns
+    return (s'',x':xs')
   foldsExprs f s args = case head args of
-    (_,[]) -> (s,fmap (const []) args)
-    _ -> let args_heads = fmap (\(xs,anns) -> (head xs,head anns)) args
-             args_tails = fmap (\(xs,anns) -> (tail xs,tail anns)) args
-             ~(s1,res_heads) = foldsExprs f s args_heads
-             ~(s2,res_tails) = foldsExprs f s1 args_tails
-         in (s2,zipWith (:) res_heads res_tails)
+    (_,[]) -> return (s,fmap (const []) args)
+    _ -> do
+      let args_heads = fmap (\(xs,anns) -> (head xs,head anns)) args
+          args_tails = fmap (\(xs,anns) -> (tail xs,tail anns)) args
+      ~(s1,res_heads) <- foldsExprs f s args_heads
+      ~(s2,res_tails) <- foldsExprs f s1 args_tails
+      return (s2,zipWith (:) res_heads res_tails)
   extractArgAnnotation = fmap extractArgAnnotation
   toArgs [] = Just ([],[])
   toArgs x = do
@@ -591,11 +591,9 @@ instance SMTType a => SMTType (Maybe a) where
                       }
       conNothing = Constr { conName = "Nothing"
                           , conFields = []
-                          , construct = \args [] f
-                                        -> case args of
-                                          Just [prx]
-                                            -> withProxyArg prx $
-                                               \(_::t) ann -> f (Nothing::Maybe t) ann
+                          , construct = \[Just prx] [] f
+                                        -> withProxyArg prx $
+                                           \(_::t) ann -> f [prx] (Nothing::Maybe t) ann
                           , conTest = \args x -> case args of
                             [s] -> withProxyArg s $
                                    \(_::t) _ -> case cast x of
@@ -614,7 +612,7 @@ instance SMTType a => SMTType (Maybe a) where
                                                 }]
                        , construct = \sort args f -> case args of
                          [v] -> withAnyValue v $
-                                \rv ann -> f (Just rv) ann
+                                \_ (rv::t) ann -> f [ProxyArg (undefined::t) ann] (Just rv) ann
                        , conTest = \args x -> case args of
                          [s] -> withProxyArg s $
                                 \(_::t) _ -> case cast x of
@@ -633,8 +631,8 @@ instance SMTValue a => SMTValue (Maybe a) where
     Nothing -> Nothing
   --unmangle (AsValue v (Fix (NamedSort "Maybe" _))) ann = unmangle v ann
   unmangle _ _ = Nothing
-  mangle u@Nothing ann = ConstrValue "Nothing" [] (Just $ getSort u ann)
-  mangle u@(Just x) ann = ConstrValue "Just" [mangle x ann] (Just $ getSort u ann)
+  mangle (Nothing::Maybe t) ann = ConstrValue "Nothing" [] (Just [getSort (undefined::t) ann])
+  mangle u@(Just x) ann = ConstrValue "Just" [mangle x ann] Nothing
 
 -- | Get an undefined value of the type argument of a type.
 undefArg :: b a -> a
@@ -654,9 +652,9 @@ instance (Typeable a,SMTType a) => SMTType [a] where
                         }
       conNil = Constr { conName = "nil"
                       , conFields = []
-                      , construct = \sort args f -> case sort of
-                        Just [s] -> withProxyArg s $
-                                    \(_::t) ann -> f ([]::[t]) ann
+                      , construct = \[Just sort] args f
+                                    -> withProxyArg sort $
+                                       \(_::t) ann -> f [sort] ([]::[t]) ann
                       , conTest = \args x -> case args of
                         [s] -> withProxyArg s $
                                \(_::t) _ -> case cast x of
@@ -681,10 +679,9 @@ instance (Typeable a,SMTType a) => SMTType [a] where
                        , construct = \sort args f
                                      -> case args of
                                        [h,t] -> withAnyValue h $
-                                                \v ann
-                                                -> withAnyValue t $
-                                                   \vs _ -> case cast vs of
-                                                     Just vs' -> f (v:vs') ann
+                                                \_ (v::t) ann
+                                                -> case castAnyValue t of
+                                                  Just (vs,_) -> f [ProxyArg (undefined::t) ann] (v:vs) ann
                        , conTest = \args x -> case args of
                          [s] -> withProxyArg s $
                                 \(_::t) _ -> case cast x of
@@ -703,8 +700,8 @@ instance (Typeable a,SMTValue a) => SMTValue [a] where
     t' <- unmangle t ann
     return (h':t')
   unmangle _ _ = Nothing
-  mangle u@[] ann = ConstrValue "nil" [] (Just $ getSort u ann)
-  mangle u@(x:xs) ann = ConstrValue "insert" [mangle x ann,mangle xs ann] (Just $ getSort u ann)
+  mangle ([]::[t]) ann = ConstrValue "nil" [] (Just [getSort (undefined::t) ann])
+  mangle (x:xs) ann = ConstrValue "insert" [mangle x ann,mangle xs ann] Nothing
 
 -- BitVector implementation
 

@@ -8,7 +8,6 @@ import Control.Monad.Reader hiding (mapM,mapM_)
 import Control.Monad.State hiding (mapM,mapM_)
 import Data.Typeable
 import Data.Map as Map hiding (assocs,foldl)
-import Data.Char (isDigit)
 import Data.Ratio
 import Data.Proxy
 #ifdef SMTLIB2_WITH_CONSTRAINTS
@@ -23,6 +22,7 @@ import Prelude hiding (mapM,mapM_,foldl)
 import Data.Foldable
 import Data.Traversable
 import Control.Exception
+import Data.Functor.Identity
 
 -- Monad stuff
 import Control.Applicative (Applicative(..))
@@ -38,8 +38,8 @@ data SMTRequest response where
   SMTDeclareSort :: String -> Integer -> SMTRequest ()
   SMTPush :: SMTRequest ()
   SMTPop :: SMTRequest ()
-  SMTDefineFun :: SMTType res => String -> [(String,Sort)] -> SMTExpr res -> SMTRequest ()
-  SMTDeclareFun :: String -> [Sort] -> Sort -> SMTRequest ()
+  SMTDefineFun :: SMTType res => FunInfo -> [FunInfo] -> SMTExpr res -> SMTRequest ()
+  SMTDeclareFun :: FunInfo -> [Sort] -> Sort -> SMTRequest ()
   SMTGetValue :: SMTValue t => SMTExpr t -> SMTRequest t
   SMTGetProof :: SMTRequest (SMTExpr Bool)
   SMTGetUnsatCore :: SMTRequest [String]
@@ -95,9 +95,19 @@ infix 4 .<., .<=., .>=., .>.
 -- | An array which maps indices of type /i/ to elements of type /v/.
 data SMTArray (i :: *) (v :: *) = SMTArray deriving (Eq,Typeable)
 
-data SMTState = SMTState { nameCount :: Map String Integer
-                         , declaredDataTypes :: DataTypeInfo
-                         , namedExprs :: Map String UntypedExpr }
+data FunInfo = forall arg r. (Args arg,SMTType r) => FunInfo { funInfoId :: Integer
+                                                             , funInfoProxy :: Proxy (arg,r)
+                                                             , funInfoArgAnn :: ArgAnnotation arg
+                                                             , funInfoResAnn :: SMTAnnotation r
+                                                             , funInfoName :: Maybe (String,Integer)
+                                                             }
+
+data SMTState = SMTState { nextVar :: Integer
+                         , nextInterpolationGroup :: Integer
+                         , allVars :: Map Integer FunInfo
+                         , namedVars :: Map (String,Integer) Integer
+                         , nameCount :: Map String Integer
+                         , declaredDataTypes :: DataTypeInfo }
 
 data AnyBackend m = forall b. SMTBackend b m => AnyBackend b
 
@@ -145,7 +155,7 @@ instance MonadTrans SMT' where
 
 -- | An abstract SMT expression
 data SMTExpr t where
-  Var :: SMTType t => String -> SMTAnnotation t -> SMTExpr t
+  Var :: SMTType t => Integer -> SMTAnnotation t -> SMTExpr t
   Const :: SMTValue t => t -> SMTAnnotation t -> SMTExpr t
   AsArray :: (Args arg,SMTType res) => SMTFunction arg res -> ArgAnnotation arg
              -> SMTExpr (SMTArray arg res)
@@ -153,7 +163,7 @@ data SMTExpr t where
   Exists :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
   Let :: (Args a) => ArgAnnotation a -> a -> (a -> SMTExpr b) -> SMTExpr b
   App :: (Args arg,SMTType res) => SMTFunction arg res -> arg -> SMTExpr res
-  Named :: SMTExpr a -> String -> SMTExpr a
+  Named :: SMTExpr a -> String -> Integer -> SMTExpr a
   deriving Typeable
 
 data UntypedExpr where
@@ -178,13 +188,14 @@ data Value = BoolValue Bool
            | RealValue (Ratio Integer)
            | BVValue { bvValueWidth :: Integer
                      , bvValueValue :: Integer }
-           | ConstrValue String [Value] (Maybe Sort)
+           | ConstrValue String [Value] (Maybe [Sort])
            deriving (Eq,Show)
 
 data SMTFunction arg res where
   SMTEq :: SMTType a => SMTFunction [SMTExpr a] Bool
   SMTMap :: (Liftable arg,SMTType res,Args i) => SMTFunction arg res -> SMTFunction (Lifted arg i) (SMTArray i res)
-  SMTFun :: (Liftable arg,SMTType res) => String -> SMTAnnotation res -> SMTFunction arg res
+  SMTFun :: (Liftable arg,SMTType res) => Integer -> SMTAnnotation res -> SMTFunction arg res
+  SMTBuiltIn :: (Liftable arg,SMTType res) => String -> SMTAnnotation res -> SMTFunction arg res
   SMTOrd :: (SMTType a) => SMTOrdOp -> SMTFunction (SMTExpr a,SMTExpr a) Bool
   SMTArith :: (SMTType a) => SMTArithOp -> SMTFunction [SMTExpr a] a
   SMTMinus :: (SMTType a) => SMTFunction (SMTExpr a,SMTExpr a) a
@@ -234,6 +245,7 @@ instance Args arg => Eq (SMTFunction arg res) where
     Nothing -> False
     Just f2' -> f1 == f2'
   (==) (SMTFun f1 _) (SMTFun f2 _) = f1==f2
+  (==) (SMTBuiltIn f1 _) (SMTBuiltIn f2 _) = f1==f2
   (==) (SMTOrd op1) (SMTOrd op2) = op1==op2
   (==) (SMTArith op1) (SMTArith op2) = op1==op2
   (==) SMTMinus SMTMinus = True
@@ -281,24 +293,22 @@ eqExpr n lhs rhs = case (lhs,rhs) of
       Just arg2' -> if f1 == f2' && arg1 == arg2'
                     then Just True
                     else Nothing
-  (Forall a1 f1,Forall a2 f2) -> let name i = "internal_eq_check"++show i
-                                     (n',v) = foldExprs (\i _ ann -> (i+1,Var (name i) ann)) n undefined a1
+  (Forall a1 f1,Forall a2 f2) -> let (n',v) = foldExprsId (\i _ ann -> (i+1,Var i ann)) n undefined a1
                                  in case cast (a2,f2) of
                                    Nothing -> Nothing
                                    Just (a2',f2') -> if a1==a2'
                                                      then eqExpr n' (f1 v) (f2' v)
                                                      else Nothing
-  (Exists a1 f1,Exists a2 f2) -> let name i = "internal_eq_check"++show i
-                                     (n',v) = foldExprs (\i _ ann -> (i+1,Var (name i) ann)) n undefined a1
+  (Exists a1 f1,Exists a2 f2) -> let (n',v) = foldExprsId (\i _ ann -> (i+1,Var i ann)) n undefined a1
                                  in case cast (a2,f2) of
                                    Nothing -> Nothing
                                    Just (a2',f2') -> if a1==a2'
                                                      then eqExpr n' (f1 v) (f2' v)
                                                      else Nothing
   (Let _ x1 f1,Let _ x2 f2) -> eqExpr n (f1 x1) (f2 x2)
-  (Named e1 n1,Named e2 n2) -> if n1==n2
-                               then eqExpr n e1 e2
-                               else Nothing
+  (Named e1 n1 nc1,Named e2 n2 nc2) -> if n1==n2 && nc1 == nc2
+                                       then eqExpr n e1 e2
+                                       else Nothing
   (App f1 arg1,App f2 arg2) -> case cast f2 of
       Nothing -> Nothing
       Just f2' -> case cast arg2 of
@@ -315,7 +325,7 @@ data Constructor arg res = Constructor String deriving (Eq,Show,Typeable)
 -- | Represents a field of the datatype /a/ of the type /f/
 data Field a f = Field String deriving (Eq,Show)
 
-newtype InterpolationGroup = InterpolationGroup String
+newtype InterpolationGroup = InterpolationGroup Integer
 
 -- | Options controling the behaviour of the SMT solver
 data SMTOption
@@ -334,18 +344,37 @@ data SMTInfo i where
 class (Eq a,Typeable a,Eq (ArgAnnotation a),Typeable (ArgAnnotation a))
       => Args a where
   type ArgAnnotation a
-  foldExprs :: (forall t. SMTType t => s -> SMTExpr t -> SMTAnnotation t -> (s,SMTExpr t))
-               -> s -> a -> ArgAnnotation a -> (s,a)
-  foldExprs f s x ann = let (s',[r]) = foldsExprs (\cs [(expr,ann')] -> let (cs',cr) = f cs expr ann'
-                                                                        in (cs',[cr])
-                                                  ) s [(x,ann)]
-                        in (s',r)
-  foldsExprs :: (forall t. SMTType t => s -> [(SMTExpr t,SMTAnnotation t)] -> (s,[SMTExpr t]))
-                -> s -> [(a,ArgAnnotation a)] -> (s,[a])
+  foldExprs :: Monad m => (forall t. SMTType t => s -> SMTExpr t -> SMTAnnotation t -> m (s,SMTExpr t))
+            -> s -> a -> ArgAnnotation a -> m (s,a)
+  foldExprs f s x ann = do
+    (s',[r]) <- foldsExprs (\cs [(expr,ann')] -> do
+                               (cs',cr) <- f cs expr ann'
+                               return (cs',[cr])
+                           ) s [(x,ann)]
+    return (s',r)
+  foldsExprs :: Monad m => (forall t. SMTType t => s -> [(SMTExpr t,SMTAnnotation t)] -> m (s,[SMTExpr t]))
+                -> s -> [(a,ArgAnnotation a)] -> m (s,[a])
   extractArgAnnotation :: a -> ArgAnnotation a
   toArgs :: [UntypedExpr] -> Maybe (a,[UntypedExpr])
   getSorts :: a -> ArgAnnotation a -> [Sort]
   getArgAnnotation :: a -> [Sort] -> (ArgAnnotation a,[Sort])
+
+instance Args () where
+  type ArgAnnotation () = ()
+  foldExprs _ s _ _ = return (s,())
+  foldsExprs _ s args = return (s,fmap (const ()) args)
+  extractArgAnnotation _ = ()
+  toArgs x = Just ((),x)
+  getSorts _ _ = []
+  getArgAnnotation _ xs = ((),xs)
+
+foldExprsId :: Args a => (forall t. SMTType t => s -> SMTExpr t -> SMTAnnotation t -> (s,SMTExpr t))
+               -> s -> a -> ArgAnnotation a -> (s,a)
+foldExprsId f st arg ann = runIdentity $ foldExprs (\st' expr ann' -> return $ f st' expr ann') st arg ann
+
+foldsExprsId :: Args a => (forall t. SMTType t => s -> [(SMTExpr t,SMTAnnotation t)] -> (s,[SMTExpr t]))
+               -> s -> [(a,ArgAnnotation a)] -> (s,[a])
+foldsExprsId f st arg = runIdentity $ foldsExprs (\st' anns -> return $ f st' anns) st arg
 
 class (Args a) => Liftable a where
   type Lifted a i
@@ -358,20 +387,12 @@ class (Args a) => Liftable a where
 argSorts :: Args a => a -> ArgAnnotation a -> [Sort]
 argSorts arg ann = Prelude.reverse res
     where
-      (res,_) = foldExprs (\tps e ann' -> ((getSort (getUndef e) ann'):tps,e)) [] arg ann
+      (res,_) = foldExprsId (\tps e ann' -> ((getSort (getUndef e) ann'):tps,e)) [] arg ann
 
 unpackArgs :: Args a => (forall t. SMTType t => SMTExpr t -> SMTAnnotation t -> s -> (c,s)) -> a -> ArgAnnotation a -> s -> ([c],s)
-unpackArgs f x ann i = fst $ foldExprs (\(res,ci) e ann' -> let (p,ni) = f e ann' ci
-                                                            in ((res++[p],ni),e)
-                                       ) ([],i) x ann
-
-createArgs :: Args a => ArgAnnotation a -> Integer -> (a,[(String,Sort)],Integer)
-createArgs ann i = let ((tps,ni),res) = foldExprs (\(tps',ci) e ann'
-                                                   -> let name = "arg_"++show ci
-                                                          sort' = getSort (getUndef e) ann'
-                                                      in ((tps'++[(name,sort')],ci+1),Var name ann')
-                                                  ) ([],i) (error "Evaluated the argument to createArgs") ann
-                   in (res,tps,ni)
+unpackArgs f x ann i = fst $ foldExprsId (\(res,ci) e ann' -> let (p,ni) = f e ann' ci
+                                                              in ((res++[p],ni),e)
+                                         ) ([],i) x ann
 
 -- | An extension of the `Args` class: Instances of this class can be represented as native haskell data types.
 class Args a => LiftArgs a where
@@ -407,9 +428,13 @@ withSMTBackend :: SMTBackend b m => b -> SMT' m a -> m a
 withSMTBackend backend act = withSMTBackend' (AnyBackend backend) True act
 
 emptySMTState :: SMTState
-emptySMTState = SMTState { nameCount = Map.empty
+emptySMTState = SMTState { nextVar = 0
+                         , nextInterpolationGroup = 0
+                         , allVars = Map.empty
+                         , namedVars = Map.empty
+                         , nameCount = Map.empty
                          , declaredDataTypes = emptyDataTypeInfo
-                         , namedExprs = Map.empty }
+                         }
 
 withSMTBackend' :: AnyBackend m -> Bool -> SMT' m a -> m a
 withSMTBackend' backend@(AnyBackend b) mustExit f = do
@@ -417,32 +442,78 @@ withSMTBackend' backend@(AnyBackend b) mustExit f = do
   when mustExit (smtHandle b st SMTExit)
   return res
 
-escapeName :: String -> String
-escapeName (c:cs) = if isDigit c
-                    then "num"++escapeName' (c:cs)
-                    else escapeName' (c:cs)
-escapeName [] = ""
+funInfoSort :: FunInfo -> Sort
+funInfoSort (FunInfo { funInfoProxy = _::Proxy (a,t)
+                     , funInfoResAnn = ann})
+  = getSort (undefined::t) ann
 
-escapeName' :: String -> String
-escapeName' [] = []
-escapeName' ('_':xs) = '_':'_':escapeName' xs
-escapeName' (x:xs) = x:escapeName' xs
-
-freeName :: Monad m => String -> SMT' m String
-freeName name = do
+newVariableId :: (Monad m) => Maybe String -> (Integer -> Maybe Integer -> (r,FunInfo)) -> SMT' m r
+newVariableId name f = do
   st <- getSMT
-  let c = case Map.lookup name (nameCount st) of
-        Nothing -> 0
-        Just c' -> c'
+  let idx = nextVar st
+      (nc,st') = case name of
+        Nothing -> (Nothing,st)
+        Just name' -> let nc = Map.findWithDefault 0 name' (nameCount st)
+                      in (Just nc,st { namedVars = Map.insert (name',nc) idx (namedVars st)
+                                     , nameCount = Map.insert name' (nc+1) (nameCount st) })
+      (res,info) = f idx nc
+  putSMT $ st' { nextVar = succ idx
+               , allVars = Map.insert idx info (allVars st') }
+  return res
+
+newVariable :: (Monad m,SMTType t) => Maybe String -> SMTAnnotation t -> SMT' m (SMTExpr t,FunInfo)
+newVariable name (ann::SMTAnnotation t)
+  = newVariableId name
+    (\idx nc -> let info = FunInfo { funInfoId = idx
+                                   , funInfoProxy = Proxy :: Proxy ((),t)
+                                   , funInfoArgAnn = ()
+                                   , funInfoResAnn = ann
+                                   , funInfoName = case (name,nc) of
+                                     (Nothing,Nothing) -> Nothing
+                                     (Just name',Just nc') -> Just (name',nc') }
+                in ((Var idx ann::SMTExpr t,info),info))
+
+newFunction :: (Monad m,Liftable arg,SMTType r) => Maybe String -> ArgAnnotation arg -> SMTAnnotation r -> SMT' m (SMTFunction arg r,FunInfo)
+newFunction name (ann_arg::ArgAnnotation arg) (ann_res::SMTAnnotation r)
+  = newVariableId name
+    (\idx nc -> let info = FunInfo { funInfoId = idx
+                                   , funInfoProxy = Proxy :: Proxy (arg,r)
+                                   , funInfoArgAnn = ann_arg
+                                   , funInfoResAnn = ann_res
+                                   , funInfoName = case (name,nc) of
+                                     (Nothing,Nothing) -> Nothing
+                                     (Just name',Just nc') -> Just (name',nc') }
+                in ((SMTFun idx ann_res::SMTFunction arg r,info),info))
+
+createArgs :: Args a => ArgAnnotation a -> Integer -> (a,[FunInfo],Integer)
+createArgs ann i = let ((tps,ni),res) = foldExprsId (\(tps',ci) (_::SMTExpr t) ann'
+                                                     -> let info = FunInfo { funInfoId = ci
+                                                                           , funInfoProxy = Proxy :: Proxy ((),t)
+                                                                           , funInfoArgAnn = ()
+                                                                           , funInfoResAnn = ann'
+                                                                           , funInfoName = Nothing }
+                                                        in ((tps'++[info],ci+1),Var ci ann')
+                                                    ) ([],i) (error "Evaluated the argument to createArgs") ann
+                   in (res,tps,ni)
+
+createArgs' :: (Args a,Monad m) => ArgAnnotation a -> SMT' m (a,[FunInfo])
+createArgs' ann = do
+  (tps,res) <- foldExprs (\tps' (_::SMTExpr t) ann' -> do
+                             (expr',info) <- newVariable Nothing ann'
+                             return (tps'++[info],expr')
+                         ) [] (error "Evaluated the argument to createArgs") ann
+  return (res,tps)
+
+nameVariable :: Monad m => Integer -> String -> SMT' m ()
+nameVariable var name = do
+  st <- getSMT
+  let c = Map.findWithDefault 0 name (nameCount st)
   putSMT $ st { nameCount = Map.insert name (c+1) (nameCount st) }
-  return $ (escapeName name)++(case c of
-                                  0 -> ""
-                                  _ -> "_"++show c)
 
 argsSignature :: Args a => a -> ArgAnnotation a -> [Sort]
 argsSignature arg ann
   = reverse $ fst $
-    foldExprs (\sigs e ann' -> ((getSort (getUndef e) ann'):sigs,e))
+    foldExprsId (\sigs e ann' -> ((getSort (getUndef e) ann'):sigs,e))
     [] arg ann
 
 {-
@@ -472,28 +543,13 @@ sortToArgumentSort :: Sort -> ArgumentSort
 sortToArgumentSort (Fix s) = Fix (NormalSort (fmap sortToArgumentSort s))
 
 declareType :: (Monad m,SMTType t) => t -> SMTAnnotation t -> SMT' m ()
-declareType u ann = case asDataType u of
-  Nothing -> return ()
-  Just (dtName,dts) -> do
-    let paramPrx = getProxyArgs u ann
-    mapM_ (\dt
-           -> dataTypeGetUndefined dt paramPrx $
-              \und _ -> mapM (\con -> mapM (\field
-                                            -> fieldGet field paramPrx und $
-                                               \fval fann
-                                               -> declareType fval fann
-                                           ) (conFields con)
-                             ) (dataTypeConstructors dt)
-          ) (dataTypes dts)
-    st <- getSMT
-    if containsTypeCollection dts (declaredDataTypes st)
-      then return ()
-      else (do
-               putSMT $ st { declaredDataTypes = addDataTypeStructure dts (declaredDataTypes st)
-                           }
-               smtBackend (\backend -> do
-                              st <- getSMT
-                              lift $ smtHandle backend st (SMTDeclareDataTypes dts)))
+declareType (_::t) ann = do
+  st <- getSMT
+  let (colls,ndts) = getNewTypeCollections (Proxy::Proxy t) ann
+                     (declaredDataTypes st)
+      nst = st { declaredDataTypes = ndts }
+  putSMT nst
+  smtBackend $ \backend -> mapM_ (\coll -> lift $ smtHandle backend st (SMTDeclareDataTypes coll)) colls
 
 -- Data type info
 
@@ -511,13 +567,13 @@ data ProxyArg = forall t. SMTType t => ProxyArg t (SMTAnnotation t)
 withProxyArg :: ProxyArg -> (forall t. SMTType t => t -> SMTAnnotation t -> a) -> a
 withProxyArg (ProxyArg x ann) f = f x ann
 
-data AnyValue = forall t. SMTType t => AnyValue t (SMTAnnotation t)
+data AnyValue = forall t. SMTType t => AnyValue [ProxyArg] t (SMTAnnotation t)
 
-withAnyValue :: AnyValue -> (forall t. SMTType t => t -> SMTAnnotation t -> a) -> a
-withAnyValue (AnyValue x ann) f = f x ann
+withAnyValue :: AnyValue -> (forall t. SMTType t => [ProxyArg] -> t -> SMTAnnotation t -> a) -> a
+withAnyValue (AnyValue p x ann) f = f p x ann
 
 castAnyValue :: SMTType t => AnyValue -> Maybe (t,SMTAnnotation t)
-castAnyValue (AnyValue x ann) = cast (x,ann)
+castAnyValue (AnyValue _ x ann) = cast (x,ann)
 
 data DataType = DataType { dataTypeName :: String
                          , dataTypeConstructors :: [Constr]
@@ -529,8 +585,8 @@ data DataType = DataType { dataTypeName :: String
 
 data Constr = Constr { conName :: String
                      , conFields :: [DataField]
-                     , construct :: forall r. Maybe [ProxyArg] -> [AnyValue]
-                                    -> (forall t. SMTType t => t -> SMTAnnotation t -> r)
+                     , construct :: forall r. [Maybe ProxyArg] -> [AnyValue]
+                                    -> (forall t. SMTType t => [ProxyArg] -> t -> SMTAnnotation t -> r)
                                     -> r
                      , conTest :: forall t. SMTType t => [ProxyArg] -> t -> Bool
                      }
@@ -564,6 +620,47 @@ addDataTypeStructure struct dts
                      ) (cdts { datatypes = Map.insert (dataTypeName dt) (dt,struct) (datatypes cdts) })
                (dataTypeConstructors dt)
           ) (dts { structures = struct:(structures dts) }) (dataTypes struct)
+
+-- | Get all the type collections which are not yet declared from a type.
+getNewTypeCollections :: SMTType t => Proxy t -> SMTAnnotation t -> DataTypeInfo
+                         -> ([TypeCollection],DataTypeInfo)
+getNewTypeCollections (_::Proxy t) ann dts
+  = case asDataType (undefined::t) of
+    Nothing -> ([],dts) -- This is no declarable data type
+    Just (name,coll)
+      -> let isKnown = Map.member name (datatypes dts) -- Is the datatype already known?
+             proxies = getProxyArgs (undefined::t) ann
+             (tps1,dts1) = if isKnown
+                           then ([],dts)
+                           else ([coll],addDataTypeStructure coll dts)
+             (tps2,dts2) = foldl (\(tps,dts) prx -- Check all the data type parameters
+                                  -> withProxyArg prx $
+                                     \(_::a) ann'
+                                     -> let (ntps,ndts) = getNewTypeCollections
+                                                          (Proxy::Proxy a)
+                                                          ann' dts
+                                        in (ntps++tps,ndts)
+                                 ) ([],dts1) proxies
+             (tps3,dts3) = if isKnown
+                           then ([],dts2)
+                           else foldl
+                                (\cur dt
+                                 -> dataTypeGetUndefined dt proxies $
+                                    \dtUndef dtAnn
+                                    -> foldl
+                                       (\cur con
+                                        -> foldl
+                                           (\(tps,dts) field
+                                            -> fieldGet field proxies dtUndef $
+                                               \(_::f) fAnn
+                                               -> let (ntps,ndts) = getNewTypeCollections
+                                                                    (Proxy::Proxy f)
+                                                                    fAnn dts
+                                                  in (ntps++tps,ndts)
+                                           ) cur (conFields con)
+                                       ) cur (dataTypeConstructors dt)
+                                ) ([],dts2) (dataTypes coll) -- Declare all field types
+         in (tps1++tps2++tps3,dts3)
 
 -- BitVectors
 
