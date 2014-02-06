@@ -19,7 +19,7 @@ import Foreign.Marshal
 import Foreign.Storable
 
 data BoolectorBackend = BoolectorBackend { boolectorInstance :: Btor
-                                         , boolectorVars :: IORef (Map String BtorNode)
+                                         , boolectorVars :: IORef (Map Integer BtorNode)
                                          , boolectorAssumeState :: IORef Bool
                                          }
 
@@ -67,20 +67,23 @@ instance SMTBackend BoolectorBackend IO where
   smtHandle btor _ (SMTDefineFun name [] expr) = do
     mp <- readIORef (boolectorVars btor)
     nd <- exprToNode mp btor expr
-    modifyIORef (boolectorVars btor) (Map.insert name nd)
+    modifyIORef (boolectorVars btor) (Map.insert (funInfoId name) nd)
   smtHandle btor _ (SMTDefineFun name args expr) = do
-    params <- mapM (\(name,sort) -> do
-                       let w = case sort of
+    params <- mapM (\info -> do
+                       let w = case funInfoSort info of
                              Fix BoolSort -> 1
                              Fix (BVSort { bvSortWidth = w' }) -> w'
-                             _ -> error $ "smtlib2-boolector: Parameter type "++show sort++" not supported."
-                       res <- boolectorParam (boolectorInstance btor) (fromIntegral w) name
-                       return (name,res)
+                             sort -> error $ "smtlib2-boolector: Parameter type "++show sort++" not supported."
+                       res <- boolectorParam (boolectorInstance btor) (fromIntegral w)
+                              (escapeName $ case funInfoName info of
+                                  Nothing -> Right $ funInfoId info
+                                  Just name' -> Left name')
+                       return (funInfoId info,res)
                    ) args
     mp <- readIORef (boolectorVars btor)
     nd <- exprToNode (Map.union mp (Map.fromList params)) btor expr
     fun <- boolectorFun (boolectorInstance btor) (fmap snd params) nd
-    modifyIORef (boolectorVars btor) (Map.insert name fun)
+    modifyIORef (boolectorVars btor) (Map.insert (funInfoId name) fun)
   smtHandle btor st (SMTGetValue (expr :: SMTExpr t)) = do
     mp <- readIORef (boolectorVars btor)
     nd <- exprToNode mp btor expr
@@ -116,7 +119,7 @@ instance SMTBackend BoolectorBackend IO where
   smtHandle _ _ (SMTComment _) = return ()
   smtHandle btor _ SMTExit = boolectorDelete (boolectorInstance btor)
   
-exprToNode :: SMTType a => Map String BtorNode -> BoolectorBackend -> SMTExpr a -> IO BtorNode
+exprToNode :: SMTType a => Map Integer BtorNode -> BoolectorBackend -> SMTExpr a -> IO BtorNode
 exprToNode mp btor (Var name ann) = do
   case Map.lookup name mp of
     Just nd -> return nd
@@ -220,15 +223,18 @@ exprToNode mp btor (App (SMTExtract prStart prLen) e) = do
   boolectorSlice (boolectorInstance btor) n (fromIntegral $ start+len-1) (fromIntegral start)
 exprToNode _ _ e = error $ "smtlib2-boolector: No support for expression: "++show e
 
-mkVar :: BoolectorBackend -> String -> Sort -> IO BtorNode
-mkVar btor name sort = do
+mkVar :: BoolectorBackend -> FunInfo -> Sort -> IO BtorNode
+mkVar btor info sort = do
+  let name = escapeName $ case funInfoName info of
+        Nothing -> Right $ funInfoId info
+        Just name' -> Left name'
   nd <- case sort of
     Fix BoolSort -> boolectorVar (boolectorInstance btor) 1 name
     Fix (BVSort { bvSortWidth = w }) -> boolectorVar (boolectorInstance btor) (fromIntegral w) name
     Fix (ArraySort [Fix (BVSort { bvSortWidth = idx_w })] (Fix (BVSort { bvSortWidth = el_w })))
       -> boolectorArray (boolectorInstance btor) (fromIntegral el_w) (fromIntegral idx_w) name
     _ -> error $ "smtlib2-boolector: Boolector backend doesn't support sort "++show sort
-  modifyIORef (boolectorVars btor) (Map.insert name nd)
+  modifyIORef (boolectorVars btor) (Map.insert (funInfoId info) nd)
   return nd
 
 newtype BtorNode = BtorNode (Ptr BtorNode) deriving (Storable)

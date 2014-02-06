@@ -25,7 +25,7 @@ newtype STPType = STPType (Ptr STPType) deriving (Storable)
 newtype STPExpr = STPExpr (Ptr STPExpr) deriving (Storable)
 
 data STPBackend = STPBackend { stpInstance :: VC
-                             , stpVars :: IORef (Map String STPExpr) }
+                             , stpVars :: IORef (Map Integer STPExpr) }
 
 withSTP :: SMT' IO a -> IO a
 withSTP act = do
@@ -62,16 +62,18 @@ instance SMTBackend STPBackend IO where
   smtHandle stp _ (SMTDefineFun name [] expr) = do
     mp <- readIORef (stpVars stp)
     expr' <- exprToSTP mp stp expr
-    modifyIORef (stpVars stp) (Map.insert name expr')
+    modifyIORef (stpVars stp) (Map.insert (funInfoId name) expr')
   smtHandle stp _ (SMTDeclareFun name [] sort) = do
     tp <- sortToSTP stp sort
-    expr <- stpVarExpr (stpInstance stp) name tp
-    modifyIORef (stpVars stp) (Map.insert name expr)
+    expr <- stpVarExpr (stpInstance stp) (escapeName $ case funInfoName name of
+                                             Nothing -> Right (funInfoId name)
+                                             Just name' -> Left name') tp
+    modifyIORef (stpVars stp) (Map.insert (funInfoId name) expr)
   smtHandle stp st (SMTGetValue (expr::SMTExpr t)) = do
     mp <- readIORef (stpVars stp)
     expr' <- exprToSTP mp stp expr
     resExpr <- stpGetCounterExample (stpInstance stp) expr'
-    stpToExpr (declaredDataTypes st) (Just $ getSort (undefined::t) (extractAnnotation expr)) resExpr $
+    stpToExpr (declaredDataTypes st) (namedVars st) (Just $ getSort (undefined::t) (extractAnnotation expr)) resExpr $
       \res -> case res of
         Const val _ -> case cast val of
           Just val' -> val'
@@ -81,7 +83,7 @@ instance SMTBackend STPBackend IO where
     mp <- readIORef (stpVars stp)
     expr' <- exprToSTP mp stp expr
     simpExpr <- stpSimplify (stpInstance stp) expr'
-    stpToExpr (declaredDataTypes st) (Just $ getSort (undefined::t) (extractAnnotation expr)) simpExpr $
+    stpToExpr (declaredDataTypes st) (namedVars st) (Just $ getSort (undefined::t) (extractAnnotation expr)) simpExpr $
       \res -> case cast res of
         Just res' -> res'
   smtHandle _ _ (SMTGetInterpolant _) = error $ "smtlib2-stp: STP doesn't support interpolation."
@@ -98,7 +100,7 @@ sortToSTP stp (Fix (ArraySort [i] v)) = do
   stpArrayType (stpInstance stp) iTp vTp
 sortToSTP _ sort = error $ "smtlib2-stp: STP doesn't support type "++show sort++"."
 
-exprToSTP :: SMTType a => Map String STPExpr -> STPBackend -> SMTExpr a -> IO STPExpr
+exprToSTP :: SMTType a => Map Integer STPExpr -> STPBackend -> SMTExpr a -> IO STPExpr
 exprToSTP mp stp (Var name ann) = case Map.lookup name mp of
   Just expr -> return expr
 exprToSTP mp stp (Const c ann) = do
@@ -197,15 +199,18 @@ exprToSTP mp stp (App (SMTExtract prStart prLen) e) = do
   stpBVExtract (stpInstance stp) n (fromIntegral $ start+len-1) (fromIntegral start)
 exprToSTP _ _ expr = error $ "smtlib2-stp: STP backend doesn't support expression "++show expr
 
-stpToExpr :: DataTypeInfo -> Maybe Sort -> STPExpr -> (forall t. SMTType t => SMTExpr t -> a) -> IO a
-stpToExpr dts expected expr f = do
+stpToExpr :: DataTypeInfo -> Map (String,Integer) Integer -> Maybe Sort -> STPExpr -> (forall t. SMTType t => SMTExpr t -> a) -> IO a
+stpToExpr dts named expected expr f = do
   kind <- stpGetExprKind expr
   case kind of
     #{const SYMBOL} -> do
       name <- stpExprName expr
       sort <- stpExprSort expected expr
       withSort dts sort $
-        \(_::t) ann -> return $ f (Var name ann :: SMTExpr t)
+        \(_::t) ann -> case unescapeName name of
+          Just (Left name) -> case Map.lookup name named of
+            Just var -> return $ f (Var var ann :: SMTExpr t)
+          Just (Right i) -> return $ f (Var i ann :: SMTExpr t)
     #{const BVCONST} -> do
       val <- stpGetBVUnsignedLongLong expr
       len <- stpGetBVLength expr
@@ -224,7 +229,7 @@ stpToExpr dts expected expr f = do
     #{const FALSE} -> return $ f (Const False ())
     #{const BVNEG} -> do
       arg <- stpGetChild expr 0
-      stpToExpr dts expected arg $
+      stpToExpr dts named expected arg $
         \arg' -> asBV arg' $
                  \arg'' -> f (App (SMTBVUn BVNeg) arg'')
     -- #{const BVCONCAT} -> do

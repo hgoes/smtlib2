@@ -18,11 +18,12 @@ import Data.Tagged
 import Data.List as List (genericReplicate)
 #endif
 import Data.Fix
-import Prelude hiding (mapM,mapM_,foldl)
+import Prelude hiding (mapM,mapM_,foldl,all)
 import Data.Foldable
 import Data.Traversable
 import Control.Exception
 import Data.Functor.Identity
+import Data.Char (isDigit)
 
 -- Monad stuff
 import Control.Applicative (Applicative(..))
@@ -188,7 +189,7 @@ data Value = BoolValue Bool
            | RealValue (Ratio Integer)
            | BVValue { bvValueWidth :: Integer
                      , bvValueValue :: Integer }
-           | ConstrValue String [Value] (Maybe [Sort])
+           | ConstrValue String [Value] (Maybe (String,[Sort]))
            deriving (Eq,Show)
 
 data SMTFunction arg res where
@@ -661,6 +662,50 @@ getNewTypeCollections (_::Proxy t) ann dts
                                        ) cur (dataTypeConstructors dt)
                                 ) ([],dts2) (dataTypes coll) -- Declare all field types
          in (tps1++tps2++tps3,dts3)
+
+escapeName :: Either (String,Integer) Integer -> String
+escapeName (Right i) = "var"++(if i==0
+                              then ""
+                              else "_"++show i)
+escapeName (Left (c:cs,nc))
+  = (if isDigit c
+     then "num"++escapeName' (c:cs)
+     else escapeName' (c:cs))++(if nc==0
+                                then ""
+                                else "_"++show nc)
+escapeName (Left ([],0)) = "no_name"
+escapeName (Left ([],n)) = "no_name"++show n
+
+escapeName' :: String -> String
+escapeName' [] = []
+escapeName' ('_':xs) = '_':'_':escapeName' xs
+escapeName' (x:xs) = x:escapeName' xs
+
+unescapeName :: String -> Maybe (Either (String,Integer) Integer)
+unescapeName "var" = Just (Right 0)
+unescapeName ('v':'a':'r':'_':rest) = if all isDigit rest
+                                      then Just (Right (read rest))
+                                      else Nothing
+unescapeName xs = do
+  res <- unescapeName' xs
+  return $ Left res
+
+unescapeName' :: String -> Maybe (String,Integer)
+unescapeName' ('n':'o':'_':'n':'a':'m':'e':rest) = case rest of
+  [] -> Just ("",0)
+  xs -> if all isDigit xs
+        then Just ("",read xs)
+        else Nothing
+unescapeName' ('_':'_':rest) = do
+  (name,nc) <- unescapeName' rest
+  return ('_':name,nc)
+unescapeName' ('_':rest) = if all isDigit rest
+                           then return ("",read rest)
+                           else Nothing
+unescapeName' (x:xs) = do
+  (name,nc) <- unescapeName' xs
+  return (x:name,nc)
+unescapeName' "" = Just ("",0)
 
 -- BitVectors
 

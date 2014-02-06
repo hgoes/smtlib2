@@ -9,7 +9,7 @@ Library
   Extensions: 		ForeignFunctionInterface,CApiFFI,CPP,
                         GeneralizedNewtypeDeriving,MultiParamTypeClasses,
                         GADTs,ScopedTypeVariables,RankNTypes,FlexibleContexts
-  Extra-Libraries:	stp
+  Extra-Libraries:	stp,boost_system
 
   GHC-Options: -fwarn-unused-imports
   Exposed-Modules:

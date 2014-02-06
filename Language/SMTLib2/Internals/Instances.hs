@@ -34,15 +34,15 @@ valueToHaskell dtInfo f sort (ConstrValue name args sort')
   = case Map.lookup name (constructors dtInfo) of
   Just (con,dt,struct)
     -> let sort'' = case sort of
-             Just (Fix (NamedSort _ args)) -> Just args
+             Just (Fix (NamedSort name args)) -> Just (name,args)
              Nothing -> sort'
            argPrx = case sort'' of
-             Just sort''' -> fmap (\s -> Just $ withSort dtInfo s ProxyArg) sort'''
+             Just (_,sort''') -> fmap (\s -> Just $ withSort dtInfo s ProxyArg) sort'''
              Nothing -> genericReplicate (argCount struct) Nothing
            sorts' = fmap (\field -> argumentSortToSort
                                     (\i -> case sort'' of
                                         Nothing -> Nothing
-                                        Just sort''' -> Just $ sort''' `genericIndex` i)
+                                        Just (_,sort''') -> Just $ sort''' `genericIndex` i)
                                     (fieldSort field)
                          ) (conFields con)
            rargs :: [AnyValue]
@@ -631,7 +631,7 @@ instance SMTValue a => SMTValue (Maybe a) where
     Nothing -> Nothing
   --unmangle (AsValue v (Fix (NamedSort "Maybe" _))) ann = unmangle v ann
   unmangle _ _ = Nothing
-  mangle (Nothing::Maybe t) ann = ConstrValue "Nothing" [] (Just [getSort (undefined::t) ann])
+  mangle (Nothing::Maybe t) ann = ConstrValue "Nothing" [] (Just ("Maybe",[getSort (undefined::t) ann]))
   mangle u@(Just x) ann = ConstrValue "Just" [mangle x ann] Nothing
 
 -- | Get an undefined value of the type argument of a type.
@@ -700,7 +700,7 @@ instance (Typeable a,SMTValue a) => SMTValue [a] where
     t' <- unmangle t ann
     return (h':t')
   unmangle _ _ = Nothing
-  mangle ([]::[t]) ann = ConstrValue "nil" [] (Just [getSort (undefined::t) ann])
+  mangle ([]::[t]) ann = ConstrValue "nil" [] (Just ("List",[getSort (undefined::t) ann]))
   mangle (x:xs) ann = ConstrValue "insert" [mangle x ann,mangle xs ann] Nothing
 
 -- BitVector implementation

@@ -30,7 +30,6 @@ import Numeric (readInt,readHex)
 import Data.Ratio
 import Control.Monad.Trans (MonadIO,liftIO)
 import Control.Monad.Identity
-import Data.Char (isDigit)
 
 data SMTPipe = SMTPipe { channelIn :: Handle
                        , channelOut :: Handle
@@ -266,51 +265,9 @@ lispToSort (L.Symbol x) = Fix $ NamedSort (T.unpack x) []
 lispToSort (L.List ((L.Symbol x):args)) = Fix $ NamedSort (T.unpack x) (fmap lispToSort args)
 
 getSMTName :: FunInfo -> String
-getSMTName info = case funInfoName info of
-  Nothing -> "var"++(case funInfoId info of
-                        0 -> ""
-                        n -> "_"++show n)
-  Just (name,nc) -> escapeName name nc
-
-escapeName :: String -> Integer -> String
-escapeName (c:cs) nc = (if isDigit c
-                        then "num"++escapeName' (c:cs)
-                        else escapeName' (c:cs))++(if nc==0
-                                                   then ""
-                                                   else "_"++show nc)
-escapeName [] 0 = "no_name"
-escapeName [] n = "no_name"++show n
-
-escapeName' :: String -> String
-escapeName' [] = []
-escapeName' ('_':xs) = '_':'_':escapeName' xs
-escapeName' (x:xs) = x:escapeName' xs
-
-unescapeName :: String -> Maybe (Either (String,Integer) Integer)
-unescapeName "var" = Just (Right 0)
-unescapeName ('v':'a':'r':'_':rest) = if all isDigit rest
-                                      then Just (Right (read rest))
-                                      else Nothing
-unescapeName xs = do
-  res <- unescapeName' xs
-  return $ Left res
-
-unescapeName' :: String -> Maybe (String,Integer)
-unescapeName' ('n':'o':'_':'n':'a':'m':'e':rest) = case rest of
-  [] -> Just ("",0)
-  xs -> if all isDigit xs
-        then Just ("",read xs)
-        else Nothing
-unescapeName' ('_':'_':rest) = do
-  (name,nc) <- unescapeName' rest
-  return ('_':name,nc)
-unescapeName' ('_':rest) = if all isDigit rest
-                           then return ("",read rest)
-                           else Nothing
-unescapeName' (x:xs) = do
-  (name,nc) <- unescapeName' xs
-  return (x:name,nc)
-unescapeName' "" = Just ("",0)
+getSMTName info = escapeName (case funInfoName info of
+  Nothing -> Right (funInfoId info)
+  Just name -> Left name)
 
 findName :: SMTState -> T.Text -> Maybe UntypedExpr
 findName st name = case unescapeName (T.unpack name) of
@@ -328,17 +285,12 @@ findName st name = case unescapeName (T.unpack name) of
                     , funInfoResAnn = ann
                     }) -> Just $ UntypedExpr (Var idx ann :: SMTExpr t)
 
-varName :: Integer -> String
-varName 0 = "var"
-varName n = "var_"++show n
-
 exprToLisp :: SMTExpr t -> Map Integer FunInfo -> DataTypeInfo -> Integer -> (L.Lisp,Integer)
 exprToLisp (Var idx _) mp _ c = case Map.lookup idx mp of
-  Just info -> case funInfoName info of
-    Just (name,nc) -> let name' = escapeName name nc
-                      in (L.Symbol $ T.pack name',c)
-    Nothing -> let name = varName idx
-               in (L.Symbol $ T.pack name,c)
+  Just info -> (L.Symbol $ T.pack $
+                escapeName (case funInfoName info of
+                               Nothing -> Right (funInfoId info)
+                               Just name -> Left name),c)
   Nothing -> error $ "smtlib2: Variable "++show idx++" has no info."
 exprToLisp (Const x ann) _ dts c = (valueToLisp dts $ mangle x ann,c)
 exprToLisp (AsArray f arg) mp _ c
@@ -384,7 +336,7 @@ exprToLisp (Named expr name nc) mp dts c
   = let (expr',c') = exprToLisp expr mp dts c
     in (L.List [L.Symbol "!",expr'
                ,L.Symbol ":named"
-               ,L.Symbol $ T.pack $ escapeName name nc],c')
+               ,L.Symbol $ T.pack $ escapeName (Left (name,nc))],c')
 
 isOverloaded :: SMTFunction a b -> Bool
 isOverloaded SMTEq = True
@@ -681,7 +633,7 @@ lispToConstr dts sort (L.Symbol n)
     in case Map.lookup rn (constructors dts) of
       Just (constr,dt,coll)
         -> Just (ConstrValue rn [] (case sort of
-                                       Just (_,s) -> Just s
+                                       Just s -> Just s
                                        Nothing -> Nothing))
 lispToConstr dts sort (L.List ((L.Symbol name):args)) = do
   let (constr,dt,coll) = case Map.lookup (T.unpack name) (constructors dts) of
@@ -692,7 +644,7 @@ lispToConstr dts sort (L.List ((L.Symbol name):args)) = do
   args' <- mapM (\(l,s) -> lispToValue' dts s l) (zip args argSorts)
   return $ ConstrValue (T.unpack name) args'
     (case sort of
-        Just (_,sort') -> Just sort'
+        Just sort' -> Just sort'
         Nothing -> Nothing)
   where
     getArgSort (Fix (ArgumentSort n)) = case sort of
@@ -736,12 +688,11 @@ valueToLisp _ (BVValue { bvValueWidth = w
            ,L.Number $ L.I w]
 valueToLisp dts (ConstrValue name vals sort)
   = let constr = case sort of
-          Just sort' -> case Map.lookup name (constructors dts) of
-            Just (_,dt,coll) -> L.List [L.Symbol "as"
-                                       ,L.Symbol $ T.pack name
-                                       ,if argCount coll > 0
-                                        then L.List $ [L.Symbol $ T.pack (dataTypeName dt)]++(fmap sortToLisp sort')
-                                        else L.Symbol $ T.pack $ dataTypeName dt]
+          Just (tp,sort') ->  L.List [L.Symbol "as"
+                                     ,L.Symbol $ T.pack name
+                                     ,if null sort'
+                                      then L.Symbol $ T.pack tp
+                                      else L.List $ [L.Symbol $ T.pack tp]++(fmap sortToLisp sort')]
           Nothing -> L.Symbol $ T.pack name
     in case vals of
       [] -> constr

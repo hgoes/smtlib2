@@ -39,7 +39,7 @@ newtype Model = Model (Ptr Model)
 
 data YicesBackend = YicesBackend { yicesState :: IORef YicesState
                                  , yicesTypes :: IORef (Map String (Type,[String]))
-                                 , yicesExprs :: IORef (Map String Term)
+                                 , yicesExprs :: IORef (Map Integer Term)
                                  }
 
 data YicesState = NoContext CtxConfig
@@ -189,17 +189,17 @@ instance SMTBackend YicesBackend IO where
   smtHandle b _ (SMTDefineFun fname args body) = do
     tps <- readIORef (yicesTypes b)
     mp <- readIORef (yicesExprs b)
-    rargs <- mapM (\(name,sort) -> do
-                      tp <- sortToType tps sort
+    rargs <- mapM (\info -> do
+                      tp <- sortToType tps (funInfoSort info)
                       arg <- yicesNewVariable tp
-                      return (name,arg)
+                      return (funInfoId info,arg)
                   ) args
     body <- exprToTerm tps (Map.union mp (Map.fromList rargs)) 0 body
     fun <- if null rargs
            then return body
            else withArrayLen (fmap snd rargs) $
                 \len arr -> yicesLambda (fromIntegral len) arr body
-    modifyIORef (yicesExprs b) (Map.insert fname fun)
+    modifyIORef (yicesExprs b) (Map.insert (funInfoId fname) fun)
   smtHandle b _ (SMTDeclareFun fname argSorts retSort) = do
     tps <- readIORef (yicesTypes b)
     argTps <- mapM (sortToType tps) argSorts
@@ -209,7 +209,7 @@ instance SMTBackend YicesBackend IO where
              else withArrayLen argTps $
                   \len arr -> yicesFunctionType (fromIntegral len) arr retTp
     fun <- yicesNewUninterpretedTerm funTp
-    modifyIORef (yicesExprs b) (Map.insert fname fun)
+    modifyIORef (yicesExprs b) (Map.insert (funInfoId fname) fun)
   smtHandle b st (SMTGetValue (expr :: SMTExpr t)) = do
     mmdl <- getModel b
     case mmdl of
@@ -256,7 +256,7 @@ instance SMTBackend YicesBackend IO where
             case Map.lookup name (datatypes $ declaredDataTypes st) of
               Just (dt,_) -> do
                 let constr = (dataTypeConstructors dt)!!(fromIntegral idx)
-                construct constr (Just []) [] $ \res _ -> do
+                construct constr [] [] $ \_ res _ -> do
                   case cast res of
                     Just ret -> return ret
   smtHandle _ _ SMTGetProof = error "smtlib2-yices: Proof extraction not supported."
@@ -300,7 +300,7 @@ findConstructor mp cname = findCons (Map.toList mp)
       Just idx -> (tpName,tp,idx)
       Nothing -> findCons rest
 
-exprToTerm :: SMTType a => Map String (Type,[String]) -> Map String Term -> Integer
+exprToTerm :: SMTType a => Map String (Type,[String]) -> Map Integer Term -> Integer
               -> SMTExpr a
               -> IO Term
 exprToTerm _ mp _ (Var name ann) = case Map.lookup name mp of
@@ -316,7 +316,7 @@ exprToTerm tps _ _ (Const c ann) = do
                    (fromInteger $ denominator i)
     BVValue w v -> yicesBVConst64 (fromInteger w) (fromInteger v)
     ConstrValue name _ sort -> case sort of
-      Just (Fix (NamedSort n [])) -> case Map.lookup n tps of
+      Just (n,[]) -> case Map.lookup n tps of
         Just (tp,cons) -> case elemIndex name cons of
           Just idx -> yicesConstant tp (fromIntegral idx)
       Nothing -> do
@@ -326,10 +326,10 @@ exprToTerm tps mp i (AsArray (SMTFun fname _) _) = case Map.lookup fname mp of
   Just fterm -> return fterm
 exprToTerm tps mp i (AsArray fun ann) = do
   let (arg,names,ni) = createArgs ann i
-  vars <- mapM (\(name,sort) -> do
-                   tp <- sortToType tps sort
+  vars <- mapM (\info -> do
+                   tp <- sortToType tps (funInfoSort info)
                    var <- yicesNewVariable tp
-                   return (name,var)
+                   return (funInfoId info,var)
                ) names
   let nmp = Map.union mp (Map.fromList vars)
   body <- exprToTerm tps nmp ni (App fun arg)
@@ -337,19 +337,19 @@ exprToTerm tps mp i (AsArray fun ann) = do
     \len arr -> yicesLambda (fromIntegral len) arr body
 exprToTerm tps mp i (Forall ann f) = do
   let (arg,names,ni) = createArgs ann i
-  vars <- mapM (\(name,sort) -> do
-                   tp <- sortToType tps sort
+  vars <- mapM (\info -> do
+                   tp <- sortToType tps (funInfoSort info)
                    var <- yicesNewVariable tp
-                   return (name,var)
+                   return (funInfoId info,var)
                ) names
   body <- exprToTerm tps (Map.union mp (Map.fromList vars)) ni (f arg)
   withArrayLen (fmap snd vars) (\len arr -> yicesForall (fromIntegral len) arr body)
 exprToTerm tps mp i (Exists ann f) = do
   let (arg,names,ni) = createArgs ann i
-  vars <- mapM (\(name,sort) -> do
-                   tp <- sortToType tps sort
+  vars <- mapM (\info -> do
+                   tp <- sortToType tps (funInfoSort info)
                    var <- yicesNewVariable tp
-                   return (name,var)
+                   return (funInfoId info,var)
                ) names
   body <- exprToTerm tps (Map.union mp (Map.fromList vars)) ni (f arg)
   withArrayLen (fmap snd vars) (\len arr -> yicesExists (fromIntegral len) arr body)
