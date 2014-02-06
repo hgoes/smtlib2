@@ -197,7 +197,7 @@ exprToSTP mp stp (App (SMTExtract prStart prLen) e) = do
   let start = reflectNat prStart 0
       len = reflectNat prLen 0
   stpBVExtract (stpInstance stp) n (fromIntegral $ start+len-1) (fromIntegral start)
-exprToSTP _ _ expr = error $ "smtlib2-stp: STP backend doesn't support expression "++show expr
+exprToSTP _ _ expr = error $ "smtlib2-stp: STP backend doesn't support expression."
 
 stpToExpr :: DataTypeInfo -> Map (String,Integer) Integer -> Maybe Sort -> STPExpr -> (forall t. SMTType t => SMTExpr t -> a) -> IO a
 stpToExpr dts named expected expr f = do

@@ -221,7 +221,7 @@ exprToNode mp btor (App (SMTExtract prStart prLen) e) = do
   let start = reflectNat prStart 0
       len = reflectNat prLen 0
   boolectorSlice (boolectorInstance btor) n (fromIntegral $ start+len-1) (fromIntegral start)
-exprToNode _ _ e = error $ "smtlib2-boolector: No support for expression: "++show e
+exprToNode _ _ e = error $ "smtlib2-boolector: No support for expression."
 
 mkVar :: BoolectorBackend -> FunInfo -> Sort -> IO BtorNode
 mkVar btor info sort = do

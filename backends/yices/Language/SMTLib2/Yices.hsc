@@ -142,7 +142,7 @@ instance SMTBackend YicesBackend IO where
     f' <- exprToTerm tps mp 0 f
     res <- yicesAssertFormula ctx f'
     if res < 0
-      then mkError $ "Error while asserting formula "++show f++"."
+      then mkError $ "Error while asserting formula."
       else return ()
   smtHandle b _ (SMTCheckSat _) = do
     ctx <- getContext b False
@@ -325,7 +325,7 @@ exprToTerm tps _ _ (Const c ann) = do
 exprToTerm tps mp i (AsArray (SMTFun fname _) _) = case Map.lookup fname mp of
   Just fterm -> return fterm
 exprToTerm tps mp i (AsArray fun ann) = do
-  let (arg,names,ni) = createArgs ann i
+  let (arg,names,ni,_) = createArgs ann i Map.empty
   vars <- mapM (\info -> do
                    tp <- sortToType tps (funInfoSort info)
                    var <- yicesNewVariable tp
@@ -336,7 +336,7 @@ exprToTerm tps mp i (AsArray fun ann) = do
   withArrayLen (fmap snd vars) $
     \len arr -> yicesLambda (fromIntegral len) arr body
 exprToTerm tps mp i (Forall ann f) = do
-  let (arg,names,ni) = createArgs ann i
+  let (arg,names,ni,_) = createArgs ann i Map.empty
   vars <- mapM (\info -> do
                    tp <- sortToType tps (funInfoSort info)
                    var <- yicesNewVariable tp
@@ -345,7 +345,7 @@ exprToTerm tps mp i (Forall ann f) = do
   body <- exprToTerm tps (Map.union mp (Map.fromList vars)) ni (f arg)
   withArrayLen (fmap snd vars) (\len arr -> yicesForall (fromIntegral len) arr body)
 exprToTerm tps mp i (Exists ann f) = do
-  let (arg,names,ni) = createArgs ann i
+  let (arg,names,ni,_) = createArgs ann i Map.empty
   vars <- mapM (\info -> do
                    tp <- sortToType tps (funInfoSort info)
                    var <- yicesNewVariable tp
