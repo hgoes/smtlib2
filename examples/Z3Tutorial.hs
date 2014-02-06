@@ -406,7 +406,7 @@ instance (SMTValue a) => SMTValue (Lst a) where
     x <- unmangle h ann
     xs <- unmangle t ann
     return (Cons x xs)
-  mangle (Nil::Lst a) ann = ConstrValue "Nil" [] (Just [getSort (undefined::a) ann])
+  mangle (Nil::Lst a) ann = ConstrValue "Nil" [] (Just ("Lst",[getSort (undefined::a) ann]))
   mangle p@(Cons x xs) ann = ConstrValue "Cons" [mangle x ann,mangle xs ann] Nothing
 
 instance (SMTType a) => SMTRecordType (Lst a) where
@@ -473,7 +473,7 @@ instance SMTValue t => SMTValue (Tree t) where
     return $ Node val childs
   unmangle _ _ = Nothing
   mangle (Leaf::Tree t) ann = ConstrValue "Leaf" []
-                              (Just [getSort (undefined::t) ann])
+                              (Just ("Tree",[getSort (undefined::t) ann]))
   mangle (Node v c) ann = ConstrValue "Node"
                           [mangle v ann,
                            mangle c ann] Nothing
@@ -486,7 +486,7 @@ instance SMTValue t => SMTValue (TreeList t) where
     return $ TCons x xs
   unmangle _ _ = Nothing
   mangle (TNil::TreeList t) ann = ConstrValue "TNil" []
-                                  (Just [getSort (undefined::t) ann])
+                                  (Just ("TreeList",[getSort (undefined::t) ann]))
   mangle (TCons x xs) ann = ConstrValue "TCons"
                             [mangle x ann,
                              mangle xs ann] Nothing
