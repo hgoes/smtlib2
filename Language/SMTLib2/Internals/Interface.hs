@@ -6,7 +6,6 @@ import Language.SMTLib2.Internals
 import Language.SMTLib2.Internals.Instances (extractAnnotation)
 import Language.SMTLib2.Internals.Optimize
 import Language.SMTLib2.Internals.Operators
-import Language.SMTLib2.Pipe
 import Language.SMTLib2.Strategy
 
 import Data.Typeable
@@ -644,6 +643,3 @@ optimizeExpr' :: SMTExpr a -> SMTExpr a
 optimizeExpr' e = case optimizeExpr e of
   Nothing -> e
   Just e' -> e'
-
-instance Show (SMTExpr t) where
-  show expr = show $ fst $ exprToLisp expr Map.empty emptyDataTypeInfo 0

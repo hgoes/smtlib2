@@ -1,4 +1,4 @@
-module Language.SMTLib2.Pipe (SMTPipe(),createSMTPipe,withPipe,exprToLisp,lispToExpr,commonFunctions,commonTheorems) where
+module Language.SMTLib2.Pipe (SMTPipe(),createSMTPipe,withPipe,exprToLisp,lispToExpr,renderExpr,commonFunctions,commonTheorems) where
 
 import Language.SMTLib2.Internals as SMT
 import Language.SMTLib2.Internals.Instances
@@ -35,6 +35,12 @@ data SMTPipe = SMTPipe { channelIn :: Handle
                        , channelOut :: Handle
                        , processHandle :: ProcessHandle }
 
+renderExpr :: (SMTType t,Monad m) => SMTExpr t -> SMT' m String
+renderExpr expr = do
+  st <- getSMT
+  let (lexpr,_) = exprToLisp expr (allVars st) (declaredDataTypes st) (nextVar st)
+  return $ show lexpr
+
 instance MonadIO m => SMTBackend SMTPipe m where
   smtHandle pipe _ (SMTGetInfo SMTSolverName) = do
     putRequest pipe $
@@ -51,7 +57,7 @@ instance MonadIO m => SMTBackend SMTPipe m where
       L.List [L.Symbol ":version",L.String name] -> return $ T.unpack name
       _ -> error "Invalid solver response to 'get-info' version query"
   smtHandle pipe st (SMTAssert expr interp) = do
-    let (lexpr,_) = exprToLisp expr (allVars st) (declaredDataTypes st)(nextVar st)
+    let (lexpr,_) = exprToLisp expr (allVars st) (declaredDataTypes st) (nextVar st)
     case interp of
       Nothing -> putRequest pipe $
                  L.List [L.Symbol "assert"
@@ -302,24 +308,24 @@ exprToLisp (AsArray f arg) mp _ c
                                                              ,sortToLisp sres]
                                                  else f'],c)
 exprToLisp (Forall ann f) mp dts c
-  = let (arg,tps,nc) = createArgs ann c
-        (arg',nc') = exprToLisp (f arg) mp dts nc
+  = let (arg,tps,nc,nmp) = createArgs ann c mp
+        (arg',nc') = exprToLisp (f arg) nmp dts nc
     in (L.List [L.Symbol "forall"
                ,L.List [L.List [L.Symbol $ T.pack (getSMTName info),sortToLisp $ funInfoSort info]
                        | info <- tps]
                ,arg'],nc')
 exprToLisp (Exists ann f) mp dts c
-  = let (arg,tps,nc) = createArgs ann c
-        (arg',nc') = exprToLisp (f arg) mp dts nc
+  = let (arg,tps,nc,nmp) = createArgs ann c mp
+        (arg',nc') = exprToLisp (f arg) nmp dts nc
     in (L.List [L.Symbol "exists"
                ,L.List [L.List [L.Symbol $ T.pack (getSMTName info),sortToLisp $ funInfoSort info]
                        | info <- tps ]
                ,arg'],nc')
 exprToLisp (Let ann x f) mp dts c
-  = let (arg,tps,nc) = createArgs ann c
-        (arg',nc') = unpackArgs (\e _ cc -> exprToLisp e mp dts cc
+  = let (arg,tps,nc,nmp) = createArgs ann c mp
+        (arg',nc') = unpackArgs (\e _ cc -> exprToLisp e nmp dts cc
                                 ) x ann nc
-        (arg'',nc'') = exprToLisp (f arg) mp dts nc'
+        (arg'',nc'') = exprToLisp (f arg) nmp dts nc'
     in (L.List [L.Symbol "let"
                ,L.List [L.List [L.Symbol $ T.pack (getSMTName info),lisp]
                        | (info,lisp) <- Prelude.zip tps arg' ]
