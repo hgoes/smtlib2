@@ -54,7 +54,8 @@ class Monad m => SMTBackend a m where
   smtHandle :: a -> SMTState -> SMTRequest response -> m response
 
 -- | Haskell types which can be represented in SMT
-class (Eq t,Typeable t,Eq (SMTAnnotation t),Typeable (SMTAnnotation t))
+class (Eq t,Typeable t,
+       Eq (SMTAnnotation t),Typeable (SMTAnnotation t),Show (SMTAnnotation t))
       => SMTType t where
   type SMTAnnotation t
   getSort :: t -> SMTAnnotation t -> Sort
@@ -73,7 +74,7 @@ data ArgumentSort' a = ArgumentSort Integer
 type ArgumentSort = Fix ArgumentSort'
 
 -- | Haskell values which can be represented as SMT constants
-class SMTType t => SMTValue t where
+class (SMTType t,Show t) => SMTValue t where
   unmangle :: Value -> SMTAnnotation t -> Maybe t
   mangle :: t -> SMTAnnotation t -> Value
 
@@ -342,7 +343,8 @@ data SMTInfo i where
   SMTSolverVersion :: SMTInfo String
 
 -- | Instances of this class may be used as arguments for constructed functions and quantifiers.
-class (Eq a,Typeable a,Eq (ArgAnnotation a),Typeable (ArgAnnotation a))
+class (Eq a,Typeable a,Show a,
+       Eq (ArgAnnotation a),Typeable (ArgAnnotation a),Show (ArgAnnotation a))
       => Args a where
   type ArgAnnotation a
   foldExprs :: Monad m => (forall t. SMTType t => s -> SMTExpr t -> SMTAnnotation t -> m (s,SMTExpr t))
@@ -965,3 +967,104 @@ type BV64 = BitVector (BVTyped N64)
 
 instance Monad m => SMTBackend (AnyBackend m) m where
   smtHandle (AnyBackend b) = smtHandle b
+
+instance Show (SMTExpr t) where
+  showsPrec = showExpr 0
+
+showExpr :: Integer -> Int -> SMTExpr t -> ShowS
+showExpr _ p (Var v ann) = showParen (p>10) (showString "Var " .
+                                             showsPrec 11 v .
+                                             showChar ' ' .
+                                             showsPrec 11 ann)
+showExpr _ p (Const c ann) = showParen (p>10) (showString "Const " .
+                                               showsPrec 11 c .
+                                               showChar ' ' .
+                                               showsPrec 11 ann)
+showExpr _ p (AsArray fun ann) = showParen (p>10) (showString "AsArray " .
+                                                   showsPrec 11 fun .
+                                                   showChar ' ' .
+                                                   showsPrec 11 ann)
+showExpr i p (Forall ann f) = let (ni,arg) = foldExprsId (\ci _ ann'
+                                                          -> (ci+1,Var ci ann')
+                                                         ) i undefined ann
+                              in showParen (p>10) (showString "Forall " .
+                                                   showsPrec 11 arg .
+                                                   showString " ~> " .
+                                                   showExpr ni 11 (f arg))
+showExpr i p (Exists ann f) = let (ni,arg) = foldExprsId (\ci _ ann'
+                                                          -> (ci+1,Var ci ann')
+                                                         ) i undefined ann
+                              in showParen (p>10) (showString "Exists " .
+                                                   showsPrec 11 arg .
+                                                   showString " ~> " .
+                                                   showExpr ni 11 (f arg))
+showExpr i p (Let ann arg f) = let (ni,arg') = foldExprsId (\ci _ ann'
+                                                            -> (ci+1,Var ci ann')
+                                                           ) i undefined ann
+                               in showParen (p>10) (showString "Let " .
+                                                    showsPrec 11 arg' .
+                                                    showString " = " .
+                                                    showsPrec 11 arg .
+                                                    showString " ~> " .
+                                                    showExpr ni 11 (f arg'))
+showExpr _ p (App fun arg) = showParen (p>10) (showString "App " .
+                                               showsPrec 11 fun .
+                                               showChar ' ' .
+                                               showsPrec 11 arg)
+showExpr i p (Named expr name nc) = showParen (p>10) (showString "Named " .
+                                                      showExpr i 11 expr .
+                                                      showChar ' ' .
+                                                      showsPrec 11 name .
+                                                      showChar ' ' .
+                                                      showsPrec 11 nc)
+
+instance Show (SMTFunction arg res) where
+  showsPrec _ SMTEq = showString "SMTEq"
+  showsPrec p (SMTMap fun) = showParen (p>10) (showString "SMTMap " .
+                                               showsPrec 11 fun)
+  showsPrec p (SMTFun i ann) = showParen (p>10) (showString "SMTFun " .
+                                                 showsPrec 11 i .
+                                                 showChar ' ' .
+                                                 showsPrec 11 ann)
+  showsPrec p (SMTBuiltIn name ann) = showParen (p>10) (showString "SMTBuiltIn " .
+                                                        showsPrec 11 name .
+                                                        showChar ' ' .
+                                                        showsPrec 11 ann)
+  showsPrec p (SMTOrd op) = showParen (p>10) (showString "SMTOrd " .
+                                              showsPrec 11 op)
+  showsPrec p (SMTArith op) = showParen (p>10) (showString "SMTArith " .
+                                                showsPrec 11 op)
+  showsPrec p SMTMinus = showString "SMTMinus"
+  showsPrec p (SMTIntArith op) = showParen (p>10) (showString "SMTIntArith " .
+                                                   showsPrec 11 op)
+  showsPrec p SMTDivide = showString "SMTDivide"
+  showsPrec p SMTNeg = showString "SMTNeg"
+  showsPrec p SMTAbs = showString "SMTAbs"
+  showsPrec p SMTNot = showString "SMTNot"
+  showsPrec p (SMTLogic op) = showParen (p>10) (showString "SMTLogic " .
+                                                showsPrec 11 op)
+  showsPrec p SMTDistinct = showString "SMTDistinct"
+  showsPrec p SMTToReal = showString "SMTToReal"
+  showsPrec p SMTToInt = showString "SMTToInt"
+  showsPrec p SMTITE = showString "SMTITE"
+  showsPrec p (SMTBVComp op) = showParen (p>10) (showString "SMTBVComp " .
+                                                 showsPrec 11 op)
+  showsPrec p (SMTBVBin op) = showParen (p>10) (showString "SMTBVBin " .
+                                                showsPrec 11 op)
+  showsPrec p (SMTBVUn op) = showParen (p>10) (showString "SMTBVUn " .
+                                               showsPrec 11 op)
+  showsPrec p SMTSelect = showString "SMTSelect"
+  showsPrec p SMTStore = showString "SMTStore"
+  showsPrec p (SMTConstArray ann) = showParen (p>10) (showString "SMTConstArray " .
+                                                      showsPrec 11 ann)
+  showsPrec p SMTConcat = showString "SMTConcat"
+  showsPrec p (SMTExtract start len) = showParen (p>10) (showString "SMTExtract " .
+                                                         showsPrec 11 (reflectNat start 0) .
+                                                         showChar ' ' .
+                                                         showsPrec 11 (reflectNat len 0))
+  showsPrec p (SMTConstructor con) = showParen (p>10) (showString "SMTConstructor " .
+                                                       showsPrec 11 con)
+  showsPrec p (SMTConTest con) = showParen (p>10) (showString "SMTConTest " .
+                                                   showsPrec 11 con)
+  showsPrec p (SMTFieldSel field) = showParen (p>10) (showString "SMTFieldSel " .
+                                                      showsPrec 11 field)
