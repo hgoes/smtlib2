@@ -486,16 +486,18 @@ newFunction name (ann_arg::ArgAnnotation arg) (ann_res::SMTAnnotation r)
                                      (Just name',Just nc') -> Just (name',nc') }
                 in ((SMTFun idx ann_res::SMTFunction arg r,info),info))
 
-createArgs :: Args a => ArgAnnotation a -> Integer -> (a,[FunInfo],Integer)
-createArgs ann i = let ((tps,ni),res) = foldExprsId (\(tps',ci) (_::SMTExpr t) ann'
-                                                     -> let info = FunInfo { funInfoId = ci
-                                                                           , funInfoProxy = Proxy :: Proxy ((),t)
-                                                                           , funInfoArgAnn = ()
-                                                                           , funInfoResAnn = ann'
-                                                                           , funInfoName = Nothing }
-                                                        in ((tps'++[info],ci+1),Var ci ann')
-                                                    ) ([],i) (error "Evaluated the argument to createArgs") ann
-                   in (res,tps,ni)
+createArgs :: Args a => ArgAnnotation a -> Integer -> Map Integer FunInfo -> (a,[FunInfo],Integer,Map Integer FunInfo)
+createArgs ann i mp
+  = let ((tps,ni,nmp),res)
+          = foldExprsId (\(tps',ci,mp') (_::SMTExpr t) ann'
+                         -> let info = FunInfo { funInfoId = ci
+                                               , funInfoProxy = Proxy :: Proxy ((),t)
+                                               , funInfoArgAnn = ()
+                                               , funInfoResAnn = ann'
+                                               , funInfoName = Nothing }
+                            in ((tps'++[info],ci+1,Map.insert ci info mp'),Var ci ann')
+                        ) ([],i,mp) (error "Evaluated the argument to createArgs") ann
+    in (res,tps,ni,nmp)
 
 createArgs' :: (Args a,Monad m) => ArgAnnotation a -> SMT' m (a,[FunInfo])
 createArgs' ann = do
@@ -550,7 +552,7 @@ declareType (_::t) ann = do
                      (declaredDataTypes st)
       nst = st { declaredDataTypes = ndts }
   putSMT nst
-  smtBackend $ \backend -> mapM_ (\coll -> lift $ smtHandle backend st (SMTDeclareDataTypes coll)) colls
+  smtBackend $ \backend -> mapM_ (\coll -> lift $ smtHandle backend nst (SMTDeclareDataTypes coll)) colls
 
 -- Data type info
 
