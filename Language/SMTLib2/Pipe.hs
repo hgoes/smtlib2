@@ -212,6 +212,22 @@ instance MonadIO m => SMTBackend SMTPipe m where
                Nothing -> error $ "smtlib2: Failed to unmangle value "++show val'++" to type "++show (typeOf (undefined::t))
              Nothing -> error $ "smtlib2: Failed to parse value from "++show res
       _ -> error $ "smtlib2: Unexpected get-value response: "++show val
+  smtHandle pipe st (SMTApply tactic) = do
+    putRequest pipe $ L.List [L.Symbol "apply"
+                             ,tacticToLisp tactic]
+    val <- parseResponse pipe
+    case val of
+      L.List (L.Symbol "goals":goals)
+        -> return $
+           fmap (\goal -> case goal of
+                    L.List ((L.Symbol "goal"):expr:_)
+                      -> case lispToExpr (commonFunctions `mappend` commonTheorems)
+                              (findName st)
+                              (declaredDataTypes st) gcast (Just $ Fix BoolSort) expr of
+                           Just (Just x) -> x
+                           _ -> error $ "smtlib2: Couldn't parse goal "++show expr
+                    _ -> error $ "smtlib2: Couldn't parse goal description "++show val
+                ) goals
 
 createSMTPipe :: String -> [String] -> IO SMTPipe
 createSMTPipe solver args = do

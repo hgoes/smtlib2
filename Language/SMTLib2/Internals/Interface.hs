@@ -28,6 +28,12 @@ checkSatUsing t = smtBackend $ \backend -> do
   st <- getSMT
   lift $ smtHandle backend st (SMTCheckSat (Just t))
 
+-- | Apply the given tactic to the current assertions. (Works only with Z3)
+apply :: Monad m => Tactic -> SMT' m [SMTExpr Bool]
+apply t = smtBackend $ \backend -> do
+  st <- getSMT
+  lift $ smtHandle backend st (SMTApply t)
+
 -- | Push a new context on the stack
 push :: Monad m => SMT' m ()
 push = smtBackend $ \backend -> do

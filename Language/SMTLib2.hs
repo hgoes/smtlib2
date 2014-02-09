@@ -41,7 +41,7 @@ module Language.SMTLib2
          setOption,getInfo,setLogic,
          SMTInfo(..),
          assert,push,pop,stack,
-         checkSat,checkSatUsing,
+         checkSat,checkSatUsing,apply,
          getValue,getValues,
          comment,
          getProof,getUnsatCore,simplify,
