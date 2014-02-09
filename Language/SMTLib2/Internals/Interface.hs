@@ -282,9 +282,9 @@ infix 4 .==.
 argEq :: Args a => a -> a -> SMTExpr Bool
 argEq xs ys = app and' $
               fst $ foldsExprsId
-              (\s [(arg1,_),(arg2,_)] -> ((arg1 .==. arg2):s,[arg1,arg2]))
+              (\s [(arg1,_,_),(arg2,_,_)] -> ((arg1 .==. arg2):s,[arg1,arg2]))
               []
-              [(xs,undefined),(ys,undefined)]
+              [(xs,undefined,()),(ys,undefined,())]
 
 -- | Declares all arguments to be distinct
 distinct :: SMTType a => [SMTExpr a] -> SMTExpr Bool

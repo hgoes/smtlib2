@@ -350,13 +350,13 @@ class (Eq a,Typeable a,Show a,
   foldExprs :: Monad m => (forall t. SMTType t => s -> SMTExpr t -> SMTAnnotation t -> m (s,SMTExpr t))
             -> s -> a -> ArgAnnotation a -> m (s,a)
   foldExprs f s x ann = do
-    (s',[r]) <- foldsExprs (\cs [(expr,ann')] -> do
+    (s',[r]) <- foldsExprs (\cs [(expr,ann',_)] -> do
                                (cs',cr) <- f cs expr ann'
                                return (cs',[cr])
-                           ) s [(x,ann)]
+                           ) s [(x,ann,())]
     return (s',r)
-  foldsExprs :: Monad m => (forall t. SMTType t => s -> [(SMTExpr t,SMTAnnotation t)] -> m (s,[SMTExpr t]))
-                -> s -> [(a,ArgAnnotation a)] -> m (s,[a])
+  foldsExprs :: Monad m => (forall t. SMTType t => s -> [(SMTExpr t,SMTAnnotation t,b)] -> m (s,[SMTExpr t]))
+                -> s -> [(a,ArgAnnotation a,b)] -> m (s,[a])
   extractArgAnnotation :: a -> ArgAnnotation a
   toArgs :: [UntypedExpr] -> Maybe (a,[UntypedExpr])
   getSorts :: a -> ArgAnnotation a -> [Sort]
@@ -375,8 +375,8 @@ foldExprsId :: Args a => (forall t. SMTType t => s -> SMTExpr t -> SMTAnnotation
                -> s -> a -> ArgAnnotation a -> (s,a)
 foldExprsId f st arg ann = runIdentity $ foldExprs (\st' expr ann' -> return $ f st' expr ann') st arg ann
 
-foldsExprsId :: Args a => (forall t. SMTType t => s -> [(SMTExpr t,SMTAnnotation t)] -> (s,[SMTExpr t]))
-               -> s -> [(a,ArgAnnotation a)] -> (s,[a])
+foldsExprsId :: Args a => (forall t. SMTType t => s -> [(SMTExpr t,SMTAnnotation t,b)] -> (s,[SMTExpr t]))
+               -> s -> [(a,ArgAnnotation a,b)] -> (s,[a])
 foldsExprsId f st arg = runIdentity $ foldsExprs (\st' anns -> return $ f st' anns) st arg
 
 class (Args a) => Liftable a where
