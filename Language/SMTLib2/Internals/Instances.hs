@@ -750,6 +750,15 @@ bvRestrict (BitVector x::BitVector a) ann
   = let sz = getBVSize (Proxy::Proxy a) ann
     in BitVector (x `mod` (2^sz))
 
+instance TypeableNat n => Num (BitVector (BVTyped n)) where
+  (+) (BitVector x) (BitVector y) = BitVector (x+y)
+  (-) (BitVector x) (BitVector y) = BitVector (x-y)
+  (*) (BitVector x) (BitVector y) = BitVector (x*y)
+  negate (BitVector x) = BitVector (negate x)
+  abs (BitVector x) = BitVector (abs x)
+  signum (BitVector x) = BitVector (signum x)
+  fromInteger i = BitVector i
+
 instance TypeableNat n => Num (SMTExpr (BitVector (BVTyped n))) where
   (+) (x::SMTExpr (BitVector (BVTyped n))) y = App (SMTBVBin BVAdd) (x,y)
   (-) (x::SMTExpr (BitVector (BVTyped n))) y = App (SMTBVBin BVSub) (x,y)
