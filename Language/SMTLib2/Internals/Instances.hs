@@ -577,10 +577,10 @@ instance LiftArgs a => LiftArgs [a] where
 instance SMTType a => SMTType (Maybe a) where
   type SMTAnnotation (Maybe a) = SMTAnnotation a
   getSort u ann = Fix $ NamedSort "Maybe" [getSort (undefArg u) ann]
-  asDataType _ = Just ("Maybe",
-                       TypeCollection { argCount = 1
-                                      , dataTypes = [mbTp]
-                                      })
+  asDataType _ _ = Just ("Maybe",
+                         TypeCollection { argCount = 1
+                                        , dataTypes = [mbTp]
+                                        })
     where
       mbTp = DataType { dataTypeName = "Maybe"
                       , dataTypeConstructors = [conNothing,
@@ -641,9 +641,9 @@ undefArg _ = undefined
 instance (Typeable a,SMTType a) => SMTType [a] where
   type SMTAnnotation [a] = SMTAnnotation a
   getSort u ann = Fix (NamedSort "List" [getSort (undefArg u) ann])
-  asDataType _ = Just ("List",
-                       TypeCollection { argCount = 1
-                                      , dataTypes = [tpList] })
+  asDataType _ _ = Just ("List",
+                         TypeCollection { argCount = 1
+                                        , dataTypes = [tpList] })
     where
       tpList = DataType { dataTypeName = "List"
                         , dataTypeConstructors = [conNil,conCons]

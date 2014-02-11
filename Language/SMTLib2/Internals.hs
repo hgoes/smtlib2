@@ -59,8 +59,8 @@ class (Eq t,Typeable t,
       => SMTType t where
   type SMTAnnotation t
   getSort :: t -> SMTAnnotation t -> Sort
-  asDataType :: t -> Maybe (String,TypeCollection)
-  asDataType _ = Nothing
+  asDataType :: t -> SMTAnnotation t -> Maybe (String,TypeCollection)
+  asDataType _ _ = Nothing
   asValueType :: t -> SMTAnnotation t -> (forall v. SMTValue v => v -> SMTAnnotation v -> r) -> Maybe r
   getProxyArgs :: t -> SMTAnnotation t -> [ProxyArg]
   getProxyArgs _ _ = []
@@ -630,7 +630,7 @@ addDataTypeStructure struct dts
 getNewTypeCollections :: SMTType t => Proxy t -> SMTAnnotation t -> DataTypeInfo
                          -> ([TypeCollection],DataTypeInfo)
 getNewTypeCollections (_::Proxy t) ann dts
-  = case asDataType (undefined::t) of
+  = case asDataType (undefined::t) ann of
     Nothing -> ([],dts) -- This is no declarable data type
     Just (name,coll)
       -> let isKnown = Map.member name (datatypes dts) -- Is the datatype already known?
