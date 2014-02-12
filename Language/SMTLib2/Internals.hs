@@ -350,13 +350,13 @@ class (Eq a,Typeable a,Show a,
   foldExprs :: Monad m => (forall t. SMTType t => s -> SMTExpr t -> SMTAnnotation t -> m (s,SMTExpr t))
             -> s -> a -> ArgAnnotation a -> m (s,a)
   foldExprs f s x ann = do
-    (s',_,r) <- foldsExprs (\cs [(expr,ann',_)] -> do
+    (s',_,r) <- foldsExprs (\cs [(expr,_)] ann' -> do
                                (cs',cr) <- f cs expr ann'
                                return (cs',[cr],cr)
-                           ) s [(x,ann,())]
+                           ) s [(x,())] ann
     return (s',r)
-  foldsExprs :: Monad m => (forall t. SMTType t => s -> [(SMTExpr t,SMTAnnotation t,b)] -> m (s,[SMTExpr t],SMTExpr t))
-                -> s -> [(a,ArgAnnotation a,b)] -> m (s,[a],a)
+  foldsExprs :: Monad m => (forall t. SMTType t => s -> [(SMTExpr t,b)] -> SMTAnnotation t -> m (s,[SMTExpr t],SMTExpr t))
+                -> s -> [(a,b)] -> ArgAnnotation a -> m (s,[a],a)
   extractArgAnnotation :: a -> ArgAnnotation a
   toArgs :: [UntypedExpr] -> Maybe (a,[UntypedExpr])
   getSorts :: a -> ArgAnnotation a -> [Sort]
@@ -365,7 +365,7 @@ class (Eq a,Typeable a,Show a,
 instance Args () where
   type ArgAnnotation () = ()
   foldExprs _ s _ _ = return (s,())
-  foldsExprs _ s args = return (s,fmap (const ()) args,())
+  foldsExprs _ s args _ = return (s,fmap (const ()) args,())
   extractArgAnnotation _ = ()
   toArgs x = Just ((),x)
   getSorts _ _ = []
@@ -375,9 +375,10 @@ foldExprsId :: Args a => (forall t. SMTType t => s -> SMTExpr t -> SMTAnnotation
                -> s -> a -> ArgAnnotation a -> (s,a)
 foldExprsId f st arg ann = runIdentity $ foldExprs (\st' expr ann' -> return $ f st' expr ann') st arg ann
 
-foldsExprsId :: Args a => (forall t. SMTType t => s -> [(SMTExpr t,SMTAnnotation t,b)] -> (s,[SMTExpr t],SMTExpr t))
-               -> s -> [(a,ArgAnnotation a,b)] -> (s,[a],a)
-foldsExprsId f st arg = runIdentity $ foldsExprs (\st' anns -> return $ f st' anns) st arg
+foldsExprsId :: Args a => (forall t. SMTType t => s -> [(SMTExpr t,b)] -> SMTAnnotation t -> (s,[SMTExpr t],SMTExpr t))
+               -> s -> [(a,b)] -> ArgAnnotation a -> (s,[a],a)
+foldsExprsId f st exprs anns = runIdentity $ foldsExprs (\st' exprs' anns' -> return $ f st' exprs' anns'
+                                                        ) st exprs anns
 
 class (Args a) => Liftable a where
   type Lifted a i

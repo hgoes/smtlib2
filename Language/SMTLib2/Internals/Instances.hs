@@ -307,9 +307,9 @@ instance (Args a,Args b) => Args (a,b) where
     ~(s1,e1') <- foldExprs f s e1 ann1
     ~(s2,e2') <- foldExprs f s1 e2 ann2
     return (s2,(e1',e2'))
-  foldsExprs f s args = do
-    ~(s1,e1,r1) <- foldsExprs f s (fmap (\(~(e1,_),~(ann1,_),b) -> (e1,ann1,b)) args)
-    ~(s2,e2,r2) <- foldsExprs f s1 (fmap (\(~(_,e2),~(_,ann2),b) -> (e2,ann2,b)) args)
+  foldsExprs f s args ~(ann1,ann2) = do
+    ~(s1,e1,r1) <- foldsExprs f s (fmap (\(~(e1,_),b) -> (e1,b)) args) ann1
+    ~(s2,e2,r2) <- foldsExprs f s1 (fmap (\(~(_,e2),b) -> (e2,b)) args) ann2
     return (s2,zip e1 e2,(r1,r2))
   extractArgAnnotation ~(x,y) = (extractArgAnnotation x,
                                  extractArgAnnotation y)
@@ -343,10 +343,10 @@ instance (Args a,Args b,Args c) => Args (a,b,c) where
     ~(s2,e2') <- foldExprs f s1 e2 ann2
     ~(s3,e3') <- foldExprs f s2 e3 ann3
     return (s3,(e1',e2',e3'))
-  foldsExprs f s args = do
-    ~(s1,e1,r1) <- foldsExprs f s (fmap (\(~(e1,_,_),~(ann1,_,_),b) -> (e1,ann1,b)) args)
-    ~(s2,e2,r2) <- foldsExprs f s1 (fmap (\(~(_,e2,_),~(_,ann2,_),b) -> (e2,ann2,b)) args)
-    ~(s3,e3,r3) <- foldsExprs f s2 (fmap (\(~(_,_,e3),~(_,_,ann3),b) -> (e3,ann3,b)) args)
+  foldsExprs f s args ~(ann1,ann2,ann3) = do
+    ~(s1,e1,r1) <- foldsExprs f s (fmap (\(~(e1,_,_),b) -> (e1,b)) args) ann1
+    ~(s2,e2,r2) <- foldsExprs f s1 (fmap (\(~(_,e2,_),b) -> (e2,b)) args) ann2
+    ~(s3,e3,r3) <- foldsExprs f s2 (fmap (\(~(_,_,e3),b) -> (e3,b)) args) ann3
     return (s3,zip3 e1 e2 e3,(r1,r2,r3))
   extractArgAnnotation ~(e1,e2,e3)
     = (extractArgAnnotation e1,
@@ -381,11 +381,11 @@ instance (Args a,Args b,Args c,Args d) => Args (a,b,c,d) where
     ~(s3,e3') <- foldExprs f s2 e3 ann3
     ~(s4,e4') <- foldExprs f s3 e4 ann4
     return (s4,(e1',e2',e3',e4'))
-  foldsExprs f s args = do
-    ~(s1,e1,r1) <- foldsExprs f s (fmap (\(~(e1,_,_,_),~(ann1,_,_,_),b) -> (e1,ann1,b)) args)
-    ~(s2,e2,r2) <- foldsExprs f s1 (fmap (\(~(_,e2,_,_),~(_,ann2,_,_),b) -> (e2,ann2,b)) args)
-    ~(s3,e3,r3) <- foldsExprs f s2 (fmap (\(~(_,_,e3,_),~(_,_,ann3,_),b) -> (e3,ann3,b)) args)
-    ~(s4,e4,r4) <- foldsExprs f s3 (fmap (\(~(_,_,_,e4),~(_,_,_,ann4),b) -> (e4,ann4,b)) args)
+  foldsExprs f s args ~(ann1,ann2,ann3,ann4) = do
+    ~(s1,e1,r1) <- foldsExprs f s (fmap (\(~(e1,_,_,_),b) -> (e1,b)) args) ann1
+    ~(s2,e2,r2) <- foldsExprs f s1 (fmap (\(~(_,e2,_,_),b) -> (e2,b)) args) ann2
+    ~(s3,e3,r3) <- foldsExprs f s2 (fmap (\(~(_,_,e3,_),b) -> (e3,b)) args) ann3
+    ~(s4,e4,r4) <- foldsExprs f s3 (fmap (\(~(_,_,_,e4),b) -> (e4,b)) args) ann4
     return (s4,zip4 e1 e2 e3 e4,(r1,r2,r3,r4))
   extractArgAnnotation ~(e1,e2,e3,e4)
     = (extractArgAnnotation e1,
@@ -429,12 +429,12 @@ instance (Args a,Args b,Args c,Args d,Args e) => Args (a,b,c,d,e) where
     ~(s4,e4') <- foldExprs f s3 e4 ann4
     ~(s5,e5') <- foldExprs f s4 e5 ann5
     return (s5,(e1',e2',e3',e4',e5'))
-  foldsExprs f s args = do
-    ~(s1,e1,r1) <- foldsExprs f s (fmap (\(~(e1,_,_,_,_),~(ann1,_,_,_,_),b) -> (e1,ann1,b)) args)
-    ~(s2,e2,r2) <- foldsExprs f s1 (fmap (\(~(_,e2,_,_,_),~(_,ann2,_,_,_),b) -> (e2,ann2,b)) args)
-    ~(s3,e3,r3) <- foldsExprs f s2 (fmap (\(~(_,_,e3,_,_),~(_,_,ann3,_,_),b) -> (e3,ann3,b)) args)
-    ~(s4,e4,r4) <- foldsExprs f s3 (fmap (\(~(_,_,_,e4,_),~(_,_,_,ann4,_),b) -> (e4,ann4,b)) args)
-    ~(s5,e5,r5) <- foldsExprs f s4 (fmap (\(~(_,_,_,_,e5),~(_,_,_,_,ann5),b) -> (e5,ann5,b)) args)
+  foldsExprs f s args ~(ann1,ann2,ann3,ann4,ann5) = do
+    ~(s1,e1,r1) <- foldsExprs f s (fmap (\(~(e1,_,_,_,_),b) -> (e1,b)) args) ann1
+    ~(s2,e2,r2) <- foldsExprs f s1 (fmap (\(~(_,e2,_,_,_),b) -> (e2,b)) args) ann2
+    ~(s3,e3,r3) <- foldsExprs f s2 (fmap (\(~(_,_,e3,_,_),b) -> (e3,b)) args) ann3
+    ~(s4,e4,r4) <- foldsExprs f s3 (fmap (\(~(_,_,_,e4,_),b) -> (e4,b)) args) ann4
+    ~(s5,e5,r5) <- foldsExprs f s4 (fmap (\(~(_,_,_,_,e5),b) -> (e5,b)) args) ann5
     return (s5,zip5 e1 e2 e3 e4 e5,(r1,r2,r3,r4,r5))
   extractArgAnnotation ~(e1,e2,e3,e4,e5)
     = (extractArgAnnotation e1,
@@ -484,13 +484,13 @@ instance (Args a,Args b,Args c,Args d,Args e,Args f) => Args (a,b,c,d,e,f) where
     ~(s5,e5') <- foldExprs f s4 e5 ann5
     ~(s6,e6') <- foldExprs f s5 e6 ann6
     return (s6,(e1',e2',e3',e4',e5',e6'))
-  foldsExprs f s args = do
-    ~(s1,e1,r1) <- foldsExprs f s (fmap (\(~(e1,_,_,_,_,_),~(ann1,_,_,_,_,_),b) -> (e1,ann1,b)) args)
-    ~(s2,e2,r2) <- foldsExprs f s1 (fmap (\(~(_,e2,_,_,_,_),~(_,ann2,_,_,_,_),b) -> (e2,ann2,b)) args)
-    ~(s3,e3,r3) <- foldsExprs f s2 (fmap (\(~(_,_,e3,_,_,_),~(_,_,ann3,_,_,_),b) -> (e3,ann3,b)) args)
-    ~(s4,e4,r4) <- foldsExprs f s3 (fmap (\(~(_,_,_,e4,_,_),~(_,_,_,ann4,_,_),b) -> (e4,ann4,b)) args)
-    ~(s5,e5,r5) <- foldsExprs f s4 (fmap (\(~(_,_,_,_,e5,_),~(_,_,_,_,ann5,_),b) -> (e5,ann5,b)) args)
-    ~(s6,e6,r6) <- foldsExprs f s5 (fmap (\(~(_,_,_,_,_,e6),~(_,_,_,_,_,ann6),b) -> (e6,ann6,b)) args)
+  foldsExprs f s args ~(ann1,ann2,ann3,ann4,ann5,ann6) = do
+    ~(s1,e1,r1) <- foldsExprs f s (fmap (\(~(e1,_,_,_,_,_),b) -> (e1,b)) args) ann1
+    ~(s2,e2,r2) <- foldsExprs f s1 (fmap (\(~(_,e2,_,_,_,_),b) -> (e2,b)) args) ann2
+    ~(s3,e3,r3) <- foldsExprs f s2 (fmap (\(~(_,_,e3,_,_,_),b) -> (e3,b)) args) ann3
+    ~(s4,e4,r4) <- foldsExprs f s3 (fmap (\(~(_,_,_,e4,_,_),b) -> (e4,b)) args) ann4
+    ~(s5,e5,r5) <- foldsExprs f s4 (fmap (\(~(_,_,_,_,e5,_),b) -> (e5,b)) args) ann5
+    ~(s6,e6,r6) <- foldsExprs f s5 (fmap (\(~(_,_,_,_,_,e6),b) -> (e6,b)) args) ann6
     return  (s6,zip6 e1 e2 e3 e4 e5 e6,(r1,r2,r3,r4,r5,r6))
   extractArgAnnotation ~(e1,e2,e3,e4,e5,e6)
     = (extractArgAnnotation e1,
@@ -543,14 +543,13 @@ instance Args a => Args [a] where
     (s',x') <- foldExprs f s x ann
     (s'',xs') <- foldExprs f s' xs anns
     return (s'',x':xs')
-  foldsExprs f s args = case head args of
-    (_,[],_) -> return (s,fmap (const []) args,[])
-    _ -> do
-      let args_heads = fmap (\(xs,anns,b) -> (head xs,head anns,b)) args
-          args_tails = fmap (\(xs,anns,b) -> (tail xs,tail anns,b)) args
-      ~(s1,res_heads,zhead) <- foldsExprs f s args_heads
-      ~(s2,res_tails,ztail) <- foldsExprs f s1 args_tails
-      return (s2,zipWith (:) res_heads res_tails,zhead:ztail)
+  foldsExprs f s _ [] = return (s,[],[])
+  foldsExprs f s args (ann:anns) = do
+    let args_heads = fmap (\(xs,b) -> (head xs,b)) args
+        args_tails = fmap (\(xs,b) -> (tail xs,b)) args
+    ~(s1,res_heads,zhead) <- foldsExprs f s args_heads ann
+    ~(s2,res_tails,ztail) <- foldsExprs f s1 args_tails anns
+    return (s2,zipWith (:) res_heads res_tails,zhead:ztail)
   extractArgAnnotation = fmap extractArgAnnotation
   toArgs [] = Just ([],[])
   toArgs x = do
