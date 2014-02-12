@@ -7,23 +7,23 @@ data SMTOrdOp
   | Gt
   | Le
   | Lt
-  deriving (Typeable,Eq,Show)
+  deriving (Typeable,Eq,Ord,Show)
 
 data SMTArithOp
   = Plus
   | Mult
-  deriving (Typeable,Eq,Show)
+  deriving (Typeable,Eq,Ord,Show)
 
 data SMTIntArithOp = Div
                    | Mod
                    | Rem
-                   deriving (Typeable,Eq,Show)
+                   deriving (Typeable,Eq,Ord,Show)
 
 data SMTLogicOp = And
                 | Or
                 | XOr
                 | Implies
-                deriving (Typeable,Eq,Show)
+                deriving (Typeable,Eq,Ord,Show)
 
 data SMTBVCompOp
   = BVULE
@@ -34,7 +34,7 @@ data SMTBVCompOp
   | BVSLT
   | BVSGE
   | BVSGT
-  deriving (Typeable,Eq,Show)
+  deriving (Typeable,Eq,Ord,Show)
 
 data SMTBVBinOp
   = BVAdd
@@ -50,9 +50,9 @@ data SMTBVBinOp
   | BVXor
   | BVAnd
   | BVOr
-  deriving (Typeable,Eq,Show)
+  deriving (Typeable,Eq,Ord,Show)
 
 data SMTBVUnOp
   = BVNot 
   | BVNeg
-  deriving (Typeable,Eq,Show)
+  deriving (Typeable,Eq,Ord,Show)
