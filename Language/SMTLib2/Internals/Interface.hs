@@ -132,7 +132,7 @@ unmangleArray b expr = mapM (\i -> do
                             ) (range b) >>= return.array b
 
 -- | Define a new function with a body
-defFun :: (Liftable a,SMTType r,Unit (ArgAnnotation a),Monad m)
+defFun :: (Args a,SMTType r,Unit (ArgAnnotation a),Monad m)
           => (a -> SMTExpr r) -> SMT' m (SMTFunction a r)
 defFun = defFunAnn unit
 
@@ -153,11 +153,11 @@ defConstNamed' name e = smtBackend $ \backend -> do
   return fun
 
 -- | Define a new function with a body and custom type annotations for arguments and result.
-defFunAnnNamed :: (Liftable a,SMTType r,Monad m)
+defFunAnnNamed :: (Args a,SMTType r,Monad m)
                   => String -> ArgAnnotation a -> (a -> SMTExpr r) -> SMT' m (SMTFunction a r)
 defFunAnnNamed name = defFunAnnNamed' (Just name)
 
-defFunAnnNamed' :: (Liftable a,SMTType r,Monad m)
+defFunAnnNamed' :: (Args a,SMTType r,Monad m)
                   => Maybe String -> ArgAnnotation a -> (a -> SMTExpr r) -> SMT' m (SMTFunction a r)
 defFunAnnNamed' name ann_arg f = smtBackend $ \backend -> do
   (au,tps) <- createArgs' ann_arg
@@ -170,7 +170,7 @@ defFunAnnNamed' name ann_arg f = smtBackend $ \backend -> do
   return fun
 
 -- | Like `defFunAnnNamed`, but defaults the function name to "fun".
-defFunAnn :: (Liftable a,SMTType r,Monad m)
+defFunAnn :: (Args a,SMTType r,Monad m)
              => ArgAnnotation a -> (a -> SMTExpr r) -> SMT' m (SMTFunction a r)
 defFunAnn = defFunAnnNamed' Nothing
 

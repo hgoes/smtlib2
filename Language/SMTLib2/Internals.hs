@@ -196,7 +196,7 @@ data Value = BoolValue Bool
 data SMTFunction arg res where
   SMTEq :: SMTType a => SMTFunction [SMTExpr a] Bool
   SMTMap :: (Liftable arg,SMTType res,Args i) => SMTFunction arg res -> SMTFunction (Lifted arg i) (SMTArray i res)
-  SMTFun :: (Liftable arg,SMTType res) => Integer -> SMTAnnotation res -> SMTFunction arg res
+  SMTFun :: (Args arg,SMTType res) => Integer -> SMTAnnotation res -> SMTFunction arg res
   SMTBuiltIn :: (Liftable arg,SMTType res) => String -> SMTAnnotation res -> SMTFunction arg res
   SMTOrd :: (SMTType a) => SMTOrdOp -> SMTFunction (SMTExpr a,SMTExpr a) Bool
   SMTArith :: (SMTType a) => SMTArithOp -> SMTFunction [SMTExpr a] a
@@ -476,7 +476,7 @@ newVariable name (ann::SMTAnnotation t)
                                      (Just name',Just nc') -> Just (name',nc') }
                 in ((Var idx ann::SMTExpr t,info),info))
 
-newFunction :: (Monad m,Liftable arg,SMTType r) => Maybe String -> ArgAnnotation arg -> SMTAnnotation r -> SMT' m (SMTFunction arg r,FunInfo)
+newFunction :: (Monad m,Args arg,SMTType r) => Maybe String -> ArgAnnotation arg -> SMTAnnotation r -> SMT' m (SMTFunction arg r,FunInfo)
 newFunction name (ann_arg::ArgAnnotation arg) (ann_res::SMTAnnotation r)
   = newVariableId name
     (\idx nc -> let info = FunInfo { funInfoId = idx
