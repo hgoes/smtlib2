@@ -13,6 +13,7 @@ import Data.Constraint
 import Data.Proxy
 #endif
 import Data.Fix
+import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromJust)
 
@@ -562,6 +563,20 @@ instance Args a => Args [a] where
                                     in (x:xs,r2)
   getSorts _ [] = []
   getSorts ~(x:xs) (ann:anns) = getSorts x ann ++ getSorts xs anns
+
+instance (Typeable a,Show a,Args b,Ord a) => Args (Map a b) where
+  type ArgAnnotation (Map a b) = Map a (ArgAnnotation b)
+  foldsExprs f s args mp_ann = do
+    let lst_ann = Map.toAscList mp_ann
+        lst = fmap (\(mp,extra) -> ([ mp Map.! k | (k,_) <- lst_ann ],extra)
+                   ) args
+    (ns,lst',lst_merged) <- foldsExprs f s lst (fmap snd lst_ann)
+    return (ns,fmap (\lst'' -> Map.fromAscList $ zip (fmap fst lst_ann) lst''
+                    ) lst',Map.fromAscList $ zip (fmap fst lst_ann) lst_merged)
+  extractArgAnnotation = fmap extractArgAnnotation
+  toArgs exprs = Just (Map.empty,exprs)
+  getSorts (_::Map a b) anns = concat [ getSorts (undefined::b) ann | (_,ann) <- Map.toAscList anns ]
+  getArgAnnotation _ sorts = (Map.empty,sorts)
 
 instance LiftArgs a => LiftArgs [a] where
   type Unpacked [a] = [Unpacked a]
