@@ -222,8 +222,8 @@ instance (SMTType a,SMTType b) => SMTType (Pair a b) where
   getSort (_::Pair a b) (ann1,ann2) = let s1 = getSort (undefined::a) ann1
                                           s2 = getSort (undefined::b) ann2
                                       in Fix (NamedSort "Pair" [s1,s2])
-  asDataType _ = Just ("Pair",TypeCollection { argCount = 2
-                                             , dataTypes = [dtPair] })
+  asDataType _ _ = Just ("Pair",TypeCollection { argCount = 2
+                                               , dataTypes = [dtPair] })
     where
       dtPair = DataType { dataTypeName = "Pair"
                         , dataTypeConstructors = [conPair]
@@ -308,8 +308,8 @@ data S = A | B | C deriving (Show,Eq,Ord,Typeable)
 instance SMTType Main.S where
   type SMTAnnotation Main.S = ()
   getSort _ _ = Fix (NamedSort "S" [])
-  asDataType _ = Just ("S",TypeCollection { argCount = 0
-                                          , dataTypes = [dtS] })
+  asDataType _ _ = Just ("S",TypeCollection { argCount = 0
+                                            , dataTypes = [dtS] })
     where
       dtS = DataType { dataTypeName = "S"
                      , dataTypeConstructors = [ Constr { conName = show con
@@ -345,8 +345,8 @@ data Lst a = Nil
 instance SMTType a => SMTType (Lst a) where
   type SMTAnnotation (Lst a) = SMTAnnotation a
   getSort (_::Lst a) ann = Fix (NamedSort "Lst" [getSort (undefined::a) ann])
-  asDataType _ = Just ("Lst",TypeCollection { argCount = 1
-                                            , dataTypes = [dtLst] })
+  asDataType _ _ = Just ("Lst",TypeCollection { argCount = 1
+                                              , dataTypes = [dtLst] })
     where
       dtLst = DataType { dataTypeName = "Lst"
                        , dataTypeConstructors = [conNil,conCons]
@@ -446,7 +446,7 @@ data TreeList t = TNil
 instance SMTType t => SMTType (Tree t) where
   type SMTAnnotation (Tree t) = SMTAnnotation t
   getSort (_::Tree a) ann = Fix (NamedSort "Tree" [getSort (undefined::a) ann])
-  asDataType _ = Just ("Tree",tcTree)
+  asDataType _ _ = Just ("Tree",tcTree)
   asValueType (_::Tree t) ann f
     = asValueType (undefined::t) ann $
       \(_::t') ann' -> f (undefined::Tree t') ann'
@@ -457,7 +457,7 @@ instance SMTType t => SMTType (Tree t) where
 instance SMTType t => SMTType (TreeList t) where
   type SMTAnnotation (TreeList t) = SMTAnnotation t
   getSort (_::TreeList a) ann = Fix (NamedSort "TreeList" [getSort (undefined::a) ann])
-  asDataType _ = Just ("TreeList",tcTree)
+  asDataType _ _ = Just ("TreeList",tcTree)
   asValueType (_::TreeList t) ann f
     = asValueType (undefined::t) ann $
       \(_::t') ann' -> f (undefined::TreeList t') ann'
