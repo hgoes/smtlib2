@@ -168,8 +168,7 @@ data SMTExpr t where
   Named :: SMTExpr a -> String -> Integer -> SMTExpr a
   deriving Typeable
 
-data UntypedExpr where
-  UntypedExpr :: SMTType a => SMTExpr a -> UntypedExpr
+data UntypedExpr = forall a. SMTType a => UntypedExpr (SMTExpr a) deriving (Typeable)
 
 instance Eq UntypedExpr where
   (UntypedExpr e1) == (UntypedExpr e2) = compareExprs e1 e2 == EQ
@@ -689,10 +688,28 @@ data TypeCollection = TypeCollection { argCount :: Integer
                                      , dataTypes :: [DataType]
                                      }
 
-data ProxyArg = forall t. SMTType t => ProxyArg t (SMTAnnotation t)
+data ProxyArg = forall t. SMTType t => ProxyArg t (SMTAnnotation t) deriving Typeable
 
 withProxyArg :: ProxyArg -> (forall t. SMTType t => t -> SMTAnnotation t -> a) -> a
 withProxyArg (ProxyArg x ann) f = f x ann
+
+instance Show ProxyArg where
+  showsPrec p (ProxyArg u ann) = showParen (p>10) $
+                                 showString "ProxyArg " .
+                                 showsPrec 11 (typeOf u) .
+                                 showChar ' ' .
+                                 showsPrec 11 ann
+
+instance Eq ProxyArg where
+  (ProxyArg (u1::t) ann1) == (ProxyArg u2 ann2) = case cast (u2,ann2) of
+    Just (_::t,ann2') -> ann1==ann2'
+    Nothing -> False
+
+instance Ord ProxyArg where
+  compare (ProxyArg u1 ann1) (ProxyArg u2 ann2) = case compare (typeOf u1) (typeOf u2) of
+    EQ -> case cast ann2 of
+      Just ann2' -> compare ann1 ann2'
+    x -> x
 
 data AnyValue = forall t. SMTType t => AnyValue [ProxyArg] t (SMTAnnotation t)
 

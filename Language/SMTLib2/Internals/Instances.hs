@@ -105,6 +105,17 @@ inferResAnnotation x@(SMTExtract _ prLen) ann
 inferResAnnotation (SMTConTest _) _ = ()
 inferResAnnotation (SMTFieldSel f) ann = getFieldAnn f ann
 
+-- Untyped
+
+instance SMTType UntypedExpr where
+  type SMTAnnotation UntypedExpr = ProxyArg
+  getSort _ (ProxyArg u ann) = getSort u ann
+  asDataType _ (ProxyArg u ann) = asDataType u ann
+  asValueType _ (ProxyArg u ann) f = asValueType u ann f
+  getProxyArgs _ (ProxyArg u ann) = getProxyArgs u ann
+  additionalConstraints _ (ProxyArg u ann) (Var x _) = additionalConstraints u ann (Var x ann)
+  annotationFromSort _ _ = error "smtlib2: No implementation for annotationFromSort for UntypedExpr"
+  
 -- Bool
 
 instance SMTType Bool where
