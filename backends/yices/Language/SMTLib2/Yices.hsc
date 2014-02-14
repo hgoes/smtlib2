@@ -200,10 +200,10 @@ instance SMTBackend YicesBackend IO where
            else withArrayLen (fmap snd rargs) $
                 \len arr -> yicesLambda (fromIntegral len) arr body
     modifyIORef (yicesExprs b) (Map.insert (funInfoId fname) fun)
-  smtHandle b _ (SMTDeclareFun fname argSorts retSort) = do
+  smtHandle b _ (SMTDeclareFun fname) = do
     tps <- readIORef (yicesTypes b)
-    argTps <- mapM (sortToType tps) argSorts
-    retTp <- sortToType tps retSort
+    argTps <- mapM (sortToType tps) (funInfoArgSorts fname)
+    retTp <- sortToType tps (funInfoSort fname)
     funTp <- if null argTps
              then return retTp
              else withArrayLen argTps $

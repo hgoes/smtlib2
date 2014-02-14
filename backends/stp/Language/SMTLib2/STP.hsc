@@ -63,8 +63,11 @@ instance SMTBackend STPBackend IO where
     mp <- readIORef (stpVars stp)
     expr' <- exprToSTP mp stp expr
     modifyIORef (stpVars stp) (Map.insert (funInfoId name) expr')
-  smtHandle stp _ (SMTDeclareFun name [] sort) = do
-    tp <- sortToSTP stp sort
+  smtHandle stp _ (SMTDeclareFun name) = do
+    case funInfoArgSorts name of
+      [] -> return ()
+      _ -> error $ "smtlib2-stp: No support for uninterpreted functions."
+    tp <- sortToSTP stp (funInfoSort name)
     expr <- stpVarExpr (stpInstance stp) (escapeName $ case funInfoName name of
                                              Nothing -> Right (funInfoId name)
                                              Just name' -> Left name') tp

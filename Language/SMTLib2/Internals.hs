@@ -40,7 +40,7 @@ data SMTRequest response where
   SMTPush :: SMTRequest ()
   SMTPop :: SMTRequest ()
   SMTDefineFun :: SMTType res => FunInfo -> [FunInfo] -> SMTExpr res -> SMTRequest ()
-  SMTDeclareFun :: FunInfo -> [Sort] -> Sort -> SMTRequest ()
+  SMTDeclareFun :: FunInfo -> SMTRequest ()
   SMTGetValue :: SMTValue t => SMTExpr t -> SMTRequest t
   SMTGetProof :: SMTRequest (SMTExpr Bool)
   SMTGetUnsatCore :: SMTRequest [String]
@@ -566,6 +566,11 @@ funInfoSort :: FunInfo -> Sort
 funInfoSort (FunInfo { funInfoProxy = _::Proxy (a,t)
                      , funInfoResAnn = ann})
   = getSort (undefined::t) ann
+
+funInfoArgSorts :: FunInfo -> [Sort]
+funInfoArgSorts (FunInfo { funInfoProxy = _::Proxy (a,t)
+                         , funInfoArgAnn = ann })
+  = getSorts (undefined::a) ann
 
 newVariableId :: (Monad m) => Maybe String -> (Integer -> Maybe Integer -> (r,FunInfo)) -> SMT' m r
 newVariableId name f = do

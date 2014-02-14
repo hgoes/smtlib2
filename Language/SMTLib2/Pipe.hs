@@ -102,7 +102,9 @@ instance MonadIO m => SMTBackend SMTPipe m where
              ]
   smtHandle pipe _ (SMTDeclareSort name arity)
     = putRequest pipe (L.List [L.Symbol "declare-sort",L.Symbol $ T.pack name,L.toLisp arity])
-  smtHandle pipe _ (SMTDeclareFun name tps rtp) = do
+  smtHandle pipe _ (SMTDeclareFun name) = do
+    let tps = funInfoArgSorts name
+        rtp = funInfoSort name
     putRequest pipe $
       L.List [L.Symbol "declare-fun"
              ,L.Symbol $ T.pack $ getSMTName name

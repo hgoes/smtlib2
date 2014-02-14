@@ -91,10 +91,9 @@ argVarsAnnNamed' name ann = do
   (_,arg) <- foldExprs (\_ (_::SMTExpr t) ann' -> do
                            (res,info) <- newVariable name ann'
                            smtBackend $ \backend -> do
-                             let sort = getSort (undefined::t) ann'
                              declareType (undefined::t) ann'
                              st <- getSMT
-                             lift $ smtHandle backend st (SMTDeclareFun info [] sort)
+                             lift $ smtHandle backend st (SMTDeclareFun info)
                              mapM_ assert $ additionalConstraints (undefined::t) ann' res
                            return ((),res)
                        ) () undefined ann
@@ -247,10 +246,9 @@ funAnnNamed name = funAnnNamed' (Just name)
 
 funAnnNamed' :: (Liftable a, SMTType r,Monad m) => Maybe String -> ArgAnnotation a -> SMTAnnotation r -> SMT' m (SMTFunction a r)
 funAnnNamed' name annArg annRet = smtBackend $ \backend -> do
-  (fun::SMTFunction a r,info) <- newFunction name annArg annRet
-  let argSorts = getSorts (undefined::a) annArg
+  (fun,info) <- newFunction name annArg annRet
   st <- getSMT
-  lift $ smtHandle backend st (SMTDeclareFun info argSorts (getSort (undefined::r) annRet))
+  lift $ smtHandle backend st (SMTDeclareFun info)
   return fun
 
 -- | funAnn with an annotation only for the return type.

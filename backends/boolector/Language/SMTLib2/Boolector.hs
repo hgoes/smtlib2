@@ -44,8 +44,11 @@ instance SMTBackend BoolectorBackend IO where
   smtHandle _ _ (SMTGetInfo SMTSolverVersion) = return "unknown"
   smtHandle btor _ (SMTSetOption (ProduceModels True)) = boolectorEnableModelGen (boolectorInstance btor)
   smtHandle _ _ (SMTSetOption _) = return ()
-  smtHandle btor _ (SMTDeclareFun name [] sort) = do
-    mkVar btor name sort
+  smtHandle btor _ (SMTDeclareFun name) = do
+    case funInfoArgSorts name of
+      [] -> return ()
+      _ -> error "smtlib2-boolector: No support for uninterpreted functions."
+    mkVar btor name (funInfoSort name)
     return ()
   smtHandle btor _ (SMTAssert expr Nothing) = do
     isAssume <- readIORef (boolectorAssumeState btor)
