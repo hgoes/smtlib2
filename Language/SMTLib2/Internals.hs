@@ -182,6 +182,11 @@ instance Show UntypedExpr where
 entype :: (forall a. SMTType a => SMTExpr a -> b) -> UntypedExpr -> b
 entype f (UntypedExpr x) = f x
 
+castUntypedExpr :: SMTType t => UntypedExpr -> SMTExpr t
+castUntypedExpr (UntypedExpr x) = case cast x of
+  Just x' -> x'
+  Nothing -> error $ "smtlib2: castUntypedExpr failed."
+
 data Sort' a = BoolSort
              | IntSort
              | RealSort
