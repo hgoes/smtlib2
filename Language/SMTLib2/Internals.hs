@@ -176,6 +176,9 @@ instance Eq UntypedExpr where
 instance Ord UntypedExpr where
   compare (UntypedExpr e1) (UntypedExpr e2) = compareExprs e1 e2
 
+instance Show UntypedExpr where
+  show (UntypedExpr e) = show e
+
 entype :: (forall a. SMTType a => SMTExpr a -> b) -> UntypedExpr -> b
 entype f (UntypedExpr x) = f x
 
