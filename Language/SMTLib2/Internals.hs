@@ -166,6 +166,7 @@ data SMTExpr t where
   Let :: (Args a) => ArgAnnotation a -> a -> (a -> SMTExpr b) -> SMTExpr b
   App :: (Args arg,SMTType res) => SMTFunction arg res -> arg -> SMTExpr res
   Named :: SMTExpr a -> String -> Integer -> SMTExpr a
+  InternalObj :: (SMTType t,Typeable a,Ord a,Show a) => a -> SMTAnnotation t -> SMTExpr t
   deriving Typeable
 
 data UntypedExpr = forall a. SMTType a => UntypedExpr (SMTExpr a) deriving (Typeable)
@@ -394,8 +395,16 @@ compareExprs = compareExprs' (-1)
     compareExprs' _ (App _ _) _ = LT
     compareExprs' _ _ (App _ _) = GT
     compareExprs' _ (Named _ n1 i1) (Named _ n2 i2) = compare (n1,i1) (n2,i2)
-    --compareExprs' _ (Named _ _ _) _ = LT
-    --compareExprs' _ _ (Named _ _ _) = GT
+    compareExprs' _ (Named _ _ _) _ = LT
+    compareExprs' _ _ (Named _ _ _) = GT
+    compareExprs' _ (InternalObj o1 ann1) (InternalObj o2 ann2) = case compare (typeOf o1) (typeOf o2) of
+      EQ -> case compare (typeOf ann1) (typeOf ann2) of
+        EQ -> case cast (o2,ann2) of
+          Just (o2',ann2') -> compare (o1,ann1) (o2',ann2')
+        r -> r
+      r -> r
+    --compareExprs' _ (InternalObj _) _ = LT
+    --compareExprs' _ _ (InternalObj _) = GT
 
 instance Eq a => Eq (SMTExpr a) where
   (==) x y = case eqExpr 0 x y of
@@ -441,6 +450,9 @@ eqExpr n lhs rhs = case (lhs,rhs) of
         Just arg2' -> if f1 == f2' && arg1 == arg2'
                       then Just True
                       else Nothing
+  (InternalObj o1 ann1,InternalObj o2 ann2) -> case cast (o2,ann2) of
+    Nothing -> Nothing
+    Just (o2',ann2') -> Just $ (o1 == o2') && (ann1 == ann2')
   (_,_) -> Nothing
 
 -- | Represents a constructor of a datatype /a/
@@ -1164,6 +1176,10 @@ showExpr i p (Named expr name nc) = showParen (p>10) (showString "Named " .
                                                       showsPrec 11 name .
                                                       showChar ' ' .
                                                       showsPrec 11 nc)
+showExpr _ p (InternalObj obj ann) = showParen (p>10) (showString "InternalObj " .
+                                                       showsPrec 11 obj .
+                                                       showChar ' ' .
+                                                       showsPrec 11 ann)
 
 instance Show (SMTFunction arg res) where
   showsPrec _ SMTEq = showString "SMTEq"
