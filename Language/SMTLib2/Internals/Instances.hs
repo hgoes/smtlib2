@@ -60,6 +60,7 @@ extractAnnotation (Exists _ _) = ()
 extractAnnotation (Let _ x f) = extractAnnotation (f x)
 extractAnnotation (Named x _ _) = extractAnnotation x
 extractAnnotation (App f arg) = inferResAnnotation f (extractArgAnnotation arg)
+extractAnnotation (InternalObj _ ann) = ann
 
 inferResAnnotation :: SMTFunction arg res -> ArgAnnotation arg -> SMTAnnotation res
 inferResAnnotation SMTEq _ = ()
