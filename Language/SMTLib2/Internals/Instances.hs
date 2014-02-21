@@ -16,6 +16,8 @@ import Data.Fix
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromJust)
+import Data.Traversable (mapAccumL)
+import Text.Show
 
 valueToHaskell :: DataTypeInfo
                   -> (forall t. SMTType t => [ProxyArg] -> t -> SMTAnnotation t -> r)
@@ -313,6 +315,7 @@ instance (SMTType a) => Args (SMTExpr a) where
   getSorts (_::SMTExpr a) ann = [getSort (undefined::a) ann]
   getArgAnnotation u (s:rest) = (annotationFromSort (getUndef u) s,rest)
   getArgAnnotation _ [] = error "smtlib2: To few sorts provided."
+  showsArgs = showExpr
 
 instance (Args a,Args b) => Args (a,b) where
   type ArgAnnotation (a,b) = (ArgAnnotation a,ArgAnnotation b)
@@ -335,6 +338,13 @@ instance (Args a,Args b) => Args (a,b) where
     = let (ann1,r1) = getArgAnnotation (undefined::a1) sorts
           (ann2,r2) = getArgAnnotation (undefined::a2) r1
       in ((ann1,ann2),r2)
+  showsArgs i p (x0,x1) = let (str0,i0) = showsArgs i 0 x0
+                              (str1,i1) = showsArgs i0 0 x1
+                          in (showChar '(' .
+                              str0 .
+                              showChar ',' .
+                              str1 .
+                              showChar ')',i1)
 
 instance (SMTValue a) => LiftArgs (SMTExpr a) where
   type Unpacked (SMTExpr a) = a
@@ -376,6 +386,17 @@ instance (Args a,Args b,Args c) => Args (a,b,c) where
           (ann3,r3) = getArgAnnotation (undefined::a3) r2
       in ((ann1,ann2,ann3),r3)
   getSorts ~(x1,x2,x3) (ann1,ann2,ann3) = getSorts x1 ann1 ++ getSorts x2 ann2 ++ getSorts x3 ann3
+  showsArgs i p (x0,x1,x2)
+    = let (str0,i0) = showsArgs i 0 x0
+          (str1,i1) = showsArgs i0 0 x1
+          (str2,i2) = showsArgs i1 0 x2
+      in (showChar '(' .
+          str0 .
+          showChar ',' .
+          str1 .
+          showChar ',' .
+          str2 .
+          showChar ')',i2)
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c) => LiftArgs (a,b,c) where
   type Unpacked (a,b,c) = (Unpacked a,Unpacked b,Unpacked c)
@@ -422,6 +443,20 @@ instance (Args a,Args b,Args c,Args d) => Args (a,b,c,d) where
       getSorts x2 ann2 ++
       getSorts x3 ann3 ++
       getSorts x4 ann4
+  showsArgs i p (x0,x1,x2,x3)
+    = let (str0,i0) = showsArgs i 0 x0
+          (str1,i1) = showsArgs i0 0 x1
+          (str2,i2) = showsArgs i1 0 x2
+          (str3,i3) = showsArgs i2 0 x3
+      in (showChar '(' .
+          str0 .
+          showChar ',' .
+          str1 .
+          showChar ',' .
+          str2 .
+          showChar ',' .
+          str3 .
+          showChar ')',i3)
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d) => LiftArgs (a,b,c,d) where
   type Unpacked (a,b,c,d) = (Unpacked a,Unpacked b,Unpacked c,Unpacked d)
@@ -475,6 +510,23 @@ instance (Args a,Args b,Args c,Args d,Args e) => Args (a,b,c,d,e) where
       getSorts x3 ann3 ++
       getSorts x4 ann4 ++
       getSorts x5 ann5
+  showsArgs i p (x0,x1,x2,x3,x4)
+    = let (str0,i0) = showsArgs i 0 x0
+          (str1,i1) = showsArgs i0 0 x1
+          (str2,i2) = showsArgs i1 0 x2
+          (str3,i3) = showsArgs i2 0 x3
+          (str4,i4) = showsArgs i3 0 x4
+      in (showChar '(' .
+          str0 .
+          showChar ',' .
+          str1 .
+          showChar ',' .
+          str2 .
+          showChar ',' .
+          str3 .
+          showChar ',' .
+          str4 .
+          showChar ')',i4)
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d,LiftArgs e) => LiftArgs (a,b,c,d,e) where
   type Unpacked (a,b,c,d,e) = (Unpacked a,Unpacked b,Unpacked c,Unpacked d,Unpacked e)
@@ -535,6 +587,26 @@ instance (Args a,Args b,Args c,Args d,Args e,Args f) => Args (a,b,c,d,e,f) where
       getSorts x4 ann4 ++
       getSorts x5 ann5 ++
       getSorts x6 ann6
+  showsArgs i p (x0,x1,x2,x3,x4,x5)
+    = let (str0,i0) = showsArgs i 0 x0
+          (str1,i1) = showsArgs i0 0 x1
+          (str2,i2) = showsArgs i1 0 x2
+          (str3,i3) = showsArgs i2 0 x3
+          (str4,i4) = showsArgs i3 0 x4
+          (str5,i5) = showsArgs i4 0 x5
+      in (showChar '(' .
+          str0 .
+          showChar ',' .
+          str1 .
+          showChar ',' .
+          str2 .
+          showChar ',' .
+          str3 .
+          showChar ',' .
+          str4 .
+          showChar ',' .
+          str5 .
+          showChar ')',i5)
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d,LiftArgs e,LiftArgs f) => LiftArgs (a,b,c,d,e,f) where
   type Unpacked (a,b,c,d,e,f) = (Unpacked a,Unpacked b,Unpacked c,Unpacked d,Unpacked e,Unpacked f)
@@ -575,6 +647,11 @@ instance Args a => Args [a] where
                                     in (x:xs,r2)
   getSorts _ [] = []
   getSorts ~(x:xs) (ann:anns) = getSorts x ann ++ getSorts xs anns
+  showsArgs i p lst = let (ni,lst') = mapAccumL (\ci arg
+                                                  -> let (str,ci') = showsArgs ci 0 arg
+                                                     in (ci',str)
+                                                ) i lst
+                      in (showListWith id lst',ni)
 
 instance (Typeable a,Show a,Args b,Ord a) => Args (Map a b) where
   type ArgAnnotation (Map a b) = Map a (ArgAnnotation b)
@@ -589,6 +666,15 @@ instance (Typeable a,Show a,Args b,Ord a) => Args (Map a b) where
   toArgs exprs = Just (Map.empty,exprs)
   getSorts (_::Map a b) anns = concat [ getSorts (undefined::b) ann | (_,ann) <- Map.toAscList anns ]
   getArgAnnotation _ sorts = (Map.empty,sorts)
+  showsArgs i p mp = let (ni,lst') = mapAccumL (\ci (key,arg)
+                                                -> let (str,ci') = showsArgs ci 0 arg
+                                                   in (ci',(key,str))
+                                               ) i (Map.toList mp)
+                     in (showString "fromList " .
+                         showListWith (\(key,str) -> showChar '(' .
+                                                     showsPrec 0 key .
+                                                     showChar ',' .
+                                                     str . showChar ')') lst',ni)
 
 instance LiftArgs a => LiftArgs [a] where
   type Unpacked [a] = [Unpacked a]
