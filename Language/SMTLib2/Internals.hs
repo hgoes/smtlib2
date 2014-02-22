@@ -1244,3 +1244,65 @@ instance Show (SMTFunction arg res) where
                                                    showsPrec 11 con)
   showsPrec p (SMTFieldSel field) = showParen (p>10) (showString "SMTFieldSel " .
                                                       showsPrec 11 field)
+
+-- | Recursively fold over all sub-expressions of this expression
+foldExpr :: (SMTType a,Monad m) => (forall t. SMTType t => s -> SMTExpr t -> m (s,SMTExpr t))
+         -> s -> SMTExpr a -> m (s,SMTExpr a)
+foldExpr f s (Forall ann (fun::arg -> SMTExpr Bool)) = do
+  let (used,_,expr0) = quantify [Quantified 0..] ann fun
+  (s',expr1) <- foldExpr f s expr0
+  return (s',Forall ann (dequantify used ann expr1::arg -> SMTExpr Bool))
+foldExpr f s (Exists ann (fun::arg -> SMTExpr Bool)) = do
+  let (used,_,expr0) = quantify [Quantified 0..] ann fun
+  (s',expr1) <- foldExpr f s expr0
+  return (s',Exists ann (dequantify used ann expr1::arg -> SMTExpr Bool))
+foldExpr f s (Let ann arg fun) = do
+  (s0,arg') <- foldArgs f s arg
+  let (used,_,expr0) = quantify [Quantified 0..] ann fun
+  (s1,expr1) <- foldExpr f s0 expr0
+  return (s1,Let ann arg' (dequantify used ann expr1))
+foldExpr f s (App fun args) = do
+  (s',args') <- foldArgs f s args
+  return (s',App fun args')
+foldExpr f s (Named expr name i) = do
+  (s',expr') <- foldExpr f s expr
+  return (s',Named expr' name i)
+foldExpr f s expr = f s expr
+
+-- | Recursively fold over all sub-expressions of the argument
+foldArgs :: (Args a,Monad m) => (forall t. SMTType t => s -> SMTExpr t -> m (s,SMTExpr t))
+         -> s -> a -> m (s,a)
+foldArgs f s arg = foldExprs (\s' expr' _ -> foldExpr f s' expr') s arg (extractArgAnnotation arg)
+
+newtype Quantified = Quantified Integer deriving (Typeable,Show,Eq,Ord,Enum)
+
+quantify :: (Typeable a,Ord a,Show a,Args arg)
+            => [a] -> ArgAnnotation arg -> (arg -> SMTExpr t)
+            -> ([a],[a],SMTExpr t)
+quantify xs ann f
+  = let ((used,rest),args) = foldExprsId (\(cused,x:xs) _ ann
+                                          -> ((cused++[x],xs),InternalObj x ann)
+                                         ) ([],xs) undefined ann
+    in (used,rest,f args)
+
+dequantify :: (Typeable a,Ord a,Show a,Args arg)
+              => [a] -> ArgAnnotation arg -> SMTExpr t -> (arg -> SMTExpr t)
+dequantify xs ann expr
+  = \arg -> let ((tmap,[]),_) = foldExprsId (\(mp,x:xs) expr' ann' -> ((Map.insert x (UntypedExpr expr') mp,xs),expr')
+                                            ) (Map.empty,xs) arg ann
+            in dequantify' tmap expr
+  where
+    dequantify' :: (Typeable a,Ord a,Show a) => Map a UntypedExpr -> SMTExpr t -> SMTExpr t
+    dequantify' mp (InternalObj p ann) = case cast p of
+      Nothing -> InternalObj p ann
+      Just p' -> case Map.lookup p' mp of
+        Just i -> castUntypedExpr i
+        Nothing -> InternalObj p ann
+    dequantify' mp (Forall ann f) = Forall ann (\arg -> dequantify' mp (f arg))
+    dequantify' mp (Exists ann f) = Exists ann (\arg -> dequantify' mp (f arg))
+    dequantify' mp (Let ann arg f) = Let ann arg (\arg' -> dequantify' mp (f arg'))
+    dequantify' mp (App fun arg) = App fun $
+                                   snd $ foldExprsId (\_ expr _ -> ((),dequantify' mp expr)
+                                                     ) () arg (extractArgAnnotation arg)
+    dequantify' mp (Named expr name i) = Named (dequantify' mp expr) name i
+    dequantify' _ expr = expr
