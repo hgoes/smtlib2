@@ -1248,31 +1248,42 @@ instance Show (SMTFunction arg res) where
 -- | Recursively fold a monadic function over all sub-expressions of this expression
 foldExprM :: (SMTType a,Monad m) => (forall t. SMTType t => s -> SMTExpr t -> m (s,SMTExpr t))
          -> s -> SMTExpr a -> m (s,SMTExpr a)
-foldExprM f s (Forall ann (fun::arg -> SMTExpr Bool)) = do
-  let (used,_,expr0) = quantify [Quantified 0..] ann fun
-  (s',expr1) <- foldExprM f s expr0
+foldExprM = foldExprM' [(Quantified 0)..]
+
+foldExprM' :: (SMTType a,Monad m) => [Quantified]
+              -> (forall t. SMTType t => s -> SMTExpr t -> m (s,SMTExpr t))
+              -> s -> SMTExpr a -> m (s,SMTExpr a)
+foldExprM' quants f s (Forall ann (fun::arg -> SMTExpr Bool)) = do
+  let (used,rest,expr0) = quantify quants ann fun
+  (s',expr1) <- foldExprM' rest f s expr0
   return (s',Forall ann (dequantify used ann expr1::arg -> SMTExpr Bool))
-foldExprM f s (Exists ann (fun::arg -> SMTExpr Bool)) = do
-  let (used,_,expr0) = quantify [Quantified 0..] ann fun
-  (s',expr1) <- foldExprM f s expr0
+foldExprM' quants f s (Exists ann (fun::arg -> SMTExpr Bool)) = do
+  let (used,rest,expr0) = quantify quants ann fun
+  (s',expr1) <- foldExprM' rest f s expr0
   return (s',Exists ann (dequantify used ann expr1::arg -> SMTExpr Bool))
-foldExprM f s (Let ann arg fun) = do
-  (s0,arg') <- foldArgsM f s arg
-  let (used,_,expr0) = quantify [Quantified 0..] ann fun
-  (s1,expr1) <- foldExprM f s0 expr0
+foldExprM' quants f s (Let ann arg fun) = do
+  (s0,arg') <- foldArgsM' quants f s arg
+  let (used,rest,expr0) = quantify quants ann fun
+  (s1,expr1) <- foldExprM' rest f s0 expr0
   return (s1,Let ann arg' (dequantify used ann expr1))
-foldExprM f s (App fun args) = do
-  (s',args') <- foldArgsM f s args
+foldExprM' quants f s (App fun args) = do
+  (s',args') <- foldArgsM' quants f s args
   return (s',App fun args')
-foldExprM f s (Named expr name i) = do
-  (s',expr') <- foldExprM f s expr
+foldExprM' quants f s (Named expr name i) = do
+  (s',expr') <- foldExprM' quants f s expr
   return (s',Named expr' name i)
-foldExprM f s expr = f s expr
+foldExprM' _ f s expr = f s expr
 
 -- | Recursively fold a monadic function over all sub-expressions of the argument
 foldArgsM :: (Args a,Monad m) => (forall t. SMTType t => s -> SMTExpr t -> m (s,SMTExpr t))
          -> s -> a -> m (s,a)
-foldArgsM f s arg = foldExprs (\s' expr' _ -> foldExprM f s' expr') s arg (extractArgAnnotation arg)
+foldArgsM = foldArgsM' [(Quantified 0)..]
+
+foldArgsM' :: (Args a,Monad m) => [Quantified]
+           -> (forall t. SMTType t => s -> SMTExpr t -> m (s,SMTExpr t))
+           -> s -> a -> m (s,a)
+foldArgsM' quants f s arg
+  = foldExprs (\s' expr' _ -> foldExprM' quants f s' expr') s arg (extractArgAnnotation arg)
 
 -- | Recursively fold a function over all sub-expressions of this expression.
 --   It is implemented as a special case of 'foldExprM'.
