@@ -56,7 +56,8 @@ module Language.SMTLib2
          let',lets,letAnn,
          named,named',
          optimizeExpr,optimizeExpr',
-         foldExpr,foldArgs,
+         foldExpr,foldExprM,
+         foldArgs,foldArgsM,
          -- ** Basic logic
          (.==.),argEq,
          distinct,

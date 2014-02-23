@@ -1245,34 +1245,48 @@ instance Show (SMTFunction arg res) where
   showsPrec p (SMTFieldSel field) = showParen (p>10) (showString "SMTFieldSel " .
                                                       showsPrec 11 field)
 
--- | Recursively fold over all sub-expressions of this expression
-foldExpr :: (SMTType a,Monad m) => (forall t. SMTType t => s -> SMTExpr t -> m (s,SMTExpr t))
+-- | Recursively fold a monadic function over all sub-expressions of this expression
+foldExprM :: (SMTType a,Monad m) => (forall t. SMTType t => s -> SMTExpr t -> m (s,SMTExpr t))
          -> s -> SMTExpr a -> m (s,SMTExpr a)
-foldExpr f s (Forall ann (fun::arg -> SMTExpr Bool)) = do
+foldExprM f s (Forall ann (fun::arg -> SMTExpr Bool)) = do
   let (used,_,expr0) = quantify [Quantified 0..] ann fun
-  (s',expr1) <- foldExpr f s expr0
+  (s',expr1) <- foldExprM f s expr0
   return (s',Forall ann (dequantify used ann expr1::arg -> SMTExpr Bool))
-foldExpr f s (Exists ann (fun::arg -> SMTExpr Bool)) = do
+foldExprM f s (Exists ann (fun::arg -> SMTExpr Bool)) = do
   let (used,_,expr0) = quantify [Quantified 0..] ann fun
-  (s',expr1) <- foldExpr f s expr0
+  (s',expr1) <- foldExprM f s expr0
   return (s',Exists ann (dequantify used ann expr1::arg -> SMTExpr Bool))
-foldExpr f s (Let ann arg fun) = do
-  (s0,arg') <- foldArgs f s arg
+foldExprM f s (Let ann arg fun) = do
+  (s0,arg') <- foldArgsM f s arg
   let (used,_,expr0) = quantify [Quantified 0..] ann fun
-  (s1,expr1) <- foldExpr f s0 expr0
+  (s1,expr1) <- foldExprM f s0 expr0
   return (s1,Let ann arg' (dequantify used ann expr1))
-foldExpr f s (App fun args) = do
-  (s',args') <- foldArgs f s args
+foldExprM f s (App fun args) = do
+  (s',args') <- foldArgsM f s args
   return (s',App fun args')
-foldExpr f s (Named expr name i) = do
-  (s',expr') <- foldExpr f s expr
+foldExprM f s (Named expr name i) = do
+  (s',expr') <- foldExprM f s expr
   return (s',Named expr' name i)
-foldExpr f s expr = f s expr
+foldExprM f s expr = f s expr
 
--- | Recursively fold over all sub-expressions of the argument
-foldArgs :: (Args a,Monad m) => (forall t. SMTType t => s -> SMTExpr t -> m (s,SMTExpr t))
+-- | Recursively fold a monadic function over all sub-expressions of the argument
+foldArgsM :: (Args a,Monad m) => (forall t. SMTType t => s -> SMTExpr t -> m (s,SMTExpr t))
          -> s -> a -> m (s,a)
-foldArgs f s arg = foldExprs (\s' expr' _ -> foldExpr f s' expr') s arg (extractArgAnnotation arg)
+foldArgsM f s arg = foldExprs (\s' expr' _ -> foldExprM f s' expr') s arg (extractArgAnnotation arg)
+
+-- | Recursively fold a function over all sub-expressions of this expression.
+--   It is implemented as a special case of 'foldExprM'.
+foldExpr :: SMTType a => (forall t. SMTType t => s -> SMTExpr t -> (s,SMTExpr t))
+            -> s -> SMTExpr a -> (s,SMTExpr a)
+foldExpr f s expr = runIdentity $ foldExprM (\s' expr' -> return $ f s' expr') s expr
+
+-- | Recursively fold a function over all sub-expressions of the argument.
+--   It is implemented as a special case of 'foldArgsM'.
+foldArgs :: Args a => (forall t. SMTType t => s -> SMTExpr t -> (s,SMTExpr t))
+            -> s -> a -> (s,a)
+foldArgs f s expr = runIdentity $ foldArgsM (\s' expr' -> return $ f s' expr') s expr
+
+
 
 newtype Quantified = Quantified Integer deriving (Typeable,Show,Eq,Ord,Enum)
 
