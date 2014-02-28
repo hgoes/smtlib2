@@ -17,6 +17,7 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromJust)
 import Data.Traversable (mapAccumL)
+import Data.Foldable (foldlM)
 import Text.Show
 
 valueToHaskell :: DataTypeInfo
@@ -655,6 +656,11 @@ instance Args a => Args [a] where
 
 instance (Typeable a,Show a,Args b,Ord a) => Args (Map a b) where
   type ArgAnnotation (Map a b) = Map a (ArgAnnotation b)
+  foldExprs f s mp mp_ann = foldlM (\(s',cmp) (k,ann) -> do
+                                       let el = mp Map.! k
+                                       (s'',el') <- foldExprs f s' el ann
+                                       return (s'',Map.insert k el' cmp)
+                                   ) (s,Map.empty) (Map.toList mp_ann)
   foldsExprs f s args mp_ann = do
     let lst_ann = Map.toAscList mp_ann
         lst = fmap (\(mp,extra) -> ([ mp Map.! k | (k,_) <- lst_ann ],extra)
