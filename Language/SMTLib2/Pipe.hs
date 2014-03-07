@@ -1,4 +1,4 @@
-module Language.SMTLib2.Pipe (SMTPipe(),createSMTPipe,withPipe,exprToLisp,lispToExpr,renderExpr,commonFunctions,commonTheorems) where
+module Language.SMTLib2.Pipe (SMTPipe(),createSMTPipe,withPipe,exprToLisp,lispToExpr,renderExpr,renderExpr',commonFunctions,commonTheorems) where
 
 import Language.SMTLib2.Internals as SMT
 import Language.SMTLib2.Internals.Instances
@@ -38,8 +38,12 @@ data SMTPipe = SMTPipe { channelIn :: Handle
 renderExpr :: (SMTType t,Monad m) => SMTExpr t -> SMT' m String
 renderExpr expr = do
   st <- getSMT
-  let (lexpr,_) = exprToLisp expr (allVars st) (declaredDataTypes st) (nextVar st)
-  return $ show lexpr
+  return $ renderExpr' st expr
+  
+renderExpr' :: SMTType t => SMTState -> SMTExpr t -> String
+renderExpr' st expr
+  = let (lexpr,_) = exprToLisp expr (allVars st) (declaredDataTypes st) (nextVar st)
+    in show lexpr
 
 instance MonadIO m => SMTBackend SMTPipe m where
   smtHandle pipe _ (SMTGetInfo SMTSolverName) = do
