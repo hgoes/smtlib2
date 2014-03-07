@@ -350,10 +350,7 @@ compareFun (SMTFieldSel _) _ = LT
 compareFun _ (SMTFieldSel _) = GT
 
 compareArgs :: (Args a1,Args a2) => a1 -> a2 -> Ordering
-compareArgs x y = compare x' y'
-  where
-    x' = unpackArgs (\expr _ _ -> (UntypedExpr expr,())) x undefined ()
-    y' = unpackArgs (\expr _ _ -> (UntypedExpr expr,())) y undefined ()
+compareArgs x y = compare (fromArgs x) (fromArgs y)
 
 compareExprs :: (SMTType t1,SMTType t2) => SMTExpr t1 -> SMTExpr t2 -> Ordering
 compareExprs = compareExprs' (-1)
