@@ -494,6 +494,10 @@ class (Ord a,Typeable a,Show a,
                 -> s -> [(a,b)] -> ArgAnnotation a -> m (s,[a],a)
   extractArgAnnotation :: a -> ArgAnnotation a
   toArgs :: [UntypedExpr] -> Maybe (a,[UntypedExpr])
+  
+  fromArgs :: Args a => a -> [UntypedExpr]
+  fromArgs arg = fst $ foldExprsId (\lst expr ann -> (lst++[UntypedExpr expr],expr)
+                                   ) [] arg (extractArgAnnotation arg)
   getSorts :: a -> ArgAnnotation a -> [Sort]
   getArgAnnotation :: a -> [Sort] -> (ArgAnnotation a,[Sort])
   showsArgs :: Integer -> Int -> a -> (ShowS,Integer)
@@ -504,6 +508,7 @@ instance Args () where
   foldsExprs _ s args _ = return (s,fmap (const ()) args,())
   extractArgAnnotation _ = ()
   toArgs x = Just ((),x)
+  fromArgs _ = []
   getSorts _ _ = []
   getArgAnnotation _ xs = ((),xs)
   showsArgs i p _ = (showsPrec p (),i)
