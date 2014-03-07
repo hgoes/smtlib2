@@ -766,7 +766,7 @@ lispToExpr fun bound dts f expected l = case lispToValue dts expected l of
                 Just s -> s
               Just s -> s) $
           \rfun -> case (do
-                            (rargs,rest) <- toArgs nargs
+                            (rargs,rest) <- toArgs (error "smtlib2: Cannot parse structure dependent arguments.") nargs
                             case rest of
                               [] -> Just $ App rfun rargs
                               _ -> Nothing) of
@@ -776,7 +776,7 @@ lispToExpr fun bound dts f expected l = case lispToValue dts expected l of
         nargs <- mapM (\(el,tp) -> lispToExpr fun bound dts UntypedExpr (Just tp) el)
                  (zip args' arg_tps)
         parse $ \rfun -> case (do
-                                  (rargs,rest) <- toArgs nargs
+                                  (rargs,rest) <- toArgs (error "smtlib2: Cannot parse structure dependent arguments.") nargs
                                   case rest of
                                     [] -> Just $ App rfun rargs
                                     _ -> Nothing) of
