@@ -310,10 +310,11 @@ instance (SMTType a) => Args (SMTExpr a) where
   foldExprs f = f
   foldsExprs f = f
   extractArgAnnotation = extractAnnotation
-  toArgs (x:xs) = do
+  toArgs _ (x:xs) = do
     r <- entype gcast x
     return (r,xs)
-  toArgs [] = Nothing
+  toArgs _ [] = Nothing
+  fromArgs x = [UntypedExpr x]
   getSorts (_::SMTExpr a) ann = [getSort (undefined::a) ann]
   getArgAnnotation u (s:rest) = (annotationFromSort (getUndef u) s,rest)
   getArgAnnotation _ [] = error "smtlib2: To few sorts provided."
@@ -331,10 +332,11 @@ instance (Args a,Args b) => Args (a,b) where
     return (s2,zip e1 e2,(r1,r2))
   extractArgAnnotation ~(x,y) = (extractArgAnnotation x,
                                  extractArgAnnotation y)
-  toArgs x = do
-    (r1,x1) <- toArgs x
-    (r2,x2) <- toArgs x1
+  toArgs ~(ann1,ann2) x = do
+    (r1,x1) <- toArgs ann1 x
+    (r2,x2) <- toArgs ann2 x1
     return ((r1,r2),x2)
+  fromArgs (x,y) = fromArgs x ++ fromArgs y
   getSorts ~(x1,x2) (ann1,ann2) = getSorts x1 ann1 ++ getSorts x2 ann2
   getArgAnnotation (_::(a1,a2)) sorts
     = let (ann1,r1) = getArgAnnotation (undefined::a1) sorts
@@ -377,11 +379,14 @@ instance (Args a,Args b,Args c) => Args (a,b,c) where
     = (extractArgAnnotation e1,
        extractArgAnnotation e2,
        extractArgAnnotation e3)
-  toArgs x = do
-    (r1,x1) <- toArgs x
-    (r2,x2) <- toArgs x1
-    (r3,x3) <- toArgs x2
+  toArgs ~(ann1,ann2,ann3) x = do
+    (r1,x1) <- toArgs ann1 x
+    (r2,x2) <- toArgs ann2 x1
+    (r3,x3) <- toArgs ann3 x2
     return ((r1,r2,r3),x3)
+  fromArgs (x1,x2,x3) = fromArgs x1 ++
+                        fromArgs x2 ++
+                        fromArgs x3
   getArgAnnotation (_::(a1,a2,a3)) sorts
     = let (ann1,r1) = getArgAnnotation (undefined::a1) sorts
           (ann2,r2) = getArgAnnotation (undefined::a2) r1
@@ -428,12 +433,17 @@ instance (Args a,Args b,Args c,Args d) => Args (a,b,c,d) where
        extractArgAnnotation e2,
        extractArgAnnotation e3,
        extractArgAnnotation e4)
-  toArgs x = do
-    (r1,x1) <- toArgs x
-    (r2,x2) <- toArgs x1
-    (r3,x3) <- toArgs x2
-    (r4,x4) <- toArgs x3
+  toArgs ~(ann1,ann2,ann3,ann4) x = do
+    (r1,x1) <- toArgs ann1 x
+    (r2,x2) <- toArgs ann2 x1
+    (r3,x3) <- toArgs ann3 x2
+    (r4,x4) <- toArgs ann4 x3
     return ((r1,r2,r3,r4),x4)
+  fromArgs (x1,x2,x3,x4)
+    = fromArgs x1 ++
+      fromArgs x2 ++
+      fromArgs x3 ++
+      fromArgs x4
   getArgAnnotation (_::(a1,a2,a3,a4)) sorts
     = let (ann1,r1) = getArgAnnotation (undefined::a1) sorts
           (ann2,r2) = getArgAnnotation (undefined::a2) r1
@@ -492,13 +502,19 @@ instance (Args a,Args b,Args c,Args d,Args e) => Args (a,b,c,d,e) where
        extractArgAnnotation e3,
        extractArgAnnotation e4,
        extractArgAnnotation e5)
-  toArgs x = do
-    (r1,x1) <- toArgs x
-    (r2,x2) <- toArgs x1
-    (r3,x3) <- toArgs x2
-    (r4,x4) <- toArgs x3
-    (r5,x5) <- toArgs x4
+  toArgs ~(ann1,ann2,ann3,ann4,ann5) x = do
+    (r1,x1) <- toArgs ann1 x
+    (r2,x2) <- toArgs ann2 x1
+    (r3,x3) <- toArgs ann3 x2
+    (r4,x4) <- toArgs ann4 x3
+    (r5,x5) <- toArgs ann5 x4
     return ((r1,r2,r3,r4,r5),x5)
+  fromArgs (x1,x2,x3,x4,x5)
+    = fromArgs x1 ++
+      fromArgs x2 ++
+      fromArgs x3 ++
+      fromArgs x4 ++
+      fromArgs x5
   getArgAnnotation (_::(a1,a2,a3,a4,a5)) sorts
     = let (ann1,r1) = getArgAnnotation (undefined::a1) sorts
           (ann2,r2) = getArgAnnotation (undefined::a2) r1
@@ -566,14 +582,21 @@ instance (Args a,Args b,Args c,Args d,Args e,Args f) => Args (a,b,c,d,e,f) where
        extractArgAnnotation e4,
        extractArgAnnotation e5,
        extractArgAnnotation e6)
-  toArgs x = do
-    (r1,x1) <- toArgs x
-    (r2,x2) <- toArgs x1
-    (r3,x3) <- toArgs x2
-    (r4,x4) <- toArgs x3
-    (r5,x5) <- toArgs x4
-    (r6,x6) <- toArgs x5
+  toArgs ~(ann1,ann2,ann3,ann4,ann5,ann6) x = do
+    (r1,x1) <- toArgs ann1 x
+    (r2,x2) <- toArgs ann2 x1
+    (r3,x3) <- toArgs ann3 x2
+    (r4,x4) <- toArgs ann4 x3
+    (r5,x5) <- toArgs ann5 x4
+    (r6,x6) <- toArgs ann6 x5
     return ((r1,r2,r3,r4,r5,r6),x6)
+  fromArgs (x1,x2,x3,x4,x5,x6)
+    = fromArgs x1 ++
+      fromArgs x2 ++
+      fromArgs x3 ++
+      fromArgs x4 ++
+      fromArgs x5 ++
+      fromArgs x6
   getArgAnnotation (_::(a1,a2,a3,a4,a5,a6)) sorts
     = let (ann1,r1) = getArgAnnotation (undefined::a1) sorts
           (ann2,r2) = getArgAnnotation (undefined::a2) r1
@@ -638,11 +661,12 @@ instance Args a => Args [a] where
     ~(s2,res_tails,ztail) <- foldsExprs f s1 args_tails anns
     return (s2,zipWith (:) res_heads res_tails,zhead:ztail)
   extractArgAnnotation = fmap extractArgAnnotation
-  toArgs [] = Just ([],[])
-  toArgs x = do
-    (r,x') <- toArgs x
-    (rs,x'') <- toArgs x'
+  toArgs [] xs = Just ([],xs)
+  toArgs (ann:anns) x = do
+    (r,x') <- toArgs ann x
+    (rs,x'') <- toArgs anns x'
     return (r:rs,x'')
+  fromArgs xs = concat $ fmap fromArgs xs
   getArgAnnotation _ [] = ([],[])
   getArgAnnotation (_::[a]) sorts = let (x,r1) = getArgAnnotation (undefined::a) sorts
                                         (xs,r2) = getArgAnnotation (undefined::[a]) r1
@@ -670,7 +694,15 @@ instance (Typeable a,Show a,Args b,Ord a) => Args (Map a b) where
     return (ns,fmap (\lst'' -> Map.fromAscList $ zip (fmap fst lst_ann) lst''
                     ) lst',Map.fromAscList $ zip (fmap fst lst_ann) lst_merged)
   extractArgAnnotation = fmap extractArgAnnotation
-  toArgs exprs = Just (Map.empty,exprs)
+  toArgs mp_ann exprs = case Map.mapAccum (\cst ann -> case cst of
+                                              Nothing -> (Nothing,undefined)
+                                              Just rest -> case toArgs ann rest of
+                                                Nothing -> (Nothing,undefined)
+                                                Just (res,rest') -> (Just rest',res)
+                                          ) (Just exprs) mp_ann of
+                          (Nothing,_) -> Nothing
+                          (Just rest,mp) -> Just (mp,rest)
+  fromArgs exprs = concat $ fmap fromArgs $ Map.elems exprs
   getSorts (_::Map a b) anns = concat [ getSorts (undefined::b) ann | (_,ann) <- Map.toAscList anns ]
   getArgAnnotation _ sorts = (Map.empty,sorts)
   showsArgs i p mp = let (ni,lst') = mapAccumL (\ci (key,arg)
