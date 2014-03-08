@@ -74,6 +74,7 @@ inferResAnnotation x@(SMTMap f) ann
     withUndef :: SMTFunction arg res -> SMTFunction (Lifted arg i) (SMTArray i res) -> (arg -> i -> b) -> b
     withUndef _ _ f' = f' undefined undefined
 inferResAnnotation (SMTFun _ ann) _ = ann
+inferResAnnotation (SMTBuiltIn _ ann) _ = ann
 inferResAnnotation (SMTOrd _) _ = ()
 inferResAnnotation (SMTArith _) ~(ann:_) = ann
 inferResAnnotation SMTMinus ~(ann,_) = ann
