@@ -757,8 +757,8 @@ instance SMTType a => SMTType (Maybe a) where
                                                              -> case args of
                                                                [s] -> withProxyArg s $
                                                                       \(_::t) ann
-                                                                      -> case cast x of
-                                                                        Just (arg::Maybe t) -> f (fromJust arg) ann
+                                                                      -> f (case cast x of
+                                                                               Just (arg::Maybe t) -> fromJust arg) ann
                                                 }]
                        , construct = \sort args f -> case args of
                          [v] -> withAnyValue v $
