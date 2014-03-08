@@ -249,6 +249,15 @@ funAnnNamed' name annArg annRet = smtBackend $ \backend -> do
   (fun,info) <- newFunction name annArg annRet
   st <- getSMT
   lift $ smtHandle backend st (SMTDeclareFun info)
+  let pointwiseCheck =
+        forAllAnn annArg
+        (\x ->
+          let c = additionalConstraints (undefined::t) annRet (fun `app` x)
+          in case c of
+            [] -> constant True
+            _  -> and' `app` c
+        )
+  assert pointwiseCheck
   return fun
 
 -- | funAnn with an annotation only for the return type.
