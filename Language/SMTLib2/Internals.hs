@@ -64,8 +64,8 @@ class (Ord t,Typeable t,
   asValueType :: t -> SMTAnnotation t -> (forall v. SMTValue v => v -> SMTAnnotation v -> r) -> Maybe r
   getProxyArgs :: t -> SMTAnnotation t -> [ProxyArg]
   getProxyArgs _ _ = []
-  additionalConstraints :: t -> SMTAnnotation t -> SMTExpr t -> [SMTExpr Bool]
-  additionalConstraints _ _ _ = []
+  additionalConstraints :: t -> SMTAnnotation t -> Maybe (SMTExpr t -> [SMTExpr Bool])
+  additionalConstraints _ _ = Nothing
   annotationFromSort :: t -> Sort -> SMTAnnotation t
 
 data ArgumentSort' a = ArgumentSort Integer

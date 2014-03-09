@@ -94,7 +94,9 @@ argVarsAnnNamed' name ann = do
                              declareType (undefined::t) ann'
                              st <- getSMT
                              lift $ smtHandle backend st (SMTDeclareFun info)
-                             mapM_ assert $ additionalConstraints (undefined::t) ann' res
+                             case additionalConstraints (undefined::t) ann' of
+                               Nothing -> return ()
+                               Just constr -> mapM_ assert $ constr res
                            return ((),res)
                        ) () undefined ann
   return arg
@@ -249,15 +251,13 @@ funAnnNamed' name annArg annRet = smtBackend $ \backend -> do
   (fun,info) <- newFunction name annArg annRet
   st <- getSMT
   lift $ smtHandle backend st (SMTDeclareFun info)
-  let pointwiseCheck =
-        forAllAnn annArg
-        (\x ->
-          let c = additionalConstraints (undefined::t) annRet (fun `app` x)
-          in case c of
-            [] -> constant True
-            _  -> and' `app` c
-        )
-  assert pointwiseCheck
+  case additionalConstraints (undefined::t) annRet of
+    Nothing -> return ()
+    Just constr -> assert $ forAllAnn annArg
+                   (\x -> case constr (fun `app` x) of
+                       [] -> constant True
+                       [x] -> x
+                       xs -> and' `app` xs)
   return fun
 
 -- | funAnn with an annotation only for the return type.

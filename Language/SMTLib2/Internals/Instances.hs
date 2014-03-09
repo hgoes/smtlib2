@@ -122,7 +122,9 @@ instance SMTType UntypedExpr where
   asDataType _ (ProxyArg u ann) = asDataType u ann
   asValueType _ (ProxyArg u ann) f = asValueType u ann f
   getProxyArgs _ (ProxyArg u ann) = getProxyArgs u ann
-  additionalConstraints _ (ProxyArg u ann) (Var x _) = additionalConstraints u ann (Var x ann)
+  additionalConstraints _ (ProxyArg u ann) = do
+    constr <- additionalConstraints u ann
+    return $ \(Var x _) -> constr (Var x ann)
   annotationFromSort _ _ = error "smtlib2: No implementation for annotationFromSort for UntypedExpr"
   
 -- Bool
