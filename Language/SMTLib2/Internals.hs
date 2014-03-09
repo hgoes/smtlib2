@@ -78,10 +78,6 @@ class (SMTType t,Show t) => SMTValue t where
   unmangle :: Value -> SMTAnnotation t -> Maybe t
   mangle :: t -> SMTAnnotation t -> Value
 
--- | All records which can be expressed in SMT
-class SMTType t => SMTRecordType t where
-  getFieldAnn :: (SMTType f,Typeable (SMTAnnotation f)) => Field t f -> SMTAnnotation t -> SMTAnnotation f
-
 -- | A type class for all types which support arithmetic operations in SMT
 class (SMTValue t,Num t) => SMTArith t
 
@@ -237,7 +233,7 @@ data SMTFunction arg res where
                 => Proxy start -> Proxy len -> SMTFunction (SMTExpr (BitVector from)) (BitVector len')
   SMTConstructor :: (Args arg,SMTType dt) => Constructor arg dt -> SMTFunction arg dt
   SMTConTest :: (Args arg,SMTType dt) => Constructor arg dt -> SMTFunction (SMTExpr dt) Bool
-  SMTFieldSel :: (SMTRecordType a,SMTType f) => Field a f -> SMTFunction (SMTExpr a) f
+  SMTFieldSel :: (SMTType a,SMTType f) => Field a f -> SMTFunction (SMTExpr a) f
   deriving (Typeable)
 
 class (SMTValue (BitVector a)) => IsBitVector a where
@@ -337,17 +333,35 @@ compareFun (SMTExtract (_::Proxy start1) (_::Proxy len1)) (SMTExtract (_::Proxy 
     (typeOf (undefined::start2),typeOf (undefined::len2))
 compareFun (SMTExtract _ _) _ = LT
 compareFun _ (SMTExtract _ _) = GT
-compareFun (SMTConstructor (Constructor n1)) (SMTConstructor (Constructor n2))
-  = compare n1 n2
+compareFun (SMTConstructor con1) (SMTConstructor con2)
+  = compareConstructor con1 con2
 compareFun (SMTConstructor _) _ = LT
 compareFun _ (SMTConstructor _) = GT
-compareFun (SMTConTest (Constructor n1)) (SMTConTest (Constructor n2))
-  = compare n1 n2
+compareFun (SMTConTest con1) (SMTConTest con2)
+  = compareConstructor con1 con2
 compareFun (SMTConTest _) _ = LT
 compareFun _ (SMTConTest _) = GT
-compareFun (SMTFieldSel (Field n1)) (SMTFieldSel (Field n2)) = compare n1 n2
+compareFun (SMTFieldSel f1) (SMTFieldSel f2) = compareField f1 f2
 compareFun (SMTFieldSel _) _ = LT
 compareFun _ (SMTFieldSel _) = GT
+
+compareConstructor :: Constructor arg1 res1 -> Constructor arg2 res2 -> Ordering
+compareConstructor (Constructor p1 dt1 con1) (Constructor p2 dt2 con2)
+  = case compare (dataTypeName dt1) (dataTypeName dt2) of
+  EQ -> case compare p1 p2 of
+    EQ -> compare (conName con1) (conName con2)
+    r -> r
+  r -> r
+
+compareField :: Field a1 f1 -> Field a2 f2 -> Ordering
+compareField (Field p1 dt1 con1 f1) (Field p2 dt2 con2 f2)
+  = case compare (dataTypeName dt1) (dataTypeName dt2) of
+  EQ -> case compare p1 p2 of
+    EQ -> case compare (conName con1) (conName con2) of
+      EQ -> compare (fieldName f1) (fieldName f2)
+      r -> r
+    r -> r
+  r -> r
 
 compareArgs :: (Args a1,Args a2) => a1 -> a2 -> Ordering
 compareArgs x y = compare (fromArgs x) (fromArgs y)
@@ -454,10 +468,39 @@ eqExpr n lhs rhs = case (lhs,rhs) of
 
 -- | Represents a constructor of a datatype /a/
 --   Can be obtained by using the template haskell extension module
-data Constructor arg res = Constructor String deriving (Eq,Show,Typeable)
+data Constructor arg res = Constructor [ProxyArg] DataType Constr deriving (Typeable)
+
+instance Eq (Constructor arg res) where
+  (Constructor p1 dt1 con1) == (Constructor p2 dt2 con2)
+    = (dataTypeName dt1 == dataTypeName dt2) &&
+      (p1 == p2) &&
+      (conName con1 == conName con2)
+
+instance Ord (Constructor arg res) where
+  compare = compareConstructor
+
+instance Show (Constructor arg res) where
+  showsPrec p (Constructor _ _ con) = showParen (p>10)
+                                      (showString "Constructor " .
+                                       showsPrec 11 (conName con))
 
 -- | Represents a field of the datatype /a/ of the type /f/
-data Field a f = Field String deriving (Eq,Show)
+data Field a f = Field [ProxyArg] DataType Constr DataField deriving (Typeable)
+
+instance Eq (Field a f) where
+  (Field p1 dt1 con1 f1) == (Field p2 dt2 con2 f2)
+    = (dataTypeName dt1 == dataTypeName dt2) &&
+      (p1 == p2) &&
+      (conName con1 == conName con2) &&
+      (fieldName f1 == fieldName f2)
+
+instance Ord (Field a f) where
+  compare = compareField
+
+instance Show (Field a f) where
+  showsPrec p (Field _ _ _ f) = showParen (p>10)
+                                (showString "Field " .
+                                 showsPrec 11 (fieldName f))
 
 newtype InterpolationGroup = InterpolationGroup Integer
 

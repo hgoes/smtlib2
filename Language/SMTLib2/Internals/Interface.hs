@@ -3,7 +3,7 @@
 module Language.SMTLib2.Internals.Interface where
 
 import Language.SMTLib2.Internals
-import Language.SMTLib2.Internals.Instances (extractAnnotation)
+import Language.SMTLib2.Internals.Instances (extractAnnotation,dataTypeList,constructorNil,constructorCons)
 import Language.SMTLib2.Internals.Optimize
 import Language.SMTLib2.Internals.Operators
 import Language.SMTLib2.Strategy
@@ -591,7 +591,7 @@ is :: (Args arg,SMTType dt) => SMTExpr dt -> Constructor arg dt -> SMTExpr Bool
 is e con = App (SMTConTest con) e
 
 -- | Access a field of an expression
-(.#) :: (SMTRecordType a,SMTType f) => SMTExpr a -> Field a f -> SMTExpr f
+(.#) :: (SMTType a,SMTType f) => SMTExpr a -> Field a f -> SMTExpr f
 (.#) e f = App (SMTFieldSel f) e
 
 -- | Takes the first element of a list
@@ -608,11 +608,11 @@ insert' = curry (App (SMTBuiltIn "insert" unit))
 
 -- | Checks if a list is empty.
 isNil :: (SMTType a) => SMTExpr [a] -> SMTExpr Bool
-isNil e = is e (Constructor "nil" :: Constructor () [a])
+isNil (e::SMTExpr [a]) = is e (Constructor [ProxyArg (undefined::[a]) (extractAnnotation e)] dataTypeList constructorNil:: Constructor () [a])
 
 -- | Checks if a list is non-empty.
 isInsert :: (SMTType a,Unit (SMTAnnotation a)) => SMTExpr [a] -> SMTExpr Bool
-isInsert e = is e (Constructor "insert" :: Constructor (SMTExpr a,SMTExpr [a]) [a])
+isInsert (e::SMTExpr [a]) = is e (Constructor [ProxyArg (undefined::[a]) (extractAnnotation e)] dataTypeList constructorCons :: Constructor (SMTExpr a,SMTExpr [a]) [a])
 
 -- | Sets the logic used for the following program (Not needed for many solvers).
 setLogic :: Monad m => String -> SMT' m ()

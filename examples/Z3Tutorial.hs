@@ -285,12 +285,6 @@ instance (SMTValue a,SMTValue b) => SMTValue (Pair a b) where
       return $ Pair vx vy
   mangle (Pair x y) (ann1,ann2) = ConstrValue "Pair" [mangle x ann1,mangle y ann2] Nothing
 
-instance (SMTType a,SMTType b) => SMTRecordType (Pair a b) where
-  getFieldAnn (Field "first") (ann1,_) = case cast ann1 of
-    Just r -> r
-  getFieldAnn (Field "second") (_,ann2) = case cast ann2 of
-    Just r -> r
-
 example20 :: SMT (Pair Integer Integer,Pair Integer Integer)
 example20 = do
   (p1,p2) <- argVars
@@ -408,12 +402,6 @@ instance (SMTValue a) => SMTValue (Lst a) where
     return (Cons x xs)
   mangle (Nil::Lst a) ann = ConstrValue "Nil" [] (Just ("Lst",[getSort (undefined::a) ann]))
   mangle p@(Cons x xs) ann = ConstrValue "Cons" [mangle x ann,mangle xs ann] Nothing
-
-instance (SMTType a) => SMTRecordType (Lst a) where
-  getFieldAnn (Field "hd") ann = case cast ann of
-    Just r -> r
-  getFieldAnn (Field "tl") ann = case cast ann of
-    Just r -> r
 
 example22 :: SMT ((Lst Integer,Lst Integer,Lst Integer,Integer),Bool)
 example22 = do
@@ -588,12 +576,6 @@ tcTree = TypeCollection { argCount = 1
                                          \(_::a) ann
                                          -> case cast x of
                                            Just (x'::TreeList a) -> f (cdr x') ann }
-
-instance SMTType a => SMTRecordType (Tree a) where
-  getFieldAnn (Field "value") ann = case cast ann of
-    Just ann' -> ann'
-  getFieldAnn (Field "children") ann = case cast ann of
-    Just ann' -> ann'
 
 example23 :: SMT (Tree Integer,Tree Bool)
 example23 = do

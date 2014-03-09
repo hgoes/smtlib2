@@ -491,9 +491,9 @@ functionGetSymbol _ f@(SMTExtract prStart prLen) ann
   where
     start = reflectNat prStart 0
     len = reflectNat prLen 0
-functionGetSymbol _ (SMTConstructor (Constructor name)) _ = L.Symbol $ T.pack name
-functionGetSymbol _ (SMTConTest (Constructor name)) _ = L.Symbol $ T.pack $ "is-"++name
-functionGetSymbol _ (SMTFieldSel (Field name)) _ = L.Symbol $ T.pack name
+functionGetSymbol _ (SMTConstructor (Constructor _ _ con)) _ = L.Symbol $ T.pack (conName con)
+functionGetSymbol _ (SMTConTest (Constructor _ _ con)) _ = L.Symbol $ T.pack $ "is-"++(conName con)
+functionGetSymbol _ (SMTFieldSel (Field _ _ _ f)) _ = L.Symbol $ T.pack (fieldName f)
 
 clearInput :: MonadIO m => SMTPipe -> m ()
 clearInput pipe = do
@@ -1299,10 +1299,10 @@ constructorParser dts
                  in Just $ DefinedParser { definedArgSig = argSorts
                                          , definedRetSig = resSort
                                          , parseDefined = \f -> withSort dts resSort
-                                                                (\(_::ret) _
+                                                                (\(uret::ret) ann_ret
                                                                  -> withSorts dts argSorts
                                                                     (\(_::arg) ann
-                                                                     -> Just $ f (SMTConstructor (Constructor (conName con)::Constructor arg ret))))
+                                                                     -> Just $ f (SMTConstructor (Constructor (getProxyArgs uret ann_ret) dt con::Constructor arg ret))))
                                          }
         _ -> Nothing
 

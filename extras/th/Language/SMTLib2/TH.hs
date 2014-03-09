@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell,OverloadedStrings,FlexibleContexts #-}
+{-# LANGUAGE TemplateHaskell,OverloadedStrings,FlexibleContexts,ScopedTypeVariables #-}
 {- | This module can be used to automatically lift haskell data-types into the SMT realm.
  -}
 module Language.SMTLib2.TH
@@ -475,16 +475,12 @@ deriveSMT name = do
                                        (appT (conT ''SMTValue) fullType)
                                        [generateMangleFun dec
                                        ,generateUnmangleFun dec]
-                             inst3 <- instanceD (cxt $ concat [[classP ''SMTType [varT n]
-                                                             ,equalP ((conT ''SMTAnnotation) `appT` (varT n)) (tupleT 0)] | n <- fmap tyVarName tyvars ])
-                                       (appT (conT ''SMTRecordType) fullType)
-                                       [funD 'getFieldAnn [clause [varP field,wildP] (normalB [| castField $(varE field) () |]) []]]
-                             return [inst1,inst2,inst3]) grp
+                             return [inst1,inst2]) grp
            return ((concat decls)++[tyCollD])) (zip [0..] grps) >>= return . concat
 
 castField :: (Typeable (SMTAnnotation f),Typeable g,SMTType f) => Field a f -> g -> SMTAnnotation f
-castField (Field name) ann = case cast ann of
-  Nothing -> error $ "Internal smtlib2 error: Invalid type access for field "++show name
+castField (Field _ _ _ f) ann = case cast ann of
+  Nothing -> error $ "Internal smtlib2 error: Invalid type access for field "++fieldName f
   Just r -> r
 
 generateMangleFun :: Dec -> DecQ
@@ -593,7 +589,19 @@ constructor :: Name -> Q Exp
 constructor name = do
   inf <- reify name
   case inf of
-    DataConI _ tp _ _ -> [| Constructor $(stringE $ nameBase name) :: $(constructorType tp) |]
+    DataConI _ tp parent _
+      -> [| getConstructor $(stringE $ nameBase name) unit (undefined :: $(constructorType tp)) |]
+
+getConstructor :: SMTType res => String -> SMTAnnotation res -> Constructor arg res -> Constructor arg res
+getConstructor cName ann (_::Constructor arg res)
+  = case asDataType (undefined::res) ann of
+  Just (tp_name,tps) -> let dt = case dataTypes tps of
+                              [d] -> d
+                              xs -> case find (\d -> dataTypeName d == tp_name) xs of
+                                Just d -> d
+                            prx = getProxyArgs (undefined::res) ann
+                        in case find (\c -> conName c == cName) (dataTypeConstructors dt) of
+                          Just con -> Constructor prx dt con
 
 -- | Get the SMT representation for a given record field accessor.
 field :: Name -> Q Exp
@@ -601,13 +609,41 @@ field name = do
   inf <- reify name
   case inf of
     VarI _ tp _ _ -> case getExp tp of
-      Just rtp -> sigE [| (Field $(stringE $ nameBase name)) |] rtp
+      Just rtp -> sigE [| getField $(stringE $ nameBase name) unit undefined |] rtp
       Nothing -> error $ show inf ++ " is not a valid field"
     _ -> error $ show inf ++ " is not a valid field"
   where
     getExp (AppT (AppT ArrowT orig) res) = Just $ [t| Field |] `appT` (return orig) `appT` (return res)
-    getExp (ForallT tyvars ctx rec) = fmap (forallT tyvars (return ctx)) (getExp rec)
+    getExp (ForallT tyvars ctx rec) = fmap (forallT tyvars (do
+                                                               nctx <- mapM (\tv -> do
+                                                                                let tvName = case tv of
+                                                                                      PlainTV n -> n
+                                                                                      KindedTV n _ -> n
+                                                                                c1 <- classP ''SMTType [varT tvName]
+                                                                                c2 <- classP ''Unit [appT (conT ''SMTAnnotation) (varT tvName)]
+                                                                                return [c1,c2]
+                                                                            ) tyvars
+                                                               return $ ctx++concat nctx)) (getExp rec)
     getExp _ = Nothing
+
+findItem :: Eq b => (a -> b) -> b -> [a] -> a
+findItem _ _ [x] = x
+findItem f c (x:xs) = if f x == c
+                      then x
+                      else findItem f c xs
+
+getField :: SMTType tp => String -> SMTAnnotation tp -> Field tp ftp -> Field tp ftp
+getField fname ann (_::Field tp ftp)
+  = case asDataType (undefined::tp) ann of
+  Just (tp_name,tps) -> let dt = findItem dataTypeName tp_name (dataTypes tps)
+                            prx = getProxyArgs (undefined::tp) ann
+                            (con,field) = findField fname (dataTypeConstructors dt)
+                        in Field prx dt con field
+    where
+      findField fname [con] = (con,findItem fieldName fname (conFields con))
+      findField fname (con:cons) = case find (\f -> fieldName f == fname) (conFields con) of
+        Just f -> (con,f)
+        Nothing -> findField fname cons
 
 -- | Checks whether a given SMT expression matches a pattern.
 matches :: Q Exp -> Q Pat -> Q Exp

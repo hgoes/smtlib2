@@ -106,9 +106,13 @@ inferResAnnotation x@(SMTExtract _ prLen) ann
     withUndef :: SMTFunction (SMTExpr (BitVector a)) (BitVector res)
                  -> (a -> res -> c) -> c
     withUndef _ f = f undefined undefined
---inferResAnnotation (SMTConstructor (Constructor name)) ann = 
+inferResAnnotation (SMTConstructor (Constructor prx dt con)) _
+  = case dataTypeGetUndefined dt prx (\_ ann' -> cast ann') of
+    Just ann' -> ann'
 inferResAnnotation (SMTConTest _) _ = ()
-inferResAnnotation (SMTFieldSel f) ann = getFieldAnn f ann
+inferResAnnotation (SMTFieldSel (Field prx dt _ f)) _
+  = dataTypeGetUndefined dt prx (\u _ -> case fieldGet f prx u (\_ ann -> cast ann) of
+                                    Just ann' -> ann')
 
 -- Untyped
 
@@ -794,55 +798,57 @@ instance (Typeable a,SMTType a) => SMTType [a] where
   getSort u ann = Fix (NamedSort "List" [getSort (undefArg u) ann])
   asDataType _ _ = Just ("List",
                          TypeCollection { argCount = 1
-                                        , dataTypes = [tpList] })
-    where
-      tpList = DataType { dataTypeName = "List"
-                        , dataTypeConstructors = [conNil,conCons]
+                                        , dataTypes = [dataTypeList] })
+  getProxyArgs (_::[t]) ann = [ProxyArg (undefined::t) ann]
+  annotationFromSort u (Fix (NamedSort "List" [sort])) = annotationFromSort (undefArg u) sort
+  asValueType (_::[a]) ann f = asValueType (undefined::a) ann $
+                               \(_::b) ann' -> f (undefined::[b]) ann'
+
+dataTypeList = DataType { dataTypeName = "List"
+                        , dataTypeConstructors = [constructorNil,constructorCons]
                         , dataTypeGetUndefined = \args f -> case args of
                           [s] -> withProxyArg s (\(_::t) ann -> f (undefined::[t]) ann)
                         }
-      conNil = Constr { conName = "nil"
-                      , conFields = []
-                      , construct = \[Just sort] args f
-                                    -> withProxyArg sort $
-                                       \(_::t) ann -> f [sort] ([]::[t]) ann
+
+constructorNil = Constr { conName = "nil"
+                        , conFields = []
+                        , construct = \[Just sort] args f
+                                      -> withProxyArg sort $
+                                         \(_::t) ann -> f [sort] ([]::[t]) ann
                       , conTest = \args x -> case args of
                         [s] -> withProxyArg s $
                                \(_::t) _ -> case cast x of
                                  Just ([]::[t]) -> True
                                  _ -> False
                       }
-      conCons = Constr { conName = "cons"
-                       , conFields = [DataField { fieldName = "head"
-                                                , fieldSort = Fix (ArgumentSort 0)
-                                                , fieldGet = \args x f -> case args of
-                                                  [s] -> withProxyArg s $
-                                                         \(_::t) ann
-                                                         -> case cast x of
-                                                           Just (ys::[t]) -> f (head ys) ann }
-                                     ,DataField { fieldName = "tail"
-                                                , fieldSort = Fix (NormalSort (NamedSort "List" [Fix (ArgumentSort 0)]))
-                                                , fieldGet = \args x f -> case args of
-                                                  [s] -> withProxyArg s $
+
+constructorCons = Constr { conName = "insert"
+                         , conFields = [DataField { fieldName = "head"
+                                                  , fieldSort = Fix (ArgumentSort 0)
+                                                  , fieldGet = \args x f -> case args of
+                                                    [s] -> withProxyArg s $
+                                                           \(_::t) ann
+                                                           -> case cast x of
+                                                             Just (ys::[t]) -> f (head ys) ann }
+                                       ,DataField { fieldName = "tail"
+                                                  , fieldSort = Fix (NormalSort (NamedSort "List" [Fix (ArgumentSort 0)]))
+                                                  , fieldGet = \args x f -> case args of
+                                                    [s] -> withProxyArg s $
                                                          \(_::t) ann
                                                          -> case cast x of
                                                            Just (ys::[t]) -> f (tail ys) ann }]
-                       , construct = \sort args f
-                                     -> case args of
-                                       [h,t] -> withAnyValue h $
+                         , construct = \sort args f
+                                       -> case args of
+                                         [h,t] -> withAnyValue h $
                                                 \_ (v::t) ann
                                                 -> case castAnyValue t of
                                                   Just (vs,_) -> f [ProxyArg (undefined::t) ann] (v:vs) ann
-                       , conTest = \args x -> case args of
-                         [s] -> withProxyArg s $
+                         , conTest = \args x -> case args of
+                           [s] -> withProxyArg s $
                                 \(_::t) _ -> case cast x of
                                   Just ((_:_)::[t]) -> True
                                   _ -> False
-                       }
-  getProxyArgs (_::[t]) ann = [ProxyArg (undefined::t) ann]
-  annotationFromSort u (Fix (NamedSort "List" [sort])) = annotationFromSort (undefArg u) sort
-  asValueType (_::[a]) ann f = asValueType (undefined::a) ann $
-                               \(_::b) ann' -> f (undefined::[b]) ann'
+                         }
 
 instance (Typeable a,SMTValue a) => SMTValue [a] where
   unmangle (ConstrValue "nil" [] _) _ = Just []
