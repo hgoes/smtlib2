@@ -126,6 +126,29 @@ instance SMTType UntypedExpr where
     constr <- additionalConstraints u ann
     return $ \(Var x _) -> constr (Var x ann)
   annotationFromSort _ _ = error "smtlib2: No implementation for annotationFromSort for UntypedExpr"
+
+instance Args UntypedExpr where
+  type ArgAnnotation UntypedExpr = ProxyArg
+  foldExprs f s uexpr (ProxyArg (_::t) ann) = do
+    (ns,nx) <- f s (case uexpr of
+                       UntypedExpr x -> case cast x of
+                         Just x' -> (x'::SMTExpr t)) ann
+    return (ns,UntypedExpr nx)
+  foldsExprs f s lst (ProxyArg (_::t) ann) = do
+    let lst' = fmap (\(uexpr,p)
+                     -> (case uexpr of
+                            UntypedExpr x -> case cast x of
+                              Just x' -> (x'::SMTExpr t),p)) lst
+    (ns,ress,res) <- foldsExprs f s lst' ann
+    return (ns,fmap UntypedExpr ress,UntypedExpr res)
+  extractArgAnnotation (UntypedExpr (x::SMTExpr t)) = ProxyArg (undefined::t) (extractAnnotation x)
+  toArgs (ProxyArg (_::t) ann) exprs = do
+    (res::SMTExpr t,rest) <- toArgs ann exprs
+    return (UntypedExpr res,rest)
+  fromArgs (UntypedExpr x) = fromArgs x
+  getSorts _ (ProxyArg (_::t) ann) = getSorts (undefined::SMTExpr t) ann
+  getArgAnnotation _ _ = error "smtlib2: No implementation of getArgAnnotation for UntypedExpr"
+  showsArgs n p (UntypedExpr x) = showsArgs n p x
   
 -- Bool
 
