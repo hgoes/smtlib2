@@ -744,6 +744,68 @@ instance (Typeable a,Show a,Args b,Ord a) => Args (Map a b) where
                                                      showChar ',' .
                                                      str . showChar ')') lst',ni)
 
+instance (Args a,Args b) => Args (Either a b) where
+  type ArgAnnotation (Either a b) = Either (ArgAnnotation a) (ArgAnnotation b)
+  foldExprs f s ~(Left x) (Left ann) = do
+    (ns,res) <- foldExprs f s x ann
+    return (ns,Left res)
+  foldExprs f s ~(Right x) (Right ann) = do
+    (ns,res) <- foldExprs f s x ann
+    return (ns,Right res)
+  foldsExprs f s lst (Left ann) = do
+    (ns,ress,res) <- foldsExprs f s (fmap (\(x,p) -> (case x of
+                                                         Left x' -> x',p)) lst) ann
+    return (ns,fmap Left ress,Left res)
+  foldsExprs f s lst (Right ann) = do
+    (ns,ress,res) <- foldsExprs f s (fmap (\(x,p) -> (case x of
+                                                         Right x' -> x',p)) lst) ann
+    return (ns,fmap Right ress,Right res)
+  extractArgAnnotation (Left x) = Left $ extractArgAnnotation x
+  extractArgAnnotation (Right x) = Right $ extractArgAnnotation x
+  toArgs (Left ann) exprs = do
+    (res,rest) <- toArgs ann exprs
+    return (Left res,rest)
+  toArgs (Right ann) exprs = do
+    (res,rest) <- toArgs ann exprs
+    return (Right res,rest)
+  fromArgs (Left xs) = fromArgs xs
+  fromArgs (Right xs) = fromArgs xs
+  getSorts (_::Either a b) (Left ann) = getSorts (undefined::a) ann
+  getSorts (_::Either a b) (Right ann) = getSorts (undefined::b) ann
+  getArgAnnotation _ _ = error "smtlib2: getArgAnnotation undefined for Either"
+  showsArgs n p (Left x) = let (showx,nn) = showsArgs n 11 x
+                           in (showParen (p>10) $
+                               showString "Left " . showx,nn)
+  showsArgs n p (Right x) = let (showx,nn) = showsArgs n 11 x
+                            in (showParen (p>10) $
+                                showString "Right " . showx,nn)
+
+instance Args a => Args (Maybe a) where
+  type ArgAnnotation (Maybe a) = Maybe (ArgAnnotation a)
+  foldExprs _ s _ Nothing = return (s,Nothing)
+  foldExprs f s ~(Just x) (Just ann) = do
+    (ns,res) <- foldExprs f s x ann
+    return (ns,Just res)
+  foldsExprs _ s lst Nothing = return (s,fmap (const Nothing) lst,Nothing)
+  foldsExprs f s lst (Just ann) = do
+    (ns,ress,res) <- foldsExprs f s (fmap (\(x,p) -> (case x of
+                                                         Just x' -> x',p)) lst) ann
+    return (ns,fmap Just ress,Just res)
+  extractArgAnnotation = fmap extractArgAnnotation
+  toArgs Nothing exprs = Just (Nothing,exprs)
+  toArgs (Just ann) exprs = do
+    (res,rest) <- toArgs ann exprs
+    return (Just res,rest)
+  fromArgs Nothing = []
+  fromArgs (Just x) = fromArgs x
+  getSorts _ Nothing = []
+  getSorts (_::Maybe a) (Just ann) = getSorts (undefined::a) ann
+  getArgAnnotation _ _ = error "smtlib2: getArgAnnotation undefined for Maybe"
+  showsArgs n p Nothing = (showString "Nothing",n)
+  showsArgs n p (Just x) = let (showx,nn) = showsArgs n 11 x
+                           in (showParen (p>10) $
+                               showString "Just " . showx,nn)
+
 instance LiftArgs a => LiftArgs [a] where
   type Unpacked [a] = [Unpacked a]
   liftArgs _ [] = []
