@@ -871,7 +871,7 @@ getNewTypeCollections (_::Proxy t) ann dts
                                            ) cur (conFields con)
                                        ) cur (dataTypeConstructors dt)
                                 ) ([],dts2) (dataTypes coll) -- Declare all field types
-         in (tps1++tps2++tps3,dts3)
+         in (tps2++tps3++tps1,dts3)
 
 escapeName :: Either (String,Integer) Integer -> String
 escapeName (Right i) = "var"++(if i==0
