@@ -297,14 +297,15 @@ generateTypeCollection decls
       args <- mapM (const (newName "arg")) fs
       rargs <- mapM (const (newName "rarg")) fs
       let body = foldr (\(inf,arg,rarg) e
-                        -> if Set.null rem || inf
+                        -> if not inf
                            then appsE [[| withAnyValue |]
                                       ,varE arg
-                                      ,lamE [varP rarg,wildP] e]
+                                      ,lamE [wildP,varP rarg,wildP] e]
                            else letE [valD (conP 'Just [tupP [varP rarg,wildP]])
                                            (normalB $ appE [| castAnyValue |] (varE arg)) []]
                                      e)
                    (appsE [varE f
+                          ,listE [ varE prx | prx <- prxs ]
                           ,sigE (appsE ((conE cName):
                                         (fmap varE rargs))) (foldl appT (conT dName) (fmap varT tvs))
                           ,tupE (fmap varE anns)]) (zip3 inf args rargs)
@@ -409,9 +410,11 @@ getUndefFun con tyvars tvar udef
 
 sortExpr :: Name -> [TyVarBndr] -> ExpQ -> ExpQ
 sortExpr con [] _ = [| L.Symbol (T.pack $(stringE (nameBase con))) |]
-sortExpr con tyvars udef = [| L.List |] `appE` (listE $ [ [| L.Symbol (T.pack $(stringE (nameBase con))) |] ]
-                                                ++ [ [| getSort |] `appE` (getUndefFun con tyvars tv udef)
-                                                                   `appE` (tupE []) | tv <- tyvars ])
+sortExpr con tyvars udef
+  = [| L.List |] `appE` (listE $ [ [| L.Symbol (T.pack $(stringE (nameBase con))) |] ]
+                         ++ [ [| getSort |] `appE` (getUndefFun con tyvars tv udef)
+                              `appE` (tupE [])
+                            | tv <- tyvars ])
 
 -- | Given a data-type, this function derives an instance of both 'SMTType' and 'SMTValue' for it.
 --   Example: @ $(deriveSMT 'MyType) @
@@ -434,9 +437,10 @@ deriveSMT name = do
                                       [tySynInstD ''SMTAnnotation [fullType] (foldl appT (tupleT (genericLength tyvars)) [ appT (conT ''SMTAnnotation) (varT $ tyVarName tyvar)
                                                                                                                          | tyvar <- tyvars ]),
                                        generateGetSort dec,
-                                       funD 'asDataType [ clause [wildP] (normalB $ appsE [ [| Just |]
-                                                                                          , tupE [stringE $ nameBase $ dec_name
-                                                                                          , varE coll]]) []],
+                                       funD 'asDataType [ clause [wildP,wildP]
+                                                            (normalB $ appsE [ [| Just |]
+                                                                             , tupE [stringE $ nameBase $ dec_name
+                                                                             , varE coll]]) []],
                                        do
                                          f <- newName "f"
                                          tps <- mapM (const (newName "tp")) tyvars
@@ -504,9 +508,9 @@ generateMangleFun dec
                                                             , getAnn annF tp
                                                             ]
                                                     | ((_,_,tp),v) <- vars ]
-                                            , appE [| Just |] (appsE [ [| getSort |]
-                                                                     , varE alias
-                                                                     , varE ann ])])) []
+                                            , appE [| asNamedSort |] (appsE [ [| getSort |]
+                                                                            , varE alias
+                                                                            , varE ann ])])) []
                  | con <- case dec of
                             DataD _ _ _ cons _ -> cons
                             NewtypeD _ _ _ con _ -> [con]

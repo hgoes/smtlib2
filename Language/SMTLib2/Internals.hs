@@ -873,6 +873,10 @@ getNewTypeCollections (_::Proxy t) ann dts
                                 ) ([],dts2) (dataTypes coll) -- Declare all field types
          in (tps2++tps3++tps1,dts3)
 
+asNamedSort :: Sort -> Maybe (String,[Sort])
+asNamedSort (Fix (NamedSort name args)) = Just (name,args)
+asNamedSort _ = Nothing
+
 escapeName :: Either (String,Integer) Integer -> String
 escapeName (Right i) = "var"++(if i==0
                               then ""
