@@ -231,7 +231,7 @@ setOption opt = smtBackend $ \backend -> do
   lift $ smtHandle backend st (SMTSetOption opt)
 
 -- | Get information about the underlying SMT solver
-getInfo :: Monad m => SMTInfo i -> SMT' m i
+getInfo :: (Monad m,Typeable i) => SMTInfo i -> SMT' m i
 getInfo inf = smtBackend $ \backend -> do
   st <- getSMT
   lift $ smtHandle backend st (SMTGetInfo inf)

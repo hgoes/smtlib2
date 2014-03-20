@@ -49,9 +49,10 @@ data SMTRequest response where
   SMTComment :: String -> SMTRequest ()
   SMTExit :: SMTRequest ()
   SMTApply :: Tactic -> SMTRequest [SMTExpr Bool]
+  deriving Typeable
 
 class Monad m => SMTBackend a m where
-  smtHandle :: a -> SMTState -> SMTRequest response -> m response
+  smtHandle :: Typeable response => a -> SMTState -> SMTRequest response -> m response
 
 -- | Haskell types which can be represented in SMT
 class (Ord t,Typeable t,
