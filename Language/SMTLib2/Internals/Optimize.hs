@@ -5,6 +5,8 @@ import Language.SMTLib2.Internals.Instances (bvSigned,bvUnsigned,bvRestrict)
 import Language.SMTLib2.Internals.Operators
 import Data.Proxy
 import Data.Bits
+import Data.Either (partitionEithers)
+import Data.Typeable (cast)
 
 optimizeBackend :: b -> OptimizeBackend b
 optimizeBackend = OptB
@@ -122,6 +124,18 @@ optimizeCall (SMTExtract pstart plen) (Const from@(BitVector v) ann)
               (extractAnn (undefFrom from) (undefLen res) len ann)
     in Just res
 optimizeCall (SMTBVComp op) args = bvCompOptimize op args
+optimizeCall (SMTArith op) args = case cast args of
+  Just args' -> case cast (intArithOptimize op args') of
+    Just res -> res
+  Nothing -> Nothing
+optimizeCall SMTMinus args = case cast args of
+  Just args' -> case cast (intMinusOptimize args') of
+    Just res -> res
+  Nothing -> Nothing
+optimizeCall (SMTOrd op) args = case cast args of
+  Just args' -> case cast (intCmpOptimize op args') of
+    Just res -> res
+  Nothing -> Nothing
 optimizeCall _ _ = Nothing
 
 removeConstsOf :: Bool -> [SMTExpr Bool] -> Maybe [SMTExpr Bool]
@@ -175,3 +189,52 @@ bvCompOptimize op (Const b1 ann1,Const b2 ann2)
     s1 = bvSigned b1 ann1
     s2 = bvSigned b2 ann2
 bvCompOptimize _ _ = Nothing
+
+intArithOptimize :: SMTArithOp -> [SMTExpr Integer] -> Maybe (SMTExpr Integer)
+intArithOptimize Plus xs
+  = let (consts,nonconsts) = partitionEithers $ fmap (\e -> case e of
+                                                         Const i _ -> Left i
+                                                         _ -> Right e
+                                                     ) xs
+    in case consts of
+      [] -> Nothing
+      [x] -> case nonconsts of
+        [] -> Just (Const x ())
+        [y] -> if x==0
+               then Just y
+               else Nothing
+        _ -> Nothing
+      _ -> let s = sum consts
+           in case nonconsts of
+             [] -> Just (Const s ())
+             [x] -> if s==0
+                    then Just x
+                    else Just (App (SMTArith Plus) [x,Const s ()])
+             _ -> Just (App (SMTArith Plus) (nonconsts++(if s==0
+                                                         then []
+                                                         else [Const s ()])))
+intArithOptimize Mult xs
+  = let (consts,nonconsts) = partitionEithers $ fmap (\e -> case e of
+                                                         Const i _ -> Left i
+                                                         _ -> Right e
+                                                     ) xs
+    in case consts of
+      [] -> Nothing
+      [_] -> Nothing
+      _ -> case nonconsts of
+        [] -> Just (Const (product consts) ())
+        _ -> Just (App (SMTArith Mult) (nonconsts++[Const (product consts) ()]))
+
+intMinusOptimize :: (SMTExpr Integer,SMTExpr Integer) -> Maybe (SMTExpr Integer)
+intMinusOptimize (Const x _,Const y _) = Just (Const (x-y) ())
+intMinusOptimize (x,Const 0 _) = Just x
+intMinusOptimize _ = Nothing
+
+intCmpOptimize :: SMTOrdOp -> (SMTExpr Integer,SMTExpr Integer) -> Maybe (SMTExpr Bool)
+intCmpOptimize op (Const x _,Const y _)
+  = Just (Const (case op of
+                    Ge -> x >= y
+                    Gt -> x > y
+                    Le -> x <= y
+                    Lt -> x < y) ())
+intCmpOptimize _ _ = Nothing
