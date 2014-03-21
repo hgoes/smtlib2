@@ -711,7 +711,14 @@ instance Args a => Args [a] where
 instance (Typeable a,Show a,Args b,Ord a) => Args (Map a b) where
   type ArgAnnotation (Map a b) = Map a (ArgAnnotation b)
   foldExprs f s mp mp_ann = foldlM (\(s',cmp) (k,ann) -> do
-                                       let el = mp Map.! k
+                                       let el = case Map.lookup k mp of
+                                             Nothing -> error $ "smtlib2: Map annotation contains key "++
+                                                        show k++
+                                                        " but it is not in the map. (Map annotation: "++
+                                                        show (Map.keys mp_ann)++
+                                                        ", map: "++
+                                                        show (Map.keys mp)
+                                             Just x -> x
                                        (s'',el') <- foldExprs f s' el ann
                                        return (s'',Map.insert k el' cmp)
                                    ) (s,Map.empty) (Map.toList mp_ann)
