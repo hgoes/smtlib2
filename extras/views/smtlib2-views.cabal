@@ -1,0 +1,10 @@
+Name:           smtlib2-views
+Version:        0.1
+Author:         Henning Günther <guenther@forsyte.at>
+Build-Type:     Simple
+Cabal-Version:  >=1.2
+
+Library
+  Build-Depends:        base >= 4,smtlib2 >= 0.1
+  Exposed-Modules:
+    Language.SMTLib2.Views
