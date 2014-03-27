@@ -2,3 +2,8 @@ language: haskell
 ghc:
   - 7.4
   - 7.6
+script:
+  - cabal install
+  - cabal install ./extras/th
+  - cabal install ./extras/views
+  - cabal install ./backends/debug
