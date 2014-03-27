@@ -2,8 +2,6 @@ language: haskell
 ghc:
   - 7.4
   - 7.6
-before_install:
-  - sudo apt-get --no-install-recommends install libghc-mtl-dev libghc-vector-dev libghc-fgl-dev libghc-transformers-dev libghc-primitive-dev libghc-text-dev libghc-attoparsec-dev libghc-ansi-terminal-dev
 script:
   - cabal install
   - cabal install ./extras/th
