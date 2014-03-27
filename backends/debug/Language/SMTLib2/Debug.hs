@@ -17,10 +17,13 @@ data DebugBackend b = DebugBackend { debugBackend' :: b
 
 instance (SMTBackend b m,MonadIO m) => SMTBackend (DebugBackend b) m where
   smtHandle b st req = do
-    liftIO $ hSetSGR (debugHandle b) [Reset,SetColor Foreground Dull Green]
     case renderSMTRequest st req of
-      Left l -> liftIO $ hPutStrLn (debugHandle b) (show l)
-      Right msg -> liftIO $ hPutStr (debugHandle b) $ unlines $ fmap (\xs -> ';':xs) (lines msg)
+      Left l -> do
+        liftIO $ hSetSGR (debugHandle b) [Reset,SetColor Foreground Dull Green]
+        liftIO $ hPutStrLn (debugHandle b) (show l)
+      Right msg -> do
+        liftIO $ hSetSGR (debugHandle b) [Reset,SetColor Foreground Dull White]
+        liftIO $ hPutStr (debugHandle b) $ unlines $ fmap (\xs -> ';':xs) (lines msg)
     resp <- smtHandle (debugBackend' b) st req
     case renderSMTResponse st req resp of
       Nothing -> return ()
