@@ -265,7 +265,7 @@ generateTypeCollection decls
                                        ,sigE [| undefined |] (foldl appT (conT dName) (fmap (varT . fst) tps))
                                        ,tupE [ varE ann | (_,ann) <- tps ]]
     generateUndef dName (x:xs) fname tps
-      = appsE [ [| withProxyArg |]
+      = appsE [ varE 'withProxyArg
               , varE x
               , do
                   tp <- newName "tp"
@@ -365,7 +365,7 @@ generateTypeCollection decls
     generateGet' dName (x:xs) obj f fname tps = do
       tp <- newName "tp"
       ann <- newName "ann"
-      appsE [ [| withProxyArg |]
+      appsE [ varE 'withProxyArg
             , varE x
             , lamE [sigP wildP (varT tp)
                    ,{-sigP (-}varP ann{-) (appT (conT ''SMTAnnotation) (varT tp))-}]
