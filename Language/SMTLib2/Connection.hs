@@ -10,7 +10,6 @@ module Language.SMTLib2.Connection
 
 import Language.SMTLib2.Internals
 import Control.Concurrent.MVar
-import qualified Data.Map as Map
 import Control.Monad.State (runStateT)
 import Control.Monad.Reader (runReaderT)
 import Control.Monad.Trans (MonadIO,liftIO)

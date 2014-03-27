@@ -9,7 +9,6 @@ import Language.SMTLib2.Internals.Operators
 import Language.SMTLib2.Strategy
 
 import Data.Typeable
-import Data.Map as Map hiding (assocs)
 import Data.Array
 import Data.Unit
 import Data.List (genericReplicate)
