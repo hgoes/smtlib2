@@ -19,6 +19,7 @@ import Data.Maybe (fromJust)
 import Data.Traversable (mapAccumL)
 import Data.Foldable (foldlM)
 import Text.Show
+import Data.Functor.Identity
 
 valueToHaskell :: DataTypeInfo
                   -> (forall t. SMTType t => [ProxyArg] -> t -> SMTAnnotation t -> r)
@@ -1075,3 +1076,120 @@ withArraySort mp idx v f
     \(_::i) anni
     -> withSort mp v $
        \(_::vt) annv -> f (undefined::SMTArray i vt) (anni,annv)
+
+-- | Recursively fold a monadic function over all sub-expressions of this expression
+foldExprM :: (SMTType a,Monad m) => (forall t. SMTType t => s -> SMTExpr t -> m (s,[SMTExpr t]))
+         -> s -> SMTExpr a -> m (s,[SMTExpr a])
+foldExprM = foldExprM' [(Quantified 0)..]
+
+foldExprM' :: (SMTType a,Monad m) => [Quantified]
+              -> (forall t. SMTType t => s -> SMTExpr t -> m (s,[SMTExpr t]))
+              -> s -> SMTExpr a -> m (s,[SMTExpr a])
+foldExprM' quants f s (Forall ann (fun::arg -> SMTExpr Bool)) = do
+  let (used,rest,expr0) = quantify quants ann fun
+  (s',exprs1) <- foldExprM' rest f s expr0
+  return (s',[ Forall ann (dequantify used ann expr1::arg -> SMTExpr Bool)
+             | expr1 <- exprs1 ])
+foldExprM' quants f s (Exists ann (fun::arg -> SMTExpr Bool)) = do
+  let (used,rest,expr0) = quantify quants ann fun
+  (s',exprs1) <- foldExprM' rest f s expr0
+  return (s',[ Exists ann (dequantify used ann expr1::arg -> SMTExpr Bool)
+             | expr1 <- exprs1 ])
+foldExprM' quants f s (Let ann arg fun) = do
+  (s0,args') <- foldArgsM' quants f s arg
+  let (used,rest,expr0) = quantify quants ann fun
+  (s1,exprs1) <- foldExprM' rest f s0 expr0
+  return (s1,[ Let ann arg' (dequantify used ann expr1)
+             | arg' <- args'
+             , expr1 <- exprs1 ])
+foldExprM' quants f s (App fun arg) = do
+  (s',args') <- foldArgsM' quants f s arg
+  return (s',[ App fun arg'
+             | arg' <- args' ])
+foldExprM' quants f s (Named expr name i) = do
+  (s',exprs') <- foldExprM' quants f s expr
+  return (s',[ Named expr' name i
+             | expr' <- exprs' ])
+foldExprM' _ f s expr = f s expr
+
+-- | Recursively fold a monadic function over all sub-expressions of the argument
+foldArgsM :: (Args a,Monad m) => (forall t. SMTType t => s -> SMTExpr t -> m (s,[SMTExpr t]))
+          -> s -> a -> m (s,[a])
+foldArgsM = foldArgsM' [(Quantified 0)..]
+
+foldArgsM' :: (Args a,Monad m) => [Quantified]
+           -> (forall t. SMTType t => s -> SMTExpr t -> m (s,[SMTExpr t]))
+           -> s -> a -> m (s,[a])
+foldArgsM' quants f s arg = do
+  (ns,res) <- fold s (fromArgs arg)
+  let res' = fmap (\x -> let Just (x',[]) = toArgs (extractArgAnnotation arg) x
+                         in x'
+                  ) res
+  return (ns,res')
+  where
+    fold cs [] = return (cs,[[]])
+    fold cs ((UntypedExpr expr):exprs) = do
+      (s1,nexprs) <- foldExprM' quants f cs expr
+      (s2,rest) <- fold s1 exprs
+      return (s2,[ (UntypedExpr x):xs
+                 | x <- nexprs
+                 , xs <- rest ])
+
+-- | Recursively fold a function over all sub-expressions of this expression.
+--   It is implemented as a special case of 'foldExprM'.
+foldExpr :: SMTType a => (forall t. SMTType t => s -> SMTExpr t -> (s,SMTExpr t))
+            -> s -> SMTExpr a -> (s,SMTExpr a)
+foldExpr f s expr = case runIdentity $ foldExprM (\s' expr' -> let (ns,r) = f s' expr'
+                                                               in return (ns,[r])) s expr of
+                      (ns,[r]) -> (ns,r)
+
+
+foldExprMux :: SMTType a => (forall t. SMTType t => s -> SMTExpr t -> (s,[SMTExpr t]))
+               -> s -> SMTExpr a -> (s,[SMTExpr a])
+foldExprMux f s expr = runIdentity $ foldExprM (\s' expr' -> return $ f s' expr') s expr
+
+-- | Recursively fold a function over all sub-expressions of the argument.
+--   It is implemented as a special case of 'foldArgsM'.
+foldArgs :: Args a => (forall t. SMTType t => s -> SMTExpr t -> (s,SMTExpr t))
+            -> s -> a -> (s,a)
+foldArgs f s expr = case runIdentity $ foldArgsM (\s' expr' -> let (ns,expr'') = f s' expr'
+                                                               in return (ns,[expr''])) s expr of
+                      (ns,[r]) -> (ns,r)
+
+
+foldArgsMux :: Args a => (forall t. SMTType t => s -> SMTExpr t -> (s,[SMTExpr t]))
+            -> s -> a -> (s,[a])
+foldArgsMux f s expr = runIdentity $ foldArgsM (\s' expr' -> return $ f s' expr') s expr
+
+newtype Quantified = Quantified Integer deriving (Typeable,Show,Eq,Ord,Enum)
+
+quantify :: (Typeable a,Ord a,Show a,Args arg)
+            => [a] -> ArgAnnotation arg -> (arg -> arg')
+            -> ([a],[a],arg')
+quantify xs ann f
+  = let ((used,rest),args) = foldExprsId (\(cused,x:xs) _ ann
+                                          -> ((cused++[x],xs),InternalObj x ann)
+                                         ) ([],xs) undefined ann
+    in (used,rest,f args)
+
+dequantify :: (Typeable a,Ord a,Show a,Args arg,Args arg')
+              => [a] -> ArgAnnotation arg -> arg' -> (arg -> arg')
+dequantify xs ann expr
+  = \arg -> let ((tmap,[]),_) = foldExprsId (\(mp,x:xs) expr' ann' -> ((Map.insert x (UntypedExpr expr') mp,xs),expr')
+                                            ) (Map.empty,xs) arg ann
+            in snd $ foldExprsId (\_ expr' _ -> ((),dequantify' tmap expr')) () expr (extractArgAnnotation expr)
+  where
+    dequantify' :: (Typeable a,Ord a,Show a) => Map a UntypedExpr -> SMTExpr t -> SMTExpr t
+    dequantify' mp (InternalObj p ann) = case cast p of
+      Nothing -> InternalObj p ann
+      Just p' -> case Map.lookup p' mp of
+        Just i -> castUntypedExpr i
+        Nothing -> InternalObj p ann
+    dequantify' mp (Forall ann f) = Forall ann (\arg -> dequantify' mp (f arg))
+    dequantify' mp (Exists ann f) = Exists ann (\arg -> dequantify' mp (f arg))
+    dequantify' mp (Let ann arg f) = Let ann arg (\arg' -> dequantify' mp (f arg'))
+    dequantify' mp (App fun arg) = App fun $
+                                   snd $ foldExprsId (\_ expr _ -> ((),dequantify' mp expr)
+                                                     ) () arg (extractArgAnnotation arg)
+    dequantify' mp (Named expr name i) = Named (dequantify' mp expr) name i
+    dequantify' _ expr = expr
