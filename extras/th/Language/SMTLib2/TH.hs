@@ -455,7 +455,7 @@ deriveSMT name = do
                                                                      then appE [| Just |]
                                                                      else \arg
                                                                           -> foldr (\(tp1,tp2,ann,ann') e
-                                                                                    -> appsE [[| asValueType |]
+                                                                                    -> appsE [varE 'asValueType
                                                                                              ,sigE [| undefined |]
                                                                                                    (varT tp1)
                                                                                              ,varE ann
