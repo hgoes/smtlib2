@@ -298,7 +298,7 @@ generateTypeCollection decls
       rargs <- mapM (const (newName "rarg")) fs
       let body = foldr (\(inf,arg,rarg) e
                         -> if not inf
-                           then appsE [[| withAnyValue |]
+                           then appsE [varE 'withAnyValue
                                       ,varE arg
                                       ,lamE [wildP,varP rarg,wildP] e]
                            else letE [valD (conP 'Just [tupP [varP rarg,wildP]])
