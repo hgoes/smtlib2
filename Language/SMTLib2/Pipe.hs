@@ -1,4 +1,4 @@
-module Language.SMTLib2.Pipe (SMTPipe(),createSMTPipe,withPipe,exprToLisp,lispToExpr,renderExpr,renderExpr',renderSMTRequest,renderSMTResponse,commonFunctions,commonTheorems) where
+module Language.SMTLib2.Pipe (SMTPipe(),createSMTPipe,withPipe,exprToLisp,exprToLispWith,lispToExpr,renderExpr,renderExpr',renderSMTRequest,renderSMTResponse,commonFunctions,commonTheorems) where
 
 import Language.SMTLib2.Internals as SMT
 import Language.SMTLib2.Internals.Instances
@@ -356,14 +356,20 @@ findName st name = case unescapeName (T.unpack name) of
                     }) -> Just $ UntypedExpr (Var idx ann :: SMTExpr t)
 
 exprToLisp :: SMTExpr t -> Map Integer FunInfo -> DataTypeInfo -> Integer -> (L.Lisp,Integer)
-exprToLisp (Var idx _) mp _ c = case Map.lookup idx mp of
+exprToLisp
+  = exprToLispWith
+    (\obj -> error $ "smtlib2: Can't translate internal object "++
+             show obj++" to s-expression.")
+
+exprToLispWith :: (forall a. (Typeable a,Ord a,Show a) => a -> L.Lisp) -> SMTExpr t -> Map Integer FunInfo -> DataTypeInfo -> Integer -> (L.Lisp,Integer)
+exprToLispWith _ (Var idx _) mp _ c = case Map.lookup idx mp of
   Just info -> (L.Symbol $ T.pack $
                 escapeName (case funInfoName info of
                                Nothing -> Right (funInfoId info)
                                Just name -> Left name),c)
-  Nothing -> error $ "smtlib2: Variable "++show idx++" has no info."
-exprToLisp (Const x ann) _ dts c = (valueToLisp dts $ mangle x ann,c)
-exprToLisp (AsArray f arg) mp _ c
+  Nothing -> (L.Symbol $ T.pack $ escapeName (Right idx),c)
+exprToLispWith _ (Const x ann) _ dts c = (valueToLisp dts $ mangle x ann,c)
+exprToLispWith _ (AsArray f arg) mp _ c
   = let f' = functionGetSymbol mp f arg
         (sargs,sres) = functionSignature f arg
     in (L.List [L.Symbol "_",L.Symbol "as-array",if isOverloaded f
@@ -371,42 +377,43 @@ exprToLisp (AsArray f arg) mp _ c
                                                              ,L.List $ fmap sortToLisp sargs
                                                              ,sortToLisp sres]
                                                  else f'],c)
-exprToLisp (Forall ann f) mp dts c
+exprToLispWith objs (Forall ann f) mp dts c
   = let (arg,tps,nc,nmp) = createArgs ann c mp
-        (arg',nc') = exprToLisp (f arg) nmp dts nc
+        (arg',nc') = exprToLispWith objs (f arg) nmp dts nc
     in (L.List [L.Symbol "forall"
                ,L.List [L.List [L.Symbol $ T.pack (getSMTName info),sortToLisp $ funInfoSort info]
                        | info <- tps]
                ,arg'],nc')
-exprToLisp (Exists ann f) mp dts c
+exprToLispWith objs (Exists ann f) mp dts c
   = let (arg,tps,nc,nmp) = createArgs ann c mp
-        (arg',nc') = exprToLisp (f arg) nmp dts nc
+        (arg',nc') = exprToLispWith objs (f arg) nmp dts nc
     in (L.List [L.Symbol "exists"
                ,L.List [L.List [L.Symbol $ T.pack (getSMTName info),sortToLisp $ funInfoSort info]
                        | info <- tps ]
                ,arg'],nc')
-exprToLisp (Let ann x f) mp dts c
+exprToLispWith objs (Let ann x f) mp dts c
   = let (arg,tps,nc,nmp) = createArgs ann c mp
-        (arg',nc') = unpackArgs (\e _ cc -> exprToLisp e nmp dts cc
+        (arg',nc') = unpackArgs (\e _ cc -> exprToLispWith objs e nmp dts cc
                                 ) x ann nc
-        (arg'',nc'') = exprToLisp (f arg) nmp dts nc'
+        (arg'',nc'') = exprToLispWith objs (f arg) nmp dts nc'
     in (L.List [L.Symbol "let"
                ,L.List [L.List [L.Symbol $ T.pack (getSMTName info),lisp]
                        | (info,lisp) <- Prelude.zip tps arg' ]
                ,arg''],nc'')
-exprToLisp (App fun x) mp dts c
+exprToLispWith objs (App fun x) mp dts c
   = let arg_ann = extractArgAnnotation x
         l = functionGetSymbol mp fun arg_ann
-        ~(x',c1) = unpackArgs (\e _ i -> exprToLisp e mp dts i) x
+        ~(x',c1) = unpackArgs (\e _ i -> exprToLispWith objs e mp dts i) x
                    arg_ann c
     in if Prelude.null x'
        then (l,c1)
        else (L.List $ l:x',c1)
-exprToLisp (Named expr name nc) mp dts c
-  = let (expr',c') = exprToLisp expr mp dts c
+exprToLispWith objs (Named expr name nc) mp dts c
+  = let (expr',c') = exprToLispWith objs expr mp dts c
     in (L.List [L.Symbol "!",expr'
                ,L.Symbol ":named"
                ,L.Symbol $ T.pack $ escapeName (Left (name,nc))],c')
+exprToLispWith objs (InternalObj obj ann) _ _ c = (objs obj,c)
 
 isOverloaded :: SMTFunction a b -> Bool
 isOverloaded SMTEq = True
