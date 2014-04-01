@@ -684,6 +684,10 @@ instance Args a => Args [a] where
     (s'',xs') <- foldExprs f s' xs anns
     return (s'',x':xs')
   foldsExprs f s _ [] = return (s,[],[])
+  foldsExprs f s args [ann] = do
+    let args_heads = fmap (\(xs,b) -> (head xs,b)) args
+    ~(s1,res_heads,zhead) <- foldsExprs f s args_heads ann
+    return (s1,fmap (\x -> [x]) res_heads,[zhead])
   foldsExprs f s args (ann:anns) = do
     let args_heads = fmap (\(xs,b) -> (head xs,b)) args
         args_tails = fmap (\(xs,b) -> (tail xs,b)) args
