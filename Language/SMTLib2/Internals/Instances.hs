@@ -16,10 +16,11 @@ import Data.Fix
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromJust)
-import Data.Traversable (mapAccumL)
+import Data.Traversable (mapM,mapAccumL)
 import Data.Foldable (foldlM)
 import Text.Show
 import Data.Functor.Identity
+import Prelude hiding (mapM)
 
 valueToHaskell :: DataTypeInfo
                   -> (forall t. SMTType t => [ProxyArg] -> t -> SMTAnnotation t -> r)
@@ -827,6 +828,31 @@ instance LiftArgs a => LiftArgs [a] where
     x' <- unliftArgs x f
     xs' <- unliftArgs xs f
     return (x':xs')
+
+instance (Typeable a,Show a,Ord a,LiftArgs b) => LiftArgs (Map a b) where
+  type Unpacked (Map a b) = Map a (Unpacked b)
+  liftArgs mp ann = Map.mapWithKey (\k ann' -> liftArgs (mp Map.! k) ann') ann
+  unliftArgs mp f = mapM (\el -> unliftArgs el f) mp
+
+instance (LiftArgs a,LiftArgs b) => LiftArgs (Either a b) where
+  type Unpacked (Either a b) = Either (Unpacked a) (Unpacked b)
+  liftArgs ~(Left x) (Left ann) = Left (liftArgs x ann)
+  liftArgs ~(Right x) (Right ann) = Right (liftArgs x ann)
+  unliftArgs (Left x) f = do
+    res <- unliftArgs x f
+    return $ Left res
+  unliftArgs (Right x) f = do
+    res <- unliftArgs x f
+    return $ Right res
+
+instance LiftArgs a => LiftArgs (Maybe a) where
+  type Unpacked (Maybe a) = Maybe (Unpacked a)
+  liftArgs _ Nothing = Nothing
+  liftArgs ~(Just x) (Just ann) = Just (liftArgs x ann)
+  unliftArgs Nothing _ = return Nothing
+  unliftArgs (Just x) f = do
+    res <- unliftArgs x f
+    return (Just res)
 
 instance SMTType a => SMTType (Maybe a) where
   type SMTAnnotation (Maybe a) = SMTAnnotation a
