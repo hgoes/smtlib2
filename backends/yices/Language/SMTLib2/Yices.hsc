@@ -497,12 +497,12 @@ exprToTerm tps mp i (App (SMTExtract pstart plen) x) = do
   let start = reflectNat pstart 0
       len = reflectNat plen 0
   yicesBVExtract tx (fromIntegral start) (fromIntegral $ len-1)
-exprToTerm tps mp i (App (SMTConstructor (Constructor name)) _)
-  = let (_,tp,num) = findConstructor tps name
+exprToTerm tps mp i (App (SMTConstructor (Constructor args dt constr)) _)
+  = let (_,tp,num) = findConstructor tps (conName constr)
     in yicesConstant tp (fromIntegral num)
-exprToTerm tps mp i (App (SMTConTest (Constructor name)) x) = do
+exprToTerm tps mp i (App (SMTConTest (Constructor args dt constr)) x) = do
   tx <- exprToTerm tps mp i x
-  let (_,tp,num) = findConstructor tps name
+  let (_,tp,num) = findConstructor tps (conName constr)
   ty <- yicesConstant tp (fromIntegral num)
   yicesEq tx ty
 
