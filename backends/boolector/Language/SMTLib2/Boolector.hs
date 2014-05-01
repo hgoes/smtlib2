@@ -182,9 +182,22 @@ exprToNode mp btor (App (SMTBVComp op) (e1,e2)) = do
       BVSGE -> boolectorSGte
       BVSGT -> boolectorSGt
     ) (boolectorInstance btor) n1 n2
-exprToNode mp btor (App (SMTBVBin op) (e1,e2)) = do
+exprToNode mp btor (App (SMTBVBin op) (e1::SMTExpr (BitVector a),e2)) = do
   n1 <- exprToNode mp btor e1
   n2 <- exprToNode mp btor e2
+  n2' <- if (case op of
+                BVSHL -> True
+                BVLSHR -> True
+                BVASHR -> True
+                _ -> False)
+         then (do
+                  let bw1 = getBVSize (Proxy::Proxy a) (extractAnnotation e1)
+                      bw2 = getBVSize (Proxy::Proxy a) (extractAnnotation e2)
+                      tw = ceiling $ logBase 2 (fromInteger bw1)
+                  case compare bw2 tw of
+                    EQ -> return n2
+                    GT -> boolectorSlice (boolectorInstance btor) n2 (fromIntegral $ tw-1) 0)
+         else return n2
   (case op of
       BVAdd -> boolectorAdd
       BVSub -> boolectorSub
@@ -198,7 +211,7 @@ exprToNode mp btor (App (SMTBVBin op) (e1,e2)) = do
       BVASHR -> boolectorSRA
       BVXor -> boolectorXOr
       BVAnd -> boolectorAnd
-      BVOr -> boolectorOr) (boolectorInstance btor) n1 n2
+      BVOr -> boolectorOr) (boolectorInstance btor) n1 n2'
 exprToNode mp btor (App (SMTBVUn op) e) = do
   n <- exprToNode mp btor e
   (case op of
