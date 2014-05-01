@@ -1,4 +1,18 @@
-module Language.SMTLib2.Pipe (SMTPipe(),createSMTPipe,withPipe,exprToLisp,exprToLispWith,lispToExpr,renderExpr,renderExpr',renderSMTRequest,renderSMTResponse,commonFunctions,commonTheorems) where
+module Language.SMTLib2.Pipe
+       (SMTPipe(),
+        FunctionParser(),
+        createSMTPipe,
+        withPipe,
+        exprToLisp,
+        exprToLispWith,
+        lispToExpr,
+        lispToSort,
+        renderExpr,
+        renderExpr',
+        renderSMTRequest,
+        renderSMTResponse,
+        commonFunctions,
+        commonTheorems) where
 
 import Language.SMTLib2.Internals as SMT
 import Language.SMTLib2.Internals.Instances
@@ -31,6 +45,8 @@ import Data.Ratio
 import Control.Monad.Trans (MonadIO,liftIO)
 import Control.Monad.Identity
 
+{- | An SMT backend which uses process pipes to communicate with an SMT solver
+     process. -}
 data SMTPipe = SMTPipe { channelIn :: Handle
                        , channelOut :: Handle
                        , processHandle :: ProcessHandle }
@@ -277,7 +293,10 @@ renderSMTResponse st (SMTApply _) goals
     | goal <- goals ]
 renderSMTResponse _ _ _ = Nothing
 
-createSMTPipe :: String -> [String] -> IO SMTPipe
+-- | Spawn a new SMT solver process and create a pipe to communicate with it.
+createSMTPipe :: String -- ^ Path to the binary of the SMT solver
+              -> [String] -- ^ Command line arguments to be passed to the SMT solver
+              -> IO SMTPipe
 createSMTPipe solver args = do
   let cmd = CreateProcess { cmdspec = RawCommand solver args
                           , cwd = Nothing
@@ -315,6 +334,7 @@ sortToLisp' _ (NamedSort name []) = L.Symbol (T.pack name)
 sortToLisp' f (NamedSort name args)
   = L.List $ (L.Symbol $ T.pack name):fmap f args
 
+-- | Parse a lisp expression into an SMT sort.
 lispToSort :: L.Lisp -> Sort
 lispToSort (L.Symbol "Bool") = Fix BoolSort
 lispToSort (L.Symbol "Int") = Fix IntSort
@@ -775,9 +795,17 @@ valueToLisp dts (ConstrValue name vals sort)
       [] -> constr
       _ -> L.List (constr:(fmap (valueToLisp dts) vals))
 
-lispToExpr :: FunctionParser -> (T.Text -> Maybe UntypedExpr)
-              -> DataTypeInfo
-              -> (forall a. SMTType a => SMTExpr a -> b) -> Maybe Sort -> L.Lisp -> Maybe b
+-- | Parse a lisp expression into an SMT expression.
+--   Since we cannot know what type the expression might have, we pass a
+--   general function which may take any SMT expression and produce the desired
+--   result.
+lispToExpr :: FunctionParser -- ^ The parser to use for function symbols
+           -> (T.Text -> Maybe UntypedExpr) -- ^ How to handle variable names
+              -> DataTypeInfo -- ^ Information about declared data types
+              -> (forall a. SMTType a => SMTExpr a -> b) -- ^ A function to apply to the resulting SMT expression
+              -> Maybe Sort -- ^ If you know the sort of the expression, you can pass it here.
+              -> L.Lisp -- ^ The lisp expression to parse
+              -> Maybe b
 lispToExpr fun bound dts f expected l = case lispToValue dts expected l of
   Just val -> valueToHaskell dts
               (\_ (val'::t) ann
@@ -970,6 +998,7 @@ simpleParser fun
                         (getSort ures unit)
                         $ \f -> Just $ f fun)
 
+-- | A parser for all available SMT logics.
 commonFunctions :: FunctionParser
 commonFunctions = mconcat
                   [eqParser
