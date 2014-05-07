@@ -846,23 +846,27 @@ lispToExpr fun bound dts f expected l = case lispToValue dts expected l of
                 Nothing -> error $ "smtlib2: Couldn't infer return type of "++show l
                 Just s -> s
               Just s -> s) $
-          \rfun -> case (do
-                            (rargs,rest) <- toArgs (error "smtlib2: Cannot parse structure dependent arguments.") nargs
+          \(rfun :: SMTFunction arg res)
+          -> case (do
+                      let (ann,[]) = getArgAnnotation (undefined::arg) arg_tps
+                      (rargs,rest) <- toArgs ann nargs
+                      case rest of
+                        [] -> Just $ App rfun rargs
+                        _ -> Nothing) of
+               Just e -> f e
+               Nothing -> error $ "smtlib2: Wrong arguments for function "++show fsym++": "++show arg_tps++" ("++show args'++")."
+      Just (DefinedParser arg_tps _ parse) -> do
+        nargs <- mapM (\(el,tp) -> lispToExpr fun bound dts UntypedExpr (Just tp) el)
+                 (zip args' arg_tps)
+        parse $ \(rfun :: SMTFunction arg res)
+                -> case (do
+                            let (ann,[]) = getArgAnnotation (undefined::arg) arg_tps
+                            (rargs,rest) <- toArgs ann nargs
                             case rest of
                               [] -> Just $ App rfun rargs
                               _ -> Nothing) of
                      Just e -> f e
-                     Nothing -> error $ "smtlib2: Wrong arguments for function "++show fsym++": "++show arg_tps
-      Just (DefinedParser arg_tps _ parse) -> do
-        nargs <- mapM (\(el,tp) -> lispToExpr fun bound dts UntypedExpr (Just tp) el)
-                 (zip args' arg_tps)
-        parse $ \rfun -> case (do
-                                  (rargs,rest) <- toArgs (error "smtlib2: Cannot parse structure dependent arguments.") nargs
-                                  case rest of
-                                    [] -> Just $ App rfun rargs
-                                    _ -> Nothing) of
-                           Just e -> f e
-                           Nothing -> error $ "smtlib2: Wrong arguments for function "++show fsym
+                     Nothing -> error $ "smtlib2: Wrong arguments for function "++show fsym
     _ -> Nothing
   where
     lispToExprs constr exprs = do
@@ -1152,7 +1156,9 @@ toRealParser = simpleParser SMTToReal
 toIntParser = simpleParser SMTToInt
 
 iteParser = FunctionParser $ \sym _ dts -> case sym of
-  L.Symbol "ite" -> Just $ OverloadedParser allEqConstraint
+  L.Symbol "ite" -> Just $ OverloadedParser (\sorts -> case sorts of
+                                                [_,s1,s2] -> s1==s2
+                                                _ -> False)
                     (\sorts -> case sorts of
                         [_,s,_] -> Just s
                         _ -> error $ "smtlib2: Wrong number of arguments to ite (expected 3, got "++show (length sorts)++".") $
