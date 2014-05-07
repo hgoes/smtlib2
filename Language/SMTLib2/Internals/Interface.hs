@@ -3,7 +3,7 @@
 module Language.SMTLib2.Internals.Interface where
 
 import Language.SMTLib2.Internals
-import Language.SMTLib2.Internals.Instances (extractAnnotation,dataTypeList,constructorNil,constructorCons)
+import Language.SMTLib2.Internals.Instances (extractAnnotation,dataTypeList,constructorNil,constructorCons,withSort)
 import Language.SMTLib2.Internals.Optimize
 import Language.SMTLib2.Internals.Operators
 import Language.SMTLib2.Strategy
@@ -75,6 +75,24 @@ varAnn ann = argVarsAnn ann
 -- | Create a fresh new variable
 var :: (SMTType t,Typeable t,Unit (SMTAnnotation t),Monad m) => SMT' m (SMTExpr t)
 var = argVarsAnn unit
+
+-- | Create a fresh untyped variable with a name
+untypedNamedVar :: Monad m => String -> Sort -> SMT' m UntypedExpr
+untypedNamedVar name sort = do
+  st <- getSMT
+  withSort (declaredDataTypes st) sort $
+    \(_::t) ann -> do
+      v <- varNamedAnn name ann
+      return $ UntypedExpr (v::SMTExpr t)
+
+-- | Create a fresh untyped variable
+untypedVar :: Monad m => Sort -> SMT' m UntypedExpr
+untypedVar sort = do
+  st <- getSMT
+  withSort (declaredDataTypes st) sort $
+    \(_::t) ann -> do
+      v <- varAnn ann
+      return $ UntypedExpr (v::SMTExpr t)
 
 -- | Like `argVarsAnnNamed`, but defaults the name to "var"
 argVarsAnn :: (Args a,Monad m) => ArgAnnotation a -> SMT' m a

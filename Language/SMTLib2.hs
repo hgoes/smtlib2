@@ -28,7 +28,7 @@ module Language.SMTLib2
          SMTValue,
          SMTArith,
          SMTOrd(..),
-         SMTExpr,
+         SMTExpr,UntypedExpr,
          SMTFunction,
          SMTOption(..),
          SMTArray,
@@ -50,6 +50,7 @@ module Language.SMTLib2
          getInterpolant,
          -- * Expressions
          var,varNamed,varNamedAnn,varAnn,argVars,argVarsAnn,argVarsAnnNamed,
+         untypedVar,untypedNamedVar,
          constant,constantAnn,
          extractAnnotation,
          let',lets,letAnn,
