@@ -238,8 +238,7 @@ assertInterp expr interp = smtBackend $ \backend -> do
 getInterpolant :: Monad m => [InterpolationGroup] -> SMT' m (SMTExpr Bool)
 getInterpolant grps = smtBackend $ \backend -> do
   st <- getSMT
-  --lift $ smtGetInterpolant backend (namedExprs st) (usedTypes st) grps
-  error "TODO: getInterpolant"
+  lift $ smtHandle backend st (SMTGetInterpolant grps)
 
 -- | Set an option for the underlying SMT solver
 setOption :: Monad m => SMTOption -> SMT' m ()
