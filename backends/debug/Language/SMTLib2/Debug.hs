@@ -12,15 +12,26 @@ import Data.IORef
 debugBackend :: b -> IO (DebugBackend b)
 debugBackend b = do
   ref <- newIORef 0
-  return $ DebugBackend b stderr (Just ref)
+  return $ DebugBackend b stderr (Just ref) Nothing
+
+namedDebugBackend :: String -> b -> IO (DebugBackend b)
+namedDebugBackend name b = do 
+  ref <- newIORef 0
+  return $ DebugBackend b stderr (Just ref) (Just name)
 
 data DebugBackend b = DebugBackend { debugBackend' :: b
                                    , debugHandle :: Handle
                                    , debugLines :: Maybe (IORef Integer)
+                                   , debugPrefix :: Maybe String
                                    }
 
 instance (SMTBackend b m,MonadIO m) => SMTBackend (DebugBackend b) m where
   smtHandle b st req = do
+    case debugPrefix b of
+      Nothing -> return ()
+      Just prf -> do
+        liftIO $ hSetSGR (debugHandle b) [Reset,SetColor Foreground Dull Cyan]
+        liftIO $ hPutStr (debugHandle b) prf
     case debugLines b of
       Nothing -> return ()
       Just line_ref -> do
