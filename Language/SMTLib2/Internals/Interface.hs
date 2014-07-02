@@ -77,7 +77,7 @@ var :: (SMTType t,Typeable t,Unit (SMTAnnotation t),Monad m) => SMT' m (SMTExpr 
 var = argVarsAnn unit
 
 -- | Create a fresh untyped variable with a name
-untypedNamedVar :: Monad m => String -> Sort -> SMT' m UntypedExpr
+untypedNamedVar :: Monad m => String -> Sort -> SMT' m (SMTExpr Untyped)
 untypedNamedVar name sort = do
   st <- getSMT
   withSort (declaredDataTypes st) sort $
@@ -86,7 +86,7 @@ untypedNamedVar name sort = do
       return $ UntypedExpr (v::SMTExpr t)
 
 -- | Create a fresh untyped variable
-untypedVar :: Monad m => Sort -> SMT' m UntypedExpr
+untypedVar :: Monad m => Sort -> SMT' m (SMTExpr Untyped)
 untypedVar sort = do
   st <- getSMT
   withSort (declaredDataTypes st) sort $

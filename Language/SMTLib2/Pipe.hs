@@ -291,6 +291,7 @@ renderSMTResponse st (SMTApply _) goals
     L.List $ [L.Symbol "goals"]++
     [fst $ exprToLisp goal (allVars st) (declaredDataTypes st) (nextVar st)
     | goal <- goals ]
+renderSMTResponse _ SMTGetUnsatCore core = Just (show core)
 renderSMTResponse _ _ _ = Nothing
 
 -- | Spawn a new SMT solver process and create a pipe to communicate with it.
@@ -359,21 +360,32 @@ getSMTName info = escapeName (case funInfoName info of
   Nothing -> Right (funInfoId info)
   Just name -> Left name)
 
-findName :: SMTState -> T.Text -> Maybe UntypedExpr
+findName :: SMTState -> T.Text -> Maybe (SMTExpr Untyped)
 findName st name = case unescapeName (T.unpack name) of
   Nothing -> Nothing
   Just (Right idx) -> case Map.lookup idx (allVars st) of
     Nothing -> Nothing
     Just (FunInfo { funInfoProxy = _::Proxy (a,t)
                   , funInfoResAnn = ann
-                  }) -> Just $ UntypedExpr (Var idx ann :: SMTExpr t)
+                  }) -> let expr :: SMTExpr t
+                            expr = Var idx ann
+                        in Just $ mkUntyped expr
   Just (Left name') -> case Map.lookup name' (namedVars st) of
     Nothing -> Nothing
     Just idx -> case Map.lookup idx (allVars st) of
       Nothing -> Nothing
       Just (FunInfo { funInfoProxy = _::Proxy (a,t)
                     , funInfoResAnn = ann
-                    }) -> Just $ UntypedExpr (Var idx ann :: SMTExpr t)
+                    }) -> let expr :: SMTExpr t
+                              expr = Var idx ann
+                          in Just $ mkUntyped expr
+
+mkUntyped :: SMTType t => SMTExpr t -> SMTExpr Untyped
+mkUntyped e = case cast e of
+  Just e' -> e'
+  Nothing -> case cast e of
+    Just e' -> entypeValue UntypedExpr e'
+    Nothing -> UntypedExpr e
 
 exprToLisp :: SMTExpr t -> Map Integer FunInfo -> DataTypeInfo -> Integer -> (L.Lisp,Integer)
 exprToLisp
@@ -434,6 +446,11 @@ exprToLispWith objs (Named expr name nc) mp dts c
                ,L.Symbol ":named"
                ,L.Symbol $ T.pack $ escapeName (Left (name,nc))],c')
 exprToLispWith objs (InternalObj obj ann) _ _ c = (objs obj,c)
+exprToLispWith objs (UntypedExpr expr) mp dts c
+  = exprToLispWith objs expr mp dts c
+exprToLispWith objs (UntypedExprValue expr) mp dts c
+  = exprToLispWith objs expr mp dts c
+
 
 isOverloaded :: SMTFunction a b -> Bool
 isOverloaded SMTEq = True
@@ -800,7 +817,7 @@ valueToLisp dts (ConstrValue name vals sort)
 --   general function which may take any SMT expression and produce the desired
 --   result.
 lispToExpr :: FunctionParser -- ^ The parser to use for function symbols
-           -> (T.Text -> Maybe UntypedExpr) -- ^ How to handle variable names
+           -> (T.Text -> Maybe (SMTExpr Untyped)) -- ^ How to handle variable names
               -> DataTypeInfo -- ^ Information about declared data types
               -> (forall a. SMTType a => SMTExpr a -> b) -- ^ A function to apply to the resulting SMT expression
               -> Maybe Sort -- ^ If you know the sort of the expression, you can pass it here.
@@ -856,7 +873,7 @@ lispToExpr fun bound dts f expected l = case lispToValue dts expected l of
                Just e -> f e
                Nothing -> error $ "smtlib2: Wrong arguments for function "++show fsym++": "++show arg_tps++" ("++show args'++")."
       Just (DefinedParser arg_tps _ parse) -> do
-        nargs <- mapM (\(el,tp) -> lispToExpr fun bound dts UntypedExpr (Just tp) el)
+        nargs <- mapM (\(el,tp) -> lispToExpr fun bound dts mkUntyped (Just tp) el)
                  (zip args' arg_tps)
         parse $ \(rfun :: SMTFunction arg res)
                 -> case (do
@@ -870,12 +887,12 @@ lispToExpr fun bound dts f expected l = case lispToValue dts expected l of
     _ -> Nothing
   where
     lispToExprs constr exprs = do
-      res <- mapM (\arg -> lispToExpr fun bound dts (UntypedExpr) Nothing arg) exprs
+      res <- mapM (\arg -> lispToExpr fun bound dts mkUntyped Nothing arg) exprs
       let sorts = fmap (entype exprSort) res
       if constr sorts
         then return res
         else (case generalizeSorts sorts of
-                 Just sorts' -> mapM (\(arg,sort') -> lispToExpr fun bound dts UntypedExpr (Just sort') arg) (zip exprs sorts')
+                 Just sorts' -> mapM (\(arg,sort') -> lispToExpr fun bound dts mkUntyped (Just sort') arg) (zip exprs sorts')
                  Nothing -> return res)
     preprocessHack (L.List ((L.Symbol "concat"):args)) = foldl1 (\expr arg -> L.List [L.Symbol "concat",expr,arg]) args
     preprocessHack x = x
@@ -909,7 +926,7 @@ exprSort (expr::SMTExpr a) = getSort (undefined::a) (extractAnnotation expr)
 
 quantToExpr :: (forall a. Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool)
                -> FunctionParser
-               -> (T.Text -> Maybe UntypedExpr)
+               -> (T.Text -> Maybe (SMTExpr Untyped))
                -> DataTypeInfo
                -> [L.Lisp] -> L.Lisp -> Maybe (SMTExpr Bool)
 quantToExpr q fun bound dts (L.List [L.Symbol var,tp]:rest) body
@@ -920,7 +937,7 @@ quantToExpr q fun bound dts (L.List [L.Symbol var,tp]:rest) body
        (\u ann ->
          q ann $ \subst -> case quantToExpr q fun
                                 (\txt -> if txt==var
-                                         then Just $ UntypedExpr $ getForall u subst
+                                         then Just $ mkUntyped $ getForall u subst
                                          else bound txt)
                                 dts rest body of
                              Just r -> r
@@ -938,7 +955,7 @@ data LetStruct where
   EndLet :: SMTType a => SMTExpr a -> LetStruct
 
 parseLetStruct :: FunctionParser
-                  -> (T.Text -> Maybe UntypedExpr)
+                  -> (T.Text -> Maybe (SMTExpr Untyped))
                   -> DataTypeInfo
                   -> Maybe Sort
                   -> [L.Lisp] -> L.Lisp -> LetStruct
@@ -947,7 +964,7 @@ parseLetStruct fun bound tps expected (L.List [L.Symbol name,expr]:rest) arg
          (\expr' -> LetStruct (extractAnnotation expr') expr' $
                     \sym -> parseLetStruct fun
                             (\txt -> if txt==name
-                                     then Just $ UntypedExpr sym
+                                     then Just $ mkUntyped sym
                                      else bound txt) tps expected rest arg
          ) Nothing expr of
       Nothing -> error $ "smtlib2: Failed to parse argument in let-expression "++show expr

@@ -152,6 +152,35 @@ modifySMT f = SMT $ modify f
 instance MonadTrans SMT' where
   lift = SMT . lift . lift
 
+data Untyped = forall t. SMTType t => Untyped t deriving Typeable
+
+data UntypedValue = forall t. SMTValue t => UntypedValue t deriving Typeable
+
+instance Eq Untyped where
+  (Untyped x) == (Untyped y) = case cast y of
+    Just y' -> x==y'
+    Nothing -> False
+
+instance Ord Untyped where
+  compare (Untyped x) (Untyped y) = case compare (typeOf x) (typeOf y) of
+    EQ -> case cast y of
+      Just y' -> compare x y'
+    r -> r
+
+instance Eq UntypedValue where
+  (UntypedValue x) == (UntypedValue y) = case cast y of
+    Just y' -> x==y'
+    Nothing -> False
+
+instance Ord UntypedValue where
+  compare (UntypedValue x) (UntypedValue y) = case compare (typeOf x) (typeOf y) of
+    EQ -> case cast y of
+      Just y' -> compare x y'
+    r -> r
+
+instance Show UntypedValue where
+  showsPrec p (UntypedValue x) = showsPrec p x
+
 -- | An abstract SMT expression
 data SMTExpr t where
   Var :: SMTType t => Integer -> SMTAnnotation t -> SMTExpr t
@@ -164,26 +193,9 @@ data SMTExpr t where
   App :: (Args arg,SMTType res) => SMTFunction arg res -> arg -> SMTExpr res
   Named :: SMTExpr a -> String -> Integer -> SMTExpr a
   InternalObj :: (SMTType t,Typeable a,Ord a,Show a) => a -> SMTAnnotation t -> SMTExpr t
+  UntypedExpr :: SMTType t => SMTExpr t -> SMTExpr Untyped
+  UntypedExprValue :: SMTValue t => SMTExpr t -> SMTExpr UntypedValue
   deriving Typeable
-
-data UntypedExpr = forall a. SMTType a => UntypedExpr (SMTExpr a) deriving (Typeable)
-
-instance Eq UntypedExpr where
-  (UntypedExpr e1) == (UntypedExpr e2) = compareExprs e1 e2 == EQ
-
-instance Ord UntypedExpr where
-  compare (UntypedExpr e1) (UntypedExpr e2) = compareExprs e1 e2
-
-instance Show UntypedExpr where
-  show (UntypedExpr e) = show e
-
-entype :: (forall a. SMTType a => SMTExpr a -> b) -> UntypedExpr -> b
-entype f (UntypedExpr x) = f x
-
-castUntypedExpr :: SMTType t => UntypedExpr -> SMTExpr t
-castUntypedExpr (UntypedExpr x) = case cast x of
-  Just x' -> x'
-  Nothing -> error $ "smtlib2: castUntypedExpr failed."
 
 data Sort' a = BoolSort
              | IntSort
@@ -252,256 +264,12 @@ class (IsBitVector a,IsBitVector b) => Extractable a b where
   extractAnn :: a -> b -> Integer -> SMTAnnotation (BitVector a) -> SMTAnnotation (BitVector b)
   getExtractLen :: a -> b -> SMTAnnotation (BitVector b) -> Integer
 
-instance Args arg => Eq (SMTFunction arg res) where
-  (==) f1 f2 = compareFun f1 f2 == EQ
-
-instance Args arg => Ord (SMTFunction arg res) where
-  compare = compareFun
-  
-compareFun :: (Args a1,Args a2) => SMTFunction a1 r1 -> SMTFunction a2 r2 -> Ordering
-compareFun SMTEq SMTEq = EQ
-compareFun SMTEq _ = LT
-compareFun _ SMTEq = GT
-compareFun (SMTMap f1) (SMTMap f2) = compareFun f1 f2
-compareFun (SMTMap _) _ = LT
-compareFun _ (SMTMap _) = GT
-compareFun (SMTFun i _) (SMTFun j _) = compare i j
-compareFun (SMTFun _ _) _ = LT
-compareFun _ (SMTFun _ _) = GT
-compareFun (SMTBuiltIn n1 _) (SMTBuiltIn n2 _) = compare n1 n2
-compareFun (SMTBuiltIn _ _) _ = LT
-compareFun _ (SMTBuiltIn _ _) = GT
-compareFun (SMTOrd op1) (SMTOrd op2) = compare op1 op2
-compareFun (SMTOrd _) _ = LT
-compareFun _ (SMTOrd _) = GT
-compareFun (SMTArith op1) (SMTArith op2) = compare op1 op2
-compareFun SMTMinus SMTMinus = EQ
-compareFun SMTMinus _ = LT
-compareFun _ SMTMinus = GT
-compareFun (SMTIntArith op1) (SMTIntArith op2) = compare op1 op2
-compareFun (SMTIntArith _) _ = LT
-compareFun _ (SMTIntArith _) = GT
-compareFun SMTDivide SMTDivide = EQ
-compareFun SMTDivide _ = LT
-compareFun _ SMTDivide = GT
-compareFun SMTNeg SMTNeg = EQ
-compareFun SMTNeg _ = LT
-compareFun _ SMTNeg = GT
-compareFun SMTAbs SMTAbs = EQ
-compareFun SMTAbs _ = LT
-compareFun _ SMTAbs = GT
-compareFun SMTNot SMTNot = EQ
-compareFun SMTNot _ = LT
-compareFun _ SMTNot = GT
-compareFun (SMTLogic op1) (SMTLogic op2) = compare op1 op2
-compareFun (SMTLogic _) _ = LT
-compareFun _ (SMTLogic _) = GT
-compareFun SMTDistinct SMTDistinct = EQ
-compareFun SMTDistinct _ = LT
-compareFun _ SMTDistinct = GT
-compareFun SMTToReal SMTToReal = EQ
-compareFun SMTToReal _ = LT
-compareFun _ SMTToReal = GT
-compareFun SMTToInt SMTToInt = EQ
-compareFun SMTToInt _ = LT
-compareFun _ SMTToInt = GT
-compareFun SMTITE SMTITE = EQ
-compareFun SMTITE _ = LT
-compareFun _ SMTITE = GT
-compareFun (SMTBVComp op1) (SMTBVComp op2) = compare op1 op2
-compareFun (SMTBVComp _) _ = LT
-compareFun _ (SMTBVComp _) = GT
-compareFun (SMTBVBin op1) (SMTBVBin op2) = compare op1 op2
-compareFun (SMTBVBin _) _ = LT
-compareFun _ (SMTBVBin _) = GT
-compareFun (SMTBVUn op1) (SMTBVUn op2) = compare op1 op2
-compareFun (SMTBVUn _) _ = LT
-compareFun _ (SMTBVUn _) = GT
-compareFun SMTSelect SMTSelect = EQ
-compareFun SMTSelect _ = LT
-compareFun _ SMTSelect = GT
-compareFun SMTStore SMTStore = EQ
-compareFun SMTStore _ = LT
-compareFun _ SMTStore = GT
-compareFun (SMTConstArray _) (SMTConstArray _) = EQ
-compareFun (SMTConstArray _) _ = LT
-compareFun _ (SMTConstArray _) = GT
-compareFun SMTConcat SMTConcat = EQ
-compareFun SMTConcat _ = LT
-compareFun _ SMTConcat = GT
-compareFun (SMTExtract (_::Proxy start1) (_::Proxy len1)) (SMTExtract (_::Proxy start2) (_::Proxy len2))
-  = compare (typeOf (undefined::start1),typeOf (undefined::len1))
-    (typeOf (undefined::start2),typeOf (undefined::len2))
-compareFun (SMTExtract _ _) _ = LT
-compareFun _ (SMTExtract _ _) = GT
-compareFun (SMTConstructor con1) (SMTConstructor con2)
-  = compareConstructor con1 con2
-compareFun (SMTConstructor _) _ = LT
-compareFun _ (SMTConstructor _) = GT
-compareFun (SMTConTest con1) (SMTConTest con2)
-  = compareConstructor con1 con2
-compareFun (SMTConTest _) _ = LT
-compareFun _ (SMTConTest _) = GT
-compareFun (SMTFieldSel f1) (SMTFieldSel f2) = compareField f1 f2
-compareFun (SMTFieldSel _) _ = LT
-compareFun _ (SMTFieldSel _) = GT
-
-compareConstructor :: Constructor arg1 res1 -> Constructor arg2 res2 -> Ordering
-compareConstructor (Constructor p1 dt1 con1) (Constructor p2 dt2 con2)
-  = case compare (dataTypeName dt1) (dataTypeName dt2) of
-  EQ -> case compare p1 p2 of
-    EQ -> compare (conName con1) (conName con2)
-    r -> r
-  r -> r
-
-compareField :: Field a1 f1 -> Field a2 f2 -> Ordering
-compareField (Field p1 dt1 con1 f1) (Field p2 dt2 con2 f2)
-  = case compare (dataTypeName dt1) (dataTypeName dt2) of
-  EQ -> case compare p1 p2 of
-    EQ -> case compare (conName con1) (conName con2) of
-      EQ -> compare (fieldName f1) (fieldName f2)
-      r -> r
-    r -> r
-  r -> r
-
-compareArgs :: (Args a1,Args a2) => a1 -> a2 -> Ordering
-compareArgs x y = compare (fromArgs x) (fromArgs y)
-
-compareExprs :: (SMTType t1,SMTType t2) => SMTExpr t1 -> SMTExpr t2 -> Ordering
-compareExprs = compareExprs' (-1)
-  where
-    compareExprs' _ (Var i _) (Var j _) = compare i j
-    compareExprs' _ (Var _ _) _ = LT
-    compareExprs' _ _ (Var _ _) = GT
-    compareExprs' _ (Const i _) (Const j _) = case cast j of
-      Just j' -> compare i j'
-      Nothing -> compare (typeOf i) (typeOf j)
-    compareExprs' _ (Const _ _) _ = LT
-    compareExprs' _ _ (Const _ _) = GT
-    compareExprs' _ (AsArray f1 _) (AsArray f2 _) = compareFun f1 f2
-    compareExprs' _ (AsArray _ _) _ = LT
-    compareExprs' _ _ (AsArray _ _) = GT
-    compareExprs' n (Forall ann1 f1) (Forall ann2 f2)
-      = let (n',v1) = foldExprsId (\i _ ann -> (i-1,Var i ann)) n undefined ann1
-            (_,v2) = foldExprsId (\i _ ann -> (i-1,Var i ann)) n undefined ann2
-        in case compareArgs v1 v2 of
-          EQ -> compareExprs' n' (f1 v1) (f2 v2)
-          x -> x
-    compareExprs' _ (Forall _ _) _ = LT
-    compareExprs' _ _ (Forall _ _) = GT
-    compareExprs' n (Exists ann1 f1) (Exists ann2 f2)
-      = let (n',v1) = foldExprsId (\i _ ann -> (i-1,Var i ann)) n undefined ann1
-            (_,v2) = foldExprsId (\i _ ann -> (i-1,Var i ann)) n undefined ann2
-        in case compareArgs v1 v2 of
-          EQ -> compareExprs' n' (f1 v1) (f2 v2)
-          x -> x
-    compareExprs' _ (Exists _ _) _ = LT
-    compareExprs' _ _ (Exists _ _) = GT
-    compareExprs' n (Let _ arg1 f1) (Let _ arg2 f2)
-      = compareExprs' n (f1 arg1) (f2 arg2)
-    compareExprs' _ (Let _ _ _) _ = LT
-    compareExprs' _ _ (Let _ _ _) = GT
-    compareExprs' _ (App f1 arg1) (App f2 arg2) = case compareFun f1 f2 of
-      EQ -> compareArgs arg1 arg2
-      x -> x
-    compareExprs' _ (App _ _) _ = LT
-    compareExprs' _ _ (App _ _) = GT
-    compareExprs' _ (Named _ n1 i1) (Named _ n2 i2) = compare (n1,i1) (n2,i2)
-    compareExprs' _ (Named _ _ _) _ = LT
-    compareExprs' _ _ (Named _ _ _) = GT
-    compareExprs' _ (InternalObj o1 ann1) (InternalObj o2 ann2) = case compare (typeOf o1) (typeOf o2) of
-      EQ -> case compare (typeOf ann1) (typeOf ann2) of
-        EQ -> case cast (o2,ann2) of
-          Just (o2',ann2') -> compare (o1,ann1) (o2',ann2')
-        r -> r
-      r -> r
-    --compareExprs' _ (InternalObj _) _ = LT
-    --compareExprs' _ _ (InternalObj _) = GT
-
-instance Eq a => Eq (SMTExpr a) where
-  (==) x y = case eqExpr 0 x y of
-    Just True -> True
-    _ -> False
-
-instance SMTType t => Ord (SMTExpr t) where
-  compare = compareExprs
-
-eqExpr :: Integer -> SMTExpr a -> SMTExpr a -> Maybe Bool
-eqExpr n lhs rhs = case (lhs,rhs) of
-  (Var v1 _,Var v2 _) -> if v1 == v2
-                         then Just True
-                         else Nothing
-  (Const v1 _,Const v2 _) -> Just $ v1 == v2
-  (AsArray f1 arg1,AsArray f2 arg2) -> case cast f2 of
-    Nothing -> Nothing
-    Just f2' -> case cast arg2 of
-      Nothing -> Nothing
-      Just arg2' -> if f1 == f2' && arg1 == arg2'
-                    then Just True
-                    else Nothing
-  (Forall a1 f1,Forall a2 f2) -> let (n',v) = foldExprsId (\i _ ann -> (i+1,Var i ann)) n undefined a1
-                                 in case cast (a2,f2) of
-                                   Nothing -> Nothing
-                                   Just (a2',f2') -> if a1==a2'
-                                                     then eqExpr n' (f1 v) (f2' v)
-                                                     else Nothing
-  (Exists a1 f1,Exists a2 f2) -> let (n',v) = foldExprsId (\i _ ann -> (i+1,Var i ann)) n undefined a1
-                                 in case cast (a2,f2) of
-                                   Nothing -> Nothing
-                                   Just (a2',f2') -> if a1==a2'
-                                                     then eqExpr n' (f1 v) (f2' v)
-                                                     else Nothing
-  (Let _ x1 f1,Let _ x2 f2) -> eqExpr n (f1 x1) (f2 x2)
-  (Named e1 n1 nc1,Named e2 n2 nc2) -> if n1==n2 && nc1 == nc2
-                                       then eqExpr n e1 e2
-                                       else Nothing
-  (App f1 arg1,App f2 arg2) -> case cast f2 of
-      Nothing -> Nothing
-      Just f2' -> case cast arg2 of
-        Nothing -> Nothing
-        Just arg2' -> if f1 == f2' && arg1 == arg2'
-                      then Just True
-                      else Nothing
-  (InternalObj o1 ann1,InternalObj o2 ann2) -> case cast (o2,ann2) of
-    Nothing -> Nothing
-    Just (o2',ann2') -> Just $ (o1 == o2') && (ann1 == ann2')
-  (_,_) -> Nothing
-
 -- | Represents a constructor of a datatype /a/
 --   Can be obtained by using the template haskell extension module
 data Constructor arg res = Constructor [ProxyArg] DataType Constr deriving (Typeable)
 
-instance Eq (Constructor arg res) where
-  (Constructor p1 dt1 con1) == (Constructor p2 dt2 con2)
-    = (dataTypeName dt1 == dataTypeName dt2) &&
-      (p1 == p2) &&
-      (conName con1 == conName con2)
-
-instance Ord (Constructor arg res) where
-  compare = compareConstructor
-
-instance Show (Constructor arg res) where
-  showsPrec p (Constructor _ _ con) = showParen (p>10)
-                                      (showString "Constructor " .
-                                       showsPrec 11 (conName con))
-
 -- | Represents a field of the datatype /a/ of the type /f/
 data Field a f = Field [ProxyArg] DataType Constr DataField deriving (Typeable)
-
-instance Eq (Field a f) where
-  (Field p1 dt1 con1 f1) == (Field p2 dt2 con2 f2)
-    = (dataTypeName dt1 == dataTypeName dt2) &&
-      (p1 == p2) &&
-      (conName con1 == conName con2) &&
-      (fieldName f1 == fieldName f2)
-
-instance Ord (Field a f) where
-  compare = compareField
-
-instance Show (Field a f) where
-  showsPrec p (Field _ _ _ f) = showParen (p>10)
-                                (showString "Field " .
-                                 showsPrec 11 (fieldName f))
 
 newtype InterpolationGroup = InterpolationGroup Integer
 
@@ -534,9 +302,9 @@ class (Ord a,Typeable a,Show a,
   foldsExprs :: Monad m => (forall t. SMTType t => s -> [(SMTExpr t,b)] -> SMTAnnotation t -> m (s,[SMTExpr t],SMTExpr t))
                 -> s -> [(a,b)] -> ArgAnnotation a -> m (s,[a],a)
   extractArgAnnotation :: a -> ArgAnnotation a
-  toArgs :: ArgAnnotation a -> [UntypedExpr] -> Maybe (a,[UntypedExpr])
+  toArgs :: ArgAnnotation a -> [SMTExpr Untyped] -> Maybe (a,[SMTExpr Untyped])
   
-  fromArgs :: Args a => a -> [UntypedExpr]
+  fromArgs :: Args a => a -> [SMTExpr Untyped]
   fromArgs arg = fst $ foldExprsId (\lst expr ann -> (lst++[UntypedExpr expr],expr)
                                    ) [] arg (extractArgAnnotation arg)
   getSorts :: a -> ArgAnnotation a -> [Sort]
@@ -758,8 +526,13 @@ data TypeCollection = TypeCollection { argCount :: Integer
 
 data ProxyArg = forall t. SMTType t => ProxyArg t (SMTAnnotation t) deriving Typeable
 
+data ProxyArgValue = forall t. SMTValue t => ProxyArgValue t (SMTAnnotation t) deriving Typeable
+
 withProxyArg :: ProxyArg -> (forall t. SMTType t => t -> SMTAnnotation t -> a) -> a
 withProxyArg (ProxyArg x ann) f = f x ann
+
+withProxyArgValue :: ProxyArgValue -> (forall t. SMTValue t => t -> SMTAnnotation t -> a) -> a
+withProxyArgValue (ProxyArgValue x ann) f = f x ann
 
 instance Show ProxyArg where
   showsPrec p (ProxyArg u ann) = showParen (p>10) $
@@ -775,6 +548,24 @@ instance Eq ProxyArg where
 
 instance Ord ProxyArg where
   compare (ProxyArg u1 ann1) (ProxyArg u2 ann2) = case compare (typeOf u1) (typeOf u2) of
+    EQ -> case cast ann2 of
+      Just ann2' -> compare ann1 ann2'
+    x -> x
+
+instance Show ProxyArgValue where
+  showsPrec p (ProxyArgValue u ann) = showParen (p>10) $
+                                      showString "ProxyArg " .
+                                      showsPrec 11 (typeOf u) .
+                                      showChar ' ' .
+                                      showsPrec 11 ann
+
+instance Eq ProxyArgValue where
+  (ProxyArgValue (u1::t) ann1) == (ProxyArgValue u2 ann2) = case cast (u2,ann2) of
+    Just (_::t,ann2') -> ann1==ann2'
+    Nothing -> False
+
+instance Ord ProxyArgValue where
+  compare (ProxyArgValue u1 ann1) (ProxyArgValue u2 ann2) = case compare (typeOf u1) (typeOf u2) of
     EQ -> case cast ann2 of
       Just ann2' -> compare ann1 ann2'
     x -> x
@@ -1243,6 +1034,7 @@ showExpr i p (InternalObj obj ann) = (showParen (p>10) (showString "InternalObj 
                                                         showsPrec 11 obj .
                                                         showChar ' ' .
                                                         showsPrec 11 ann),i)
+showExpr i p (UntypedExpr e) = showExpr i p e
 
 instance Show (SMTFunction arg res) where
   showsPrec _ SMTEq = showString "SMTEq"
@@ -1294,3 +1086,13 @@ instance Show (SMTFunction arg res) where
                                                    showsPrec 11 con)
   showsPrec p (SMTFieldSel field) = showParen (p>10) (showString "SMTFieldSel " .
                                                       showsPrec 11 field)
+
+instance Show (Field a f) where
+  showsPrec p (Field _ _ _ f) = showParen (p>10)
+                                (showString "Field " .
+                                 showsPrec 11 (fieldName f))
+
+instance Show (Constructor arg res) where
+  showsPrec p (Constructor _ _ con) = showParen (p>10)
+                                      (showString "Constructor " .
+                                       showsPrec 11 (conName con))

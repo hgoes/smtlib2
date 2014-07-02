@@ -28,7 +28,7 @@ module Language.SMTLib2
          SMTValue,
          SMTArith,
          SMTOrd(..),
-         SMTExpr,UntypedExpr,
+         SMTExpr,
          SMTFunction,
          SMTOption(..),
          SMTArray,
@@ -94,7 +94,11 @@ module Language.SMTLib2
          -- ** Data types
          is,(.#),
          -- ** Lists
-         head',tail',insert',isNil,isInsert
+         head',tail',insert',isNil,isInsert,
+         -- * Untyped expressions
+         Untyped,UntypedValue,
+         entype,entypeValue,
+         castUntypedExpr,castUntypedExprValue
        )
        where
 
