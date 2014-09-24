@@ -135,7 +135,7 @@ instance SMTBackend YicesBackend IO where
     ptr <- peek yicesVersion
     peekCString ptr
   smtHandle _ _ (SMTSetOption _) = return ()
-  smtHandle b _ (SMTAssert f Nothing) = do
+  smtHandle b _ (SMTAssert f Nothing Nothing) = do
     tps <- readIORef (yicesTypes b)
     mp <- readIORef (yicesExprs b)
     ctx <- getContext b True

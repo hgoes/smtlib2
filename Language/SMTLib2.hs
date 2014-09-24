@@ -43,8 +43,14 @@ module Language.SMTLib2
          checkSat,checkSatUsing,apply,
          getValue,getValues,
          comment,
-         getProof,getUnsatCore,simplify,
+         getProof,
+         simplify,
+         -- ** Unsatisfiable Core
+         ClauseId(),
+         assertId,
+         getUnsatCore,
          -- ** Interpolation
+         InterpolationGroup(),
          interpolationGroup,
          assertInterp,
          getInterpolant,

@@ -50,7 +50,7 @@ instance SMTBackend BoolectorBackend IO where
       _ -> error "smtlib2-boolector: No support for uninterpreted functions."
     mkVar btor name (funInfoSort name)
     return ()
-  smtHandle btor _ (SMTAssert expr Nothing) = do
+  smtHandle btor _ (SMTAssert expr Nothing Nothing) = do
     isAssume <- readIORef (boolectorAssumeState btor)
     mp <- readIORef (boolectorVars btor)
     nd <- exprToNode mp btor expr

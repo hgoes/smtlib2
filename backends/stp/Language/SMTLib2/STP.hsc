@@ -44,7 +44,7 @@ instance SMTBackend STPBackend IO where
   smtHandle _ _ (SMTGetInfo SMTSolverName) = return "stp"
   smtHandle _ _ (SMTGetInfo SMTSolverVersion) = return "unknown"
   smtHandle _ _ (SMTSetOption _) = return ()
-  smtHandle stp _ (SMTAssert expr Nothing) = do
+  smtHandle stp _ (SMTAssert expr Nothing Nothing) = do
     mp <- readIORef (stpVars stp)
     expr' <- exprToSTP mp stp expr
     stpAssert (stpInstance stp) expr'

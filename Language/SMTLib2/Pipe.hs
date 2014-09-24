@@ -44,6 +44,7 @@ import Numeric (readInt,readHex)
 import Data.Ratio
 import Control.Monad.Trans (MonadIO,liftIO)
 import Control.Monad.Identity
+import Data.Char (isDigit)
 
 {- | An SMT backend which uses process pipes to communicate with an SMT solver
      process. -}
@@ -76,17 +77,23 @@ renderSMTRequest st (SMTGetInfo SMTSolverName)
   = Left $ L.List [L.Symbol "get-info",L.Symbol ":name"]
 renderSMTRequest st (SMTGetInfo SMTSolverVersion)
   = Left $ L.List [L.Symbol "get-info",L.Symbol ":version"]
-renderSMTRequest st (SMTAssert expr interp)
-  = let (lexpr,_) = exprToLisp expr (allVars st) (declaredDataTypes st) (nextVar st)
-    in Left $ case interp of
-      Nothing -> L.List [L.Symbol "assert"
-                        ,lexpr]
-      Just (InterpolationGroup gr)
-        -> L.List [L.Symbol "assert"
-                  ,L.List [L.Symbol "!"
-                          ,lexpr
-                          ,L.Symbol ":interpolation-group"
-                          ,L.Symbol (T.pack $ "i"++show gr)]]
+renderSMTRequest st (SMTAssert expr interp cid)
+  = let (expr1,_) = exprToLisp expr (allVars st) (declaredDataTypes st) (nextVar st)
+        expr2 = case interp of
+          Nothing -> expr1
+          Just (InterpolationGroup gr)
+            -> L.List [L.Symbol "!"
+                      ,expr1
+                      ,L.Symbol ":interpolation-group"
+                      ,L.Symbol (T.pack $ "i"++show gr)]
+        expr3 = case cid of
+          Nothing -> expr2
+          Just (ClauseId cid)
+            -> L.List [L.Symbol "!"
+                      ,expr2
+                      ,L.Symbol ":named"
+                      ,L.Symbol (T.pack $ "_cid"++show cid)]
+    in Left $ L.List [L.Symbol "assert",expr3]
 renderSMTRequest st (SMTCheckSat tactic)
   = Left $ L.List (case tactic of
                       Nothing -> [L.Symbol "check-sat"]
@@ -181,7 +188,7 @@ handleRequest pipe _ (SMTGetInfo SMTSolverVersion) = do
   case res of
     L.List [L.Symbol ":version",L.String name] -> return $ T.unpack name
     _ -> error "Invalid solver response to 'get-info' version query"
-handleRequest pipe st (SMTAssert expr interp) = return ()
+handleRequest pipe st (SMTAssert _ _ _) = return ()
 handleRequest pipe _ (SMTCheckSat tactic) = do
   res <- liftIO $ BS.hGetLine (channelOut pipe)
   case res of
@@ -230,7 +237,10 @@ handleRequest pipe _ SMTGetUnsatCore = do
   case res of
     L.List names -> return $
                     fmap (\name -> case name of
-                             L.Symbol s -> T.unpack s
+                             L.Symbol s -> case T.unpack s of
+                               '_':'c':'i':'d':cid
+                                 | all isDigit cid -> ClauseId (read cid)
+                               str -> error $ "Language.SMTLib2.getUnsatCore: Unknown clause id "++str
                              _ -> error $ "Language.SMTLib2.getUnsatCore: Unknown expression "
                                   ++show name++" in core list."
                          ) names

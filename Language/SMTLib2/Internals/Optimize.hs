@@ -14,13 +14,13 @@ optimizeBackend = OptB
 data OptimizeBackend b = OptB b
 
 instance SMTBackend b m => SMTBackend (OptimizeBackend b) m where
-  smtHandle (OptB b) st (SMTAssert expr grp)
+  smtHandle (OptB b) st (SMTAssert expr grp cid)
     = let nexpr = case optimizeExpr expr of
             Just e -> e
             Nothing -> expr
       in case nexpr of
         Const True _ -> return ()
-        _ -> smtHandle b st (SMTAssert nexpr grp)
+        _ -> smtHandle b st (SMTAssert nexpr grp cid)
   smtHandle (OptB b) st (SMTDefineFun name args body)
     = let nbody = case optimizeExpr body of
             Just e -> e

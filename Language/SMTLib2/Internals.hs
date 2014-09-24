@@ -33,7 +33,7 @@ data SMTRequest response where
   SMTSetLogic :: String -> SMTRequest ()
   SMTGetInfo :: SMTInfo i -> SMTRequest i
   SMTSetOption :: SMTOption -> SMTRequest ()
-  SMTAssert :: SMTExpr Bool -> Maybe InterpolationGroup -> SMTRequest ()
+  SMTAssert :: SMTExpr Bool -> Maybe InterpolationGroup -> Maybe ClauseId -> SMTRequest ()
   SMTCheckSat :: Maybe Tactic -> SMTRequest Bool
   SMTDeclareDataTypes :: TypeCollection -> SMTRequest ()
   SMTDeclareSort :: String -> Integer -> SMTRequest ()
@@ -43,7 +43,7 @@ data SMTRequest response where
   SMTDeclareFun :: FunInfo -> SMTRequest ()
   SMTGetValue :: SMTValue t => SMTExpr t -> SMTRequest t
   SMTGetProof :: SMTRequest (SMTExpr Bool)
-  SMTGetUnsatCore :: SMTRequest [String]
+  SMTGetUnsatCore :: SMTRequest [ClauseId]
   SMTSimplify :: SMTType t => SMTExpr t -> SMTRequest (SMTExpr t)
   SMTGetInterpolant :: [InterpolationGroup] -> SMTRequest (SMTExpr Bool)
   SMTComment :: String -> SMTRequest ()
@@ -103,6 +103,7 @@ data FunInfo = forall arg r. (Args arg,SMTType r) => FunInfo { funInfoId :: Inte
 
 data SMTState = SMTState { nextVar :: Integer
                          , nextInterpolationGroup :: Integer
+                         , nextClauseId :: Integer
                          , allVars :: Map Integer FunInfo
                          , namedVars :: Map (String,Integer) Integer
                          , nameCount :: Map String Integer
@@ -271,7 +272,10 @@ data Constructor arg res = Constructor [ProxyArg] DataType Constr deriving (Type
 -- | Represents a field of the datatype /a/ of the type /f/
 data Field a f = Field [ProxyArg] DataType Constr DataField deriving (Typeable)
 
-newtype InterpolationGroup = InterpolationGroup Integer
+newtype InterpolationGroup = InterpolationGroup Integer deriving (Typeable,Eq,Ord,Show)
+
+-- | Identifies a clause in an unsatisfiable core
+newtype ClauseId = ClauseId Integer deriving (Typeable,Eq,Ord,Show)
 
 -- | Options controling the behaviour of the SMT solver
 data SMTOption
@@ -385,6 +389,7 @@ withSMTBackend backend act = withSMTBackend' (AnyBackend backend) True act
 emptySMTState :: SMTState
 emptySMTState = SMTState { nextVar = 0
                          , nextInterpolationGroup = 0
+                         , nextClauseId = 0
                          , allVars = Map.empty
                          , namedVars = Map.empty
                          , nameCount = Map.empty

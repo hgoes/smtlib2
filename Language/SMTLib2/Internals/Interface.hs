@@ -219,7 +219,7 @@ arrayEquals expr arr
 assert :: Monad m => SMTExpr Bool -> SMT' m ()
 assert expr = smtBackend $ \backend -> do
   st <- getSMT
-  lift $ smtHandle backend st (SMTAssert expr Nothing)
+  lift $ smtHandle backend st (SMTAssert expr Nothing Nothing)
 
 -- | Create a new interpolation group
 interpolationGroup :: Monad m => SMT' m InterpolationGroup
@@ -229,11 +229,20 @@ interpolationGroup = do
   putSMT $ st { nextInterpolationGroup = succ intgr }
   return (InterpolationGroup intgr)
 
+-- | Assert a boolean expression and track it for an unsat core call later
+assertId :: Monad m => SMTExpr Bool -> SMT' m ClauseId
+assertId expr = smtBackend $ \backend -> do
+  st <- getSMT
+  let cid = nextClauseId st
+  putSMT $ st { nextClauseId = succ cid }
+  lift $ smtHandle backend st (SMTAssert expr Nothing (Just $ ClauseId cid))
+  return (ClauseId cid)
+
 -- | Assert a boolean expression to be true and assign it to an interpolation group
 assertInterp :: Monad m => SMTExpr Bool -> InterpolationGroup -> SMT' m ()
 assertInterp expr interp = smtBackend $ \backend -> do
   st <- getSMT
-  lift $ smtHandle backend st (SMTAssert expr (Just interp))
+  lift $ smtHandle backend st (SMTAssert expr (Just interp) Nothing)
 
 getInterpolant :: Monad m => [InterpolationGroup] -> SMT' m (SMTExpr Bool)
 getInterpolant grps = smtBackend $ \backend -> do
@@ -662,9 +671,9 @@ simplify expr = smtBackend $ \backend -> do
   st <- getSMT
   lift $ smtHandle backend st (SMTSimplify expr)
 
--- | After an unsuccessful 'checkSat', return a list of names of named
---   expression which make the instance unsatisfiable.
-getUnsatCore :: Monad m => SMT' m [String]
+-- | After an unsuccessful 'checkSat', return a list of clauses which make the
+--   instance unsatisfiable.
+getUnsatCore :: Monad m => SMT' m [ClauseId]
 getUnsatCore = smtBackend $ \backend -> do
   st <- getSMT
   lift $ smtHandle backend st SMTGetUnsatCore
