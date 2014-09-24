@@ -316,7 +316,10 @@ createSMTPipe solver args = do
                           , std_out = CreatePipe
                           , std_err = Inherit
                           , close_fds = False
-                          , create_group = False
+                          , create_group = True
+#if MIN_VERSION_process(1,2,0)
+                          , delegate_ctlc = False
+#endif
                           }
   (Just hin,Just hout,_,handle) <- createProcess cmd
   return $ SMTPipe { channelIn = hin

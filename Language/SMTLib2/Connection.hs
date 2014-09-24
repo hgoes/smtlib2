@@ -6,6 +6,7 @@ module Language.SMTLib2.Connection
        ,open
        ,close
        ,performSMT
+       ,performSMTExitCleanly
        ) where
 
 import Language.SMTLib2.Internals
@@ -13,6 +14,7 @@ import Control.Concurrent.MVar
 import Control.Monad.State (runStateT)
 import Control.Monad.Reader (runReaderT)
 import Control.Monad.Trans (MonadIO,liftIO)
+import Control.Exception
 
 -- | Represents a connection to an SMT solver.
 --   The SMT solver runs in a seperate thread and communication is handled via handles.
@@ -47,3 +49,17 @@ performSMT conn act = do
   (res,nst) <- runStateT (runReaderT (runSMT act) (AnyBackend $ backend conn)) st
   liftIO $ putMVar (status conn) nst
   return res
+
+performSMTExitCleanly :: SMTBackend b IO
+                         => SMTConnection b
+                         -> SMT' IO a
+                         -> IO a
+performSMTExitCleanly conn act = do
+  st <- takeMVar (status conn)
+  catch (do
+            (res,nst) <- runStateT (runReaderT (runSMT act) (AnyBackend $ backend conn)) st
+            putMVar (status conn) nst
+            return res)
+    (\e -> do
+        smtHandle (backend conn) st SMTExit
+        throw (e :: SomeException))
