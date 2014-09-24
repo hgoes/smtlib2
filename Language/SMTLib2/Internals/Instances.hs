@@ -130,6 +130,9 @@ entypeValue f (Const (UntypedValue v) (ProxyArgValue (_::t) ann))
   = case cast v of
   Just rv -> f (Const (rv::t) ann)
 entypeValue f (UntypedExprValue x) = f x
+entypeValue f (InternalObj obj (ProxyArgValue (_::t) ann))
+  = f (InternalObj obj ann :: SMTExpr t)
+entypeValue f expr = error $ "Can't entype expression "++show expr
 
 {-
 entypeValueFunction :: (forall a. SMTValue a => SMTFunction arg a -> b)
@@ -1173,6 +1176,14 @@ foldExprM' quants f s (Named expr name i) = do
   (s',exprs') <- foldExprM' quants f s expr
   return (s',[ Named expr' name i
              | expr' <- exprs' ])
+foldExprM' quants f s (UntypedExpr e) = do
+  (s',exprs') <- foldExprM' quants f s e
+  return (s',[ UntypedExpr e'
+             | e' <- exprs' ])
+foldExprM' quants f s (UntypedExprValue e) = do
+  (s',exprs') <- foldExprM' quants f s e
+  return (s',[ UntypedExprValue e'
+             | e' <- exprs' ])
 foldExprM' _ f s expr = f s expr
 
 -- | Recursively fold a monadic function over all sub-expressions of the argument

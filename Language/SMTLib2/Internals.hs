@@ -1040,6 +1040,7 @@ showExpr i p (InternalObj obj ann) = (showParen (p>10) (showString "InternalObj 
                                                         showChar ' ' .
                                                         showsPrec 11 ann),i)
 showExpr i p (UntypedExpr e) = showExpr i p e
+showExpr i p (UntypedExprValue e) = showExpr i p e
 
 instance Show (SMTFunction arg res) where
   showsPrec _ SMTEq = showString "SMTEq"
