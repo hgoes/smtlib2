@@ -15,6 +15,7 @@ import Control.Monad.State (runStateT)
 import Control.Monad.Reader (runReaderT)
 import Control.Monad.Trans (MonadIO,liftIO)
 import Control.Exception
+import Prelude (($),IO,return)
 
 -- | Represents a connection to an SMT solver.
 --   The SMT solver runs in a seperate thread and communication is handled via handles.
