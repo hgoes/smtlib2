@@ -593,6 +593,7 @@ functionGetSymbol _ f@(SMTExtract prStart prLen) ann
 functionGetSymbol _ (SMTConstructor (Constructor _ _ con)) _ = L.Symbol $ T.pack (conName con)
 functionGetSymbol _ (SMTConTest (Constructor _ _ con)) _ = L.Symbol $ T.pack $ "is-"++(conName con)
 functionGetSymbol _ (SMTFieldSel (Field _ _ _ f)) _ = L.Symbol $ T.pack (fieldName f)
+functionGetSymbol _ (SMTDivisible n) _ = L.List [L.Symbol "_",L.Symbol "divisible",L.Number $ L.I n]
 
 clearInput :: MonadIO m => SMTPipe -> m ()
 clearInput pipe = do
@@ -1056,7 +1057,8 @@ commonFunctions = mconcat
                   ,constArrayParser
                   ,concatParser
                   ,extractParser
-                  ,sigParser]
+                  ,sigParser
+                  ,divisibleParser]
 
 eqParser,
   mapParser,
@@ -1079,7 +1081,8 @@ eqParser,
   constArrayParser,
   concatParser,
   extractParser,
-  sigParser :: FunctionParser
+  sigParser,
+  divisibleParser :: FunctionParser
 eqParser = FunctionParser v
   where
     v (L.Symbol "=") rec dts = Just $ OverloadedParser allEqConstraint
@@ -1393,6 +1396,14 @@ sigParser = FunctionParser g
         \f -> case parser of
           OverloadedParser _ _ parse -> parse rsig rret f
           DefinedParser _ _ parse -> parse f
+    g _ _ _ = Nothing
+
+divisibleParser = FunctionParser g
+  where
+    g (L.List [L.Symbol "_",L.Symbol "divisible",L.Number (L.I n)]) _ _
+      = Just $ DefinedParser { definedArgSig = [Fix IntSort]
+                             , definedRetSig = Fix BoolSort
+                             , parseDefined = \f -> Just $ f (SMTDivisible n) }
     g _ _ _ = Nothing
 
 constructorParser :: DataTypeInfo -> FunctionParser

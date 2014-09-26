@@ -117,6 +117,7 @@ inferResAnnotation (SMTConTest _) _ = ()
 inferResAnnotation (SMTFieldSel (Field prx dt _ f)) _
   = dataTypeGetUndefined dt prx (\u _ -> case fieldGet f prx u (\_ ann -> cast ann) of
                                     Just ann' -> ann')
+inferResAnnotation (SMTDivisible _) _ = ()
 
 -- Untyped
 
@@ -1361,6 +1362,9 @@ compareFun _ (SMTConTest _) = GT
 compareFun (SMTFieldSel f1) (SMTFieldSel f2) = compareField f1 f2
 compareFun (SMTFieldSel _) _ = LT
 compareFun _ (SMTFieldSel _) = GT
+compareFun (SMTDivisible x) (SMTDivisible y) = compare x y
+compareFun (SMTDivisible _) _ = LT
+compareFun _ (SMTDivisible _) = GT
 
 compareConstructor :: Constructor arg1 res1 -> Constructor arg2 res2 -> Ordering
 compareConstructor (Constructor p1 dt1 con1) (Constructor p2 dt2 con2)

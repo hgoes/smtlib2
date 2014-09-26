@@ -248,6 +248,7 @@ data SMTFunction arg res where
   SMTConstructor :: (Args arg,SMTType dt) => Constructor arg dt -> SMTFunction arg dt
   SMTConTest :: (Args arg,SMTType dt) => Constructor arg dt -> SMTFunction (SMTExpr dt) Bool
   SMTFieldSel :: (SMTType a,SMTType f) => Field a f -> SMTFunction (SMTExpr a) f
+  SMTDivisible :: Integer -> SMTFunction (SMTExpr Integer) Bool
   deriving (Typeable)
 
 class (SMTValue (BitVector a)) => IsBitVector a where
@@ -1092,6 +1093,8 @@ instance Show (SMTFunction arg res) where
                                                    showsPrec 11 con)
   showsPrec p (SMTFieldSel field) = showParen (p>10) (showString "SMTFieldSel " .
                                                       showsPrec 11 field)
+  showsPrec p (SMTDivisible i) = showParen (p>10) (showString "SMTDivisible " .
+                                                   showsPrec 11 i)
 
 instance Show (Field a f) where
   showsPrec p (Field _ _ _ f) = showParen (p>10)
