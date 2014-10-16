@@ -99,14 +99,15 @@ renderSMTRequest st (SMTCheckSat tactic limits)
                    then [L.Symbol "check-sat-using"
                         ,case tactic of
                           Just t -> tacticToLisp t
-                          Nothing -> "smt"]++
+                          Nothing -> L.Symbol "smt"]++
                         (case limitTime limits of
                           Just t -> [L.Symbol ":timeout"
                                     ,L.Number (L.I t)]
                           Nothing -> [])++
                         (case limitMemory limits of
                           Just m -> [L.Symbol ":max-memory"
-                                    ,L.Number (L.I m)])
+                                    ,L.Number (L.I m)]
+                          Nothing -> [])
                    else [L.Symbol "check-sat"])
   where
     extendedCheckSat = case tactic of
