@@ -41,6 +41,7 @@ module Language.SMTLib2
          SMTInfo(..),
          assert,push,pop,stack,
          checkSat,checkSat',checkSatUsing,apply,
+         CheckSatResult(..),
          CheckSatLimits(..),noLimits,
          getValue,getValues,
          comment,
