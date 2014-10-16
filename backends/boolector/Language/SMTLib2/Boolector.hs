@@ -57,7 +57,11 @@ instance SMTBackend BoolectorBackend IO where
     if isAssume
       then boolectorAssume (boolectorInstance btor) nd
       else boolectorAssert (boolectorInstance btor) nd
-  smtHandle btor _ (SMTCheckSat _) = boolectorSat (boolectorInstance btor)
+  smtHandle btor _ (SMTCheckSat _ _) = do
+    res <- boolectorSat (boolectorInstance btor)
+    return $ if res
+             then Sat
+             else Unsat
   smtHandle _ _ (SMTDeclareDataTypes _) = error "smtlib2-boolector: No support for data-types."
   smtHandle _ _ (SMTDeclareSort _ _) = error "smtlib2-boolector: No support for sorts."
   smtHandle btor _ SMTPush = do

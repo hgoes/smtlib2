@@ -144,16 +144,16 @@ instance SMTBackend YicesBackend IO where
     if res < 0
       then mkError $ "Error while asserting formula."
       else return ()
-  smtHandle b _ (SMTCheckSat _) = do
+  smtHandle b _ (SMTCheckSat _ _) = do
     ctx <- getContext b False
     params <- yicesNewParamRecord
     -- TODO: Set parameters, maybe according to tactic
     res <- yicesCheckContext ctx params
     yicesFreeParamRecord params
     case res of
-      #{const STATUS_SAT} -> return True
-      #{const STATUS_UNSAT} -> return False
-      #{const STATUS_UNKNOWN} -> mkError "The check-sat result is unknown."
+      #{const STATUS_SAT} -> return Sat
+      #{const STATUS_UNSAT} -> return Unsat
+      #{const STATUS_UNKNOWN} -> return Unknown
       #{const STATUS_INTERRUPTED} -> mkError "The check-sat query was interrupted."
   smtHandle b _ (SMTDeclareDataTypes tc)
     = if argCount tc > 0

@@ -48,12 +48,12 @@ instance SMTBackend STPBackend IO where
     mp <- readIORef (stpVars stp)
     expr' <- exprToSTP mp stp expr
     stpAssert (stpInstance stp) expr'
-  smtHandle stp _ (SMTCheckSat _) = do
+  smtHandle stp _ (SMTCheckSat _ _) = do
     t <- stpFalseExpr (stpInstance stp)
     res <- stpQuery (stpInstance stp) t
     case res of
-      1 -> return False
-      0 -> return True
+      1 -> return Unsat
+      0 -> return Sat
       _ -> error $ "smtlib2-stp: Invalid query result "++show res
   smtHandle _ _ (SMTDeclareDataTypes _) = error "smtlib2-stp: No support for datatypes."
   smtHandle _ _ (SMTDeclareSort _ _) = error "smtlib2-stp: No support for sorts."

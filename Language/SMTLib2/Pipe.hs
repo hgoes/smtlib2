@@ -94,11 +94,28 @@ renderSMTRequest st (SMTAssert expr interp cid)
                       ,L.Symbol ":named"
                       ,L.Symbol (T.pack $ "_cid"++show cid)]
     in Left $ L.List [L.Symbol "assert",expr3]
-renderSMTRequest st (SMTCheckSat tactic)
-  = Left $ L.List (case tactic of
-                      Nothing -> [L.Symbol "check-sat"]
-                      Just t -> [L.Symbol "check-sat-using"
-                                ,tacticToLisp t])
+renderSMTRequest st (SMTCheckSat tactic limits)
+  = Left $ L.List (if extendedCheckSat
+                   then [L.Symbol "check-sat-using"
+                        ,case tactic of
+                          Just t -> tacticToLisp t
+                          Nothing -> "smt"]++
+                        (case limitTime limits of
+                          Just t -> [L.Symbol ":timeout"
+                                    ,L.Number (L.I t)]
+                          Nothing -> [])++
+                        (case limitMemory limits of
+                          Just m -> [L.Symbol ":max-memory"
+                                    ,L.Number (L.I m)])
+                   else [L.Symbol "check-sat"])
+  where
+    extendedCheckSat = case tactic of
+      Just _ -> True
+      _ -> case limitTime limits of
+        Just _ -> True
+        _ -> case limitMemory limits of
+          Just _ -> True
+          _ -> False
 renderSMTRequest st (SMTDeclareDataTypes dts)
   = let param x = L.Symbol $ T.pack $ "arg"++show x
     in Left $
@@ -189,14 +206,16 @@ handleRequest pipe _ (SMTGetInfo SMTSolverVersion) = do
     L.List [L.Symbol ":version",L.String name] -> return $ T.unpack name
     _ -> error "Invalid solver response to 'get-info' version query"
 handleRequest pipe st (SMTAssert _ _ _) = return ()
-handleRequest pipe _ (SMTCheckSat tactic) = do
+handleRequest pipe _ (SMTCheckSat tactic limits) = do
   res <- liftIO $ BS.hGetLine (channelOut pipe)
   case res of
-    "sat" -> return True
-    "sat\r" -> return True
-    "unsat" -> return False
-    "unsat\r" -> return False
-    _ -> error $ "unknown check-sat response: "++show res
+    "sat" -> return Sat
+    "sat\r" -> return Sat
+    "unsat" -> return Unsat
+    "unsat\r" -> return Unsat
+    "unknown" -> return Unknown
+    "unknown\r" -> return Unknown
+    _ -> error $ "smtlib2: unknown check-sat response: "++show res
 handleRequest pipe _ (SMTDeclareDataTypes dts) = return ()
 handleRequest pipe _ (SMTDeclareSort name arity) = return ()
 handleRequest pipe _ (SMTDeclareFun name) = return ()
@@ -286,9 +305,10 @@ renderSMTResponse _ (SMTGetInfo SMTSolverName) name
   = Just $ show $ L.List [L.Symbol ":name",L.String $ T.pack name]
 renderSMTResponse _ (SMTGetInfo SMTSolverVersion) vers
   = Just $ show $ L.List [L.Symbol ":version",L.String $ T.pack vers]
-renderSMTResponse _ (SMTCheckSat _) res
-  = if res then Just "sat"
-    else Just "unsat"
+renderSMTResponse _ (SMTCheckSat _ _) res = case res of
+  Sat -> Just "sat"
+  Unsat -> Just "unsat"
+  Unknown -> Just "unknown"
 renderSMTResponse st (SMTGetInterpolant grps) expr
   = Just $ renderExpr' st expr
 renderSMTResponse st SMTGetProof proof

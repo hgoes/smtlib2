@@ -34,7 +34,7 @@ data SMTRequest response where
   SMTGetInfo :: SMTInfo i -> SMTRequest i
   SMTSetOption :: SMTOption -> SMTRequest ()
   SMTAssert :: SMTExpr Bool -> Maybe InterpolationGroup -> Maybe ClauseId -> SMTRequest ()
-  SMTCheckSat :: Maybe Tactic -> SMTRequest Bool
+  SMTCheckSat :: Maybe Tactic -> CheckSatLimits -> SMTRequest CheckSatResult
   SMTDeclareDataTypes :: TypeCollection -> SMTRequest ()
   SMTDeclareSort :: String -> Integer -> SMTRequest ()
   SMTPush :: SMTRequest ()
@@ -50,6 +50,18 @@ data SMTRequest response where
   SMTExit :: SMTRequest ()
   SMTApply :: Tactic -> SMTRequest [SMTExpr Bool]
   deriving Typeable
+
+-- | Describe limits on the ressources that an SMT-solver can use
+data CheckSatLimits = CheckSatLimits { limitTime :: Maybe Integer -- ^ A limit on the amount of time the solver can spend on the problem (in milliseconds)
+                                     , limitMemory :: Maybe Integer -- ^ A limit on the amount of memory the solver can use (in megabytes)
+                                     } deriving (Show,Eq,Ord,Typeable)
+
+-- | The result of a check-sat query
+data CheckSatResult
+  = Sat -- ^ The formula is satisfiable
+  | Unsat -- ^ The formula is unsatisfiable
+  | Unknown -- ^ The solver cannot determine the satisfiability of a formula
+  deriving (Show,Eq,Ord,Typeable)
 
 class Monad m => SMTBackend a m where
   smtHandle :: Typeable response => a -> SMTState -> SMTRequest response -> m response
@@ -1105,3 +1117,7 @@ instance Show (Constructor arg res) where
   showsPrec p (Constructor _ _ con) = showParen (p>10)
                                       (showString "Constructor " .
                                        showsPrec 11 (conName con))
+
+noLimits :: CheckSatLimits
+noLimits = CheckSatLimits { limitTime = Nothing
+                          , limitMemory = Nothing }

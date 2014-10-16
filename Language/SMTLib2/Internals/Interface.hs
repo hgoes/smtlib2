@@ -17,15 +17,22 @@ import Data.Proxy
 
 -- | Check if the model is satisfiable (e.g. if there is a value for each variable so that every assertion holds)
 checkSat :: Monad m => SMT' m Bool
-checkSat = smtBackend $ \backend -> do
-  st <- getSMT
-  lift $ smtHandle backend st (SMTCheckSat Nothing)
+checkSat = checkSat' Nothing noLimits >>= return.isSat
 
 -- | Check if the model is satisfiable using a given tactic. (Works only with Z3)
 checkSatUsing :: Monad m => Tactic -> SMT' m Bool
-checkSatUsing t = smtBackend $ \backend -> do
+checkSatUsing t = checkSat' (Just t) noLimits >>= return.isSat
+
+-- | Like 'checkSat', but gives you more options like choosing a tactic (Z3 only) or providing memory/time-limits
+checkSat' :: Monad m => Maybe Tactic -> CheckSatLimits -> SMT' m CheckSatResult
+checkSat' tactic limits = smtBackend $ \backend -> do
   st <- getSMT
-  lift $ smtHandle backend st (SMTCheckSat (Just t))
+  lift $ smtHandle backend st (SMTCheckSat tactic limits)
+
+isSat :: CheckSatResult -> Bool
+isSat Sat = True
+isSat Unsat = False
+isSat Unknown = error "smtlib2: checkSat query return 'unknown' (To catch this, use checkSat' function)"
 
 -- | Apply the given tactic to the current assertions. (Works only with Z3)
 apply :: Monad m => Tactic -> SMT' m [SMTExpr Bool]
