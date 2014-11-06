@@ -16,6 +16,7 @@ import Data.Monoid
 import Data.AttoLisp as L
 import qualified Data.ByteString.Char8 as BS
 import Data.Attoparsec.ByteString as AP
+import Data.Proxy
 
 commonTypes :: DataTypeInfo
 commonTypes = emptyDataTypeInfo
@@ -57,7 +58,7 @@ testResults = mapM_ (\res -> case res of
 
 translateCheck :: SMTType a => SMTExpr a -> QCP.Result
 translateCheck (expr::SMTExpr a)
-  = let (l,_) = exprToLisp expr 0
+  = let (l,_) = exprToLisp expr Map.empty emptyDataTypeInfo 0
         expr' = lispToExpr commonFunctions
                 nameToVar
                 commonTypes gcast (Just $ getSort (undefined::a) (extractAnnotation expr)) l
@@ -76,29 +77,27 @@ nameToVar x = case T.unpack x of
   'i':_ -> Just (UntypedExpr (Var (T.unpack x) () :: SMTExpr Integer))
   str -> Nothing
 
-type BoundVars = Map TypeRep [UExpr]
+type Vars = Map TypeRep [UVar]
 
-data UExpr where
-  UExpr :: Typeable a => SMTExpr a -> UExpr
+data UVar where
+  UVar :: SMTType a => Proxy a -> Integer -> SMTAnnotation a -> UVar
 
-newtype ExprGen a = ExprGen { genExpr :: BoundVars -> a }
+newtype ExprGen a = ExprGen { genExpr :: Vars -> Vars -> Integer -> (a,Vars,Integer) }
 
-castUntypedExpr :: Typeable a => UExpr -> SMTExpr a
-castUntypedExpr (UExpr x) = case cast x of
+castUntypedVar :: Typeable a => UVar -> SMTExpr a
+castUntypedVar (UVar (_::Proxy t) x ann) = case cast (Var x ann :: SMTExpr t) of
   Just r -> r
   Nothing -> error $ "Type error in bound variable."
 
-getBoundFor :: Typeable a => a -> BoundVars -> [SMTExpr a]
-getBoundFor tp mp = fmap castUntypedExpr $ Map.findWithDefault [] (typeOf tp) mp
+getBoundFor :: SMTType a => Proxy a -> Vars -> [SMTExpr a]
+getBoundFor (_::Proxy t) mp = fmap castUntypedVar $ Map.findWithDefault [] (typeOf (undefined::t)) mp
 
-addBoundVar :: Typeable a => SMTExpr a -> BoundVars -> BoundVars
-addBoundVar e b = Map.alter (\cur -> Just $ case cur of
-                                Nothing -> [UExpr e]
-                                Just cur' -> (UExpr e):cur')
-                  (typeOf $ undefArg e) b
-  where
-    undefArg :: SMTExpr a -> a
-    undefArg = const undefined
+addUVar :: SMTType a => Proxy a -> Integer -> SMTAnnotation a -> Vars -> Vars
+addUVar (p::Proxy t) n ann
+  = Map.alter (\cur -> Just $ case cur of
+                  Nothing -> [UVar p n ann]
+                  Just cur' -> (UVar p n ann):cur')
+    (typeOf (undefined::t))
 
 genExpression :: Arbitrary (ExprGen a) => Gen a
 genExpression = do
@@ -186,17 +185,17 @@ genArith :: (Arbitrary (ExprGen (SMTExpr a)),SMTArith a) => Gen (ExprGen (SMTExp
 genArith = do
   lhs <- arbitrary
   rhs <- arbitrary
-  op <- elements [\(x,y) -> App (SMTArith Plus) [x,y]
-                 ,App SMTMinus
-                 ,\(x,y) -> App (SMTArith Mult) [x,y]]
+  op <- elements [\(x,y) -> app plus [x,y]
+                 ,app minus
+                 ,\(x,y) -> app mult [x,y]]
   return $ ExprGen $ \b -> op (genExpr lhs b,genExpr rhs b)
 
 genDivModRem :: Gen (ExprGen (SMTExpr Integer))
 genDivModRem = do
   lhs <- arbitrary
   rhs <- arbitrary
-  op <- elements [Div,Mod,Rem]
-  return $ ExprGen $ \b -> App (SMTIntArith op) (genExpr lhs b,genExpr rhs b)
+  op <- elements [div',mod',rem']
+  return $ ExprGen $ \b -> op (genExpr lhs b) (genExpr rhs b)
 
 genLogic :: Gen (ExprGen (SMTExpr Bool))
 genLogic = oneof [do
@@ -214,7 +213,7 @@ genLogic = oneof [do
                  ,do
                      x <- arbitrary
                      y <- arbitrary
-                     return $ ExprGen $ \b -> App (SMTLogic XOr) [genExpr x b,genExpr y b]
+                     return $ ExprGen $ \b -> app xor [genExpr x b,genExpr y b]
                  ,do
                      x <- arbitrary
                      return $ ExprGen $ \b -> not' (genExpr x b)

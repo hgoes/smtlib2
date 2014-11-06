@@ -5,6 +5,7 @@ module Language.SMTLib2.Connection
        (SMTConnection()
        ,open
        ,close
+       ,withConnection
        ,performSMT
        ,performSMTExitCleanly
        ) where
@@ -40,16 +41,19 @@ close conn = do
   smtHandle (backend conn) st SMTExit
   return ()
 
+withConnection :: MonadIO m => SMTConnection b -> (b -> SMTState -> m (a,SMTState)) -> m a
+withConnection conn f = do
+  st <- liftIO $ takeMVar (status conn)
+  (res,nst) <- f (backend conn) st
+  liftIO $ putMVar (status conn) nst
+  return res
+
 -- | Perform an action in the SMT solver associated with this connection and return the result.
 performSMT :: (MonadIO m,SMTBackend b m)
               => SMTConnection b -- ^ The connection to the SMT solver to use
               -> SMT' m a -- ^ The action to perform
               -> m a
-performSMT conn act = do
-  st <- liftIO $ takeMVar (status conn)
-  (res,nst) <- runStateT (runReaderT (runSMT act) (AnyBackend $ backend conn)) st
-  liftIO $ putMVar (status conn) nst
-  return res
+performSMT conn act = withConnection conn (\b st -> runStateT (runReaderT (runSMT act) (AnyBackend b)) st)
 
 performSMTExitCleanly :: SMTBackend b IO
                          => SMTConnection b
