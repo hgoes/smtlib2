@@ -2,6 +2,7 @@ Name:		smtlib2-th
 Description:	Automatically derive SMT instances for haskell data types
 Version:        0.1
 Author:         Henning Günther <guenther@forsyte.at>
+License:        GPL-3
 Build-Type:     Simple
 Cabal-Version:  >=1.2
 

@@ -1,6 +1,8 @@
 Name:           smtlib2
 Version:        0.1
 Author:         Henning Günther <guenther@forsyte.at>
+License:        GPL-3
+License-File:   LICENSE
 Build-Type:     Simple
 Cabal-Version:  >=1.2
 
@@ -39,4 +41,3 @@ Library
     Language.SMTLib2.Pipe
     Language.SMTLib2.Strategy
     Data.Unit
-    

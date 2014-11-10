@@ -1,6 +1,7 @@
 Name:           smtlib2-yices
 Version:        0.1
 Author:         Henning Günther <guenther@forsyte.at>
+License:        GPL-3
 Build-Type:     Simple
 Cabal-Version:  >=1.2
 
