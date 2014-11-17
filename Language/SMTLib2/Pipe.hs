@@ -1,3 +1,4 @@
+{-# LANGUAGE ViewPatterns #-}
 module Language.SMTLib2.Pipe
        (SMTPipe(),
         FunctionParser(),
@@ -59,7 +60,7 @@ renderExpr expr = do
   
 renderExpr' :: SMTType t => SMTState -> SMTExpr t -> String
 renderExpr' st expr
-  = let (lexpr,_) = exprToLisp expr (allVars st) (declaredDataTypes st) (nextVar st)
+  = let lexpr = exprToLisp expr (allVars st) (declaredDataTypes st)
     in show lexpr
 
 instance MonadIO m => SMTBackend SMTPipe m where
@@ -78,7 +79,7 @@ renderSMTRequest st (SMTGetInfo SMTSolverName)
 renderSMTRequest st (SMTGetInfo SMTSolverVersion)
   = Left $ L.List [L.Symbol "get-info",L.Symbol ":version"]
 renderSMTRequest st (SMTAssert expr interp cid)
-  = let (expr1,_) = exprToLisp expr (allVars st) (declaredDataTypes st) (nextVar st)
+  = let expr1 = exprToLisp expr (allVars st) (declaredDataTypes st)
         expr2 = case interp of
           Nothing -> expr1
           Just (InterpolationGroup gr)
@@ -153,7 +154,7 @@ renderSMTRequest st (SMTDefineFun name arg definition)
                      ,args [ L.List [ L.Symbol $ T.pack $ getSMTName n, sortToLisp $ funInfoSort n ]
                            | n <- arg ]
                      ,sortToLisp retSort
-                     ,fst $ exprToLisp definition (allVars st) (declaredDataTypes st) (nextVar st)]
+                     ,exprToLisp definition (allVars st) (declaredDataTypes st)]
 renderSMTRequest st (SMTComment msg) = Right msg
 renderSMTRequest st SMTExit = Left $ L.List [L.Symbol "exit"]
 renderSMTRequest st (SMTGetInterpolant grps)
@@ -182,13 +183,13 @@ renderSMTRequest st SMTGetProof
 renderSMTRequest st SMTGetUnsatCore
   = Left $ L.List [L.Symbol "get-unsat-core"]
 renderSMTRequest st (SMTSimplify expr)
-  = let (lexpr,_) = exprToLisp expr (allVars st) (declaredDataTypes st) (nextVar st)
+  = let lexpr = exprToLisp expr (allVars st) (declaredDataTypes st)
     in Left $ L.List [L.Symbol "simplify"
                      ,lexpr]
 renderSMTRequest st SMTPush = Left $ L.List [L.Symbol "push",L.toLisp (1::Integer)]
 renderSMTRequest st SMTPop = Left $ L.List [L.Symbol "pop",L.toLisp (1::Integer)]
 renderSMTRequest st (SMTGetValue expr)
-  = let (lexpr,_) = exprToLisp expr (allVars st) (declaredDataTypes st) (nextVar st)
+  = let lexpr = exprToLisp expr (allVars st) (declaredDataTypes st)
     in Left $ L.List [L.Symbol "get-value"
                      ,L.List [lexpr]]
 renderSMTRequest st (SMTApply tactic)
@@ -320,7 +321,7 @@ renderSMTResponse _ (SMTGetValue _) v = Just $ show v
 renderSMTResponse st (SMTApply _) goals
   = Just $ show $
     L.List $ [L.Symbol "goals"]++
-    [fst $ exprToLisp goal (allVars st) (declaredDataTypes st) (nextVar st)
+    [exprToLisp goal (allVars st) (declaredDataTypes st)
     | goal <- goals ]
 renderSMTResponse _ SMTGetUnsatCore core = Just (show core)
 renderSMTResponse _ _ _ = Nothing
@@ -370,24 +371,29 @@ sortToLisp' f (NamedSort name args)
   = L.List $ (L.Symbol $ T.pack name):fmap f args
 
 -- | Parse a lisp expression into an SMT sort.
-lispToSort :: L.Lisp -> Sort
-lispToSort (L.Symbol "Bool") = Fix BoolSort
-lispToSort (L.Symbol "Int") = Fix IntSort
-lispToSort (L.Symbol "Real") = Fix RealSort
+lispToSort :: L.Lisp -> Maybe Sort
+lispToSort (L.Symbol "Bool") = Just $ Fix BoolSort
+lispToSort (L.Symbol "Int") = Just $ Fix IntSort
+lispToSort (L.Symbol "Real") = Just $ Fix RealSort
 lispToSort (L.List [L.Symbol "_",
                     L.Symbol "BitVec",
                     L.Number (L.I n)])
-  = Fix $ BVSort { bvSortWidth = n
-                 , bvSortUntyped = False }
-lispToSort (L.List (L.Symbol "Array":args))
-  = Fix $ ArraySort (fmap lispToSort args') (lispToSort res)
+  = Just $ Fix $ BVSort { bvSortWidth = n
+                        , bvSortUntyped = False }
+lispToSort (L.List (L.Symbol "Array":args)) = do
+  argSorts <- mapM lispToSort args'
+  resSort <- lispToSort res
+  return $ Fix $ ArraySort argSorts resSort
   where
     (args',res) = splitLast args
     splitLast [s] = ([],s)
     splitLast (x:xs) = let (xs',l) = splitLast xs
                        in (x:xs',l)
-lispToSort (L.Symbol x) = Fix $ NamedSort (T.unpack x) []
-lispToSort (L.List ((L.Symbol x):args)) = Fix $ NamedSort (T.unpack x) (fmap lispToSort args)
+lispToSort (L.Symbol x) = Just $ Fix $ NamedSort (T.unpack x) []
+lispToSort (L.List ((L.Symbol x):args)) = do
+  argSorts <- mapM lispToSort args
+  return $ Fix $ NamedSort (T.unpack x) argSorts
+lispToSort _ = Nothing
 
 getSMTName :: FunInfo -> String
 getSMTName info = escapeName (case funInfoName info of
@@ -421,70 +427,64 @@ mkUntyped e = case cast e of
     Just e' -> entypeValue UntypedExpr e'
     Nothing -> UntypedExpr e
 
-exprToLisp :: SMTExpr t -> Map Integer FunInfo -> DataTypeInfo -> Integer -> (L.Lisp,Integer)
+exprToLisp :: SMTExpr t -> Map Integer FunInfo -> DataTypeInfo -> L.Lisp
 exprToLisp
   = exprToLispWith
     (\obj -> error $ "smtlib2: Can't translate internal object "++
              show obj++" to s-expression.")
 
-exprToLispWith :: (forall a. (Typeable a,Ord a,Show a) => a -> L.Lisp) -> SMTExpr t -> Map Integer FunInfo -> DataTypeInfo -> Integer -> (L.Lisp,Integer)
-exprToLispWith _ (Var idx _) mp _ c = case Map.lookup idx mp of
-  Just info -> (L.Symbol $ T.pack $
-                escapeName (case funInfoName info of
-                               Nothing -> Right (funInfoId info)
-                               Just name -> Left name),c)
-  Nothing -> (L.Symbol $ T.pack $ escapeName (Right idx),c)
-exprToLispWith _ (Const x ann) _ dts c = (valueToLisp dts $ mangle x ann,c)
-exprToLispWith _ (AsArray f arg) mp _ c
+exprToLispWith :: (forall a. (Typeable a,Ord a,Show a) => a -> L.Lisp) -> SMTExpr t -> Map Integer FunInfo -> DataTypeInfo -> L.Lisp
+exprToLispWith _ (Var idx _) mp _ = case Map.lookup idx mp of
+  Just info -> L.Symbol $ T.pack $
+               escapeName (case funInfoName info of
+                            Nothing -> Right (funInfoId info)
+                            Just name -> Left name)
+  Nothing -> L.Symbol $ T.pack $ escapeName (Right idx)
+exprToLispWith _ (QVar lvl idx _) _ _ = L.Symbol $ T.pack $ "q_"++show lvl++"_"++show idx
+exprToLispWith _ (Const x ann) _ dts = valueToLisp dts $ mangle x ann
+exprToLispWith _ (AsArray f arg) mp _
   = let f' = functionGetSymbol mp f arg
         (sargs,sres) = functionSignature f arg
-    in (L.List [L.Symbol "_",L.Symbol "as-array",if isOverloaded f
-                                                 then L.List [f'
-                                                             ,L.List $ fmap sortToLisp sargs
-                                                             ,sortToLisp sres]
-                                                 else f'],c)
-exprToLispWith objs (Forall ann f) mp dts c
-  = let (arg,tps,nc,nmp) = createArgs ann c mp
-        (arg',nc') = exprToLispWith objs (f arg) nmp dts nc
-    in (L.List [L.Symbol "forall"
-               ,L.List [L.List [L.Symbol $ T.pack (getSMTName info),sortToLisp $ funInfoSort info]
-                       | info <- tps]
-               ,arg'],nc')
-exprToLispWith objs (Exists ann f) mp dts c
-  = let (arg,tps,nc,nmp) = createArgs ann c mp
-        (arg',nc') = exprToLispWith objs (f arg) nmp dts nc
-    in (L.List [L.Symbol "exists"
-               ,L.List [L.List [L.Symbol $ T.pack (getSMTName info),sortToLisp $ funInfoSort info]
-                       | info <- tps ]
-               ,arg'],nc')
-exprToLispWith objs (Let ann x f) mp dts c
-  = let (arg,tps,nc,nmp) = createArgs ann c mp
-        (arg',nc') = unpackArgs (\e _ cc -> exprToLispWith objs e nmp dts cc
-                                ) x ann nc
-        (arg'',nc'') = exprToLispWith objs (f arg) nmp dts nc'
-    in (L.List [L.Symbol "let"
-               ,L.List [L.List [L.Symbol $ T.pack (getSMTName info),lisp]
-                       | (info,lisp) <- Prelude.zip tps arg' ]
-               ,arg''],nc'')
-exprToLispWith objs (App fun x) mp dts c
+    in L.List [L.Symbol "_",L.Symbol "as-array",if isOverloaded f
+                                                then L.List [f'
+                                                            ,L.List $ fmap sortToLisp sargs
+                                                            ,sortToLisp sres]
+                                                else f']
+exprToLispWith objs (Forall lvl tps body) mp dts
+  = L.List [L.Symbol "forall"
+           ,L.List [L.List [L.Symbol $ T.pack $ "q_"++show lvl++"_"++show i,sortToLisp sort]
+                   | (i,tp) <- Prelude.zip [0..] tps
+                   , let sort = withProxyArg tp getSort ]
+           ,exprToLispWith objs body mp dts]
+exprToLispWith objs (Exists lvl tps body) mp dts
+  = L.List [L.Symbol "exists"
+           ,L.List [L.List [L.Symbol $ T.pack $ "q_"++show lvl++"_"++show i,sortToLisp sort]
+                   | (i,tp) <- Prelude.zip [0..] tps
+                   , let sort = withProxyArg tp getSort ]
+           ,exprToLispWith objs body mp dts]
+exprToLispWith objs (Let lvl args body) mp dts
+  = L.List [L.Symbol "let"
+           ,L.List [L.List [L.Symbol $ T.pack $ "q_"++show lvl++"_"++show i,
+                            exprToLispWith objs def mp dts]
+                   | (i,def) <- Prelude.zip [0..] args ]
+           ,exprToLispWith objs body mp dts]
+exprToLispWith objs (App fun x) mp dts
   = let arg_ann = extractArgAnnotation x
         l = functionGetSymbol mp fun arg_ann
-        ~(x',c1) = unpackArgs (\e _ i -> exprToLispWith objs e mp dts i) x
-                   arg_ann c
+        x' = fmap (\e -> exprToLispWith objs e mp dts) (fromArgs x)
     in if Prelude.null x'
-       then (l,c1)
-       else (L.List $ l:x',c1)
-exprToLispWith objs (Named expr name nc) mp dts c
-  = let (expr',c') = exprToLispWith objs expr mp dts c
-    in (L.List [L.Symbol "!",expr'
-               ,L.Symbol ":named"
-               ,L.Symbol $ T.pack $ escapeName (Left (name,nc))],c')
-exprToLispWith objs (InternalObj obj ann) _ _ c = (objs obj,c)
-exprToLispWith objs (UntypedExpr expr) mp dts c
-  = exprToLispWith objs expr mp dts c
-exprToLispWith objs (UntypedExprValue expr) mp dts c
-  = exprToLispWith objs expr mp dts c
-
+       then l
+       else L.List $ l:x'
+exprToLispWith objs (Named expr name nc) mp dts
+  = let expr' = exprToLispWith objs expr mp dts
+    in L.List [L.Symbol "!",expr'
+              ,L.Symbol ":named"
+              ,L.Symbol $ T.pack $ escapeName (Left (name,nc))]
+exprToLispWith objs (InternalObj obj ann) _ _ = objs obj
+exprToLispWith objs (UntypedExpr expr) mp dts
+  = exprToLispWith objs expr mp dts
+exprToLispWith objs (UntypedExprValue expr) mp dts
+  = exprToLispWith objs expr mp dts
 
 isOverloaded :: SMTFunction a b -> Bool
 isOverloaded SMTEq = True
@@ -773,10 +773,10 @@ lispToValue' dts sort l = case lispToValue dts sort l of
 lispToConstr :: DataTypeInfo -> Maybe (String,[Sort]) -> L.Lisp -> Maybe Value
 lispToConstr dts sort (L.List [L.Symbol "as",
                                expr,
-                               dt])
-  = let sort' = lispToSort dt
-    in case sort' of
-      Fix (NamedSort name args) -> lispToConstr dts (Just (name,args)) expr
+                               dt]) = do
+  sort' <- lispToSort dt
+  case sort' of
+   Fix (NamedSort name args) -> lispToConstr dts (Just (name,args)) expr
 lispToConstr dts sort (L.Symbol n)
   = let rn = T.unpack n
     in case Map.lookup rn (constructors dts) of
@@ -874,8 +874,7 @@ lispToExpr fun bound dts f expected l = case lispToValue dts expected l of
     L.List [L.Symbol "exists",L.List args',body]
       -> fmap f $ quantToExpr Exists fun bound dts args' body
     L.List [L.Symbol "let",L.List args',body]
-      -> let struct = parseLetStruct fun bound dts expected args' body
-         in Just $ convertLetStruct f struct
+      -> parseLet fun bound dts f expected args' body
     L.List [L.Symbol "_",L.Symbol "as-array",fsym]
       -> case parseFun fun fsym fun dts of
       Nothing -> Nothing
@@ -959,32 +958,60 @@ generalizeSorts (x:xs) = case generalizeSort x of
 exprSort :: SMTType a => SMTExpr a -> Sort
 exprSort (expr::SMTExpr a) = getSort (undefined::a) (extractAnnotation expr)
 
-quantToExpr :: (forall a. Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool)
-               -> FunctionParser
-               -> (T.Text -> Maybe (SMTExpr Untyped))
-               -> DataTypeInfo
-               -> [L.Lisp] -> L.Lisp -> Maybe (SMTExpr Bool)
-quantToExpr q fun bound dts (L.List [L.Symbol var,tp]:rest) body
-  = let sort = lispToSort tp
-        getForall :: Typeable a => a -> SMTExpr a -> SMTExpr a
-        getForall = const id
-    in Just $ withSort dts sort
-       (\u ann ->
-         q ann $ \subst -> case quantToExpr q fun
-                                (\txt -> if txt==var
-                                         then Just $ mkUntyped $ getForall u subst
-                                         else bound txt)
-                                dts rest body of
-                             Just r -> r
-                             Nothing -> error $ "smtlib2: Failed to parse quantifier construct "++show rest
-       )
-quantToExpr _ fun bound dts [] body
-  = lispToExpr fun bound dts (\expr -> case gcast expr of
-                                 Nothing -> error "smtlib2: Body of existential quantification isn't bool."
-                                 Just r -> r
-                             ) (Just $ getSort (undefined::Bool) ()) body
-quantToExpr _ _ _ _ (el:_) _ = error $ "smtlib2: Invalid element "++show el++" in quantifier construct."
+quantToExpr :: (Integer -> [ProxyArg] -> SMTExpr Bool -> SMTExpr Bool)
+            -> FunctionParser
+            -> (T.Text -> Maybe (SMTExpr Untyped))
+            -> DataTypeInfo
+            -> [L.Lisp] -> L.Lisp -> Maybe (SMTExpr Bool)
+quantToExpr con fun bound dts args body = do
+  argLst <- mapM (\el -> case el of
+                   L.List [L.Symbol name,tp] -> do
+                     sort <- lispToSort tp
+                     return (name,withSort dts sort ProxyArg)
+                   _ -> Nothing
+                 ) args
+  let argMp = Map.fromList [ (name,(i,tp))
+                           | (i,(name,tp)) <- Prelude.zip [0..] argLst ]
+      bound' name = case Map.lookup name argMp of
+        Just (idx,tp) -> Just (InternalObj (Quantified idx) tp)
+        Nothing -> bound name
+  lispToExpr fun bound' dts
+    (\body1 -> let level = quantificationLevel body1
+                   (_,body2) = foldExpr (\_ e -> case e of
+                                          InternalObj (cast -> Just (Quantified n)) ann
+                                            -> ((),QVar level n ann)
+                                          _ -> ((),e)) () body1
+               in case cast body2 of
+                   Just body3 -> con level (fmap snd argLst) body3
+    ) (Just $ Fix BoolSort) body
 
+parseLet :: FunctionParser
+         -> (T.Text -> Maybe (SMTExpr Untyped))
+         -> DataTypeInfo
+         -> (forall a. SMTType a => SMTExpr a -> b)
+         -> Maybe Sort
+         -> [L.Lisp] -> L.Lisp -> Maybe b
+parseLet fun bound dts app expected args body = do
+  argLst <- mapM (\el -> case el of
+                   L.List [L.Symbol name,expr] -> do
+                     expr' <- lispToExpr fun bound dts UntypedExpr Nothing expr
+                     return (name,expr')
+                   _ -> Nothing
+                 ) args
+  let argMp = Map.fromList [ (name,(i,extractAnnotation expr))
+                           | (i,(name,expr)) <- Prelude.zip [0..] argLst ]
+      bound' name = case Map.lookup name argMp of
+        Just (idx,tp) -> Just (InternalObj (Quantified idx) tp)
+        Nothing -> bound name
+  lispToExpr fun bound' dts
+    (\body1 -> let level = quantificationLevel body1
+                   (_,body2) = foldExpr (\_ e -> case e of
+                                          InternalObj (cast -> Just (Quantified n)) ann
+                                            -> ((),QVar level n ann)
+                                          _ -> ((),e)) () body1
+               in app (Let level (fmap snd argLst) body2)
+    ) expected body
+{-
 data LetStruct where
   LetStruct :: SMTType a => SMTAnnotation a -> SMTExpr a -> (SMTExpr a -> LetStruct) -> LetStruct
   EndLet :: SMTType a => SMTExpr a -> LetStruct
@@ -1024,7 +1051,7 @@ convertLetStruct :: (forall a. SMTType a => SMTExpr a -> b) -> LetStruct -> b
 convertLetStruct f x
   = extractType
     (\(_::t) -> f (convertLetStructT x :: SMTExpr t)) x
-
+-}
 withFirstArgSort :: DataTypeInfo -> L.Lisp -> [Sort] -> (forall t. SMTType t => t -> SMTAnnotation t -> a) -> a
 withFirstArgSort dts _ (s:rest) f = case s of
   Fix (BVSort i False) -> if any (\sort -> case sort of
@@ -1337,7 +1364,7 @@ constArrayParser = FunctionParser g
               ,L.Symbol "const"
               ,s]) _ dts
       = case lispToSort s of
-        rsort@(Fix (ArraySort idx val))
+        Just rsort@(Fix (ArraySort idx val))
           -> Just $ DefinedParser [val] rsort $
              \f -> withArraySort dts idx val $
                    \(_::SMTArray i v) (i_ann,_)
@@ -1410,8 +1437,8 @@ extractParser = FunctionParser g
 sigParser = FunctionParser g
   where
     g (L.List [fsym,L.List sig,ret]) r dts = do
-      let rsig = fmap lispToSort sig
-          rret = lispToSort ret
+      rsig <- mapM lispToSort sig
+      rret <- lispToSort ret
       parser <- parseFun r fsym r dts
       return $ DefinedParser rsig rret $
         \f -> case parser of

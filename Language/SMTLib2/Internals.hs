@@ -18,7 +18,7 @@ import Data.Tagged
 import Data.List as List (genericReplicate)
 #endif
 import Data.Fix
-import Prelude hiding (mapM,mapM_,foldl,all)
+import Prelude hiding (mapM,mapM_,foldl,all,maximum)
 import Data.Foldable
 import Data.Traversable
 import Control.Exception
@@ -197,12 +197,13 @@ instance Show UntypedValue where
 -- | An abstract SMT expression
 data SMTExpr t where
   Var :: SMTType t => Integer -> SMTAnnotation t -> SMTExpr t
+  QVar :: SMTType t => Integer -> Integer -> SMTAnnotation t -> SMTExpr t
   Const :: SMTValue t => t -> SMTAnnotation t -> SMTExpr t
   AsArray :: (Args arg,SMTType res) => SMTFunction arg res -> ArgAnnotation arg
              -> SMTExpr (SMTArray arg res)
-  Forall :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
-  Exists :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
-  Let :: (Args a) => ArgAnnotation a -> a -> (a -> SMTExpr b) -> SMTExpr b
+  Forall :: Integer -> [ProxyArg] -> SMTExpr Bool -> SMTExpr Bool
+  Exists :: Integer -> [ProxyArg] -> SMTExpr Bool -> SMTExpr Bool
+  Let :: Integer -> [SMTExpr Untyped] -> SMTExpr b -> SMTExpr b
   App :: (Args arg,SMTType res) => SMTFunction arg res -> arg -> SMTExpr res
   Named :: SMTExpr a -> String -> Integer -> SMTExpr a
   InternalObj :: (SMTType t,Typeable a,Ord a,Show a) => a -> SMTAnnotation t -> SMTExpr t
@@ -324,9 +325,11 @@ class (Ord a,Typeable a,Show a,
   fromArgs :: Args a => a -> [SMTExpr Untyped]
   fromArgs arg = fst $ foldExprsId (\lst expr ann -> (lst++[UntypedExpr expr],expr)
                                    ) [] arg (extractArgAnnotation arg)
-  getSorts :: a -> ArgAnnotation a -> [Sort]
+  getTypes :: a -> ArgAnnotation a -> [ProxyArg]
   getArgAnnotation :: a -> [Sort] -> (ArgAnnotation a,[Sort])
-  showsArgs :: Integer -> Int -> a -> (ShowS,Integer)
+
+getSorts :: Args a => a -> ArgAnnotation a -> [Sort]
+getSorts u ann = fmap (\prx -> withProxyArg prx getSort) (getTypes u ann)
 
 instance Args () where
   type ArgAnnotation () = ()
@@ -335,9 +338,8 @@ instance Args () where
   extractArgAnnotation _ = ()
   toArgs _ x = Just ((),x)
   fromArgs _ = []
-  getSorts _ _ = []
+  getTypes _ _ = []
   getArgAnnotation _ xs = ((),xs)
-  showsArgs i p _ = (showsPrec p (),i)
 
 foldExprsId :: Args a => (forall t. SMTType t => s -> SMTExpr t -> SMTAnnotation t -> (s,SMTExpr t))
                -> s -> a -> ArgAnnotation a -> (s,a)
@@ -989,71 +991,65 @@ instance Monad m => SMTBackend (AnyBackend m) m where
   smtHandle (AnyBackend b) = smtHandle b
 
 instance Show (SMTExpr t) where
-  showsPrec p x = fst $ showExpr 0 p x
+  showsPrec = showExpr
 
 newtype Bound = Bound Integer deriving (Typeable,Eq,Ord,Show)
 
-showExpr :: Integer -> Int -> SMTExpr t -> (ShowS,Integer)
-showExpr i p (Var v ann) = (showParen (p>10) (showString "Var " .
-                                              showsPrec 11 v .
-                                              showChar ' ' .
-                                              showsPrec 11 ann),i)
-showExpr i p (Const c ann) = (showParen (p>10) (showString "Const " .
-                                                showsPrec 11 c .
+showExpr :: Int -> SMTExpr t -> ShowS
+showExpr p (Var v ann) = showParen (p>10) (showString "Var " .
+                                           showsPrec 11 v .
+                                           showChar ' ' .
+                                           showsPrec 11 ann)
+showExpr p (QVar lvl v ann) = showParen (p>10) (showString "QVar " .
+                                                showsPrec 11 lvl .
                                                 showChar ' ' .
-                                                showsPrec 11 ann),i)
-showExpr i p (AsArray fun ann) = (showParen (p>10) (showString "AsArray " .
-                                                    showsPrec 11 fun .
-                                                    showChar ' ' .
-                                                    showsPrec 11 ann),i)
-showExpr i p (Forall ann f) = let (i0,arg) = foldExprsId (\ci _ ann'
-                                                          -> (ci+1,InternalObj (Bound ci) ann')
-                                                         ) i undefined ann
-                                  (strArgs,i1) = showsArgs i0 11 arg
-                                  (strBody,i2) = showExpr i1 11 (f arg)
-                              in (showParen (p>10) (showString "Forall " .
-                                                    strArgs .
-                                                    showString " ~> " .
-                                                    strBody),i2)
-showExpr i p (Exists ann f) = let (i0,arg) = foldExprsId (\ci _ ann'
-                                                          -> (ci+1,InternalObj (Bound ci) ann')
-                                                         ) i undefined ann
-                                  (strArgs,i1) = showsArgs i0 11 arg
-                                  (strBody,i2) = showExpr i1 11 (f arg)
-                              in (showParen (p>10) (showString "Exists " .
-                                                    strArgs .
-                                                    showString " ~> " .
-                                                    strBody),i2)
-showExpr i p (Let ann arg f) = let (i0,arg') = foldExprsId (\ci _ ann'
-                                                            -> (ci+1,InternalObj (Bound ci) ann')
-                                                           ) i undefined ann
-                                   (strArgs',i1) = showsArgs i0 11 arg'
-                                   (strArgs,i2) = showsArgs i1 11 arg
-                                   (strBody,i3) = showExpr i2 11 (f arg')
-                               in (showParen (p>10) (showString "Let " .
-                                                     strArgs' .
-                                                     showString " = " .
-                                                     strArgs .
-                                                     showString " ~> " .
-                                                     strBody),i3)
-showExpr i p (App fun arg) = let (strArgs,i0) = showsArgs i 11 arg
-                             in (showParen (p>10) (showString "App " .
-                                                   showsPrec 11 fun .
+                                                showsPrec 11 v .
+                                                showChar ' ' .
+                                                showsPrec 11 ann)
+showExpr p (Const c ann) = showParen (p>10) (showString "Const " .
+                                             showsPrec 11 c .
+                                             showChar ' ' .
+                                             showsPrec 11 ann)
+showExpr p (AsArray fun ann) = showParen (p>10) (showString "AsArray " .
+                                                 showsPrec 11 fun .
+                                                 showChar ' ' .
+                                                 showsPrec 11 ann)
+showExpr p (Forall lvl args f) = showParen (p>10) (showString "Forall " .
+                                                   showsPrec 11 lvl .
                                                    showChar ' ' .
-                                                   strArgs),i0)
-showExpr i p (Named expr name nc) = let (strExpr,i0) = showExpr i 11 expr
-                                    in (showParen (p>10) (showString "Named " .
-                                                          strExpr .
-                                                          showChar ' ' .
-                                                          showsPrec 11 name .
-                                                          showChar ' ' .
-                                                          showsPrec 11 nc),i0)
-showExpr i p (InternalObj obj ann) = (showParen (p>10) (showString "InternalObj " .
-                                                        showsPrec 11 obj .
-                                                        showChar ' ' .
-                                                        showsPrec 11 ann),i)
-showExpr i p (UntypedExpr e) = showExpr i p e
-showExpr i p (UntypedExprValue e) = showExpr i p e
+                                                   showsPrec 11 args .
+                                                   showString " ~> " .
+                                                   showsPrec 11 f)
+showExpr p (Exists lvl args f) = showParen (p>10) (showString "Exists " .
+                                                   showsPrec 11 lvl .
+                                                   showChar ' ' .
+                                                   showsPrec 11 args .
+                                                   showString " ~> " .
+                                                   showsPrec 11 f)
+showExpr p (Let lvl arg f) = showParen (p>10) (showString "Let " .
+                                               showsPrec 11 lvl .
+                                               showChar ' ' .
+                                               showsPrec 11 arg .
+                                               showChar ' ' .
+                                               showsPrec 11 f)
+showExpr p (App fun arg) = let strArgs = showsPrec 11 arg
+                           in showParen (p>10) (showString "App " .
+                                                showsPrec 11 fun .
+                                                showChar ' ' .
+                                                strArgs)
+showExpr p (Named expr name nc) = let strExpr = showExpr 11 expr
+                                  in showParen (p>10) (showString "Named " .
+                                                       strExpr .
+                                                       showChar ' ' .
+                                                       showsPrec 11 name .
+                                                       showChar ' ' .
+                                                       showsPrec 11 nc)
+showExpr p (InternalObj obj ann) = showParen (p>10) (showString "InternalObj " .
+                                                     showsPrec 11 obj .
+                                                     showChar ' ' .
+                                                     showsPrec 11 ann)
+showExpr p (UntypedExpr e) = showExpr p e
+showExpr p (UntypedExprValue e) = showExpr p e
 
 instance Show (SMTFunction arg res) where
   showsPrec _ SMTEq = showString "SMTEq"
@@ -1121,3 +1117,16 @@ instance Show (Constructor arg res) where
 noLimits :: CheckSatLimits
 noLimits = CheckSatLimits { limitTime = Nothing
                           , limitMemory = Nothing }
+
+newtype Quantified = Quantified Integer deriving (Typeable,Show,Eq,Ord)
+
+quantificationLevel :: SMTExpr t -> Integer
+quantificationLevel (QVar lvl _ _) = lvl+1
+quantificationLevel (Forall lvl _ _) = lvl+1
+quantificationLevel (Exists lvl _ _) = lvl+1
+quantificationLevel (Let lvl _ _) = lvl+1
+quantificationLevel (App _ arg) = maximum $ fmap quantificationLevel $ fromArgs arg
+quantificationLevel (Named expr _ _) = quantificationLevel expr
+quantificationLevel (UntypedExpr e) = quantificationLevel e
+quantificationLevel (UntypedExprValue e) = quantificationLevel e
+quantificationLevel _ = 0

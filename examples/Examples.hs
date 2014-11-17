@@ -1,8 +1,8 @@
-{-# LANGUAGE OverloadedStrings,TemplateHaskell,TypeFamilies,DeriveDataTypeable,ScopedTypeVariables #-}
+{-# LANGUAGE OverloadedStrings,TemplateHaskell,TypeFamilies,DeriveDataTypeable,ScopedTypeVariables,PackageImports #-}
 module Examples where
 
 import Control.Monad
-import Control.Monad.Trans
+import "mtl" Control.Monad.Trans
 import Language.SMTLib2
 import Language.SMTLib2.TH
 import Language.SMTLib2.Internals -- (declareType)

@@ -1,5 +1,5 @@
 {- | Defines the user-accessible interface of the smtlib2 library -}
-{-# LANGUAGE TypeFamilies,OverloadedStrings,FlexibleContexts,ScopedTypeVariables,CPP #-}
+{-# LANGUAGE TypeFamilies,OverloadedStrings,FlexibleContexts,ScopedTypeVariables,CPP,ViewPatterns #-}
 module Language.SMTLib2.Internals.Interface where
 
 import Language.SMTLib2.Internals
@@ -575,48 +575,65 @@ bvsplitu64to8 e = (App (SMTExtract (Proxy::Proxy N56) (Proxy::Proxy N8)) e,
                    App (SMTExtract (Proxy::Proxy N8) (Proxy::Proxy N8)) e,
                    App (SMTExtract (Proxy::Proxy N0) (Proxy::Proxy N8)) e)
 
+mkQuantified :: (Args a,SMTType b) => (Integer -> [ProxyArg] -> SMTExpr b -> SMTExpr b)
+             -> ArgAnnotation a -> (a -> SMTExpr b)
+             -> SMTExpr b
+mkQuantified constr ann f = constr lvl sorts body
+  where
+    undef :: (a -> SMTExpr b) -> a
+    undef _ = undefined
+    sorts = getTypes (undef f) ann
+    Just (arg0,[]) = toArgs ann [InternalObj () prx
+                                | prx <- sorts ]
+    body' = f arg0
+    lvl = quantificationLevel body'
+    Just (arg1,[]) = toArgs ann [QVar lvl i prx
+                                | (i,prx) <- Prelude.zip [0..] sorts ]
+    body = f arg1
+    
 -- | If the supplied function returns true for all possible values, the forall quantification returns true.
 forAll :: (Args a,Unit (ArgAnnotation a)) => (a -> SMTExpr Bool) -> SMTExpr Bool
-forAll = Forall unit
+forAll = forAllAnn unit
 
 -- | An annotated version of `forAll`.
 forAllAnn :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
-forAllAnn = Forall
+forAllAnn = mkQuantified Forall
 
 -- | If the supplied function returns true for at least one possible value, the exists quantification returns true.
 exists :: (Args a,Unit (ArgAnnotation a)) => (a -> SMTExpr Bool) -> SMTExpr Bool
-exists = Exists unit
+exists = existsAnn unit
 
 -- | An annotated version of `exists`.
 existsAnn :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
-existsAnn = Exists
+existsAnn = mkQuantified Exists
 
 -- | Binds an expression to a variable.
 --   Can be used to prevent blowups in the command stream if expressions are used multiple times.
 --   @let' x f@ is functionally equivalent to @f x@.
-let' :: (Args a,Unit (ArgAnnotation a)) => a -> (a -> SMTExpr b) -> SMTExpr b
-let' = Let unit
+let' :: (Args a,Unit (ArgAnnotation a),SMTType b) => a -> (a -> SMTExpr b) -> SMTExpr b
+let' = letAnn unit
 
 -- | Like `let'`, but can be given an additional type annotation for the argument of the function.
-letAnn :: Args a => ArgAnnotation a -> a -> (a -> SMTExpr b) -> SMTExpr b
-letAnn = Let
+letAnn :: (Args a,SMTType b) => ArgAnnotation a -> a -> (a -> SMTExpr b) -> SMTExpr b
+letAnn ann arg = mkQuantified (\lvl _ body -> Let lvl args body) ann
+  where
+    args = fromArgs arg
 
 -- | Like 'let'', but can define multiple variables of the same type.
-lets :: (Args a,Unit (ArgAnnotation a)) => [a] -> ([a] -> SMTExpr b) -> SMTExpr b
-lets xs = Let (fmap (const unit) xs) xs
+lets :: (Args a,Unit (ArgAnnotation a),SMTType b) => [a] -> ([a] -> SMTExpr b) -> SMTExpr b
+lets xs = letAnn (fmap (const unit) xs) xs
 
 -- | Like 'forAll', but can quantify over more than one variable (of the same type).
 forAllList :: (Args a,Unit (ArgAnnotation a)) => Integer -- ^ Number of variables to quantify
               -> ([a] -> SMTExpr Bool) -- ^ Function which takes a list of the quantified variables
               -> SMTExpr Bool
-forAllList l = Forall (genericReplicate l unit)
+forAllList l = forAllAnn (genericReplicate l unit)
 
 -- | Like `exists`, but can quantify over more than one variable (of the same type).
 existsList :: (Args a,Unit (ArgAnnotation a)) => Integer -- ^ Number of variables to quantify
            -> ([a] -> SMTExpr Bool) -- ^ Function which takes a list of the quantified variables
            -> SMTExpr Bool
-existsList l = Exists (genericReplicate l unit)
-
+existsList l = existsAnn (genericReplicate l unit)
 
 -- | Checks if the expression is formed a specific constructor.
 is :: (Args arg,SMTType dt) => SMTExpr dt -> Constructor arg dt -> SMTExpr Bool

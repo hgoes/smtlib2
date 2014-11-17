@@ -67,7 +67,7 @@ optimizeExpr _ = Nothing
 optimizeCall :: SMTFunction arg res -> arg -> Maybe (SMTExpr res)
 optimizeCall SMTEq [] = Just (Const True ())
 optimizeCall SMTEq [_] = Just (Const True ())
-optimizeCall SMTEq [x,y] = case eqExpr 0 x y of
+optimizeCall SMTEq [x,y] = case eqExpr x y of
   Nothing -> Nothing
   Just res -> Just (Const res ())
 optimizeCall SMTNot (Const x _) = Just $ Const (not x) ()
@@ -106,7 +106,7 @@ optimizeCall (SMTLogic Implies) xs
           Just args' -> Just $ App (SMTLogic Implies) (args'++[res])
 optimizeCall SMTITE (Const True _,ifT,_) = Just ifT
 optimizeCall SMTITE (Const False _,_,ifF) = Just ifF
-optimizeCall SMTITE (_,ifT,ifF) = case eqExpr 0 ifT ifF of
+optimizeCall SMTITE (_,ifT,ifF) = case eqExpr ifT ifF of
   Just True -> Just ifT
   _ -> Nothing
 optimizeCall (SMTBVBin op) args = bvBinOpOptimize op args

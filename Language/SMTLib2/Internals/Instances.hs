@@ -58,11 +58,12 @@ valueToHaskell dtInfo f sort (ConstrValue name args sort')
 -- | Reconstruct the type annotation for a given SMT expression.
 extractAnnotation :: SMTExpr a -> SMTAnnotation a
 extractAnnotation (Var _ ann) = ann
+extractAnnotation (QVar _ _ ann) = ann
 extractAnnotation (Const _ ann) = ann
 extractAnnotation (AsArray f arg) = (arg,inferResAnnotation f arg)
-extractAnnotation (Forall _ _) = ()
-extractAnnotation (Exists _ _) = ()
-extractAnnotation (Let _ x f) = extractAnnotation (f x)
+extractAnnotation (Forall _ _ _) = ()
+extractAnnotation (Exists _ _ _) = ()
+extractAnnotation (Let _ _ f) = extractAnnotation f
 extractAnnotation (Named x _ _) = extractAnnotation x
 extractAnnotation (App f arg) = inferResAnnotation f (extractArgAnnotation arg)
 extractAnnotation (InternalObj _ ann) = ann
@@ -122,11 +123,20 @@ inferResAnnotation (SMTDivisible _) _ = ()
 -- Untyped
 
 entype :: (forall a. SMTType a => SMTExpr a -> b) -> SMTExpr Untyped -> b
+entype f (Var i (ProxyArg (_::t) ann))
+  = f (Var i ann::SMTExpr t)
+entype f (QVar lvl i (ProxyArg (_::t) ann))
+  = f (QVar lvl i ann::SMTExpr t)
 entype f (UntypedExpr x) = f x
+entype f (InternalObj obj (ProxyArg (_::t) ann))
+  = f (InternalObj obj ann :: SMTExpr t)
+entype f expr = error $ "Can't entype expression "++show expr
 
 entypeValue :: (forall a. SMTValue a => SMTExpr a -> b) -> SMTExpr UntypedValue -> b
 entypeValue f (Var i (ProxyArgValue (_::t) ann))
   = f (Var i ann::SMTExpr t)
+entypeValue f (QVar lvl i (ProxyArgValue (_::t) ann))
+  = f (QVar lvl i ann::SMTExpr t)
 entypeValue f (Const (UntypedValue v) (ProxyArgValue (_::t) ann))
   = case cast v of
   Just rv -> f (Const (rv::t) ann)
@@ -383,10 +393,9 @@ instance (SMTType a) => Args (SMTExpr a) where
     return (r,xs)
   toArgs _ [] = Nothing
   fromArgs x = [UntypedExpr x]
-  getSorts (_::SMTExpr a) ann = [getSort (undefined::a) ann]
+  getTypes (_::SMTExpr a) ann = [ProxyArg (undefined::a) ann]
   getArgAnnotation u (s:rest) = (annotationFromSort (getUndef u) s,rest)
   getArgAnnotation _ [] = error "smtlib2: To few sorts provided."
-  showsArgs = showExpr
 
 instance (Args a,Args b) => Args (a,b) where
   type ArgAnnotation (a,b) = (ArgAnnotation a,ArgAnnotation b)
@@ -405,18 +414,11 @@ instance (Args a,Args b) => Args (a,b) where
     (r2,x2) <- toArgs ann2 x1
     return ((r1,r2),x2)
   fromArgs (x,y) = fromArgs x ++ fromArgs y
-  getSorts ~(x1,x2) (ann1,ann2) = getSorts x1 ann1 ++ getSorts x2 ann2
+  getTypes ~(x1,x2) (ann1,ann2) = getTypes x1 ann1 ++ getTypes x2 ann2
   getArgAnnotation (_::(a1,a2)) sorts
     = let (ann1,r1) = getArgAnnotation (undefined::a1) sorts
           (ann2,r2) = getArgAnnotation (undefined::a2) r1
       in ((ann1,ann2),r2)
-  showsArgs i p (x0,x1) = let (str0,i0) = showsArgs i 0 x0
-                              (str1,i1) = showsArgs i0 0 x1
-                          in (showChar '(' .
-                              str0 .
-                              showChar ',' .
-                              str1 .
-                              showChar ')',i1)
 
 instance (SMTValue a) => LiftArgs (SMTExpr a) where
   type Unpacked (SMTExpr a) = a
@@ -460,18 +462,7 @@ instance (Args a,Args b,Args c) => Args (a,b,c) where
           (ann2,r2) = getArgAnnotation (undefined::a2) r1
           (ann3,r3) = getArgAnnotation (undefined::a3) r2
       in ((ann1,ann2,ann3),r3)
-  getSorts ~(x1,x2,x3) (ann1,ann2,ann3) = getSorts x1 ann1 ++ getSorts x2 ann2 ++ getSorts x3 ann3
-  showsArgs i p (x0,x1,x2)
-    = let (str0,i0) = showsArgs i 0 x0
-          (str1,i1) = showsArgs i0 0 x1
-          (str2,i2) = showsArgs i1 0 x2
-      in (showChar '(' .
-          str0 .
-          showChar ',' .
-          str1 .
-          showChar ',' .
-          str2 .
-          showChar ')',i2)
+  getTypes ~(x1,x2,x3) (ann1,ann2,ann3) = getTypes x1 ann1 ++ getTypes x2 ann2 ++ getTypes x3 ann3
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c) => LiftArgs (a,b,c) where
   type Unpacked (a,b,c) = (Unpacked a,Unpacked b,Unpacked c)
@@ -518,25 +509,11 @@ instance (Args a,Args b,Args c,Args d) => Args (a,b,c,d) where
           (ann3,r3) = getArgAnnotation (undefined::a3) r2
           (ann4,r4) = getArgAnnotation (undefined::a4) r3
       in ((ann1,ann2,ann3,ann4),r4)
-  getSorts ~(x1,x2,x3,x4) (ann1,ann2,ann3,ann4)
-    = getSorts x1 ann1 ++
-      getSorts x2 ann2 ++
-      getSorts x3 ann3 ++
-      getSorts x4 ann4
-  showsArgs i p (x0,x1,x2,x3)
-    = let (str0,i0) = showsArgs i 0 x0
-          (str1,i1) = showsArgs i0 0 x1
-          (str2,i2) = showsArgs i1 0 x2
-          (str3,i3) = showsArgs i2 0 x3
-      in (showChar '(' .
-          str0 .
-          showChar ',' .
-          str1 .
-          showChar ',' .
-          str2 .
-          showChar ',' .
-          str3 .
-          showChar ')',i3)
+  getTypes ~(x1,x2,x3,x4) (ann1,ann2,ann3,ann4)
+    = getTypes x1 ann1 ++
+      getTypes x2 ann2 ++
+      getTypes x3 ann3 ++
+      getTypes x4 ann4
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d) => LiftArgs (a,b,c,d) where
   type Unpacked (a,b,c,d) = (Unpacked a,Unpacked b,Unpacked c,Unpacked d)
@@ -590,29 +567,12 @@ instance (Args a,Args b,Args c,Args d,Args e) => Args (a,b,c,d,e) where
           (ann4,r4) = getArgAnnotation (undefined::a4) r3
           (ann5,r5) = getArgAnnotation (undefined::a5) r4
       in ((ann1,ann2,ann3,ann4,ann5),r5)
-  getSorts ~(x1,x2,x3,x4,x5) (ann1,ann2,ann3,ann4,ann5)
-    = getSorts x1 ann1 ++
-      getSorts x2 ann2 ++
-      getSorts x3 ann3 ++
-      getSorts x4 ann4 ++
-      getSorts x5 ann5
-  showsArgs i p (x0,x1,x2,x3,x4)
-    = let (str0,i0) = showsArgs i 0 x0
-          (str1,i1) = showsArgs i0 0 x1
-          (str2,i2) = showsArgs i1 0 x2
-          (str3,i3) = showsArgs i2 0 x3
-          (str4,i4) = showsArgs i3 0 x4
-      in (showChar '(' .
-          str0 .
-          showChar ',' .
-          str1 .
-          showChar ',' .
-          str2 .
-          showChar ',' .
-          str3 .
-          showChar ',' .
-          str4 .
-          showChar ')',i4)
+  getTypes ~(x1,x2,x3,x4,x5) (ann1,ann2,ann3,ann4,ann5)
+    = getTypes x1 ann1 ++
+      getTypes x2 ann2 ++
+      getTypes x3 ann3 ++
+      getTypes x4 ann4 ++
+      getTypes x5 ann5
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d,LiftArgs e) => LiftArgs (a,b,c,d,e) where
   type Unpacked (a,b,c,d,e) = (Unpacked a,Unpacked b,Unpacked c,Unpacked d,Unpacked e)
@@ -673,33 +633,13 @@ instance (Args a,Args b,Args c,Args d,Args e,Args f) => Args (a,b,c,d,e,f) where
           (ann5,r5) = getArgAnnotation (undefined::a5) r4
           (ann6,r6) = getArgAnnotation (undefined::a6) r5
       in ((ann1,ann2,ann3,ann4,ann5,ann6),r6)
-  getSorts ~(x1,x2,x3,x4,x5,x6) (ann1,ann2,ann3,ann4,ann5,ann6)
-    = getSorts x1 ann1 ++
-      getSorts x2 ann2 ++
-      getSorts x3 ann3 ++
-      getSorts x4 ann4 ++
-      getSorts x5 ann5 ++
-      getSorts x6 ann6
-  showsArgs i p (x0,x1,x2,x3,x4,x5)
-    = let (str0,i0) = showsArgs i 0 x0
-          (str1,i1) = showsArgs i0 0 x1
-          (str2,i2) = showsArgs i1 0 x2
-          (str3,i3) = showsArgs i2 0 x3
-          (str4,i4) = showsArgs i3 0 x4
-          (str5,i5) = showsArgs i4 0 x5
-      in (showChar '(' .
-          str0 .
-          showChar ',' .
-          str1 .
-          showChar ',' .
-          str2 .
-          showChar ',' .
-          str3 .
-          showChar ',' .
-          str4 .
-          showChar ',' .
-          str5 .
-          showChar ')',i5)
+  getTypes ~(x1,x2,x3,x4,x5,x6) (ann1,ann2,ann3,ann4,ann5,ann6)
+    = getTypes x1 ann1 ++
+      getTypes x2 ann2 ++
+      getTypes x3 ann3 ++
+      getTypes x4 ann4 ++
+      getTypes x5 ann5 ++
+      getTypes x6 ann6
 
 instance (LiftArgs a,LiftArgs b,LiftArgs c,LiftArgs d,LiftArgs e,LiftArgs f) => LiftArgs (a,b,c,d,e,f) where
   type Unpacked (a,b,c,d,e,f) = (Unpacked a,Unpacked b,Unpacked c,Unpacked d,Unpacked e,Unpacked f)
@@ -743,13 +683,8 @@ instance Args a => Args [a] where
   getArgAnnotation (_::[a]) sorts = let (x,r1) = getArgAnnotation (undefined::a) sorts
                                         (xs,r2) = getArgAnnotation (undefined::[a]) r1
                                     in (x:xs,r2)
-  getSorts _ [] = []
-  getSorts ~(x:xs) (ann:anns) = getSorts x ann ++ getSorts xs anns
-  showsArgs i p lst = let (ni,lst') = mapAccumL (\ci arg
-                                                  -> let (str,ci') = showsArgs ci 0 arg
-                                                     in (ci',str)
-                                                ) i lst
-                      in (showListWith id lst',ni)
+  getTypes _ [] = []
+  getTypes ~(x:xs) (ann:anns) = getTypes x ann ++ getTypes xs anns
 
 instance (Typeable a,Show a,Args b,Ord a) => Args (Map a b) where
   type ArgAnnotation (Map a b) = Map a (ArgAnnotation b)
@@ -782,17 +717,8 @@ instance (Typeable a,Show a,Args b,Ord a) => Args (Map a b) where
                           (Nothing,_) -> Nothing
                           (Just rest,mp) -> Just (mp,rest)
   fromArgs exprs = concat $ fmap fromArgs $ Map.elems exprs
-  getSorts (_::Map a b) anns = concat [ getSorts (undefined::b) ann | (_,ann) <- Map.toAscList anns ]
+  getTypes (_::Map a b) anns = concat [ getTypes (undefined::b) ann | (_,ann) <- Map.toAscList anns ]
   getArgAnnotation _ sorts = (Map.empty,sorts)
-  showsArgs i p mp = let (ni,lst') = mapAccumL (\ci (key,arg)
-                                                -> let (str,ci') = showsArgs ci 0 arg
-                                                   in (ci',(key,str))
-                                               ) i (Map.toList mp)
-                     in (showString "fromList " .
-                         showListWith (\(key,str) -> showChar '(' .
-                                                     showsPrec 0 key .
-                                                     showChar ',' .
-                                                     str . showChar ')') lst',ni)
 
 instance (Args a,Args b) => Args (Either a b) where
   type ArgAnnotation (Either a b) = Either (ArgAnnotation a) (ArgAnnotation b)
@@ -820,15 +746,9 @@ instance (Args a,Args b) => Args (Either a b) where
     return (Right res,rest)
   fromArgs (Left xs) = fromArgs xs
   fromArgs (Right xs) = fromArgs xs
-  getSorts (_::Either a b) (Left ann) = getSorts (undefined::a) ann
-  getSorts (_::Either a b) (Right ann) = getSorts (undefined::b) ann
+  getTypes (_::Either a b) (Left ann) = getTypes (undefined::a) ann
+  getTypes (_::Either a b) (Right ann) = getTypes (undefined::b) ann
   getArgAnnotation _ _ = error "smtlib2: getArgAnnotation undefined for Either"
-  showsArgs n p (Left x) = let (showx,nn) = showsArgs n 11 x
-                           in (showParen (p>10) $
-                               showString "Left " . showx,nn)
-  showsArgs n p (Right x) = let (showx,nn) = showsArgs n 11 x
-                            in (showParen (p>10) $
-                                showString "Right " . showx,nn)
 
 instance Args a => Args (Maybe a) where
   type ArgAnnotation (Maybe a) = Maybe (ArgAnnotation a)
@@ -848,13 +768,9 @@ instance Args a => Args (Maybe a) where
     return (Just res,rest)
   fromArgs Nothing = []
   fromArgs (Just x) = fromArgs x
-  getSorts _ Nothing = []
-  getSorts (_::Maybe a) (Just ann) = getSorts (undefined::a) ann
+  getTypes _ Nothing = []
+  getTypes (_::Maybe a) (Just ann) = getTypes (undefined::a) ann
   getArgAnnotation _ _ = error "smtlib2: getArgAnnotation undefined for Maybe"
-  showsArgs n p Nothing = (showString "Nothing",n)
-  showsArgs n p (Just x) = let (showx,nn) = showsArgs n 11 x
-                           in (showParen (p>10) $
-                               showString "Just " . showx,nn)
 
 instance LiftArgs a => LiftArgs [a] where
   type Unpacked [a] = [Unpacked a]
@@ -1146,56 +1062,51 @@ withArraySort mp idx v f
 
 -- | Recursively fold a monadic function over all sub-expressions of this expression
 foldExprM :: (SMTType a,Monad m) => (forall t. SMTType t => s -> SMTExpr t -> m (s,[SMTExpr t]))
-         -> s -> SMTExpr a -> m (s,[SMTExpr a])
-foldExprM = foldExprM' [(Quantified 0)..]
-
-foldExprM' :: (SMTType a,Monad m) => [Quantified]
-              -> (forall t. SMTType t => s -> SMTExpr t -> m (s,[SMTExpr t]))
-              -> s -> SMTExpr a -> m (s,[SMTExpr a])
-foldExprM' quants f s (Forall ann (fun::arg -> SMTExpr Bool)) = do
-  let (used,rest,expr0) = quantify quants ann fun
-  (s',exprs1) <- foldExprM' rest f s expr0
-  return (s',[ Forall ann (dequantify used ann expr1::arg -> SMTExpr Bool)
-             | expr1 <- exprs1 ])
-foldExprM' quants f s (Exists ann (fun::arg -> SMTExpr Bool)) = do
-  let (used,rest,expr0) = quantify quants ann fun
-  (s',exprs1) <- foldExprM' rest f s expr0
-  return (s',[ Exists ann (dequantify used ann expr1::arg -> SMTExpr Bool)
-             | expr1 <- exprs1 ])
-foldExprM' quants f s (Let ann arg fun) = do
-  (s0,args') <- foldArgsM' quants f s arg
-  let (used,rest,expr0) = quantify quants ann fun
-  (s1,exprs1) <- foldExprM' rest f s0 expr0
-  return (s1,[ Let ann arg' (dequantify used ann expr1)
-             | arg' <- args'
-             , expr1 <- exprs1 ])
-foldExprM' quants f s (App fun arg) = do
-  (s',args') <- foldArgsM' quants f s arg
+          -> s -> SMTExpr a -> m (s,[SMTExpr a])
+foldExprM f s (Forall lvl args body) = do
+  (s',exprs1) <- foldExprM f s body
+  return (s',[ Forall lvl args body'
+             | body' <- exprs1 ])
+foldExprM f s (Exists lvl args body) = do
+  (s',exprs1) <- foldExprM f s body
+  return (s',[ Exists lvl args body'
+             | body' <- exprs1 ])
+foldExprM f s (Let lvl defs body) = do
+  (s1,defs') <- foldDefs s defs
+  (s2,body') <- foldExprM f s1 body
+  return (s2,[ Let lvl defs body
+             | defs <- defs'
+             , body <- body' ])
+  where
+    foldDefs s [] = return (s,[[]])
+    foldDefs s (d:ds) = do
+      (s1,d') <- foldExprM f s d
+      (s2,ds') <- foldDefs s1 ds
+      return (s2,[ d:ds
+                 | d <- d'
+                 , ds <- ds' ])
+foldExprM f s (App fun arg) = do
+  (s',args') <- foldArgsM f s arg
   return (s',[ App fun arg'
              | arg' <- args' ])
-foldExprM' quants f s (Named expr name i) = do
-  (s',exprs') <- foldExprM' quants f s expr
+foldExprM f s (Named expr name i) = do
+  (s',exprs') <- foldExprM f s expr
   return (s',[ Named expr' name i
              | expr' <- exprs' ])
-foldExprM' quants f s (UntypedExpr e) = do
-  (s',exprs') <- foldExprM' quants f s e
+foldExprM f s (UntypedExpr e) = do
+  (s',exprs') <- foldExprM f s e
   return (s',[ UntypedExpr e'
              | e' <- exprs' ])
-foldExprM' quants f s (UntypedExprValue e) = do
-  (s',exprs') <- foldExprM' quants f s e
+foldExprM f s (UntypedExprValue e) = do
+  (s',exprs') <- foldExprM f s e
   return (s',[ UntypedExprValue e'
              | e' <- exprs' ])
-foldExprM' _ f s expr = f s expr
+foldExprM f s expr = f s expr
 
 -- | Recursively fold a monadic function over all sub-expressions of the argument
 foldArgsM :: (Args a,Monad m) => (forall t. SMTType t => s -> SMTExpr t -> m (s,[SMTExpr t]))
-          -> s -> a -> m (s,[a])
-foldArgsM = foldArgsM' [(Quantified 0)..]
-
-foldArgsM' :: (Args a,Monad m) => [Quantified]
-           -> (forall t. SMTType t => s -> SMTExpr t -> m (s,[SMTExpr t]))
            -> s -> a -> m (s,[a])
-foldArgsM' quants f s arg = do
+foldArgsM f s arg = do
   (ns,res) <- fold s (fromArgs arg)
   let res' = fmap (\x -> let Just (x',[]) = toArgs (extractArgAnnotation arg) x
                          in x'
@@ -1204,7 +1115,7 @@ foldArgsM' quants f s arg = do
   where
     fold cs [] = return (cs,[[]])
     fold cs ((UntypedExpr expr):exprs) = do
-      (s1,nexprs) <- foldExprM' quants f cs expr
+      (s1,nexprs) <- foldExprM f cs expr
       (s2,rest) <- fold s1 exprs
       return (s2,[ (UntypedExpr x):xs
                  | x <- nexprs
@@ -1235,39 +1146,6 @@ foldArgs f s expr = case runIdentity $ foldArgsM (\s' expr' -> let (ns,expr'') =
 foldArgsMux :: Args a => (forall t. SMTType t => s -> SMTExpr t -> (s,[SMTExpr t]))
             -> s -> a -> (s,[a])
 foldArgsMux f s expr = runIdentity $ foldArgsM (\s' expr' -> return $ f s' expr') s expr
-
-newtype Quantified = Quantified Integer deriving (Typeable,Show,Eq,Ord,Enum)
-
-quantify :: (Typeable a,Ord a,Show a,Args arg)
-            => [a] -> ArgAnnotation arg -> (arg -> arg')
-            -> ([a],[a],arg')
-quantify xs ann f
-  = let ((used,rest),args) = foldExprsId (\(cused,x:xs) _ ann
-                                          -> ((cused++[x],xs),InternalObj x ann)
-                                         ) ([],xs) undefined ann
-    in (used,rest,f args)
-
-dequantify :: (Typeable a,Ord a,Show a,Args arg,Args arg')
-              => [a] -> ArgAnnotation arg -> arg' -> (arg -> arg')
-dequantify xs ann expr
-  = \arg -> let ((tmap,[]),_) = foldExprsId (\(mp,x:xs) expr' ann' -> ((Map.insert x (UntypedExpr expr') mp,xs),expr')
-                                            ) (Map.empty,xs) arg ann
-            in snd $ foldExprsId (\_ expr' _ -> ((),dequantify' tmap expr')) () expr (extractArgAnnotation expr)
-  where
-    dequantify' :: (Typeable a,Ord a,Show a) => Map a (SMTExpr Untyped) -> SMTExpr t -> SMTExpr t
-    dequantify' mp (InternalObj p ann) = case cast p of
-      Nothing -> InternalObj p ann
-      Just p' -> case Map.lookup p' mp of
-        Just i -> castUntypedExpr i
-        Nothing -> InternalObj p ann
-    dequantify' mp (Forall ann f) = Forall ann (\arg -> dequantify' mp (f arg))
-    dequantify' mp (Exists ann f) = Exists ann (\arg -> dequantify' mp (f arg))
-    dequantify' mp (Let ann arg f) = Let ann arg (\arg' -> dequantify' mp (f arg'))
-    dequantify' mp (App fun arg) = App fun $
-                                   snd $ foldExprsId (\_ expr _ -> ((),dequantify' mp expr)
-                                                     ) () arg (extractArgAnnotation arg)
-    dequantify' mp (Named expr name i) = Named (dequantify' mp expr) name i
-    dequantify' _ expr = expr
 
 instance Args arg => Eq (SMTFunction arg res) where
   (==) f1 f2 = compareFun f1 f2 == EQ
@@ -1388,75 +1266,83 @@ compareArgs :: (Args a1,Args a2) => a1 -> a2 -> Ordering
 compareArgs x y = compare (fromArgs x) (fromArgs y)
 
 compareExprs :: (SMTType t1,SMTType t2) => SMTExpr t1 -> SMTExpr t2 -> Ordering
-compareExprs = compareExprs' (-1)
-  where
-    compareExprs' :: Integer -> (SMTType t1,SMTType t2) => SMTExpr t1 -> SMTExpr t2 -> Ordering
-    compareExprs' n (UntypedExpr e1) e2 = compareExprs' n e1 e2
-    compareExprs' n e1 (UntypedExpr e2) = compareExprs' n e1 e2
-    compareExprs' n (UntypedExprValue e1) e2 = compareExprs' n e1 e2
-    compareExprs' n e1 (UntypedExprValue e2) = compareExprs' n e1 e2
-    
-    compareExprs' _ (Var i _) (Var j _) = compare i j
-    compareExprs' _ (Var _ _) _ = LT
-    compareExprs' _ _ (Var _ _) = GT
-    compareExprs' _ (Const i _) (Const j _) = case cast j of
+compareExprs (UntypedExpr e1) e2 = compareExprs e1 e2
+compareExprs e1 (UntypedExpr e2) = compareExprs e1 e2
+compareExprs (UntypedExprValue e1) e2 = compareExprs e1 e2
+compareExprs e1 (UntypedExprValue e2) = compareExprs e1 e2
+compareExprs (Var i _) (Var j _) = compare i j
+compareExprs (Var _ _) _ = LT
+compareExprs _ (Var _ _) = GT
+compareExprs (QVar lvl1 i1 _) (QVar lvl2 i2 _) = case compare lvl1 lvl2 of
+  EQ -> compare i1 i2
+  r -> r
+compareExprs (QVar _ _ _) _ = LT
+compareExprs _ (QVar _ _ _) = GT
+compareExprs (Const i _) (Const j _) = case cast j of
       Just j' -> compare i j'
       Nothing -> compare (typeOf i) (typeOf j)
-    compareExprs' _ (Const _ _) _ = LT
-    compareExprs' _ _ (Const _ _) = GT
-    compareExprs' _ (AsArray f1 _) (AsArray f2 _) = compareFun f1 f2
-    compareExprs' _ (AsArray _ _) _ = LT
-    compareExprs' _ _ (AsArray _ _) = GT
-    compareExprs' n (Forall ann1 f1) (Forall ann2 f2)
-      = let (n',v1) = foldExprsId (\i _ ann -> (i-1,Var i ann)) n undefined ann1
-            (_,v2) = foldExprsId (\i _ ann -> (i-1,Var i ann)) n undefined ann2
-        in case compareArgs v1 v2 of
-          EQ -> compareExprs' n' (f1 v1) (f2 v2)
-          x -> x
-    compareExprs' _ (Forall _ _) _ = LT
-    compareExprs' _ _ (Forall _ _) = GT
-    compareExprs' n (Exists ann1 f1) (Exists ann2 f2)
-      = let (n',v1) = foldExprsId (\i _ ann -> (i-1,Var i ann)) n undefined ann1
-            (_,v2) = foldExprsId (\i _ ann -> (i-1,Var i ann)) n undefined ann2
-        in case compareArgs v1 v2 of
-          EQ -> compareExprs' n' (f1 v1) (f2 v2)
-          x -> x
-    compareExprs' _ (Exists _ _) _ = LT
-    compareExprs' _ _ (Exists _ _) = GT
-    compareExprs' n (Let _ arg1 f1) (Let _ arg2 f2)
-      = compareExprs' n (f1 arg1) (f2 arg2)
-    compareExprs' _ (Let _ _ _) _ = LT
-    compareExprs' _ _ (Let _ _ _) = GT
-    compareExprs' _ (App f1 arg1) (App f2 arg2) = case compareFun f1 f2 of
-      EQ -> compareArgs arg1 arg2
-      x -> x
-    compareExprs' _ (App _ _) _ = LT
-    compareExprs' _ _ (App _ _) = GT
-    compareExprs' _ (Named _ n1 i1) (Named _ n2 i2) = compare (n1,i1) (n2,i2)
-    compareExprs' _ (Named _ _ _) _ = LT
-    compareExprs' _ _ (Named _ _ _) = GT
-    compareExprs' _ (InternalObj o1 ann1) (InternalObj o2 ann2) = case compare (typeOf o1) (typeOf o2) of
+compareExprs (Const _ _) _ = LT
+compareExprs _ (Const _ _) = GT
+compareExprs (AsArray f1 _) (AsArray f2 _) = compareFun f1 f2
+compareExprs (AsArray _ _) _ = LT
+compareExprs _ (AsArray _ _) = GT
+compareExprs (Forall lvl1 args1 f1) (Forall lvl2 args2 f2)
+  = case compare lvl1 lvl2 of
+     EQ -> case compare args1 args2 of
+       EQ -> compareExprs f1 f2
+       r -> r
+     r -> r
+compareExprs (Forall _ _ _) _ = LT
+compareExprs _ (Forall _ _ _) = GT
+compareExprs (Exists lvl1 args1 f1) (Exists lvl2 args2 f2)
+  = case compare lvl1 lvl2 of
+     EQ -> case compare args1 args2 of
+       EQ -> compareExprs f1 f2
+       r -> r
+     r -> r
+compareExprs (Exists _ _ _) _ = LT
+compareExprs _ (Exists _ _ _) = GT
+compareExprs (Let lvl1 arg1 f1) (Let lvl2 arg2 f2)
+  = case compare lvl1 lvl2 of
+     EQ -> case compare arg1 arg2 of
+       EQ -> compareExprs f1 f2
+       r -> r
+     r -> r
+compareExprs (Let _ _ _) _ = LT
+compareExprs _ (Let _ _ _) = GT
+compareExprs (App f1 arg1) (App f2 arg2) = case compareFun f1 f2 of
+  EQ -> compareArgs arg1 arg2
+  x -> x
+compareExprs (App _ _) _ = LT
+compareExprs _ (App _ _) = GT
+compareExprs (Named _ n1 i1) (Named _ n2 i2) = compare (n1,i1) (n2,i2)
+compareExprs (Named _ _ _) _ = LT
+compareExprs _ (Named _ _ _) = GT
+compareExprs (InternalObj o1 ann1) (InternalObj o2 ann2) = case compare (typeOf o1) (typeOf o2) of
       EQ -> case compare (typeOf ann1) (typeOf ann2) of
         EQ -> case cast (o2,ann2) of
           Just (o2',ann2') -> compare (o1,ann1) (o2',ann2')
         r -> r
       r -> r
-    compareExprs' _ (InternalObj _ _) _ = LT
-    compareExprs' _ _ (InternalObj _ _) = GT
+compareExprs (InternalObj _ _) _ = LT
+compareExprs _ (InternalObj _ _) = GT
 
 instance Eq a => Eq (SMTExpr a) where
-  (==) x y = case eqExpr 0 x y of
+  (==) x y = case eqExpr x y of
     Just True -> True
     _ -> False
 
 instance SMTType t => Ord (SMTExpr t) where
   compare = compareExprs
 
-eqExpr :: Integer -> SMTExpr a -> SMTExpr a -> Maybe Bool
-eqExpr n lhs rhs = case (lhs,rhs) of
+eqExpr :: SMTExpr a -> SMTExpr a -> Maybe Bool
+eqExpr lhs rhs = case (lhs,rhs) of
   (Var v1 _,Var v2 _) -> if v1 == v2
                          then Just True
                          else Nothing
+  (QVar l1 v1 _,QVar l2 v2 _) -> if l1==l2 && v1==v2
+                                 then Just True
+                                 else Nothing
   (Const v1 _,Const v2 _) -> Just $ v1 == v2
   (AsArray f1 arg1,AsArray f2 arg2) -> case cast f2 of
     Nothing -> Nothing
@@ -1465,21 +1351,17 @@ eqExpr n lhs rhs = case (lhs,rhs) of
       Just arg2' -> if f1 == f2' && arg1 == arg2'
                     then Just True
                     else Nothing
-  (Forall a1 f1,Forall a2 f2) -> let (n',v) = foldExprsId (\i _ ann -> (i+1,Var i ann)) n undefined a1
-                                 in case cast (a2,f2) of
-                                   Nothing -> Nothing
-                                   Just (a2',f2') -> if a1==a2'
-                                                     then eqExpr n' (f1 v) (f2' v)
-                                                     else Nothing
-  (Exists a1 f1,Exists a2 f2) -> let (n',v) = foldExprsId (\i _ ann -> (i+1,Var i ann)) n undefined a1
-                                 in case cast (a2,f2) of
-                                   Nothing -> Nothing
-                                   Just (a2',f2') -> if a1==a2'
-                                                     then eqExpr n' (f1 v) (f2' v)
-                                                     else Nothing
-  (Let _ x1 f1,Let _ x2 f2) -> eqExpr n (f1 x1) (f2 x2)
+  (Forall l1 a1 f1,Forall l2 a2 f2) -> if l1==l2 && a1==a2
+                                       then eqExpr f1 f2
+                                       else Nothing
+  (Exists l1 a1 f1,Exists l2 a2 f2) -> if l1==l2 && a1==a2
+                                       then eqExpr f1 f2
+                                       else Nothing
+  (Let l1 a1 f1,Let l2 a2 f2) -> if l1==l2 && a1==a2
+                                 then eqExpr f1 f2
+                                 else Nothing
   (Named e1 n1 nc1,Named e2 n2 nc2) -> if n1==n2 && nc1 == nc2
-                                       then eqExpr n e1 e2
+                                       then eqExpr e1 e2
                                        else Nothing
   (App f1 arg1,App f2 arg2) -> case cast f2 of
       Nothing -> Nothing
@@ -1492,7 +1374,7 @@ eqExpr n lhs rhs = case (lhs,rhs) of
     Nothing -> Nothing
     Just (o2',ann2') -> Just $ (o1 == o2') && (ann1 == ann2')
   (UntypedExpr e1,UntypedExpr e2) -> case cast e2 of
-    Just e2' -> eqExpr n e1 e2'
+    Just e2' -> eqExpr e1 e2'
     Nothing -> Just False
   (_,_) -> Nothing
 
