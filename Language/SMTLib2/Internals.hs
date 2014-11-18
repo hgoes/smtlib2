@@ -42,6 +42,7 @@ data SMTRequest response where
   SMTDefineFun :: SMTType res => FunInfo -> [FunInfo] -> SMTExpr res -> SMTRequest ()
   SMTDeclareFun :: FunInfo -> SMTRequest ()
   SMTGetValue :: SMTValue t => SMTExpr t -> SMTRequest t
+  SMTGetModel :: SMTRequest SMTModel
   SMTGetProof :: SMTRequest (SMTExpr Bool)
   SMTGetUnsatCore :: SMTRequest [ClauseId]
   SMTSimplify :: SMTType t => SMTExpr t -> SMTRequest (SMTExpr t)
@@ -50,6 +51,9 @@ data SMTRequest response where
   SMTExit :: SMTRequest ()
   SMTApply :: Tactic -> SMTRequest [SMTExpr Bool]
   deriving Typeable
+
+data SMTModel = SMTModel { modelFunctions :: Map Integer (Integer,[ProxyArg],SMTExpr Untyped)
+                         } deriving (Show,Typeable)
 
 -- | Describe limits on the ressources that an SMT-solver can use
 data CheckSatLimits = CheckSatLimits { limitTime :: Maybe Integer -- ^ A limit on the amount of time the solver can spend on the problem (in milliseconds)

@@ -43,7 +43,7 @@ module Language.SMTLib2
          checkSat,checkSat',checkSatUsing,apply,
          CheckSatResult(..),
          CheckSatLimits(..),noLimits,
-         getValue,getValues,
+         getValue,getValues,getModel,
          comment,
          getProof,
          simplify,

@@ -145,6 +145,12 @@ getValue expr = smtBackend $ \backend -> do
 getValues :: (LiftArgs arg,Monad m) => arg -> SMT' m (Unpacked arg)
 getValues args = unliftArgs args getValue
 
+-- | Extract all assigned values of the model
+getModel :: Monad m => SMT' m SMTModel
+getModel = smtBackend $ \backend -> do
+  st <- getSMT
+  lift $ smtHandle backend st SMTGetModel
+
 -- | Extract all values of an array by giving the range of indices.
 unmangleArray :: (Liftable i,LiftArgs i,Ix (Unpacked i),SMTValue v,
                   Unit (ArgAnnotation i),Monad m)
