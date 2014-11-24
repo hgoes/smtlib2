@@ -368,6 +368,7 @@ renderSMTResponse st (SMTApply _) goals
     [exprToLisp goal (allVars st) (declaredDataTypes st)
     | goal <- goals ]
 renderSMTResponse _ SMTGetUnsatCore core = Just (show core)
+renderSMTResponse _ SMTGetModel mdl = Just (show mdl)
 renderSMTResponse _ _ _ = Nothing
 
 -- | Spawn a new SMT solver process and create a pipe to communicate with it.
