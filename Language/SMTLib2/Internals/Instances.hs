@@ -362,6 +362,81 @@ instance (Liftable a,Liftable b,Liftable c)
         Dict -> Dict
 #endif
 
+instance (Liftable a,Liftable b,Liftable c,Liftable d)
+         => Liftable (a,b,c,d) where
+  type Lifted (a,b,c,d) i = (Lifted a i,Lifted b i,Lifted c i,Lifted d i)
+  getLiftedArgumentAnn ~(x1,x2,x3,x4) i (ann1,ann2,ann3,ann4) i_ann
+     = (getLiftedArgumentAnn x1 i ann1 i_ann,
+        getLiftedArgumentAnn x2 i ann2 i_ann,
+        getLiftedArgumentAnn x3 i ann3 i_ann,
+        getLiftedArgumentAnn x4 i ann4 i_ann)
+  inferLiftedAnnotation ~(x1,x2,x3,x4) i ~(ann1,ann2,ann3,ann4)
+    = let (i_ann,ann1') = inferLiftedAnnotation x1 i ann1
+          (_,ann2') = inferLiftedAnnotation x2 i ann2
+          (_,ann3') = inferLiftedAnnotation x3 i ann3
+          (_,ann4') = inferLiftedAnnotation x4 i ann4
+      in (i_ann,(ann1',ann2',ann3',ann4'))
+#ifdef SMTLIB2_WITH_CONSTRAINTS
+  getConstraint (_ :: p ((a,b,c,d),i)) = case getConstraint (Proxy :: Proxy (a,i)) of
+    Dict -> case getConstraint (Proxy :: Proxy (b,i)) of
+      Dict -> case getConstraint (Proxy :: Proxy (c,i)) of
+        Dict -> case getConstraint (Proxy :: Proxy (d,i)) of
+          Dict -> Dict
+#endif
+
+instance (Liftable a,Liftable b,Liftable c,Liftable d,Liftable e)
+         => Liftable (a,b,c,d,e) where
+  type Lifted (a,b,c,d,e) i = (Lifted a i,Lifted b i,Lifted c i,Lifted d i,Lifted e i)
+  getLiftedArgumentAnn ~(x1,x2,x3,x4,x5) i (ann1,ann2,ann3,ann4,ann5) i_ann
+     = (getLiftedArgumentAnn x1 i ann1 i_ann,
+        getLiftedArgumentAnn x2 i ann2 i_ann,
+        getLiftedArgumentAnn x3 i ann3 i_ann,
+        getLiftedArgumentAnn x4 i ann4 i_ann,
+        getLiftedArgumentAnn x5 i ann5 i_ann)
+  inferLiftedAnnotation ~(x1,x2,x3,x4,x5) i ~(ann1,ann2,ann3,ann4,ann5)
+    = let (i_ann,ann1') = inferLiftedAnnotation x1 i ann1
+          (_,ann2') = inferLiftedAnnotation x2 i ann2
+          (_,ann3') = inferLiftedAnnotation x3 i ann3
+          (_,ann4') = inferLiftedAnnotation x4 i ann4
+          (_,ann5') = inferLiftedAnnotation x5 i ann5
+      in (i_ann,(ann1',ann2',ann3',ann4',ann5'))
+#ifdef SMTLIB2_WITH_CONSTRAINTS
+  getConstraint (_ :: p ((a,b,c,d,e),i)) = case getConstraint (Proxy :: Proxy (a,i)) of
+    Dict -> case getConstraint (Proxy :: Proxy (b,i)) of
+      Dict -> case getConstraint (Proxy :: Proxy (c,i)) of
+        Dict -> case getConstraint (Proxy :: Proxy (d,i)) of
+          Dict -> case getConstraint (Proxy :: Proxy (e,i)) of
+            Dict -> Dict
+#endif
+
+instance (Liftable a,Liftable b,Liftable c,Liftable d,Liftable e,Liftable f)
+         => Liftable (a,b,c,d,e,f) where
+  type Lifted (a,b,c,d,e,f) i = (Lifted a i,Lifted b i,Lifted c i,Lifted d i,Lifted e i,Lifted f i)
+  getLiftedArgumentAnn ~(x1,x2,x3,x4,x5,x6) i (ann1,ann2,ann3,ann4,ann5,ann6) i_ann
+     = (getLiftedArgumentAnn x1 i ann1 i_ann,
+        getLiftedArgumentAnn x2 i ann2 i_ann,
+        getLiftedArgumentAnn x3 i ann3 i_ann,
+        getLiftedArgumentAnn x4 i ann4 i_ann,
+        getLiftedArgumentAnn x5 i ann5 i_ann,
+        getLiftedArgumentAnn x6 i ann6 i_ann)
+  inferLiftedAnnotation ~(x1,x2,x3,x4,x5,x6) i ~(ann1,ann2,ann3,ann4,ann5,ann6)
+    = let (i_ann,ann1') = inferLiftedAnnotation x1 i ann1
+          (_,ann2') = inferLiftedAnnotation x2 i ann2
+          (_,ann3') = inferLiftedAnnotation x3 i ann3
+          (_,ann4') = inferLiftedAnnotation x4 i ann4
+          (_,ann5') = inferLiftedAnnotation x5 i ann5
+          (_,ann6') = inferLiftedAnnotation x6 i ann6
+      in (i_ann,(ann1',ann2',ann3',ann4',ann5',ann6'))
+#ifdef SMTLIB2_WITH_CONSTRAINTS
+  getConstraint (_ :: p ((a,b,c,d,e,f),i)) = case getConstraint (Proxy :: Proxy (a,i)) of
+    Dict -> case getConstraint (Proxy :: Proxy (b,i)) of
+      Dict -> case getConstraint (Proxy :: Proxy (c,i)) of
+        Dict -> case getConstraint (Proxy :: Proxy (d,i)) of
+          Dict -> case getConstraint (Proxy :: Proxy (e,i)) of
+            Dict -> case getConstraint (Proxy :: Proxy (f,i)) of
+              Dict -> Dict
+#endif
+
 instance (TypeableNat n1,TypeableNat n2,TypeableNat (Add n1 n2))
          => Concatable (BVTyped n1) (BVTyped n2) where
   type ConcatResult (BVTyped n1) (BVTyped n2) = BVTyped (Add n1 n2)
