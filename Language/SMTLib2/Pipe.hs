@@ -7,7 +7,7 @@ module Language.SMTLib2.Pipe
         exprToLisp,
         exprToLispWith,
         lispToExpr,
-        lispToSort,
+        sortToLisp,lispToSort,
         renderExpr,
         renderExpr',
         renderSMTRequest,
