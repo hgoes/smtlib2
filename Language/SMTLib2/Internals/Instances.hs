@@ -157,7 +157,7 @@ castUntypedExpr = entype (\expr -> case cast expr of
                              Just r -> r
                              Nothing -> error $ "smtlib2: castUntypedExpr failed.")
 
-castUntypedExprValue :: SMTValue t => SMTExpr UntypedValue -> SMTExpr t
+castUntypedExprValue :: SMTType t => SMTExpr UntypedValue -> SMTExpr t
 castUntypedExprValue
   = entypeValue (\expr -> case cast expr of
                     Just r -> r
