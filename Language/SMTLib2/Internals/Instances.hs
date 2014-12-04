@@ -16,7 +16,7 @@ import Data.Fix
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromJust)
-import Data.Traversable (mapM,mapAccumL)
+import Data.Traversable (mapM)
 import Data.Foldable (foldlM)
 import Text.Show
 import Data.Functor.Identity
@@ -1112,6 +1112,11 @@ withSort mp (Fix (NamedSort name args)) f
     Just (decl,_) -> dataTypeGetUndefined decl
                      (fmap (\s -> withSort mp s ProxyArg) args) f
     Nothing -> error $ "smtlib2: Datatype "++name++" not defined."
+
+withNumSort :: DataTypeInfo -> Sort -> (forall t. (SMTType t,Num t) => t -> SMTAnnotation t -> r) -> Maybe r
+withNumSort _ (Fix IntSort) f = Just $ f (undefined::Integer) ()
+withNumSort _ (Fix RealSort) f = Just $ f (undefined::Rational) ()
+withNumSort _ _ _ = Nothing
 
 withSorts :: DataTypeInfo -> [Sort] -> (forall arg . Liftable arg => arg -> ArgAnnotation arg -> r) -> r
 withSorts mp [x] f = withSort mp x $ \(_::t) ann -> f (undefined::SMTExpr t) ann

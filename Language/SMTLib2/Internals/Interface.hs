@@ -445,11 +445,11 @@ bvxor :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SM
 bvxor e1 e2 = App (SMTBVBin BVXor) (e1,e2)
 
 -- | Bitvector not
-bvnot :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvnot :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t)
 bvnot e = App (SMTBVUn BVNot) e
 
 -- | Bitvector signed negation
-bvneg :: (SMTType (BitVector t)) => SMTExpr (BitVector t) -> SMTExpr (BitVector t)
+bvneg :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t)
 bvneg e = App (SMTBVUn BVNeg) e
 
 -- | Bitvector addition

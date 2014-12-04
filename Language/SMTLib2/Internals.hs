@@ -240,12 +240,12 @@ data SMTFunction arg res where
   SMTFun :: (Args arg,SMTType res) => Integer -> SMTAnnotation res -> SMTFunction arg res
   SMTBuiltIn :: (Liftable arg,SMTType res) => String -> SMTAnnotation res -> SMTFunction arg res
   SMTOrd :: (SMTType a) => SMTOrdOp -> SMTFunction (SMTExpr a,SMTExpr a) Bool
-  SMTArith :: (SMTType a) => SMTArithOp -> SMTFunction [SMTExpr a] a
-  SMTMinus :: (SMTType a) => SMTFunction (SMTExpr a,SMTExpr a) a
+  SMTArith :: (SMTType a,Num a) => SMTArithOp -> SMTFunction [SMTExpr a] a
+  SMTMinus :: (SMTType a,Num a) => SMTFunction (SMTExpr a,SMTExpr a) a
   SMTIntArith :: SMTIntArithOp -> SMTFunction (SMTExpr Integer,SMTExpr Integer) Integer
   SMTDivide :: SMTFunction (SMTExpr Rational,SMTExpr Rational) Rational
-  SMTNeg :: (SMTType a) => SMTFunction (SMTExpr a) a
-  SMTAbs :: (SMTType a) => SMTFunction (SMTExpr a) a
+  SMTNeg :: (SMTType a,Num a) => SMTFunction (SMTExpr a) a
+  SMTAbs :: (SMTType a,Num a) => SMTFunction (SMTExpr a) a
   SMTNot :: SMTFunction (SMTExpr Bool) Bool
   SMTLogic :: SMTLogicOp -> SMTFunction [SMTExpr Bool] Bool
   SMTDistinct :: SMTType a => SMTFunction [SMTExpr a] Bool
@@ -254,7 +254,7 @@ data SMTFunction arg res where
   SMTITE :: SMTType a => SMTFunction (SMTExpr Bool,SMTExpr a,SMTExpr a) a
   SMTBVComp :: IsBitVector a => SMTBVCompOp -> SMTFunction (SMTExpr (BitVector a),SMTExpr (BitVector a)) Bool
   SMTBVBin :: IsBitVector a => SMTBVBinOp -> SMTFunction (SMTExpr (BitVector a),SMTExpr (BitVector a)) (BitVector a)
-  SMTBVUn :: SMTType (BitVector a) => SMTBVUnOp -> SMTFunction (SMTExpr (BitVector a)) (BitVector a)
+  SMTBVUn :: IsBitVector a => SMTBVUnOp -> SMTFunction (SMTExpr (BitVector a)) (BitVector a)
   SMTSelect :: (Liftable i,SMTType v) => SMTFunction (SMTExpr (SMTArray i v),i) v
   SMTStore :: (Liftable i,SMTType v) => SMTFunction (SMTExpr (SMTArray i v),i,SMTExpr v) (SMTArray i v)
   SMTConstArray :: (Args i,SMTType v) => ArgAnnotation i -> SMTFunction (SMTExpr v) (SMTArray i v)
@@ -326,7 +326,7 @@ class (Ord a,Typeable a,Show a,
   extractArgAnnotation :: a -> ArgAnnotation a
   toArgs :: ArgAnnotation a -> [SMTExpr Untyped] -> Maybe (a,[SMTExpr Untyped])
   
-  fromArgs :: Args a => a -> [SMTExpr Untyped]
+  fromArgs :: a -> [SMTExpr Untyped]
   fromArgs arg = fst $ foldExprsId (\lst expr ann -> (lst++[UntypedExpr expr],expr)
                                    ) [] arg (extractArgAnnotation arg)
   getTypes :: a -> ArgAnnotation a -> [ProxyArg]

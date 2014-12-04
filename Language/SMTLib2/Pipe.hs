@@ -1223,22 +1223,22 @@ ordOpParser = FunctionParser $ \sym _ dts -> case sym of
 arithOpParser = FunctionParser $ \sym _ dts -> case sym of
   L.Symbol "+" -> Just $ OverloadedParser allEqConstraint (\sorts -> Just (head sorts)) $
                   \_ sort_ret f
-                  -> withSort dts sort_ret $
+                  -> withNumSort dts sort_ret $
                      \(_::t) _
-                     -> Just $ f (SMTArith Plus::SMTFunction [SMTExpr t] t)
+                     -> f (SMTArith Plus::SMTFunction [SMTExpr t] t)
   L.Symbol "*" -> Just $ OverloadedParser allEqConstraint (\sorts -> Just (head sorts)) $
                   \_ sort_ret f
-                  -> withSort dts sort_ret $
+                  -> withNumSort dts sort_ret $
                      \(_::t) _
-                     -> Just $ f (SMTArith Mult::SMTFunction [SMTExpr t] t)
+                     -> f (SMTArith Mult::SMTFunction [SMTExpr t] t)
   _ -> Nothing
 
 minusParser = FunctionParser $ \sym _ dts -> case sym of
   L.Symbol "-" -> Just $ OverloadedParser allEqConstraint (\sorts -> Just (head sorts)) $
                   \sort_arg _ f -> case sort_arg of
                     [] -> error "smtlib2: minus function needs at least one argument"
-                    [s] -> withSort dts s $ \(_::t) _ -> Just $ f (SMTNeg::SMTFunction (SMTExpr t) t)
-                    (s:_) -> withSort dts s $ \(_::t) _ -> Just $ f (SMTMinus::SMTFunction (SMTExpr t,SMTExpr t) t)
+                    [s] -> withNumSort dts s $ \(_::t) _ -> f (SMTNeg::SMTFunction (SMTExpr t) t)
+                    (s:_) -> withNumSort dts s $ \(_::t) _ -> f (SMTMinus::SMTFunction (SMTExpr t,SMTExpr t) t)
   _ -> Nothing
 
 intArithParser = mconcat [simpleParser (SMTIntArith Div)
@@ -1250,7 +1250,7 @@ divideParser = simpleParser SMTDivide
 absParser = FunctionParser $ \sym _ dts -> case sym of
   L.Symbol "abs" -> Just $ OverloadedParser (const True) (\sorts -> Just $ head sorts) $
                     \_ sort_ret f
-                    -> withSort dts sort_ret $ \(_::t) _ -> Just $ f (SMTAbs::SMTFunction (SMTExpr t) t)
+                    -> withNumSort dts sort_ret $ \(_::t) _ -> f (SMTAbs::SMTFunction (SMTExpr t) t)
   _ -> Nothing
 
 logicParser = mconcat $
