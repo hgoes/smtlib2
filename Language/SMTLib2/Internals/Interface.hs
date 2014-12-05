@@ -3,7 +3,7 @@
 module Language.SMTLib2.Internals.Interface where
 
 import Language.SMTLib2.Internals
-import Language.SMTLib2.Internals.Instances (extractAnnotation,dataTypeList,constructorNil,constructorCons,withSort)
+import Language.SMTLib2.Internals.Instances (extractAnnotation,dtList,conNil,conInsert,withSort)
 import Language.SMTLib2.Internals.Optimize
 import Language.SMTLib2.Internals.Operators
 import Language.SMTLib2.Strategy
@@ -663,11 +663,11 @@ insert' = curry (App (SMTBuiltIn "insert" unit))
 
 -- | Checks if a list is empty.
 isNil :: (SMTType a) => SMTExpr [a] -> SMTExpr Bool
-isNil (e::SMTExpr [a]) = is e (Constructor [ProxyArg (undefined::[a]) (extractAnnotation e)] dataTypeList constructorNil:: Constructor () [a])
+isNil (e::SMTExpr [a]) = is e (Constructor [ProxyArg (undefined::[a]) (extractAnnotation e)] dtList conNil:: Constructor () [a])
 
 -- | Checks if a list is non-empty.
 isInsert :: (SMTType a,Unit (SMTAnnotation a)) => SMTExpr [a] -> SMTExpr Bool
-isInsert (e::SMTExpr [a]) = is e (Constructor [ProxyArg (undefined::[a]) (extractAnnotation e)] dataTypeList constructorCons :: Constructor (SMTExpr a,SMTExpr [a]) [a])
+isInsert (e::SMTExpr [a]) = is e (Constructor [ProxyArg (undefined::[a]) (extractAnnotation e)] dtList conInsert :: Constructor (SMTExpr a,SMTExpr [a]) [a])
 
 -- | Sets the logic used for the following program (Not needed for many solvers).
 setLogic :: Monad m => String -> SMT' m ()

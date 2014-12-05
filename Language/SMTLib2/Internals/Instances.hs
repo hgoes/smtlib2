@@ -192,12 +192,17 @@ instance SMTType UntypedValue where
           Nothing -> error $ "annotationFromSort for non-value type "++show (typeOf u)++" used.")
 
 instance SMTValue UntypedValue where
-  unmangle val (ProxyArgValue (_::t) ann) = do
-    r <- unmangle val ann
-    return $ UntypedValue (r::t)
-  mangle (UntypedValue x) (ProxyArgValue (_::t) ann)
-    = case cast x of
-    Just x' -> mangle (x'::t) ann
+  unmangle = ComplexUnmangling $
+             \f val (ProxyArgValue _ ann)
+             -> entypeValue
+                (\(expr'::SMTExpr t) -> case cast ann of
+                  Just ann' -> do
+                    res <- f expr' ann'
+                    return $ Just $ UntypedValue res
+                ) val
+  mangle = ComplexMangling (\(UntypedValue x) (ProxyArgValue (_::t) ann)
+                             -> case cast x of
+                                 Just x' -> UntypedExprValue $ Const (x'::t) ann)
 
 -- Bool
 
@@ -208,9 +213,10 @@ instance SMTType Bool where
   asValueType x ann f = Just $ f x ann
 
 instance SMTValue Bool where
-  unmangle (BoolValue v) _ = Just v
-  unmangle _ _ = Nothing
-  mangle v _ = BoolValue v
+  unmangle = PrimitiveUnmangling (\val _ -> case val of
+                                   BoolValue v -> Just v
+                                   _ -> Nothing)
+  mangle = PrimitiveMangling (\v _ -> BoolValue v)
 
 -- Integer
 
@@ -221,9 +227,10 @@ instance SMTType Integer where
   asValueType x ann f = Just $ f x ann
 
 instance SMTValue Integer where
-  unmangle (IntValue v) _ = Just v
-  unmangle _ _ = Nothing
-  mangle v _ = IntValue v
+  unmangle = PrimitiveUnmangling (\val _ -> case val of
+                                   IntValue v -> Just v
+                                   _ -> Nothing)
+  mangle = PrimitiveMangling (\v _ -> IntValue v)
 
 instance SMTArith Integer
 
@@ -269,9 +276,10 @@ instance SMTType (Ratio Integer) where
   asValueType x ann f = Just $ f x ann
 
 instance SMTValue (Ratio Integer) where
-  unmangle (RealValue v) _ = Just v
-  unmangle _ _ = Nothing
-  mangle v _ = RealValue v
+  unmangle = PrimitiveUnmangling (\val _ -> case val of
+                                   RealValue v -> Just v
+                                   _ -> Nothing)
+  mangle = PrimitiveMangling (\v _ -> RealValue v)
 
 instance SMTArith (Ratio Integer)
 
@@ -887,60 +895,102 @@ instance SMTType a => SMTType (Maybe a) where
   getSort u ann = Fix $ NamedSort "Maybe" [getSort (undefArg u) ann]
   asDataType _ _ = Just ("Maybe",
                          TypeCollection { argCount = 1
-                                        , dataTypes = [mbTp]
+                                        , dataTypes = [dtMaybe]
                                         })
-    where
-      mbTp = DataType { dataTypeName = "Maybe"
-                      , dataTypeConstructors = [conNothing,
-                                                conJust]
-                      , dataTypeGetUndefined = \sorts f -> case sorts of
-                        [s] -> withProxyArg s $
-                               \(_::t) ann -> f (undefined::Maybe t) ann
-                      }
-      conNothing = Constr { conName = "Nothing"
-                          , conFields = []
-                          , construct = \[Just prx] [] f
-                                        -> withProxyArg prx $
-                                           \(_::t) ann -> f [prx] (Nothing::Maybe t) ann
-                          , conTest = \args x -> case args of
-                            [s] -> withProxyArg s $
-                                   \(_::t) _ -> case cast x of
-                                     Just (Nothing::Maybe t) -> True
-                                     _ -> False
-                          }
-      conJust = Constr { conName = "Just"
-                       , conFields = [DataField { fieldName = "fromJust"
-                                                , fieldSort = Fix $ ArgumentSort 0
-                                                , fieldGet = \args x f
-                                                             -> case args of
-                                                               [s] -> withProxyArg s $
-                                                                      \(_::t) ann
-                                                                      -> f (case cast x of
-                                                                               Just (arg::Maybe t) -> fromJust arg) ann
-                                                }]
-                       , construct = \sort args f -> case args of
-                         [v] -> withAnyValue v $
-                                \_ (rv::t) ann -> f [ProxyArg (undefined::t) ann] (Just rv) ann
-                       , conTest = \args x -> case args of
-                         [s] -> withProxyArg s $
-                                \(_::t) _ -> case cast x of
-                                  Just (Just (_::t)) -> True
-                                  _ -> False
-                       }
   getProxyArgs (_::Maybe t) ann = [ProxyArg (undefined::t) ann]
   annotationFromSort u (Fix (NamedSort "Maybe" [argSort])) = annotationFromSort (undefArg u) argSort
   asValueType (_::Maybe x) ann f = asValueType (undefined::x) ann $
                                    \(_::y) ann' -> f (undefined::Maybe y) ann'
 
+dtMaybe :: DataType
+dtMaybe = DataType { dataTypeName = "Maybe"
+                   , dataTypeConstructors = [conNothing,
+                                             conJust]
+                   , dataTypeGetUndefined = \sorts f -> case sorts of
+                                                         [s] -> withProxyArg s $
+                                                                \(_::t) ann -> f (undefined::Maybe t) ann
+                   }
+
+conNothing :: Constr
+conNothing
+  = Constr { conName = "Nothing"
+           , conFields = []
+           , construct = \[Just prx] [] f
+                         -> withProxyArg prx $
+                            \(_::t) ann -> f [prx] (Nothing::Maybe t) ann
+           , conTest = \args x -> case args of
+                                   [s] -> withProxyArg s $
+                                          \(_::t) _ -> case cast x of
+                                                        Just (Nothing::Maybe t) -> True
+                                                        _ -> False
+           }
+
+conJust :: Constr
+conJust
+  = Constr { conName = "Just"
+           , conFields = [fieldFromJust]
+           , construct = \sort args f
+                         -> case args of
+                             [v] -> withAnyValue v $
+                                    \_ (rv::t) ann
+                                    -> f [ProxyArg (undefined::t) ann] (Just rv) ann
+           , conTest = \args x -> case args of
+                                   [s] -> withProxyArg s $
+                                          \(_::t) _ -> case cast x of
+                                                        Just (Just (_::t)) -> True
+                                                        _ -> False
+           }
+
+fieldFromJust :: DataField
+fieldFromJust = DataField { fieldName = "fromJust"
+                          , fieldSort = Fix $ ArgumentSort 0
+                          , fieldGet = \args x f
+                                       -> case args of
+                                           [s] -> withProxyArg s $
+                                                  \(_::t) ann
+                                                  -> f (case cast x of
+                                                         Just (arg::Maybe t) -> fromJust arg) ann
+                          }
+
 instance SMTValue a => SMTValue (Maybe a) where
-  unmangle (ConstrValue "Nothing" [] sort) _ = Just Nothing
-  unmangle (ConstrValue "Just" [arg] _) ann = case unmangle arg ann of
-    Just v -> Just (Just v)
-    Nothing -> Nothing
-  --unmangle (AsValue v (Fix (NamedSort "Maybe" _))) ann = unmangle v ann
-  unmangle _ _ = Nothing
-  mangle (Nothing::Maybe t) ann = ConstrValue "Nothing" [] (Just ("Maybe",[getSort (undefined::t) ann]))
-  mangle u@(Just x) ann = ConstrValue "Just" [mangle x ann] Nothing
+  unmangle = case unmangle of
+    PrimitiveUnmangling p
+      -> PrimitiveUnmangling (\val ann -> case val of
+                               ConstrValue "Nothing" [] _ -> Just Nothing
+                               ConstrValue "Just" [arg] _
+                                 -> case p arg ann of
+                                     Just v -> Just (Just v)
+                                     Nothing -> Nothing
+                               _ -> Nothing)
+    ComplexUnmangling p
+      -> ComplexUnmangling $ \f (expr::SMTExpr (Maybe t)) ann -> do
+        isNothing <- f (App (SMTConTest
+                             (Constructor [ProxyArg (undefined::t) (extractAnnotation expr)]
+                              dtMaybe conNothing :: Constructor () (Maybe a))) expr
+                       ) ()
+        if isNothing
+          then return (Just Nothing)
+          else do
+           val <- p f (App (SMTFieldSel (Field [ProxyArg (undefined::t) (extractAnnotation expr)] dtMaybe conJust fieldFromJust)) expr) ann
+           case val of
+            Nothing -> return Nothing
+            Just val' -> return (Just (Just val'))
+  mangle = case mangle of
+    PrimitiveMangling p
+      -> PrimitiveMangling $
+         \val ann -> case val of
+                      (Nothing::Maybe t) -> ConstrValue "Nothing" [] (Just ("Maybe",[getSort (undefined::t) ann]))
+                      Just x -> ConstrValue "Just" [p x ann] Nothing
+    ComplexMangling p
+      -> ComplexMangling $
+         \(val::Maybe t) ann -> case val of
+         Just x -> App (SMTConstructor
+                        (Constructor [ProxyArg (undefined::t) ann] dtMaybe conJust))
+                   (p x ann)
+         Nothing -> App (SMTConstructor
+                         (Constructor [ProxyArg (undefined::t) ann]
+                          dtMaybe conNothing :: Constructor () (Maybe t)))
+                    ()
 
 -- | Get an undefined value of the type argument of a type.
 undefArg :: b a -> a
@@ -951,45 +1001,36 @@ instance (Typeable a,SMTType a) => SMTType [a] where
   getSort u ann = Fix (NamedSort "List" [getSort (undefArg u) ann])
   asDataType _ _ = Just ("List",
                          TypeCollection { argCount = 1
-                                        , dataTypes = [dataTypeList] })
+                                        , dataTypes = [dtList] })
   getProxyArgs (_::[t]) ann = [ProxyArg (undefined::t) ann]
   annotationFromSort u (Fix (NamedSort "List" [sort])) = annotationFromSort (undefArg u) sort
   asValueType (_::[a]) ann f = asValueType (undefined::a) ann $
                                \(_::b) ann' -> f (undefined::[b]) ann'
 
-dataTypeList = DataType { dataTypeName = "List"
-                        , dataTypeConstructors = [constructorNil,constructorCons]
+dtList :: DataType
+dtList = DataType { dataTypeName = "List"
+                        , dataTypeConstructors = [conNil,conInsert]
                         , dataTypeGetUndefined = \args f -> case args of
                           [s] -> withProxyArg s (\(_::t) ann -> f (undefined::[t]) ann)
                         }
 
-constructorNil = Constr { conName = "nil"
-                        , conFields = []
-                        , construct = \[Just sort] args f
-                                      -> withProxyArg sort $
-                                         \(_::t) ann -> f [sort] ([]::[t]) ann
-                      , conTest = \args x -> case args of
-                        [s] -> withProxyArg s $
-                               \(_::t) _ -> case cast x of
-                                 Just ([]::[t]) -> True
-                                 _ -> False
-                      }
+conNil :: Constr
+conNil = Constr { conName = "nil"
+                , conFields = []
+                , construct = \[Just sort] args f
+                              -> withProxyArg sort $
+                                 \(_::t) ann -> f [sort] ([]::[t]) ann
+                , conTest = \args x -> case args of
+                [s] -> withProxyArg s $
+                       \(_::t) _ -> case cast x of
+                                     Just ([]::[t]) -> True
+                                     _ -> False
+                }
 
-constructorCons = Constr { conName = "insert"
-                         , conFields = [DataField { fieldName = "head"
-                                                  , fieldSort = Fix (ArgumentSort 0)
-                                                  , fieldGet = \args x f -> case args of
-                                                    [s] -> withProxyArg s $
-                                                           \(_::t) ann
-                                                           -> case cast x of
-                                                             Just (ys::[t]) -> f (head ys) ann }
-                                       ,DataField { fieldName = "tail"
-                                                  , fieldSort = Fix (NormalSort (NamedSort "List" [Fix (ArgumentSort 0)]))
-                                                  , fieldGet = \args x f -> case args of
-                                                    [s] -> withProxyArg s $
-                                                         \(_::t) ann
-                                                         -> case cast x of
-                                                           Just (ys::[t]) -> f (tail ys) ann }]
+conInsert :: Constr
+conInsert = Constr { conName = "insert"
+                   , conFields = [fieldHead
+                                 ,fieldTail]
                          , construct = \sort args f
                                        -> case args of
                                          [h,t] -> withAnyValue h $
@@ -1003,15 +1044,73 @@ constructorCons = Constr { conName = "insert"
                                   _ -> False
                          }
 
+fieldHead :: DataField
+fieldHead = DataField { fieldName = "head"
+                      , fieldSort = Fix (ArgumentSort 0)
+                      , fieldGet = \args x f -> case args of
+                      [s] -> withProxyArg s $
+                             \(_::t) ann
+                             -> case cast x of
+                                 Just (ys::[t]) -> f (head ys) ann
+                      }
+
+fieldTail :: DataField
+fieldTail = DataField { fieldName = "tail"
+                      , fieldSort = Fix (NormalSort (NamedSort "List" [Fix (ArgumentSort 0)]))
+                      , fieldGet = \args x f -> case args of
+                      [s] -> withProxyArg s $
+                             \(_::t) ann
+                             -> case cast x of
+                                 Just (ys::[t]) -> f (tail ys) ann
+                      }
+
 instance (Typeable a,SMTValue a) => SMTValue [a] where
-  unmangle (ConstrValue "nil" [] _) _ = Just []
-  unmangle (ConstrValue "insert" [h,t] _) ann = do
-    h' <- unmangle h ann
-    t' <- unmangle t ann
-    return (h':t')
-  unmangle _ _ = Nothing
-  mangle ([]::[t]) ann = ConstrValue "nil" [] (Just ("List",[getSort (undefined::t) ann]))
-  mangle (x:xs) ann = ConstrValue "insert" [mangle x ann,mangle xs ann] Nothing
+  unmangle = case unmangle of
+    PrimitiveUnmangling p
+      -> PrimitiveUnmangling $ pUnmangle p
+    ComplexUnmangling p
+      -> ComplexUnmangling $ cUnmangle p
+    where
+      pUnmangle _ (ConstrValue "nil" [] _) ann = Just []
+      pUnmangle p (ConstrValue "insert" [h,t] _) ann = do
+        h' <- p h ann
+        t' <- pUnmangle p t ann
+        return (h':t')
+      cUnmangle :: Monad m
+                => ((forall b. SMTValue b => SMTExpr b -> SMTAnnotation b -> m b)
+                    -> SMTExpr a -> SMTAnnotation a -> m (Maybe a))
+                -> (forall b. SMTValue b => SMTExpr b -> SMTAnnotation b -> m b)
+                -> SMTExpr [a] -> SMTAnnotation a -> m (Maybe [a])
+      cUnmangle c f (expr::SMTExpr [t]) ann = do
+        isNil <- f (App (SMTConTest
+                         (Constructor [ProxyArg (undefined::t) ann] dtList conNil
+                          ::Constructor () [t]))
+                    expr) ()
+        if isNil
+          then return (Just [])
+          else do
+           h <- c f (App (SMTFieldSel (Field [ProxyArg (undefined::t) ann] dtList conInsert fieldHead))
+                     expr) ann
+           t <- cUnmangle c f (App (SMTFieldSel (Field [ProxyArg (undefined::t) ann] dtList conInsert fieldTail)) expr) ann
+           return $ do
+             h' <- h
+             t' <- t
+             return $ h':t'
+  mangle = case mangle of
+    PrimitiveMangling p
+      -> PrimitiveMangling $ pMangle p
+    ComplexMangling p
+      -> ComplexMangling $ cMangle p
+    where
+      pMangle _ ([]::[t]) ann = ConstrValue "nil" [] (Just ("List",[getSort (undefined::t) ann]))
+      pMangle p (x:xs) ann = ConstrValue "insert" [p x ann,pMangle p xs ann] Nothing
+      cMangle :: (a -> SMTAnnotation a -> SMTExpr a)
+              -> [a] -> SMTAnnotation a -> SMTExpr [a]
+      cMangle c ([]::[t]) ann
+        = App (SMTConstructor (Constructor [ProxyArg (undefined::t) ann] dtList conNil)) ()
+      cMangle c ((x::t):xs) ann
+        = App (SMTConstructor (Constructor [ProxyArg (undefined::t) ann] dtList conInsert))
+          (c x ann,cMangle c xs ann)
 
 -- BitVector implementation
 
@@ -1025,9 +1124,12 @@ instance IsBitVector BVUntyped where
   getBVSize _ = id
 
 instance SMTValue (BitVector BVUntyped) where
-  unmangle (BVValue _ v) _ = Just (BitVector v)
-  unmangle _ _ = Nothing
-  mangle (BitVector v) l = BVValue l v
+  unmangle = PrimitiveUnmangling $
+             \val _ -> case val of
+             BVValue _ v -> Just (BitVector v)
+             _ -> Nothing
+  mangle = PrimitiveMangling $
+           \(BitVector v) l -> BVValue l v
 
 instance TypeableNat n => SMTType (BitVector (BVTyped n)) where
   type SMTAnnotation (BitVector (BVTyped n)) = ()
@@ -1039,11 +1141,14 @@ instance TypeableNat n => IsBitVector (BVTyped n) where
   getBVSize (_::Proxy (BVTyped n)) _ = reflectNat (Proxy::Proxy n) 0
 
 instance TypeableNat n => SMTValue (BitVector (BVTyped n)) where
-  unmangle (BVValue w v) _
-    | (reflectNat (Proxy::Proxy n) 0)==w = Just (BitVector v)
-    | otherwise = Nothing
-  unmangle _ _ = Nothing
-  mangle (BitVector v) _ = BVValue (reflectNat (Proxy::Proxy n) 0) v
+  unmangle = PrimitiveUnmangling $
+             \val _ -> case val of
+             BVValue w v
+               | (reflectNat (Proxy::Proxy n) 0)==w -> Just (BitVector v)
+               | otherwise -> Nothing
+             _ -> Nothing
+  mangle = PrimitiveMangling $
+           \(BitVector v) _ -> BVValue (reflectNat (Proxy::Proxy n) 0) v
 
 bvUnsigned :: IsBitVector a => BitVector a -> SMTAnnotation (BitVector a) -> Integer
 bvUnsigned (BitVector x) _ = x

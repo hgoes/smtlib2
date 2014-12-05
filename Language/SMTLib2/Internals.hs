@@ -90,10 +90,16 @@ data ArgumentSort' a = ArgumentSort Integer
 
 type ArgumentSort = Fix ArgumentSort'
 
+data Unmangling a = PrimitiveUnmangling (Value -> SMTAnnotation a -> Maybe a)
+                  | ComplexUnmangling (forall m. Monad m => (forall b. SMTValue b => SMTExpr b -> SMTAnnotation b -> m b) -> SMTExpr a -> SMTAnnotation a -> m (Maybe a))
+
+data Mangling a = PrimitiveMangling (a -> SMTAnnotation a -> Value)
+                | ComplexMangling (a -> SMTAnnotation a -> SMTExpr a)
+
 -- | Haskell values which can be represented as SMT constants
 class (SMTType t,Show t) => SMTValue t where
-  unmangle :: Value -> SMTAnnotation t -> Maybe t
-  mangle :: t -> SMTAnnotation t -> Value
+  unmangle :: Unmangling t
+  mangle :: Mangling t
 
 -- | A type class for all types which support arithmetic operations in SMT
 class (SMTValue t,Num t) => SMTArith t

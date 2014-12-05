@@ -64,15 +64,26 @@ renderExpr' st expr
     in show lexpr
 
 instance MonadIO m => SMTBackend SMTPipe m where
-  smtHandle pipe st req = do
-    case cast req of
-      Just (_::SMTRequest ()) -> return ()
-      _ -> clearInput pipe
-    case renderSMTRequest st req of
-      Left l -> putRequest pipe l
-      Right msg -> liftIO $ IO.hPutStr (channelIn pipe) $ Prelude.unlines (fmap (';':) (Prelude.lines msg))
-    handleRequest pipe st req
-  
+  smtHandle pipe st req@(SMTGetValue (expr::SMTExpr t))
+    = case unmangle :: Unmangling t of
+       PrimitiveUnmangling _ -> handleNormal pipe st req
+       ComplexUnmangling f -> do
+         res <- f (\expr' ann -> smtHandle pipe st (SMTGetValue expr')) expr (extractAnnotation expr)
+         case res of
+          Just x -> return x
+          Nothing -> error $ "smtlib2: Error while unmangling expression "++show expr++" to type "++show (typeOf (undefined::t))
+  smtHandle pipe st req = handleNormal pipe st req
+
+handleNormal :: (MonadIO m,Typeable a) => SMTPipe -> SMTState -> SMTRequest a -> m a
+handleNormal pipe st req = do
+  case cast req of
+   Just (_::SMTRequest ()) -> return ()
+   _ -> clearInput pipe
+  case renderSMTRequest st req of
+   Left l -> putRequest pipe l
+   Right msg -> liftIO $ IO.hPutStr (channelIn pipe) $ Prelude.unlines (fmap (';':) (Prelude.lines msg))
+  handleRequest pipe st req
+
 renderSMTRequest :: SMTState -> SMTRequest r -> Either L.Lisp String
 renderSMTRequest st (SMTGetInfo SMTSolverName)
   = Left $ L.List [L.Symbol "get-info",L.Symbol ":name"]
@@ -278,12 +289,13 @@ handleRequest _ _ SMTPop = return ()
 handleRequest pipe st (SMTGetValue (expr::SMTExpr t)) = do
   let ann = extractAnnotation expr
       sort = getSort (undefined::t) ann
+      PrimitiveUnmangling unm = unmangle :: Unmangling t
   val <- parseResponse pipe
   case val of
     L.List [L.List [_,res]]
       -> let res' = removeLets res
          in case lispToValue' (declaredDataTypes st) (Just sort) res' of
-           Just val' -> case unmangle val' ann of
+           Just val' -> case unm val' ann of
              Just val'' -> return val''
              Nothing -> error $ "smtlib2: Failed to unmangle value "++show val'++" to type "++show (typeOf (undefined::t))
            Nothing -> error $ "smtlib2: Failed to parse value from "++show res
@@ -486,7 +498,9 @@ exprToLispWith _ (Var idx _) mp _ = case Map.lookup idx mp of
                             Just name -> Left name)
   Nothing -> L.Symbol $ T.pack $ escapeName (Right idx)
 exprToLispWith _ (QVar lvl idx _) _ _ = L.Symbol $ T.pack $ "q_"++show lvl++"_"++show idx
-exprToLispWith _ (Const x ann) _ dts = valueToLisp dts $ mangle x ann
+exprToLispWith objs (Const x ann) mp dts = case mangle of
+  PrimitiveMangling f -> valueToLisp dts $ f x ann
+  ComplexMangling f -> exprToLispWith objs (f x ann) mp dts
 exprToLispWith _ (AsArray f arg) mp _
   = let f' = functionGetSymbol mp f arg
         (sargs,sres) = functionSignature f arg
@@ -1120,7 +1134,9 @@ simpleParser fun
 -- | A parser for all available SMT logics.
 commonFunctions :: FunctionParser
 commonFunctions = mconcat
-                  [eqParser
+                  [fieldParser
+                  ,constructorParser
+                  ,eqParser
                   ,mapParser
                   ,ordOpParser
                   ,arithOpParser
@@ -1490,8 +1506,8 @@ divisibleParser = FunctionParser g
                              , parseDefined = \f -> Just $ f (SMTDivisible n) }
     g _ _ _ = Nothing
 
-constructorParser :: DataTypeInfo -> FunctionParser
-constructorParser dts
+constructorParser :: FunctionParser
+constructorParser
   = FunctionParser $
     \sym _ dts -> case sym of
         L.Symbol name -> case Map.lookup (T.unpack name) (constructors dts) of
@@ -1513,7 +1529,72 @@ constructorParser dts
                                                                     (\(_::arg) ann
                                                                      -> Just $ f (SMTConstructor (Constructor (getProxyArgs uret ann_ret) dt con::Constructor arg ret))))
                                          }
+            _ -> Just $ OverloadedParser { sortConstraint = \_ -> True
+                                         , deriveRetSort = infer
+                                         , parseOverloaded = parse
+                                         }
+              where
+                infer tps = let inf = foldl (\cinf (x,y) -> inferSorts x y cinf)
+                                      Map.empty (zip (fmap fieldSort (conFields con)) tps)
+                            in argumentSortToSort (\i -> Map.lookup i inf)
+                               (Fix $ NormalSort (NamedSort (dataTypeName dt)
+                                                  [Fix $ ArgumentSort i
+                                                  | i <- [0..(argCount struc)-1]]))
+                parse :: [Sort] -> Sort
+                      -> (forall arg res.
+                          (Liftable arg,SMTType res)
+                          => SMTFunction arg res -> a) -> Maybe a
+                parse tps rtp app
+                  = withSorts dts tps $
+                    \(_::arg') _
+                    -> withSort dts rtp $
+                       \(_::res') _
+                        -> Just $ app (SMTConstructor
+                                       (Constructor proxies dt con
+                                        ::Constructor arg' res'))
+                  where
+                    proxies = case rtp of
+                      Fix (NamedSort _ tps) -> fmap (\tp -> withSort dts tp ProxyArg) tps
         _ -> Nothing
+
+fieldParser :: FunctionParser
+fieldParser
+  = FunctionParser $
+    \sym _ dts -> case sym of
+    L.Symbol name -> case Map.lookup (T.unpack name) (fields dts) of
+      Nothing -> Nothing
+      Just (field,constr,dt,struc)
+        -> Just $ OverloadedParser { sortConstraint = \_ -> True
+                                   , deriveRetSort = infer
+                                   , parseOverloaded = parse }
+        where
+          infer [Fix (NamedSort _ tps)]
+            = let mp = Map.fromList (zip [0..] tps)
+              in argumentSortToSort (\i -> Map.lookup i mp) (fieldSort field)
+          parse :: [Sort] -> Sort
+                -> (forall arg res.
+                    (Liftable arg,SMTType res)
+                    => SMTFunction arg res -> a) -> Maybe a
+          parse [Fix (NamedSort _ tps)] rtp app
+            = dataTypeGetUndefined dt proxies $
+              \(u::t) _ -> withSort dts rtp $
+                           \(_::f) _
+                           -> Just $ app (SMTFieldSel
+                                          (Field proxies dt constr field
+                                           :: Field t f))
+            where
+              proxies = fmap (\tp -> withSort dts tp ProxyArg) tps
+    _ -> Nothing
+
+inferSorts :: ArgumentSort -> Sort -> Map Integer Sort -> Map Integer Sort
+inferSorts (Fix (ArgumentSort i)) s mp = Map.insert i s mp
+inferSorts (Fix (NormalSort (ArraySort xs x))) (Fix (ArraySort ys y)) mp
+  = foldl (\cmp (x,y) -> inferSorts x y cmp
+          ) (inferSorts x y mp) (zip xs ys)
+inferSorts (Fix (NormalSort (NamedSort n1 xs))) (Fix (NamedSort n2 ys)) mp
+  | n1==n2 = foldl (\cmp (x,y) -> inferSorts x y cmp
+                   ) mp (zip xs ys)
+inferSorts _ _ mp = mp
 
 withPipe :: MonadIO m => String -> [String] -> SMT' m a -> m a
 withPipe prog args act = do
