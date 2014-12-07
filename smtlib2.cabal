@@ -1,10 +1,18 @@
 Name:           smtlib2
 Version:        0.1
 Author:         Henning Günther <guenther@forsyte.at>
+Maintainer:     guenther@forsyte.at
+Synopsis:       A type-safe interface to communicate with an SMT solver.
+Stability:      provisional
+Category:       SMT, Formal Methods, Theorem Provers, Symbolic Computation
 License:        GPL-3
 License-File:   LICENSE
 Build-Type:     Simple
-Cabal-Version:  >=1.2
+Cabal-Version:  >=1.6
+
+Source-Repository head
+  Type:         git
+  Location:     https://github.com/hguenther/smtlib2.git
 
 Flag WithConstraints
   Description: Enables the use of the constraint-kind extension which is needed to parse 'map'-expressions.
@@ -14,7 +22,7 @@ Flag WithDataKinds
   Default: False
 
 Library
-  Build-Depends:        base >= 4,text,mtl,process,blaze-builder,bytestring,
+  Build-Depends:        base >= 4 && < 5,text,mtl,process,blaze-builder,bytestring,
                         attoparsec,atto-lisp >= 0.2,array,
                         containers, transformers, data-fix, tagged
   Extensions: GADTs,RankNTypes,CPP,ScopedTypeVariables,
