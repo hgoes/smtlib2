@@ -53,7 +53,7 @@ instance SMTBackend BoolectorBackend IO where
   smtHandle btor _ (SMTAssert expr Nothing Nothing) = do
     isAssume <- readIORef (boolectorAssumeState btor)
     mp <- readIORef (boolectorVars btor)
-    nd <- exprToNode mp btor expr
+    nd <- exprToNode mp Map.empty btor expr
     if isAssume
       then boolectorAssume (boolectorInstance btor) nd
       else boolectorAssert (boolectorInstance btor) nd
@@ -73,7 +73,7 @@ instance SMTBackend BoolectorBackend IO where
   smtHandle btor _ SMTPop = writeIORef (boolectorAssumeState btor) False
   smtHandle btor _ (SMTDefineFun name [] expr) = do
     mp <- readIORef (boolectorVars btor)
-    nd <- exprToNode mp btor expr
+    nd <- exprToNode mp Map.empty btor expr
     modifyIORef (boolectorVars btor) (Map.insert (funInfoId name) nd)
   smtHandle btor _ (SMTDefineFun name args expr) = do
     params <- mapM (\info -> do
@@ -88,12 +88,12 @@ instance SMTBackend BoolectorBackend IO where
                        return (funInfoId info,res)
                    ) args
     mp <- readIORef (boolectorVars btor)
-    nd <- exprToNode (Map.union mp (Map.fromList params)) btor expr
+    nd <- exprToNode (Map.union mp (Map.fromList params)) Map.empty btor expr
     fun <- boolectorFun (boolectorInstance btor) (fmap snd params) nd
     modifyIORef (boolectorVars btor) (Map.insert (funInfoId name) fun)
   smtHandle btor st (SMTGetValue (expr :: SMTExpr t)) = do
     mp <- readIORef (boolectorVars btor)
-    nd <- exprToNode mp btor expr
+    nd <- exprToNode mp Map.empty btor expr
     let sort = getSort (undefined::t) (extractAnnotation expr)
     case sort of
       Fix (BVSort { bvSortWidth = w
@@ -126,56 +126,67 @@ instance SMTBackend BoolectorBackend IO where
   smtHandle _ _ (SMTComment _) = return ()
   smtHandle btor _ SMTExit = boolectorDelete (boolectorInstance btor)
   
-exprToNode :: SMTType a => Map Integer BtorNode -> BoolectorBackend -> SMTExpr a -> IO BtorNode
-exprToNode mp btor (Var name ann) = do
+exprToNode :: SMTType a => Map Integer BtorNode -> Map Integer (Map Integer BtorNode) -> BoolectorBackend -> SMTExpr a -> IO BtorNode
+exprToNode mp qmp btor (Var name ann) = do
   case Map.lookup name mp of
     Just nd -> return nd
-exprToNode _ btor (Const c ann) = do
-  let val = mangle c ann
-  case val of
-    BoolValue True -> boolectorTrue (boolectorInstance btor)
-    BoolValue False -> boolectorFalse (boolectorInstance btor)
-    BVValue { bvValueWidth = w
-            , bvValueValue = v }
-      -> if v < 0
-         then boolectorInt (boolectorInstance btor) (fromIntegral v) (fromIntegral w)
-         else boolectorUnsignedInt (boolectorInstance btor) (fromIntegral v) (fromIntegral w)
-    _ -> error $ "smtlib2-boolector: Boolector backend doesn't support value "++show val
-exprToNode mp btor (Let ann args f) = exprToNode mp btor (f args)
-exprToNode mp btor (App SMTEq [x,y]) = do
-  ndx <- exprToNode mp btor x
-  ndy <- exprToNode mp btor y
+exprToNode mp qmp btor (QVar p q ann) = case Map.lookup p qmp of
+  Just mp' -> case Map.lookup q mp' of
+    Just nd -> return nd
+exprToNode _ _ btor e@(Const c ann) = do
+  case mangle of
+   PrimitiveMangling f -> do
+     let val = f c ann
+     case val of
+      BoolValue True -> boolectorTrue (boolectorInstance btor)
+      BoolValue False -> boolectorFalse (boolectorInstance btor)
+      BVValue { bvValueWidth = w
+              , bvValueValue = v }
+        -> if v < 0
+           then boolectorInt (boolectorInstance btor) (fromIntegral v) (fromIntegral w)
+           else boolectorUnsignedInt (boolectorInstance btor) (fromIntegral v) (fromIntegral w)
+      _ -> error $ "smtlib2-boolector: Boolector backend doesn't support value "++show val
+   _ -> error $ "smtlib2-boolector: Boolector backend doesn't support constant "++show e
+exprToNode mp qmp btor (Let lvl defs body) = do
+  nqmp <- foldlM (\cmp (i,expr) -> do
+                     nd <- exprToNode mp cmp btor expr
+                     return $ Map.insertWith Map.union lvl (Map.singleton i nd) cmp
+                 ) qmp (zip [0..] defs)
+  exprToNode mp nqmp btor body
+exprToNode mp qmp btor (App SMTEq [x,y]) = do
+  ndx <- exprToNode mp qmp btor x
+  ndy <- exprToNode mp qmp btor y
   boolectorEq (boolectorInstance btor) ndx ndy
-exprToNode mp btor (App (SMTFun fun _) args) = do
+exprToNode mp qmp btor (App (SMTFun fun _) args) = do
   funNd <- case Map.lookup fun mp of
     Just nd -> return nd
-  let (argLst,_) = unpackArgs (\arg _ _ -> (exprToNode mp btor arg,())) args (extractArgAnnotation args) ()
+  let (argLst,_) = unpackArgs (\arg _ _ -> (exprToNode mp qmp btor arg,())) args (extractArgAnnotation args) ()
   argNds <- sequence argLst
   boolectorApply (boolectorInstance btor) argNds funNd
-exprToNode mp btor (App (SMTLogic op) args) = do
-  nd:nds <- mapM (exprToNode mp btor) args
+exprToNode mp qmp btor (App (SMTLogic op) args) = do
+  nd:nds <- mapM (exprToNode mp qmp btor) args
   let rop = case op of
         And -> boolectorAnd
         Or -> boolectorOr
         XOr -> boolectorXOr
         Implies -> boolectorImplies
   foldlM (rop (boolectorInstance btor)) nd nds
-exprToNode mp btor (App SMTNot e) = do
-  nd <- exprToNode mp btor e
+exprToNode mp qmp btor (App SMTNot e) = do
+  nd <- exprToNode mp qmp btor e
   boolectorNot (boolectorInstance btor) nd
-exprToNode mp btor (App SMTDistinct [x,y]) = do
-  ndx <- exprToNode mp btor x
-  ndy <- exprToNode mp btor y
+exprToNode mp qmp btor (App SMTDistinct [x,y]) = do
+  ndx <- exprToNode mp qmp btor x
+  ndy <- exprToNode mp qmp btor y
   res <- boolectorEq (boolectorInstance btor) ndx ndy
   boolectorNot (boolectorInstance btor) res
-exprToNode mp btor (App SMTITE (c,ifT,ifF)) = do
-  ndC <- exprToNode mp btor c
-  ndIfT <- exprToNode mp btor ifT
-  ndIfF <- exprToNode mp btor ifF
+exprToNode mp qmp btor (App SMTITE (c,ifT,ifF)) = do
+  ndC <- exprToNode mp qmp btor c
+  ndIfT <- exprToNode mp qmp btor ifT
+  ndIfF <- exprToNode mp qmp btor ifF
   boolectorCond (boolectorInstance btor) ndC ndIfT ndIfF
-exprToNode mp btor (App (SMTBVComp op) (e1,e2)) = do
-  n1 <- exprToNode mp btor e1
-  n2 <- exprToNode mp btor e2
+exprToNode mp qmp btor (App (SMTBVComp op) (e1,e2)) = do
+  n1 <- exprToNode mp qmp btor e1
+  n2 <- exprToNode mp qmp btor e2
   (case op of
       BVULE -> boolectorULte 
       BVULT -> boolectorULt
@@ -186,9 +197,9 @@ exprToNode mp btor (App (SMTBVComp op) (e1,e2)) = do
       BVSGE -> boolectorSGte
       BVSGT -> boolectorSGt
     ) (boolectorInstance btor) n1 n2
-exprToNode mp btor (App (SMTBVBin op) (e1::SMTExpr (BitVector a),e2)) = do
-  n1 <- exprToNode mp btor e1
-  n2 <- exprToNode mp btor e2
+exprToNode mp qmp btor (App (SMTBVBin op) (e1::SMTExpr (BitVector a),e2)) = do
+  n1 <- exprToNode mp qmp btor e1
+  n2 <- exprToNode mp qmp btor e2
   n2' <- if (case op of
                 BVSHL -> True
                 BVLSHR -> True
@@ -216,32 +227,34 @@ exprToNode mp btor (App (SMTBVBin op) (e1::SMTExpr (BitVector a),e2)) = do
       BVXor -> boolectorXOr
       BVAnd -> boolectorAnd
       BVOr -> boolectorOr) (boolectorInstance btor) n1 n2'
-exprToNode mp btor (App (SMTBVUn op) e) = do
-  n <- exprToNode mp btor e
+exprToNode mp qmp btor (App (SMTBVUn op) e) = do
+  n <- exprToNode mp qmp btor e
   (case op of
       BVNot -> boolectorNot
       BVNeg -> boolectorNeg) (boolectorInstance btor) n
-exprToNode mp btor (App SMTSelect (arr,i)) = do
-  ndArr <- exprToNode mp btor arr
-  let (argLst,_) = unpackArgs (\arg _ _ -> (exprToNode mp btor arg,())) i (extractArgAnnotation i) ()
+exprToNode mp qmp btor (App SMTSelect (arr,i)) = do
+  ndArr <- exprToNode mp qmp btor arr
+  let (argLst,_) = unpackArgs (\arg _ _ -> (exprToNode mp qmp btor arg,())) i (extractArgAnnotation i) ()
   [ndI] <- sequence argLst
   boolectorRead (boolectorInstance btor) ndArr ndI
-exprToNode mp btor (App SMTStore (arr,i,v)) = do
-  ndArr <- exprToNode mp btor arr
-  let (argLst,_) = unpackArgs (\arg _ _ -> (exprToNode mp btor arg,())) i (extractArgAnnotation i) ()
+exprToNode mp qmp btor (App SMTStore (arr,i,v)) = do
+  ndArr <- exprToNode mp qmp btor arr
+  let (argLst,_) = unpackArgs (\arg _ _ -> (exprToNode mp qmp btor arg,())) i (extractArgAnnotation i) ()
   [ndI] <- sequence argLst
-  ndV <- exprToNode mp btor v
+  ndV <- exprToNode mp qmp btor v
   boolectorWrite (boolectorInstance btor) ndArr ndI ndV
-exprToNode mp btor (App SMTConcat (e1,e2)) = do
-  n1 <- exprToNode mp btor e1
-  n2 <- exprToNode mp btor e2
+exprToNode mp qmp btor (App SMTConcat (e1,e2)) = do
+  n1 <- exprToNode mp qmp btor e1
+  n2 <- exprToNode mp qmp btor e2
   boolectorConcat (boolectorInstance btor) n1 n2
-exprToNode mp btor (App (SMTExtract prStart prLen) e) = do
-  n <- exprToNode mp btor e
+exprToNode mp qmp btor (App (SMTExtract prStart prLen) e) = do
+  n <- exprToNode mp qmp btor e
   let start = reflectNat prStart 0
       len = reflectNat prLen 0
   boolectorSlice (boolectorInstance btor) n (fromIntegral $ start+len-1) (fromIntegral start)
-exprToNode _ _ e = error $ "smtlib2-boolector: No support for expression."
+exprToNode mp qmp btor (UntypedExpr e) = exprToNode mp qmp btor e
+exprToNode mp qmp btor (UntypedExprValue e) = exprToNode mp qmp btor e
+exprToNode _ _ _ e = error $ "smtlib2-boolector: No support for expression: "++show e
 
 mkVar :: BoolectorBackend -> FunInfo -> Sort -> IO BtorNode
 mkVar btor info sort = do
