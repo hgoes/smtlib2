@@ -87,8 +87,8 @@ getConfig b = do
     NoContext cfg -> return (Just cfg)
     _ -> return Nothing
 
-getModel :: YicesBackend -> IO (Maybe Model)
-getModel b = do
+getYicesModel :: YicesBackend -> IO (Maybe Model)
+getYicesModel b = do
   state <- readIORef (yicesState b)
   case state of
     HasContext ctx mdl -> case mdl of
@@ -139,7 +139,7 @@ instance SMTBackend YicesBackend IO where
     tps <- readIORef (yicesTypes b)
     mp <- readIORef (yicesExprs b)
     ctx <- getContext b True
-    f' <- exprToTerm tps mp 0 f
+    f' <- exprToTerm tps mp Map.empty 0 f
     res <- yicesAssertFormula ctx f'
     if res < 0
       then mkError $ "Error while asserting formula."
@@ -194,7 +194,7 @@ instance SMTBackend YicesBackend IO where
                       arg <- yicesNewVariable tp
                       return (funInfoId info,arg)
                   ) args
-    body <- exprToTerm tps (Map.union mp (Map.fromList rargs)) 0 body
+    body <- exprToTerm tps (Map.union mp (Map.fromList rargs)) Map.empty 0 body
     fun <- if null rargs
            then return body
            else withArrayLen (fmap snd rargs) $
@@ -211,13 +211,13 @@ instance SMTBackend YicesBackend IO where
     fun <- yicesNewUninterpretedTerm funTp
     modifyIORef (yicesExprs b) (Map.insert (funInfoId fname) fun)
   smtHandle b st (SMTGetValue (expr :: SMTExpr t)) = do
-    mmdl <- getModel b
+    mmdl <- getYicesModel b
     case mmdl of
       Nothing -> error $ "smtlib2-yices: No model available."
       Just mdl -> do
         tps <- readIORef (yicesTypes b)
         mp <- readIORef (yicesExprs b)
-        term <- exprToTerm tps mp 0 expr
+        term <- exprToTerm tps mp Map.empty 0 expr
         let sort = getSort (undefined::t) (extractAnnotation expr)
         case sort of
           Fix BoolSort -> alloca $ \res -> do
@@ -300,31 +300,38 @@ findConstructor mp cname = findCons (Map.toList mp)
       Just idx -> (tpName,tp,idx)
       Nothing -> findCons rest
 
-exprToTerm :: SMTType a => Map String (Type,[String]) -> Map Integer Term -> Integer
+exprToTerm :: SMTType a => Map String (Type,[String])
+              -> Map Integer Term
+              -> Map Integer (Map Integer Term)
+              -> Integer
               -> SMTExpr a
               -> IO Term
-exprToTerm _ mp _ (Var name ann) = case Map.lookup name mp of
+exprToTerm _ mp _ _ (Var name ann) = case Map.lookup name mp of
   Just t -> return t
-exprToTerm tps _ _ (Const c ann) = do
-  let val = mangle c ann
-  case val of
-    BoolValue True -> yicesTrue
-    BoolValue False -> yicesFalse
-    IntValue i -> yicesInt64 (fromInteger i)
-    RealValue i -> yicesRational64
-                   (fromInteger $ numerator i)
-                   (fromInteger $ denominator i)
-    BVValue w v -> yicesBVConst64 (fromInteger w) (fromInteger v)
-    ConstrValue name _ sort -> case sort of
-      Just (n,[]) -> case Map.lookup n tps of
-        Just (tp,cons) -> case elemIndex name cons of
-          Just idx -> yicesConstant tp (fromIntegral idx)
-      Nothing -> do
-        let (_,tp,num) = findConstructor tps name
-        yicesConstant tp (fromIntegral num)
-exprToTerm tps mp i (AsArray (SMTFun fname _) _) = case Map.lookup fname mp of
+exprToTerm _ _ qmp _ (QVar p q ann) = case Map.lookup p qmp of
+  Just mp -> case Map.lookup q mp of
+    Just t -> return t
+exprToTerm tps _ _ _ (Const c ann) = case mangle of
+  PrimitiveMangling f -> do
+    let val = f c ann
+    case val of
+     BoolValue True -> yicesTrue
+     BoolValue False -> yicesFalse
+     IntValue i -> yicesInt64 (fromInteger i)
+     RealValue i -> yicesRational64
+                    (fromInteger $ numerator i)
+                    (fromInteger $ denominator i)
+     BVValue w v -> yicesBVConst64 (fromInteger w) (fromInteger v)
+     ConstrValue name _ sort -> case sort of
+       Just (n,[]) -> case Map.lookup n tps of
+         Just (tp,cons) -> case elemIndex name cons of
+           Just idx -> yicesConstant tp (fromIntegral idx)
+       Nothing -> do
+         let (_,tp,num) = findConstructor tps name
+         yicesConstant tp (fromIntegral num)
+exprToTerm tps mp qmp _ (AsArray (SMTFun fname _) _) = case Map.lookup fname mp of
   Just fterm -> return fterm
-exprToTerm tps mp i (AsArray fun ann) = do
+exprToTerm tps mp qmp i (AsArray fun ann) = do
   let (arg,names,ni,_) = createArgs ann i Map.empty
   vars <- mapM (\info -> do
                    tp <- sortToType tps (funInfoSort info)
@@ -332,82 +339,84 @@ exprToTerm tps mp i (AsArray fun ann) = do
                    return (funInfoId info,var)
                ) names
   let nmp = Map.union mp (Map.fromList vars)
-  body <- exprToTerm tps nmp ni (App fun arg)
+  body <- exprToTerm tps nmp qmp ni (App fun arg)
   withArrayLen (fmap snd vars) $
     \len arr -> yicesLambda (fromIntegral len) arr body
-exprToTerm tps mp i (Forall ann f) = do
-  let (arg,names,ni,_) = createArgs ann i Map.empty
-  vars <- mapM (\info -> do
-                   tp <- sortToType tps (funInfoSort info)
-                   var <- yicesNewVariable tp
-                   return (funInfoId info,var)
-               ) names
-  body <- exprToTerm tps (Map.union mp (Map.fromList vars)) ni (f arg)
-  withArrayLen (fmap snd vars) (\len arr -> yicesForall (fromIntegral len) arr body)
-exprToTerm tps mp i (Exists ann f) = do
-  let (arg,names,ni,_) = createArgs ann i Map.empty
-  vars <- mapM (\info -> do
-                   tp <- sortToType tps (funInfoSort info)
-                   var <- yicesNewVariable tp
-                   return (funInfoId info,var)
-               ) names
-  body <- exprToTerm tps (Map.union mp (Map.fromList vars)) ni (f arg)
-  withArrayLen (fmap snd vars) (\len arr -> yicesExists (fromIntegral len) arr body)
-exprToTerm tps mp i (Let ann args f)
-  = exprToTerm tps mp i (f args)
-exprToTerm tps mp i (App SMTEq [x,y]) = do
-  tx <- exprToTerm tps mp i x
-  ty <- exprToTerm tps mp i y
+exprToTerm tps mp qmp i (Forall lvl qTps body) = do
+  vars <- mapM (\(ProxyArg u ann) -> do
+                   tp <- sortToType tps (getSort u ann)
+                   yicesNewVariable tp
+               ) qTps
+  body' <- exprToTerm tps mp (Map.insert lvl (Map.fromList (zip [0..] vars)) qmp) i body
+  withArrayLen vars (\len arr -> yicesForall (fromIntegral len) arr body')
+exprToTerm tps mp qmp i (Exists lvl qTps body) = do
+  vars <- mapM (\(ProxyArg u ann) -> do
+                   tp <- sortToType tps (getSort u ann)
+                   yicesNewVariable tp
+               ) qTps
+  body' <- exprToTerm tps mp (Map.insert lvl (Map.fromList (zip [0..] vars)) qmp) i body
+  withArrayLen vars (\len arr -> yicesExists (fromIntegral len) arr body')
+exprToTerm tps mp qmp i (Let lvl defs body) = do
+  nqmp <- foldlM (\cmp (i,expr) -> do
+                     nd <- exprToTerm tps mp cmp i expr
+                     return $ Map.insertWith Map.union lvl (Map.singleton i nd) cmp
+                 ) qmp (zip [0..] defs)
+  exprToTerm tps mp nqmp i body
+exprToTerm tps mp qmp i (App SMTEq [x,y]) = do
+  tx <- exprToTerm tps mp qmp i x
+  ty <- exprToTerm tps mp qmp i y
   yicesEq tx ty
-exprToTerm _ _ _ (App (SMTMap f) _)
+exprToTerm _ _ _ _ (App (SMTMap f) _)
   = error $ "smtlib2-yices: Mapping functions not supported."
-exprToTerm tps mp i (App (SMTFun fname fann) args)
+exprToTerm tps mp qmp i (App (SMTFun fname fann) args)
   = case Map.lookup fname mp of
   Just fun -> do
-    let (acts,_) = unpackArgs (\expr _ _ -> (exprToTerm tps mp i expr,())) args undefined ()
+    let (acts,_) = unpackArgs (\expr _ _ -> (exprToTerm tps mp qmp i expr,())) args undefined ()
     rargs <- sequence acts
     withArrayLen rargs (\len arr -> yicesApplication fun (fromIntegral len) arr)
-exprToTerm tps mp i (App (SMTOrd op) (x,y)) = do
-  tx <- exprToTerm tps mp i x
-  ty <- exprToTerm tps mp i y
+exprToTerm tps mp qmp i (App (SMTOrd op) (x,y)) = do
+  tx <- exprToTerm tps mp qmp i x
+  ty <- exprToTerm tps mp qmp i y
   (case op of
       Ge -> yicesArithGEqAtom
       Gt -> yicesArithGtAtom
       Le -> yicesArithLEqAtom
       Lt -> yicesArithLtAtom) tx ty
-exprToTerm tps mp i (App (SMTArith op) args) = do
-  x:xs <- mapM (exprToTerm tps mp i) args
+exprToTerm tps mp qmp i (App (SMTArith op) args) = do
+  x:xs <- mapM (exprToTerm tps mp qmp i) args
   let f = case op of
         Plus -> yicesAdd
         Mult -> yicesMul
   foldlM f x xs
-exprToTerm tps mp i (App SMTMinus (x,y)) = do
-  tx <- exprToTerm tps mp i x
-  ty <- exprToTerm tps mp i y
+exprToTerm tps mp qmp i (App SMTMinus (x,y)) = do
+  tx <- exprToTerm tps mp qmp i x
+  ty <- exprToTerm tps mp qmp i y
   yicesSub tx ty
-exprToTerm tps mp i (App (SMTIntArith op) _)
+exprToTerm tps mp qmp i (App (SMTIntArith op) _)
   = error $ "smtlib2-yices: Integer operator "++show op++" not supported."
-exprToTerm tps mp i (App SMTDivide _)
+exprToTerm tps mp qmp i (App SMTDivide _)
   = error $ "smtlib2-yices: Rational division not supported."
-exprToTerm tps mp i (App SMTNeg x) = do
-  tx <- exprToTerm tps mp i x
+exprToTerm tps mp qmp i (App SMTNeg x) = do
+  tx <- exprToTerm tps mp qmp i x
   yicesNeg tx
-exprToTerm tps mp i (App SMTAbs x)
+exprToTerm tps mp qmp i (App SMTAbs x)
   = case cast x of
-  Just x' -> exprToTerm tps mp i (App SMTITE
-                                  (App (SMTOrd Ge) (x',Const (0::Integer) ()),
-                                   x',
-                                   App SMTNeg x'))
+  Just x' -> exprToTerm tps mp qmp i
+             (App SMTITE
+              (App (SMTOrd Ge) (x',Const (0::Integer) ()),
+               x',
+               App SMTNeg x'))
   Nothing -> case cast x of
-    Just x' -> exprToTerm tps mp i (App SMTITE
-                                    (App (SMTOrd Ge) (x',Const (0::Rational) ()),
-                                     x',
-                                     App SMTNeg x'))
-exprToTerm tps mp i (App SMTNot x) = do
-  tx <- exprToTerm tps mp i x
+    Just x' -> exprToTerm tps mp qmp i
+               (App SMTITE
+                (App (SMTOrd Ge) (x',Const (0::Rational) ()),
+                 x',
+                 App SMTNeg x'))
+exprToTerm tps mp qmp i (App SMTNot x) = do
+  tx <- exprToTerm tps mp qmp i x
   yicesNot tx
-exprToTerm tps mp i (App (SMTLogic op) args) = do
-  rargs <- mapM (exprToTerm tps mp i) args
+exprToTerm tps mp qmp i (App (SMTLogic op) args) = do
+  rargs <- mapM (exprToTerm tps mp qmp i) args
   case op of
     Implies -> case rargs of
       [x,y] -> yicesImplies x y
@@ -416,22 +425,22 @@ exprToTerm tps mp i (App (SMTLogic op) args) = do
                          And -> yicesAnd
                          Or -> yicesOr
                          XOr -> yicesXor) (fromIntegral len) arr
-exprToTerm tps mp i (App SMTDistinct args) = do
-  rargs <- mapM (exprToTerm tps mp i) args
+exprToTerm tps mp qmp i (App SMTDistinct args) = do
+  rargs <- mapM (exprToTerm tps mp qmp i) args
   withArrayLen rargs $
     \len arr -> yicesDistinct (fromIntegral len) arr
-exprToTerm tps mp i (App SMTToReal _)
+exprToTerm tps mp qmp i (App SMTToReal _)
   = error "smtlib2-yices: to-real operation not supported."
-exprToTerm tps mp i (App SMTToInt _)
+exprToTerm tps mp qmp i (App SMTToInt _)
   = error "smtlib2-yices: to-int operation not supported."
-exprToTerm tps mp i (App SMTITE (c,x,y)) = do
-  tc <- exprToTerm tps mp i c
-  tx <- exprToTerm tps mp i x
-  ty <- exprToTerm tps mp i y
+exprToTerm tps mp qmp i (App SMTITE (c,x,y)) = do
+  tc <- exprToTerm tps mp qmp i c
+  tx <- exprToTerm tps mp qmp i x
+  ty <- exprToTerm tps mp qmp i y
   yicesITE tc tx ty
-exprToTerm tps mp i (App (SMTBVComp op) (x,y)) = do
-  tx <- exprToTerm tps mp i x
-  ty <- exprToTerm tps mp i y
+exprToTerm tps mp qmp i (App (SMTBVComp op) (x,y)) = do
+  tx <- exprToTerm tps mp qmp i x
+  ty <- exprToTerm tps mp qmp i y
   (case op of
       BVULE -> yicesBVLeAtom
       BVULT -> yicesBVLtAtom
@@ -441,9 +450,9 @@ exprToTerm tps mp i (App (SMTBVComp op) (x,y)) = do
       BVSLT -> yicesBVSLtAtom
       BVSGE -> yicesBVSGeAtom
       BVSGT -> yicesBVSGtAtom) tx ty
-exprToTerm tps mp i (App (SMTBVBin bin) (x,y)) = do
-  tx <- exprToTerm tps mp i x
-  ty <- exprToTerm tps mp i y
+exprToTerm tps mp qmp i (App (SMTBVBin bin) (x,y)) = do
+  tx <- exprToTerm tps mp qmp i x
+  ty <- exprToTerm tps mp qmp i y
   (case bin of
       BVAdd -> yicesBVAdd
       BVSub -> yicesBVSub
@@ -458,50 +467,50 @@ exprToTerm tps mp i (App (SMTBVBin bin) (x,y)) = do
       BVXor -> yicesBVXor
       BVAnd -> yicesBVAnd
       BVOr -> yicesBVOr) tx ty
-exprToTerm tps mp i (App (SMTBVUn op) x) = do
-  tx <- exprToTerm tps mp i x
+exprToTerm tps mp qmp i (App (SMTBVUn op) x) = do
+  tx <- exprToTerm tps mp qmp i x
   (case op of
       BVNot -> yicesBVNot
       BVNeg -> yicesBVNeg) tx
-exprToTerm tps mp i (App SMTSelect (arr,idx)) = do
-  tarr <- exprToTerm tps mp i arr
-  let (argLst,_) = unpackArgs (\arg _ _ -> (exprToTerm tps mp i arg,())) idx
+exprToTerm tps mp qmp i (App SMTSelect (arr,idx)) = do
+  tarr <- exprToTerm tps mp qmp i arr
+  let (argLst,_) = unpackArgs (\arg _ _ -> (exprToTerm tps mp qmp i arg,())) idx
                    (extractArgAnnotation idx) ()
   tidx <- sequence argLst
   withArrayLen tidx $
     \len arr -> yicesApplication tarr (fromIntegral len) arr
-exprToTerm tps mp i (App SMTStore (arr,idx,val)) = do
-  tarr <- exprToTerm tps mp i arr
-  tval <- exprToTerm tps mp i val
-  let (argLst,_) = unpackArgs (\arg _ _ -> (exprToTerm tps mp i arg,())) idx
+exprToTerm tps mp qmp i (App SMTStore (arr,idx,val)) = do
+  tarr <- exprToTerm tps mp qmp i arr
+  tval <- exprToTerm tps mp qmp i val
+  let (argLst,_) = unpackArgs (\arg _ _ -> (exprToTerm tps mp qmp i arg,())) idx
                    (extractArgAnnotation idx) ()
   tidx <- sequence argLst
   withArrayLen tidx $
     \len arr -> yicesUpdate tarr (fromIntegral len) arr tval
-exprToTerm tps mp i (App fun@(SMTConstArray ann) val) = do
+exprToTerm tps mp qmp i (App fun@(SMTConstArray ann) val) = do
   let getUndef :: SMTFunction p (SMTArray i v) -> i
       getUndef _ = undefined
       sorts = argSorts (getUndef fun) ann
-  tval <- exprToTerm tps mp i val
+  tval <- exprToTerm tps mp qmp i val
   vars <- mapM (\sort -> do
                   tp <- sortToType tps sort
                   yicesNewVariable tp) sorts
   withArrayLen vars $
     \len arr -> yicesLambda (fromIntegral len) arr tval
-exprToTerm tps mp i (App SMTConcat (x,y)) = do
-  tx <- exprToTerm tps mp i x
-  ty <- exprToTerm tps mp i y
+exprToTerm tps mp qmp i (App SMTConcat (x,y)) = do
+  tx <- exprToTerm tps mp qmp i x
+  ty <- exprToTerm tps mp qmp i y
   yicesBVConcat tx ty
-exprToTerm tps mp i (App (SMTExtract pstart plen) x) = do
-  tx <- exprToTerm tps mp i x
+exprToTerm tps mp qmp i (App (SMTExtract pstart plen) x) = do
+  tx <- exprToTerm tps mp qmp i x
   let start = reflectNat pstart 0
       len = reflectNat plen 0
   yicesBVExtract tx (fromIntegral start) (fromIntegral $ len-1)
-exprToTerm tps mp i (App (SMTConstructor (Constructor args dt constr)) _)
+exprToTerm tps mp qmp i (App (SMTConstructor (Constructor args dt constr)) _)
   = let (_,tp,num) = findConstructor tps (conName constr)
     in yicesConstant tp (fromIntegral num)
-exprToTerm tps mp i (App (SMTConTest (Constructor args dt constr)) x) = do
-  tx <- exprToTerm tps mp i x
+exprToTerm tps mp qmp i (App (SMTConTest (Constructor args dt constr)) x) = do
+  tx <- exprToTerm tps mp qmp i x
   let (_,tp,num) = findConstructor tps (conName constr)
   ty <- yicesConstant tp (fromIntegral num)
   yicesEq tx ty
