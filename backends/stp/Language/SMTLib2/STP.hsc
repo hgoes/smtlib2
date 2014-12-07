@@ -46,7 +46,7 @@ instance SMTBackend STPBackend IO where
   smtHandle _ _ (SMTSetOption _) = return ()
   smtHandle stp _ (SMTAssert expr Nothing Nothing) = do
     mp <- readIORef (stpVars stp)
-    expr' <- exprToSTP mp stp expr
+    expr' <- exprToSTP mp Map.empty stp expr
     stpAssert (stpInstance stp) expr'
   smtHandle stp _ (SMTCheckSat _ _) = do
     t <- stpFalseExpr (stpInstance stp)
@@ -61,7 +61,7 @@ instance SMTBackend STPBackend IO where
   smtHandle stp _ SMTPop = stpPop (stpInstance stp)
   smtHandle stp _ (SMTDefineFun name [] expr) = do
     mp <- readIORef (stpVars stp)
-    expr' <- exprToSTP mp stp expr
+    expr' <- exprToSTP mp Map.empty stp expr
     modifyIORef (stpVars stp) (Map.insert (funInfoId name) expr')
   smtHandle stp _ (SMTDeclareFun name) = do
     case funInfoArgSorts name of
@@ -74,7 +74,7 @@ instance SMTBackend STPBackend IO where
     modifyIORef (stpVars stp) (Map.insert (funInfoId name) expr)
   smtHandle stp st (SMTGetValue (expr::SMTExpr t)) = do
     mp <- readIORef (stpVars stp)
-    expr' <- exprToSTP mp stp expr
+    expr' <- exprToSTP mp Map.empty stp expr
     resExpr <- stpGetCounterExample (stpInstance stp) expr'
     stpToExpr (declaredDataTypes st) (namedVars st) (Just $ getSort (undefined::t) (extractAnnotation expr)) resExpr $
       \res -> case res of
@@ -84,7 +84,7 @@ instance SMTBackend STPBackend IO where
   smtHandle _ _ SMTGetUnsatCore = error $ "smtlib2-stp: STP doesn't support unsat core extraction."
   smtHandle stp st (SMTSimplify (expr::SMTExpr t)) = do
     mp <- readIORef (stpVars stp)
-    expr' <- exprToSTP mp stp expr
+    expr' <- exprToSTP mp Map.empty stp expr
     simpExpr <- stpSimplify (stpInstance stp) expr'
     stpToExpr (declaredDataTypes st) (namedVars st) (Just $ getSort (undefined::t) (extractAnnotation expr)) simpExpr $
       \res -> case cast res of
@@ -103,67 +103,77 @@ sortToSTP stp (Fix (ArraySort [i] v)) = do
   stpArrayType (stpInstance stp) iTp vTp
 sortToSTP _ sort = error $ "smtlib2-stp: STP doesn't support type "++show sort++"."
 
-exprToSTP :: SMTType a => Map Integer STPExpr -> STPBackend -> SMTExpr a -> IO STPExpr
-exprToSTP mp stp (Var name ann) = case Map.lookup name mp of
+exprToSTP :: SMTType a => Map Integer STPExpr -> Map Integer (Map Integer STPExpr) -> STPBackend -> SMTExpr a -> IO STPExpr
+exprToSTP mp qmp stp (Var name ann) = case Map.lookup name mp of
   Just expr -> return expr
-exprToSTP mp stp (Const c ann) = do
-  let val = mangle c ann
-  case val of
-    BoolValue True -> stpTrueExpr (stpInstance stp)
-    BoolValue False -> stpFalseExpr (stpInstance stp)
-    BVValue { bvValueWidth = w
-            , bvValueValue = v }
-      -> stpBVConstFromDecStr (stpInstance stp) (fromIntegral w) (show v)
-    _ -> error $ "smtlib2-stp: STP backend doesn't support value "++show val
-exprToSTP mp stp (Let ann args f) = exprToSTP mp stp (f args)
-exprToSTP mp stp (App SMTEq [x,y::SMTExpr t]) = do
-  ndx <- exprToSTP mp stp x
-  ndy <- exprToSTP mp stp y
+exprToSTP mp qmp stp (QVar p q ann) = case Map.lookup p qmp of
+  Just mp' -> case Map.lookup p mp' of
+    Just expr -> return expr
+exprToSTP mp qmp stp e@(Const c ann) = case mangle of
+  PrimitiveMangling f -> do
+    let val = f c ann
+    case val of
+     BoolValue True -> stpTrueExpr (stpInstance stp)
+     BoolValue False -> stpFalseExpr (stpInstance stp)
+     BVValue { bvValueWidth = w
+             , bvValueValue = v }
+       -> stpBVConstFromDecStr (stpInstance stp) (fromIntegral w) (show v)
+     _ -> error $ "smtlib2-stp: STP backend doesn't support value "++show val
+  _ -> error $ "smtlib2-stp: STP backend doesn't support expression "++show e
+exprToSTP mp qmp stp (Let lvl defs body) = do
+  nqmp <- foldlM (\cmp (i,expr) -> do
+                     nd <- exprToSTP mp cmp stp expr
+                     return $ Map.insertWith Map.union lvl (Map.singleton i nd) cmp
+                 ) qmp (zip [0..] defs)
+  exprToSTP mp nqmp stp body
+exprToSTP mp qmp stp (App SMTEq [x,y::SMTExpr t]) = do
+  ndx <- exprToSTP mp qmp stp x
+  ndy <- exprToSTP mp qmp stp y
   case getSort (undefined::t) (extractAnnotation y) of
     Fix BoolSort -> stpIffExpr (stpInstance stp) ndx ndy
     _ -> stpEqExpr (stpInstance stp) ndx ndy
-exprToSTP mp stp (App SMTNot x) = do
-  ndx <- exprToSTP mp stp x
+exprToSTP mp qmp stp (App SMTNot x) = do
+  ndx <- exprToSTP mp qmp stp x
   stpNotExpr (stpInstance stp) ndx
-exprToSTP mp stp (App (SMTLogic And) xs) = do
-  nds <- mapM (exprToSTP mp stp) xs
+exprToSTP mp qmp stp (App (SMTLogic And) xs) = do
+  nds <- mapM (exprToSTP mp qmp stp) xs
   stpAndExpr (stpInstance stp) nds
-exprToSTP mp stp (App (SMTLogic Or) xs) = do
-  nds <- mapM (exprToSTP mp stp) xs
+exprToSTP mp qmp stp (App (SMTLogic Or) xs) = do
+  nds <- mapM (exprToSTP mp qmp stp) xs
   stpOrExpr (stpInstance stp) nds
-exprToSTP mp stp (App (SMTLogic XOr) xs) = do
-  n:ns <- mapM (exprToSTP mp stp) xs
+exprToSTP mp qmp stp (App (SMTLogic XOr) xs) = do
+  n:ns <- mapM (exprToSTP mp qmp stp) xs
   foldlM (stpXOrExpr (stpInstance stp)) n ns
-exprToSTP mp stp (App (SMTLogic Implies) [x,y]) = do
-  ndx <- exprToSTP mp stp x
-  ndy <- exprToSTP mp stp y
+exprToSTP mp qmp stp (App (SMTLogic Implies) [x,y]) = do
+  ndx <- exprToSTP mp qmp stp x
+  ndy <- exprToSTP mp qmp stp y
   stpImpliesExpr (stpInstance stp) ndx ndy
-exprToSTP mp stp (App SMTITE (c,ifT,ifF)) = do
-  ndC <- exprToSTP mp stp c
-  ndT <- exprToSTP mp stp ifT
-  ndF <- exprToSTP mp stp ifF
+exprToSTP mp qmp stp (App SMTITE (c,ifT,ifF)) = do
+  ndC <- exprToSTP mp qmp stp c
+  ndT <- exprToSTP mp qmp stp ifT
+  ndF <- exprToSTP mp qmp stp ifF
   stpITEExpr (stpInstance stp) ndC ndT ndF
-exprToSTP mp stp (App SMTSelect (arr,i)) = do
-  ndArr <- exprToSTP mp stp arr
-  let (argLst,_) = unpackArgs (\arg _ _ -> (exprToSTP mp stp arg,())) i (extractArgAnnotation i) ()
+exprToSTP mp qmp stp (App SMTSelect (arr,i)) = do
+  ndArr <- exprToSTP mp qmp stp arr
+  let (argLst,_) = unpackArgs (\arg _ _ -> (exprToSTP mp qmp stp arg,())) i (extractArgAnnotation i) ()
   [ndI] <- sequence argLst
   stpReadExpr (stpInstance stp) ndArr ndI
-exprToSTP mp stp (App SMTStore (arr,i,v)) = do
-  ndArr <- exprToSTP mp stp arr
-  let (argLst,_) = unpackArgs (\arg _ _ -> (exprToSTP mp stp arg,())) i (extractArgAnnotation i) ()
+exprToSTP mp qmp stp (App SMTStore (arr,i,v)) = do
+  ndArr <- exprToSTP mp qmp stp arr
+  let (argLst,_) = unpackArgs (\arg _ _ -> (exprToSTP mp qmp stp arg,())) i (extractArgAnnotation i) ()
   [ndI] <- sequence argLst
-  ndV <- exprToSTP mp stp v
+  ndV <- exprToSTP mp qmp stp v
   stpWriteExpr (stpInstance stp) ndArr ndI ndV
-exprToSTP mp stp (App SMTConcat (e1,e2)) = do
-  nd1 <- exprToSTP mp stp e1
-  nd2 <- exprToSTP mp stp e2
+exprToSTP mp qmp stp (App SMTConcat (e1,e2)) = do
+  nd1 <- exprToSTP mp qmp stp e1
+  nd2 <- exprToSTP mp qmp stp e2
   stpBVConcatExpr (stpInstance stp) nd1 nd2
-exprToSTP mp stp (App (SMTBVBin op) (e1::SMTExpr (BitVector t),e2)) = do
+exprToSTP mp qmp stp (App (SMTBVBin op) (e1::SMTExpr (BitVector t),e2)) = do
   let sort = getSort (undefined::BitVector t) (extractAnnotation e1)
       width = case sort of
         Fix (BVSort { bvSortWidth = w }) -> fromIntegral w
-  nd1 <- exprToSTP mp stp e1
-  nd2 <- exprToSTP mp stp e2
+  nd1 <- exprToSTP mp qmp stp e1
+  nd2 <- exprToSTP mp qmp stp e2
   (case op of
       BVAdd -> stpBVPlusExpr (stpInstance stp) width
       BVSub -> stpBVMinusExpr (stpInstance stp) width
@@ -178,9 +188,9 @@ exprToSTP mp stp (App (SMTBVBin op) (e1::SMTExpr (BitVector t),e2)) = do
       BVAnd -> stpBVAndExpr (stpInstance stp)
       BVOr -> stpBVOrExpr (stpInstance stp)
       BVXor -> stpBVXorExpr (stpInstance stp)) nd1 nd2
-exprToSTP mp stp (App (SMTBVComp op) (e1,e2)) = do
-  nd1 <- exprToSTP mp stp e1
-  nd2 <- exprToSTP mp stp e2
+exprToSTP mp qmp stp (App (SMTBVComp op) (e1,e2)) = do
+  nd1 <- exprToSTP mp qmp stp e1
+  nd2 <- exprToSTP mp qmp stp e2
   (case op of
       BVULE -> stpBVLeExpr
       BVULT -> stpBVLtExpr
@@ -190,17 +200,19 @@ exprToSTP mp stp (App (SMTBVComp op) (e1,e2)) = do
       BVSLT -> stpSBVLtExpr
       BVSGE -> stpSBVGeExpr
       BVSGT -> stpSBVGtExpr) (stpInstance stp) nd1 nd2
-exprToSTP mp stp (App (SMTBVUn op) e) = do
-  nd <- exprToSTP mp stp e
+exprToSTP mp qmp stp (App (SMTBVUn op) e) = do
+  nd <- exprToSTP mp qmp stp e
   (case op of
       BVNot -> stpBVNotExpr
       BVNeg -> stpBVUMinusExpr) (stpInstance stp) nd
-exprToSTP mp stp (App (SMTExtract prStart prLen) e) = do
-  n <- exprToSTP mp stp e
+exprToSTP mp qmp stp (App (SMTExtract prStart prLen) e) = do
+  n <- exprToSTP mp qmp stp e
   let start = reflectNat prStart 0
       len = reflectNat prLen 0
   stpBVExtract (stpInstance stp) n (fromIntegral $ start+len-1) (fromIntegral start)
-exprToSTP _ _ expr = error $ "smtlib2-stp: STP backend doesn't support expression."
+exprToSTP mp qmp stp (UntypedExpr e) = exprToSTP mp qmp stp e
+exprToSTP mp qmp stp (UntypedExprValue e) = exprToSTP mp qmp stp e
+exprToSTP _ _ _ expr = error $ "smtlib2-stp: STP backend doesn't support expression."
 
 stpToExpr :: DataTypeInfo -> Map (String,Integer) Integer -> Maybe Sort -> STPExpr -> (forall t. SMTType t => SMTExpr t -> a) -> IO a
 stpToExpr dts named expected expr f = do
@@ -243,7 +255,7 @@ stpToExpr dts named expected expr f = do
       error $ "smtlib2-stp: Can't convert expression "++repr++" to haskell."
       
     
-asBV :: SMTType t => SMTExpr t -> (forall bv. SMTType (BitVector bv) => SMTExpr (BitVector bv) -> a) -> a
+asBV :: SMTType t => SMTExpr t -> (forall bv. IsBitVector bv => SMTExpr (BitVector bv) -> a) -> a
 asBV (expr::SMTExpr t) f = case getSort (undefined::t) (extractAnnotation expr) of
   Fix (BVSort { bvSortWidth = w
               , bvSortUntyped = unt })
