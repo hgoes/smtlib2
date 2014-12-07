@@ -84,6 +84,7 @@ class (Ord t,Typeable t,
   additionalConstraints :: t -> SMTAnnotation t -> Maybe (SMTExpr t -> [SMTExpr Bool])
   additionalConstraints _ _ = Nothing
   annotationFromSort :: t -> Sort -> SMTAnnotation t
+  defaultExpr :: SMTAnnotation t -> SMTExpr t
 
 data ArgumentSort' a = ArgumentSort Integer
                      | NormalSort (Sort' a)
@@ -1140,3 +1141,27 @@ quantificationLevel (Named expr _ _) = quantificationLevel expr
 quantificationLevel (UntypedExpr e) = quantificationLevel e
 quantificationLevel (UntypedExprValue e) = quantificationLevel e
 quantificationLevel _ = 0
+
+inferSorts :: ArgumentSort -> Sort -> Map Integer Sort -> Map Integer Sort
+inferSorts (Fix (ArgumentSort i)) s mp = Map.insert i s mp
+inferSorts (Fix (NormalSort (ArraySort xs x))) (Fix (ArraySort ys y)) mp
+  = foldl (\cmp (x,y) -> inferSorts x y cmp
+          ) (inferSorts x y mp) (zip xs ys)
+inferSorts (Fix (NormalSort (NamedSort n1 xs))) (Fix (NamedSort n2 ys)) mp
+  | n1==n2 = foldl (\cmp (x,y) -> inferSorts x y cmp
+                   ) mp (zip xs ys)
+inferSorts _ _ mp = mp
+
+valueSort :: DataTypeInfo -> Value -> Sort
+valueSort _ (BoolValue _) = Fix BoolSort
+valueSort _ (IntValue _) = Fix IntSort
+valueSort _ (RealValue _) = Fix RealSort
+valueSort _ (BVValue w _) = Fix (BVSort w False)
+valueSort dts (ConstrValue _ _ (Just (sname,sargs))) = Fix $ NamedSort sname sargs
+valueSort dts (ConstrValue name args Nothing) = case Map.lookup name (constructors dts) of
+  Just (con,dt,tc) -> Fix $ NamedSort (dataTypeName dt) (fmap snd $ Map.toAscList infMp)
+    where
+      argTps = fmap (valueSort dts) args
+      conTps = fmap fieldSort (conFields con)
+      infMp = foldl (\cinf (tp,argTp) -> inferSorts tp argTp cinf
+                    ) Map.empty (zip conTps argTps)

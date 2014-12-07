@@ -174,6 +174,7 @@ instance SMTType Untyped where
     return $ \(UntypedExpr x) -> case cast x of
       Just x' -> constr x'
   annotationFromSort _ sort = withSort emptyDataTypeInfo sort ProxyArg
+  defaultExpr (ProxyArg (_::t) ann) = UntypedExpr (defaultExpr ann :: SMTExpr t)
 
 instance SMTType UntypedValue where
   type SMTAnnotation UntypedValue = ProxyArgValue
@@ -190,6 +191,8 @@ instance SMTType UntypedValue where
       (\u ann -> case asValueType u ann ProxyArgValue of
           Just r -> r
           Nothing -> error $ "annotationFromSort for non-value type "++show (typeOf u)++" used.")
+  defaultExpr (ProxyArgValue (_::t) ann)
+    = UntypedExprValue (defaultExpr ann :: SMTExpr t)
 
 instance SMTValue UntypedValue where
   unmangle = ComplexUnmangling $
@@ -211,6 +214,7 @@ instance SMTType Bool where
   getSort _ _ = Fix BoolSort
   annotationFromSort _ _ = ()
   asValueType x ann f = Just $ f x ann
+  defaultExpr _ = Const False ()
 
 instance SMTValue Bool where
   unmangle = PrimitiveUnmangling (\val _ -> case val of
@@ -225,6 +229,7 @@ instance SMTType Integer where
   getSort _ _ = Fix IntSort
   annotationFromSort _ _ = ()
   asValueType x ann f = Just $ f x ann
+  defaultExpr _ = Const 0 ()
 
 instance SMTValue Integer where
   unmangle = PrimitiveUnmangling (\val _ -> case val of
@@ -274,6 +279,7 @@ instance SMTType (Ratio Integer) where
   getSort _ _ = Fix RealSort
   annotationFromSort _ _ = ()
   asValueType x ann f = Just $ f x ann
+  defaultExpr _ = Const 0 ()
 
 instance SMTValue (Ratio Integer) where
   unmangle = PrimitiveUnmangling (\val _ -> case val of
@@ -320,6 +326,7 @@ instance (Args idx,SMTType val) => SMTType (SMTArray idx val) where
       getVal :: SMTArray i v -> v
       getVal _ = undefined
   asValueType _ _ _ = Nothing
+  defaultExpr ~(anni,annv) = App (SMTConstArray anni) (defaultExpr annv)
 
 instance (SMTType a) => Liftable (SMTExpr a) where
   type Lifted (SMTExpr a) i = SMTExpr (SMTArray i a)
@@ -901,6 +908,11 @@ instance SMTType a => SMTType (Maybe a) where
   annotationFromSort u (Fix (NamedSort "Maybe" [argSort])) = annotationFromSort (undefArg u) argSort
   asValueType (_::Maybe x) ann f = asValueType (undefined::x) ann $
                                    \(_::y) ann' -> f (undefined::Maybe y) ann'
+  defaultExpr ann = withUndef $
+                    \u -> App (SMTConstructor (nothing' ann)) ()
+    where
+      withUndef :: (a -> SMTExpr (Maybe a)) -> SMTExpr (Maybe a)
+      withUndef f = f undefined
 
 dtMaybe :: DataType
 dtMaybe = DataType { dataTypeName = "Maybe"
@@ -940,6 +952,20 @@ conJust
                                                         Just (Just (_::t)) -> True
                                                         _ -> False
            }
+
+nothing' :: SMTType a => SMTAnnotation a -> Constructor () (Maybe a)
+nothing' ann = withUndef $
+               \u -> Constructor [ProxyArg u ann] dtMaybe conNothing
+  where
+    withUndef :: (a -> Constructor () (Maybe a)) -> Constructor () (Maybe a)
+    withUndef f = f undefined
+
+just' :: SMTType a => SMTAnnotation a -> Constructor (SMTExpr a) (Maybe a)
+just' ann = withUndef $
+            \u -> Constructor [ProxyArg u ann] dtMaybe conJust
+  where
+    withUndef :: (a -> Constructor (SMTExpr a) (Maybe a)) -> Constructor (SMTExpr a) (Maybe a)
+    withUndef f = f undefined
 
 fieldFromJust :: DataField
 fieldFromJust = DataField { fieldName = "fromJust"
@@ -1006,6 +1032,7 @@ instance (Typeable a,SMTType a) => SMTType [a] where
   annotationFromSort u (Fix (NamedSort "List" [sort])) = annotationFromSort (undefArg u) sort
   asValueType (_::[a]) ann f = asValueType (undefined::a) ann $
                                \(_::b) ann' -> f (undefined::[b]) ann'
+  defaultExpr ann = App (SMTConstructor (nil' ann)) ()
 
 dtList :: DataType
 dtList = DataType { dataTypeName = "List"
@@ -1043,6 +1070,20 @@ conInsert = Constr { conName = "insert"
                                   Just ((_:_)::[t]) -> True
                                   _ -> False
                          }
+
+insert' :: SMTType a => SMTAnnotation a -> Constructor (SMTExpr a,SMTExpr [a]) [a]
+insert' ann = withUndef $
+              \u -> Constructor [ProxyArg u ann] dtList conInsert
+  where
+    withUndef :: (a -> Constructor (SMTExpr a,SMTExpr [a]) [a]) -> Constructor (SMTExpr a,SMTExpr [a]) [a]
+    withUndef f = f undefined
+
+nil' :: SMTType a => SMTAnnotation a -> Constructor () [a]
+nil' ann = withUndef $
+           \u -> Constructor [ProxyArg u ann] dtList conNil
+  where
+    withUndef :: (a -> Constructor () [a]) -> Constructor () [a]
+    withUndef f = f undefined
 
 fieldHead :: DataField
 fieldHead = DataField { fieldName = "head"
@@ -1119,6 +1160,7 @@ instance SMTType (BitVector BVUntyped) where
   getSort _ l = Fix (BVSort l True)
   annotationFromSort _ (Fix (BVSort l _)) = l
   asValueType x ann f = Just $ f x ann
+  defaultExpr bw = Const (BitVector 0) bw
 
 instance IsBitVector BVUntyped where
   getBVSize _ = id
@@ -1136,6 +1178,7 @@ instance TypeableNat n => SMTType (BitVector (BVTyped n)) where
   getSort _ _ = Fix (BVSort (reflectNat (Proxy::Proxy n) 0) False)
   annotationFromSort _ _ = ()
   asValueType x ann f = Just $ f x ann
+  defaultExpr _ = Const (BitVector 0) ()
 
 instance TypeableNat n => IsBitVector (BVTyped n) where
   getBVSize (_::Proxy (BVTyped n)) _ = reflectNat (Proxy::Proxy n) 0
@@ -1581,3 +1624,16 @@ instance Eq (Field a f) where
 
 instance Ord (Field a f) where
   compare = compareField
+
+valueToConst :: DataTypeInfo -> Value -> (forall a. SMTType a => [ProxyArg] -> a -> SMTAnnotation a -> b) -> b
+valueToConst _ (BoolValue c) app = app [] c ()
+valueToConst _ (IntValue c) app = app [] c ()
+valueToConst _ (RealValue c) app = app [] c ()
+valueToConst _ (BVValue w v) app = reifyNat w (\(_::Proxy n) -> app [] (BitVector v::BitVector (BVTyped n)) ())
+valueToConst dts (ConstrValue name args sort) app = case Map.lookup name (constructors dts) of
+  Just (con,dt,tc) -> construct con (case sort of
+                                      Nothing -> genericReplicate (argCount tc) Nothing
+                                      Just (_,pars) -> [ Just $ withSort dts par ProxyArg
+                                                       | par <- pars ])
+                      (fmap (\val -> valueToConst dts val AnyValue) args)
+                      app

@@ -1586,16 +1586,6 @@ fieldParser
               proxies = fmap (\tp -> withSort dts tp ProxyArg) tps
     _ -> Nothing
 
-inferSorts :: ArgumentSort -> Sort -> Map Integer Sort -> Map Integer Sort
-inferSorts (Fix (ArgumentSort i)) s mp = Map.insert i s mp
-inferSorts (Fix (NormalSort (ArraySort xs x))) (Fix (ArraySort ys y)) mp
-  = foldl (\cmp (x,y) -> inferSorts x y cmp
-          ) (inferSorts x y mp) (zip xs ys)
-inferSorts (Fix (NormalSort (NamedSort n1 xs))) (Fix (NamedSort n2 ys)) mp
-  | n1==n2 = foldl (\cmp (x,y) -> inferSorts x y cmp
-                   ) mp (zip xs ys)
-inferSorts _ _ mp = mp
-
 withPipe :: MonadIO m => String -> [String] -> SMT' m a -> m a
 withPipe prog args act = do
   pipe <- liftIO $ createSMTPipe prog args

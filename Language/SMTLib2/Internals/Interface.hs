@@ -657,10 +657,6 @@ head' = App (SMTBuiltIn "head" unit)
 tail' :: (SMTType a,Unit (SMTAnnotation a)) => SMTExpr [a] -> SMTExpr [a]
 tail' = App (SMTBuiltIn "tail" unit)
 
--- | Put a new element at the front of the list
-insert' :: (SMTType a,Unit (SMTAnnotation a)) => SMTExpr a -> SMTExpr [a] -> SMTExpr [a]
-insert' = curry (App (SMTBuiltIn "insert" unit))
-
 -- | Checks if a list is empty.
 isNil :: (SMTType a) => SMTExpr [a] -> SMTExpr Bool
 isNil (e::SMTExpr [a]) = is e (Constructor [ProxyArg (undefined::[a]) (extractAnnotation e)] dtList conNil:: Constructor () [a])
