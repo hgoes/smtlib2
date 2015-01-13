@@ -4,8 +4,6 @@ module Language.SMTLib2.Internals where
 import Language.SMTLib2.Internals.Operators
 import Language.SMTLib2.Strategy
 
-import Control.Monad.Reader hiding (mapM,mapM_)
-import Control.Monad.State hiding (mapM,mapM_)
 import Data.Typeable
 import Data.Map as Map hiding (assocs,foldl)
 import Data.Ratio
@@ -27,7 +25,9 @@ import Data.Char (isDigit)
 
 -- Monad stuff
 import Control.Applicative (Applicative(..))
-import Control.Monad.State.Lazy as Lazy (StateT)
+import Control.Monad.Trans
+import Control.Monad.Fix
+import Control.Monad (ap,when)
 
 data SMTRequest response where
   SMTSetLogic :: String -> SMTRequest ()
@@ -35,12 +35,13 @@ data SMTRequest response where
   SMTSetOption :: SMTOption -> SMTRequest ()
   SMTAssert :: SMTExpr Bool -> Maybe InterpolationGroup -> Maybe ClauseId -> SMTRequest ()
   SMTCheckSat :: Maybe Tactic -> CheckSatLimits -> SMTRequest CheckSatResult
+  SMTDeclaredDataTypes :: SMTRequest DataTypeInfo
   SMTDeclareDataTypes :: TypeCollection -> SMTRequest ()
   SMTDeclareSort :: String -> Integer -> SMTRequest ()
   SMTPush :: SMTRequest ()
   SMTPop :: SMTRequest ()
-  SMTDefineFun :: SMTType res => FunInfo -> [FunInfo] -> SMTExpr res -> SMTRequest ()
-  SMTDeclareFun :: FunInfo -> SMTRequest ()
+  SMTDefineFun :: (Args arg,SMTType res) => Maybe String -> Proxy arg -> ArgAnnotation arg -> SMTExpr res -> SMTRequest Integer
+  SMTDeclareFun :: FunInfo -> SMTRequest Integer
   SMTGetValue :: SMTValue t => SMTExpr t -> SMTRequest t
   SMTGetModel :: SMTRequest SMTModel
   SMTGetProof :: SMTRequest (SMTExpr Bool)
@@ -50,6 +51,9 @@ data SMTRequest response where
   SMTComment :: String -> SMTRequest ()
   SMTExit :: SMTRequest ()
   SMTApply :: Tactic -> SMTRequest [SMTExpr Bool]
+  SMTNameExpr :: String -> SMTExpr t -> SMTRequest Integer
+  SMTNewInterpolationGroup :: SMTRequest InterpolationGroup
+  SMTNewClauseId :: SMTRequest ClauseId
   deriving Typeable
 
 data SMTModel = SMTModel { modelFunctions :: Map Integer (Integer,[ProxyArg],SMTExpr Untyped)
@@ -68,7 +72,9 @@ data CheckSatResult
   deriving (Show,Eq,Ord,Typeable)
 
 class Monad m => SMTBackend a m where
-  smtHandle :: Typeable response => a -> SMTState -> SMTRequest response -> m response
+  smtHandle :: Typeable response => a -> SMTRequest response -> m (response,a)
+  smtGetNames :: a -> m (Integer -> String)
+  smtNextName :: a -> m (Maybe String -> String)
 
 -- | Haskell types which can be represented in SMT
 class (Ord t,Typeable t,
@@ -92,7 +98,7 @@ data ArgumentSort' a = ArgumentSort Integer
 type ArgumentSort = Fix ArgumentSort'
 
 data Unmangling a = PrimitiveUnmangling (Value -> SMTAnnotation a -> Maybe a)
-                  | ComplexUnmangling (forall m. Monad m => (forall b. SMTValue b => SMTExpr b -> SMTAnnotation b -> m b) -> SMTExpr a -> SMTAnnotation a -> m (Maybe a))
+                  | ComplexUnmangling (forall m s. Monad m => (forall b. SMTValue b => s -> SMTExpr b -> SMTAnnotation b -> m (b,s)) -> s -> SMTExpr a -> SMTAnnotation a -> m (Maybe a,s))
 
 data Mangling a = PrimitiveMangling (a -> SMTAnnotation a -> Value)
                 | ComplexMangling (a -> SMTAnnotation a -> SMTExpr a)
@@ -117,64 +123,49 @@ infix 4 .<., .<=., .>=., .>.
 -- | An array which maps indices of type /i/ to elements of type /v/.
 data SMTArray (i :: *) (v :: *) = SMTArray deriving (Eq,Ord,Typeable)
 
-data FunInfo = forall arg r. (Args arg,SMTType r) => FunInfo { funInfoId :: Integer
-                                                             , funInfoProxy :: Proxy (arg,r)
+data FunInfo = forall arg r. (Args arg,SMTType r) => FunInfo { funInfoProxy :: Proxy (arg,r)
                                                              , funInfoArgAnn :: ArgAnnotation arg
                                                              , funInfoResAnn :: SMTAnnotation r
-                                                             , funInfoName :: Maybe (String,Integer)
+                                                             , funInfoName :: Maybe String
                                                              }
-
-data SMTState = SMTState { nextVar :: Integer
-                         , nextInterpolationGroup :: Integer
-                         , nextClauseId :: Integer
-                         , allVars :: Map Integer FunInfo
-                         , namedVars :: Map (String,Integer) Integer
-                         , nameCount :: Map String Integer
-                         , declaredDataTypes :: DataTypeInfo }
 
 data AnyBackend m = forall b. SMTBackend b m => AnyBackend b
 
 -- | The SMT monad used for communating with the SMT solver
-data SMT' m a = SMT { runSMT :: ReaderT (AnyBackend m) (Lazy.StateT SMTState m) a }
+data SMT' m a = SMT { runSMT :: forall b. SMTBackend b m => b -> m (a,b) }
 
 type SMT = SMT' IO
 
 instance Functor m => Functor (SMT' m) where
-  fmap f = SMT . fmap f . runSMT
+  fmap f (SMT g) = SMT $ \b -> fmap (\(r,b) -> (f r,b)) (g b)
 
 instance Monad m => Monad (SMT' m) where
-  return = SMT . return
-  m >>= f = SMT $ (runSMT m) >>= runSMT . f
+  return x = SMT $ \b -> return (x,b)
+  (SMT f) >>= g = SMT $ \b -> do
+    (r,b1) <- f b
+    case g r of
+     SMT act -> act b1
 
 instance MonadIO m => MonadIO (SMT' m) where
-  liftIO = SMT . liftIO
+  liftIO act = SMT $ \b -> do
+    res <- liftIO act
+    return (res,b)
 
 instance MonadFix m => MonadFix (SMT' m) where
-  mfix f = SMT $ mfix (runSMT . f)
+  mfix f = SMT $ \b -> mfix (\(~(res,_)) -> case f res of
+                              ~(SMT act) -> act b)
 
 instance (Monad m,Functor m) => Applicative (SMT' m) where
   pure = return
   (<*>) = ap
 
---askSMT :: Monad m => SMT' b m b
---askSMT = SMT ask
-
-smtBackend :: Monad m => (forall b. SMTBackend b m => b -> SMT' m a) -> SMT' m a
-smtBackend f = SMT $ do
-  AnyBackend backend <- ask
-  runSMT $ f backend
-
-getSMT :: Monad m => SMT' m SMTState
-getSMT = SMT get
-
-putSMT :: Monad m => SMTState -> SMT' m ()
-putSMT = SMT . put
-
-modifySMT :: Monad m => (SMTState -> SMTState) -> SMT' m ()
-modifySMT f = SMT $ modify f
+smtBackend :: Monad m => (forall b. SMTBackend b m => b -> m (res,b)) -> SMT' m res
+smtBackend f = SMT f
 
 instance MonadTrans SMT' where
-  lift = SMT . lift . lift
+  lift act = SMT $ \b -> do
+    res <- act
+    return (res,b)
 
 data Untyped = forall t. SMTType t => Untyped t deriving Typeable
 
@@ -209,6 +200,7 @@ instance Show UntypedValue where
 data SMTExpr t where
   Var :: SMTType t => Integer -> SMTAnnotation t -> SMTExpr t
   QVar :: SMTType t => Integer -> Integer -> SMTAnnotation t -> SMTExpr t
+  FunArg :: SMTType t => Integer -> SMTAnnotation t -> SMTExpr t
   Const :: SMTValue t => t -> SMTAnnotation t -> SMTExpr t
   AsArray :: (Args arg,SMTType res) => SMTFunction arg res -> ArgAnnotation arg
              -> SMTExpr (SMTArray arg res)
@@ -406,26 +398,16 @@ withSMTBackendExitCleanly :: SMTBackend b IO => b -> SMT a -> IO a
 withSMTBackendExitCleanly backend act
   = bracket
     (return backend)
-    (\backend -> smtHandle backend emptySMTState SMTExit)
-    (\backend -> withSMTBackend' (AnyBackend backend) False act)
+    (\backend -> smtHandle backend SMTExit)
+    (\backend -> withSMTBackend' backend False act)
 
-withSMTBackend :: SMTBackend b m => b -> SMT' m a -> m a
-withSMTBackend backend act = withSMTBackend' (AnyBackend backend) True act
+withSMTBackend :: SMTBackend a m => a -> SMT' m b -> m b
+withSMTBackend b = withSMTBackend' b True
 
-emptySMTState :: SMTState
-emptySMTState = SMTState { nextVar = 0
-                         , nextInterpolationGroup = 0
-                         , nextClauseId = 0
-                         , allVars = Map.empty
-                         , namedVars = Map.empty
-                         , nameCount = Map.empty
-                         , declaredDataTypes = emptyDataTypeInfo
-                         }
-
-withSMTBackend' :: AnyBackend m -> Bool -> SMT' m a -> m a
-withSMTBackend' backend@(AnyBackend b) mustExit f = do
-  (res,st) <- runStateT (runReaderT (runSMT f) backend) emptySMTState
-  when mustExit (smtHandle b st SMTExit)
+withSMTBackend' :: SMTBackend a m => a -> Bool -> SMT' m b -> m b
+withSMTBackend' backend mustExit f = do
+  (res,nbackend) <- runSMT f backend
+  when mustExit (smtHandle nbackend SMTExit >> return ())
   return res
 
 funInfoSort :: FunInfo -> Sort
@@ -438,7 +420,7 @@ funInfoArgSorts (FunInfo { funInfoProxy = _::Proxy (a,t)
                          , funInfoArgAnn = ann })
   = getSorts (undefined::a) ann
 
-newVariableId :: (Monad m) => Maybe String -> (Integer -> Maybe Integer -> (r,FunInfo)) -> SMT' m r
+{-newVariableId :: (Monad m) => Maybe String -> (Integer -> Maybe Integer -> (r,FunInfo)) -> SMT' m r
 newVariableId name f = do
   st <- getSMT
   let idx = nextVar st
@@ -501,7 +483,7 @@ nameVariable :: Monad m => Integer -> String -> SMT' m ()
 nameVariable var name = do
   st <- getSMT
   let c = Map.findWithDefault 0 name (nameCount st)
-  putSMT $ st { nameCount = Map.insert name (c+1) (nameCount st) }
+  putSMT $ st { nameCount = Map.insert name (c+1) (nameCount st) }-}
 
 argsSignature :: Args a => a -> ArgAnnotation a -> [Sort]
 argsSignature arg ann
@@ -536,13 +518,14 @@ sortToArgumentSort :: Sort -> ArgumentSort
 sortToArgumentSort (Fix s) = Fix (NormalSort (fmap sortToArgumentSort s))
 
 declareType :: (Monad m,SMTType t) => t -> SMTAnnotation t -> SMT' m ()
-declareType (_::t) ann = do
-  st <- getSMT
-  let (colls,ndts) = getNewTypeCollections (Proxy::Proxy t) ann
-                     (declaredDataTypes st)
-      nst = st { declaredDataTypes = ndts }
-  putSMT nst
-  smtBackend $ \backend -> mapM_ (\coll -> lift $ smtHandle backend nst (SMTDeclareDataTypes coll)) colls
+declareType (_::t) ann = smtBackend $ \b0 -> do
+  (dts,b1) <- smtHandle b0 SMTDeclaredDataTypes
+  let (colls,ndts) = getNewTypeCollections (Proxy::Proxy t) ann dts
+  b2 <- foldlM (\backend coll -> do
+                   ((),nbackend) <- smtHandle backend (SMTDeclareDataTypes coll)
+                   return nbackend
+               ) b1 colls
+  return ((),b2)
 
 -- Data type info
 
@@ -550,6 +533,7 @@ data DataTypeInfo = DataTypeInfo { structures :: [TypeCollection]
                                  , datatypes :: Map String (DataType,TypeCollection)
                                  , constructors :: Map String (Constr,DataType,TypeCollection)
                                  , fields :: Map String (DataField,Constr,DataType,TypeCollection) }
+                  deriving Typeable
 
 data TypeCollection = TypeCollection { argCount :: Integer
                                      , dataTypes :: [DataType]
@@ -622,6 +606,7 @@ data Constr = Constr { conName :: String
                      , construct :: forall r. [Maybe ProxyArg] -> [AnyValue]
                                     -> (forall t. SMTType t => [ProxyArg] -> t -> SMTAnnotation t -> r)
                                     -> r
+                     , conUndefinedArgs :: forall r. [ProxyArg] -> (forall arg. Args arg => arg -> ArgAnnotation arg -> r) -> r
                      , conTest :: forall t. SMTType t => [ProxyArg] -> t -> Bool
                      }
 
@@ -743,6 +728,44 @@ unescapeName' (x:xs) = do
   (name,nc) <- unescapeName' xs
   return (x:name,nc)
 unescapeName' "" = Just ("",0)
+
+data SMTState = SMTState { nextVar :: Integer
+                         , nextInterpolationGroup :: Integer
+                         , nextClauseId :: Integer
+                         , allVars :: Map Integer (FunInfo,Integer)
+                         , namedVars :: Map (String,Integer) Integer
+                         , nameCount :: Map String Integer
+                         , declaredDataTypes :: DataTypeInfo }
+
+emptySMTState :: SMTState
+emptySMTState = SMTState { nextVar = 0
+                         , nextInterpolationGroup = 0
+                         , nextClauseId = 0
+                         , allVars = Map.empty
+                         , namedVars = Map.empty
+                         , nameCount = Map.empty
+                         , declaredDataTypes = emptyDataTypeInfo
+                         }
+
+smtStateAddFun :: FunInfo -> SMTState -> (Integer,String,SMTState)
+smtStateAddFun finfo st
+  = (v,name',nst)
+  where
+    v = nextVar st
+    nameBase = case funInfoName finfo of
+      Nothing -> "var"
+      Just n -> n
+    nc = case Map.lookup nameBase (nameCount st) of
+      Just n -> n
+      Nothing -> 0
+    name' = if nc==0
+            then nameBase
+            else nameBase++"_"++show nc
+    nst = st { nextVar = v+1
+             , allVars = Map.insert v (finfo,nc) (allVars st)
+             , namedVars = Map.insert (nameBase,nc) v (namedVars st)
+             , nameCount = Map.insert nameBase (nc+1) (nameCount st)
+             }
 
 -- BitVectors
 
@@ -999,7 +1022,11 @@ type BV32 = BitVector (BVTyped N32)
 type BV64 = BitVector (BVTyped N64)
 
 instance Monad m => SMTBackend (AnyBackend m) m where
-  smtHandle (AnyBackend b) = smtHandle b
+  smtHandle (AnyBackend b) req = do
+    (res,nb) <- smtHandle b req
+    return (res,AnyBackend nb)
+  smtGetNames (AnyBackend b) = smtGetNames b
+  smtNextName (AnyBackend b) = smtNextName b
 
 instance Show (SMTExpr t) where
   showsPrec = showExpr
@@ -1017,6 +1044,10 @@ showExpr p (QVar lvl v ann) = showParen (p>10) (showString "QVar " .
                                                 showsPrec 11 v .
                                                 showChar ' ' .
                                                 showsPrec 11 ann)
+showExpr p (FunArg v ann) = showParen (p>10) (showString "FunArg " .
+                                              showsPrec 11 v .
+                                              showChar ' ' .
+                                              showsPrec 11 ann)
 showExpr p (Const c ann) = showParen (p>10) (showString "Const " .
                                              showsPrec 11 c .
                                              showChar ' ' .
@@ -1059,8 +1090,10 @@ showExpr p (InternalObj obj ann) = showParen (p>10) (showString "InternalObj " .
                                                      showsPrec 11 obj .
                                                      showChar ' ' .
                                                      showsPrec 11 ann)
-showExpr p (UntypedExpr e) = showExpr p e
-showExpr p (UntypedExprValue e) = showExpr p e
+showExpr p (UntypedExpr e) = showParen (p>10) (showString "UntypedExpr " .
+                                               showExpr 11 e)
+showExpr p (UntypedExprValue e) = showParen (p>10) (showString "UntypedExprValue " .
+                                                    showExpr 11 e)
 
 instance Show (SMTFunction arg res) where
   showsPrec _ SMTEq = showString "SMTEq"

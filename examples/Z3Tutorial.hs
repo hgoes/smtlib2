@@ -279,11 +279,15 @@ instance (SMTType a,SMTType b) => SMTType (Pair a b) where
        annotationFromSort (undefined::b) y)
 
 instance (SMTValue a,SMTValue b) => SMTValue (Pair a b) where
-  unmangle (ConstrValue "Pair" [x,y] _) (ann1,ann2) = do
-      vx <- unmangle x ann1
-      vy <- unmangle y ann2
+  unmangle = case (unmangle,unmangle) of
+    (PrimitiveUnmangling f1,PrimitiveUnmangling f2)
+      -> PrimitiveUnmangling $ \(ConstrValue "Pair" [x,y] _) (ann1,ann2) -> do
+      vx <- f1 x ann1
+      vy <- f2 y ann2
       return $ Pair vx vy
-  mangle (Pair x y) (ann1,ann2) = ConstrValue "Pair" [mangle x ann1,mangle y ann2] Nothing
+  mangle = case (mangle,mangle) of
+    (PrimitiveMangling f1,PrimitiveMangling f2)
+      -> PrimitiveMangling $ \(Pair x y) (ann1,ann2) -> ConstrValue "Pair" [f1 x ann1,f2 y ann2] Nothing
 
 example20 :: SMT (Pair Integer Integer,Pair Integer Integer)
 example20 = do
@@ -317,10 +321,12 @@ instance SMTType Main.S where
   annotationFromSort _ _ = ()
 
 instance SMTValue Main.S where
-  unmangle (ConstrValue "A" [] _) _ = Just A
-  unmangle (ConstrValue "B" [] _) _ = Just B
-  unmangle (ConstrValue "C" [] _) _ = Just C
-  mangle con _ = ConstrValue (show con) [] Nothing
+  unmangle = PrimitiveUnmangling unm
+    where
+      unm (ConstrValue "A" [] _) _ = Just A
+      unm (ConstrValue "B" [] _) _ = Just B
+      unm (ConstrValue "C" [] _) _ = Just C
+  mangle = PrimitiveMangling $ \con _ -> ConstrValue (show con) [] Nothing
 
 example21 :: SMT (Bool,Bool)
 example21 = do
@@ -395,13 +401,19 @@ instance SMTType a => SMTType (Lst a) where
     = annotationFromSort (undefined::a) x
 
 instance (SMTValue a) => SMTValue (Lst a) where
-  unmangle (ConstrValue "Nil" [] _) _ = return Nil
-  unmangle (ConstrValue "Cons" [h,t] _) ann = do
-    x <- unmangle h ann
-    xs <- unmangle t ann
-    return (Cons x xs)
-  mangle (Nil::Lst a) ann = ConstrValue "Nil" [] (Just ("Lst",[getSort (undefined::a) ann]))
-  mangle p@(Cons x xs) ann = ConstrValue "Cons" [mangle x ann,mangle xs ann] Nothing
+  unmangle = case unmangle of
+    PrimitiveUnmangling f -> PrimitiveUnmangling (unm f)
+    where
+      unm _ (ConstrValue "Nil" [] _) _ = return Nil
+      unm f (ConstrValue "Cons" [h,t] _) ann = do
+        x <- f h ann
+        xs <- unm f t ann
+        return (Cons x xs)
+  mangle = case mangle of
+    PrimitiveMangling f -> PrimitiveMangling (mang f)
+    where
+      mang _ (Nil::Lst a) ann = ConstrValue "Nil" [] (Just ("Lst",[getSort (undefined::a) ann]))
+      mang f p@(Cons x xs) ann = ConstrValue "Cons" [f x ann,mang f xs ann] Nothing
 
 example22 :: SMT ((Lst Integer,Lst Integer,Lst Integer,Integer),Bool)
 example22 = do
@@ -454,30 +466,46 @@ instance SMTType t => SMTType (TreeList t) where
     = annotationFromSort (undefined::t) s
 
 instance SMTValue t => SMTValue (Tree t) where
-  unmangle (ConstrValue "Leaf" [] _) _ = Just Leaf
-  unmangle (ConstrValue "Node" [v,c] _) ann = do
-    val <- unmangle v ann
-    childs <- unmangle c ann
-    return $ Node val childs
-  unmangle _ _ = Nothing
-  mangle (Leaf::Tree t) ann = ConstrValue "Leaf" []
-                              (Just ("Tree",[getSort (undefined::t) ann]))
-  mangle (Node v c) ann = ConstrValue "Node"
-                          [mangle v ann,
-                           mangle c ann] Nothing
+  unmangle = case (unmangle,unmangle) of
+    (PrimitiveUnmangling f1,~(PrimitiveUnmangling f2))
+      -> PrimitiveUnmangling (unm f1 f2)
+    where
+      unm _ _ (ConstrValue "Leaf" [] _) _ = Just Leaf
+      unm f1 f2 (ConstrValue "Node" [v,c] _) ann = do
+        val <- f1 v ann
+        childs <- f2 c ann
+        return $ Node val childs
+      unm _ _ _ _ = Nothing
+  mangle = case (mangle,mangle) of
+    (PrimitiveMangling f1,~(PrimitiveMangling f2))
+      -> PrimitiveMangling (mang f1 f2)
+    where
+      mang _ _ (Leaf::Tree t) ann = ConstrValue "Leaf" []
+                                    (Just ("Tree",[getSort (undefined::t) ann]))
+      mang f1 f2 (Node v c) ann = ConstrValue "Node"
+                                  [f1 v ann,
+                                   f2 c ann] Nothing
 
 instance SMTValue t => SMTValue (TreeList t) where
-  unmangle (ConstrValue "TNil" [] _) _ = Just TNil
-  unmangle (ConstrValue "TCons" [v,c] _) ann = do
-    x <- unmangle v ann
-    xs <- unmangle c ann
-    return $ TCons x xs
-  unmangle _ _ = Nothing
-  mangle (TNil::TreeList t) ann = ConstrValue "TNil" []
-                                  (Just ("TreeList",[getSort (undefined::t) ann]))
-  mangle (TCons x xs) ann = ConstrValue "TCons"
-                            [mangle x ann,
-                             mangle xs ann] Nothing
+  unmangle = case (unmangle,unmangle) of
+    (PrimitiveUnmangling f1,~(PrimitiveUnmangling f2))
+      -> PrimitiveUnmangling (unm f1 f2)
+    where
+      unm _ _ (ConstrValue "TNil" [] _) _ = Just TNil
+      unm f1 f2 (ConstrValue "TCons" [v,c] _) ann = do
+        x <- f1 v ann
+        xs <- f2 c ann
+        return $ TCons x xs
+      unm _ _ _ _ = Nothing
+  mangle = case (mangle,mangle) of
+    (PrimitiveMangling f1,~(PrimitiveMangling f2))
+      -> PrimitiveMangling (mang f1 f2)
+    where
+      mang _ _ (TNil::TreeList t) ann = ConstrValue "TNil" []
+                                        (Just ("TreeList",[getSort (undefined::t) ann]))
+      mang f1 f2 (TCons x xs) ann = ConstrValue "TCons"
+                                    [f1 x ann,
+                                     f2 xs ann] Nothing
 
 tcTree :: TypeCollection
 tcTree = TypeCollection { argCount = 1

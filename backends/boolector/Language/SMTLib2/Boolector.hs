@@ -4,7 +4,6 @@ import Language.SMTLib2
 import Language.SMTLib2.Internals
 import Language.SMTLib2.Internals.Operators
 
-import Data.IORef
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Fix
@@ -12,6 +11,7 @@ import Data.Bits
 import Data.Typeable
 import Data.Proxy
 import Data.Foldable (foldlM)
+import Data.List (genericIndex)
 
 import Foreign.Ptr
 import Foreign.C
@@ -19,8 +19,10 @@ import Foreign.Marshal
 import Foreign.Storable
 
 data BoolectorBackend = BoolectorBackend { boolectorInstance :: Btor
-                                         , boolectorVars :: IORef (Map Integer BtorNode)
-                                         , boolectorAssumeState :: IORef Bool
+                                         , boolectorNextVar :: Integer
+                                         , boolectorNameCount :: Map String Integer
+                                         , boolectorVars :: Map Integer (BtorNode,String)
+                                         , boolectorAssumeState :: Bool
                                          }
 
 withBoolector :: SMT' IO a -> IO a
@@ -31,69 +33,82 @@ withBoolector act = do
 boolectorBackend :: IO BoolectorBackend
 boolectorBackend = do
   btor <- boolectorNew
-  boolectorEnableIncUsage btor
-  vars <- newIORef Map.empty
-  assumeState <- newIORef False
   return $ BoolectorBackend { boolectorInstance = btor
-                            , boolectorVars = vars
-                            , boolectorAssumeState = assumeState }
+                            , boolectorNextVar = 0
+                            , boolectorNameCount = Map.empty
+                            , boolectorVars = Map.empty
+                            , boolectorAssumeState = False }
 
 instance SMTBackend BoolectorBackend IO where
-  smtHandle _ _ (SMTSetLogic _) = return ()
-  smtHandle _ _ (SMTGetInfo SMTSolverName) = return "boolector"
-  smtHandle _ _ (SMTGetInfo SMTSolverVersion) = return "unknown"
-  smtHandle btor _ (SMTSetOption (ProduceModels True)) = boolectorEnableModelGen (boolectorInstance btor)
-  smtHandle _ _ (SMTSetOption _) = return ()
-  smtHandle btor _ (SMTDeclareFun name) = do
+  smtGetNames btor = return $ \i -> case Map.lookup i (boolectorVars btor) of
+                                     Just (_,name) -> name
+  smtNextName btor = return $ \name -> case name of
+                                        Nothing -> escapeName (Right $ boolectorNextVar btor)
+                                        Just name' -> escapeName $ Left
+                                                      (name',
+                                                       Map.findWithDefault 0 name'
+                                                       (boolectorNameCount btor))
+  smtHandle btor (SMTSetLogic _) = return ((),btor)
+  smtHandle btor (SMTGetInfo SMTSolverName) = return ("boolector",btor)
+  smtHandle btor (SMTGetInfo SMTSolverVersion) = return ("unknown",btor)
+  smtHandle btor (SMTSetOption (ProduceModels True)) = do
+    boolectorEnableModelGen (boolectorInstance btor)
+    return ((),btor)
+  smtHandle btor (SMTSetOption _) = return ((),btor)
+  smtHandle btor SMTDeclaredDataTypes = return (emptyDataTypeInfo,btor)
+  smtHandle btor (SMTDeclareFun name) = do
     case funInfoArgSorts name of
       [] -> return ()
       _ -> error "smtlib2-boolector: No support for uninterpreted functions."
     mkVar btor name (funInfoSort name)
-    return ()
-  smtHandle btor _ (SMTAssert expr Nothing Nothing) = do
-    isAssume <- readIORef (boolectorAssumeState btor)
-    mp <- readIORef (boolectorVars btor)
-    nd <- exprToNode mp Map.empty btor expr
-    if isAssume
+  smtHandle btor (SMTAssert expr Nothing Nothing) = do
+    nd <- exprToNode [] Map.empty btor expr
+    if boolectorAssumeState btor
       then boolectorAssume (boolectorInstance btor) nd
       else boolectorAssert (boolectorInstance btor) nd
-  smtHandle btor _ (SMTCheckSat _ _) = do
+    return ((),btor)
+  smtHandle btor (SMTCheckSat _ _) = do
     res <- boolectorSat (boolectorInstance btor)
-    return $ if res
-             then Sat
-             else Unsat
-  smtHandle _ _ (SMTDeclareDataTypes _) = error "smtlib2-boolector: No support for data-types."
-  smtHandle _ _ (SMTDeclareSort _ _) = error "smtlib2-boolector: No support for sorts."
-  smtHandle btor _ SMTPush = do
-    isAssume <- readIORef (boolectorAssumeState btor)
-    if isAssume
+    return (if res
+            then Sat
+            else Unsat,btor)
+  smtHandle _ (SMTDeclareDataTypes _) = error "smtlib2-boolector: No support for data-types."
+  smtHandle _ (SMTDeclareSort _ _) = error "smtlib2-boolector: No support for sorts."
+  smtHandle btor SMTPush
+    = if boolectorAssumeState btor
       then error $ "smtlib2-boolector: Only one stack level is supported"
-      else return ()
-    writeIORef (boolectorAssumeState btor) True
-  smtHandle btor _ SMTPop = writeIORef (boolectorAssumeState btor) False
-  smtHandle btor _ (SMTDefineFun name [] expr) = do
-    mp <- readIORef (boolectorVars btor)
-    nd <- exprToNode mp Map.empty btor expr
-    modifyIORef (boolectorVars btor) (Map.insert (funInfoId name) nd)
-  smtHandle btor _ (SMTDefineFun name args expr) = do
-    params <- mapM (\info -> do
-                       let w = case funInfoSort info of
-                             Fix BoolSort -> 1
-                             Fix (BVSort { bvSortWidth = w' }) -> w'
-                             sort -> error $ "smtlib2-boolector: Parameter type "++show sort++" not supported."
-                       res <- boolectorParam (boolectorInstance btor) (fromIntegral w)
-                              (escapeName $ case funInfoName info of
-                                  Nothing -> Right $ funInfoId info
-                                  Just name' -> Left name')
-                       return (funInfoId info,res)
-                   ) args
-    mp <- readIORef (boolectorVars btor)
-    nd <- exprToNode (Map.union mp (Map.fromList params)) Map.empty btor expr
-    fun <- boolectorFun (boolectorInstance btor) (fmap snd params) nd
-    modifyIORef (boolectorVars btor) (Map.insert (funInfoId name) fun)
-  smtHandle btor st (SMTGetValue (expr :: SMTExpr t)) = do
-    mp <- readIORef (boolectorVars btor)
-    nd <- exprToNode mp Map.empty btor expr
+      else return ((),btor { boolectorAssumeState = True })
+  smtHandle btor SMTPop = return ((),btor { boolectorAssumeState = False })
+  smtHandle btor (SMTDefineFun name (_::Proxy arg) ann expr) = do
+    nd <- case getTypes (undefined::arg) ann of
+      [] -> exprToNode [] Map.empty btor expr
+      argTps -> do
+        params <- mapM (\(ProxyArg u ann,i) -> do
+                           let w = case getSort u ann of
+                                 Fix BoolSort -> 1
+                                 Fix (BVSort { bvSortWidth = w' }) -> w'
+                                 sort -> error $ "smtlib2-boolector: Parameter type "++show sort++" not supported."
+                           res <- boolectorParam (boolectorInstance btor) (fromIntegral w)
+                                  ("farg_"++show i)
+                           return res
+                       ) (zip argTps [0..])
+        nd <- exprToNode params Map.empty btor expr
+        boolectorFun (boolectorInstance btor) params nd
+    return (vid,btor { boolectorNextVar = vid+1
+                     , boolectorNameCount = ncs
+                     , boolectorVars = Map.insert vid (nd,rname)
+                                       (boolectorVars btor) })
+    where
+      vid = boolectorNextVar btor
+      (rname,ncs) = case name of
+        Nothing -> (escapeName (Right vid),boolectorNameCount btor)
+        Just name' -> let (nc,ncs) = case Map.insertLookupWithKey (const (+)) name' 1
+                                          (boolectorNameCount btor) of
+                                      (Just nc,ncs) -> (nc,ncs)
+                                      (Nothing,ncs) -> (0,ncs)
+                      in (escapeName (Left (name',nc)),ncs)
+  smtHandle btor (SMTGetValue (expr :: SMTExpr t)) = do
+    nd <- exprToNode [] Map.empty btor expr
     let sort = getSort (undefined::t) (extractAnnotation expr)
     case sort of
       Fix (BVSort { bvSortWidth = w
@@ -107,9 +122,9 @@ instance SMTBackend BoolectorBackend IO where
                                   DontCare -> 0)) 0 assign
         if unt
           then (case cast (BitVector res :: BitVector BVUntyped) of
-                   Just r -> return r)
+                   Just r -> return (r,btor))
           else (reifyNat w (\(_::Proxy bw) -> case cast (BitVector res :: BitVector (BVTyped bw)) of
-                               Just r -> return r))
+                               Just r -> return (r,btor)))
       Fix BoolSort -> do
         [assign] <- boolectorBVAssignment (boolectorInstance btor) nd
         let res = case assign of
@@ -117,22 +132,26 @@ instance SMTBackend BoolectorBackend IO where
               Zero -> False
               DontCare -> False
         case cast res of
-          Just r -> return r
+          Just r -> return (r,btor)
       _ -> error $ "smtlib2-boolector: Getting values of sort "++show sort++" not supported."
-  smtHandle _ _ SMTGetProof = error "smtlib2-boolector: Proof extraction not supported."
-  smtHandle _ _ SMTGetUnsatCore = error "smtlib2-boolector: Unsat core extraction not supported."
-  smtHandle _ _ (SMTSimplify expr) = return expr
-  smtHandle _ _ (SMTGetInterpolant _) = error "smtlib2-boolector: Interpolant extraction not supported."
-  smtHandle _ _ (SMTComment _) = return ()
-  smtHandle btor _ SMTExit = boolectorDelete (boolectorInstance btor)
+  smtHandle _ SMTGetProof = error "smtlib2-boolector: Proof extraction not supported."
+  smtHandle _ SMTGetUnsatCore = error "smtlib2-boolector: Unsat core extraction not supported."
+  smtHandle btor (SMTSimplify expr) = return (expr,btor)
+  smtHandle _ (SMTGetInterpolant _) = error "smtlib2-boolector: Interpolant extraction not supported."
+  smtHandle btor (SMTComment _) = return ((),btor)
+  smtHandle btor SMTExit = do
+    boolectorDelete (boolectorInstance btor)
+    return ((),btor)
   
-exprToNode :: SMTType a => Map Integer BtorNode -> Map Integer (Map Integer BtorNode) -> BoolectorBackend -> SMTExpr a -> IO BtorNode
-exprToNode mp qmp btor (Var name ann) = do
-  case Map.lookup name mp of
-    Just nd -> return nd
-exprToNode mp qmp btor (QVar p q ann) = case Map.lookup p qmp of
+exprToNode :: SMTType a => [BtorNode] -> Map Integer (Map Integer BtorNode) -> BoolectorBackend
+           -> SMTExpr a -> IO BtorNode
+exprToNode _ _ btor (Var name ann) = do
+  case Map.lookup name (boolectorVars btor) of
+    Just (nd,_) -> return nd
+exprToNode _ qmp btor (QVar p q ann) = case Map.lookup p qmp of
   Just mp' -> case Map.lookup q mp' of
     Just nd -> return nd
+exprToNode args _ _ (FunArg i _) = return $ args `genericIndex` i
 exprToNode _ _ btor e@(Const c ann) = do
   case mangle of
    PrimitiveMangling f -> do
@@ -147,19 +166,19 @@ exprToNode _ _ btor e@(Const c ann) = do
            else boolectorUnsignedInt (boolectorInstance btor) (fromIntegral v) (fromIntegral w)
       _ -> error $ "smtlib2-boolector: Boolector backend doesn't support value "++show val
    _ -> error $ "smtlib2-boolector: Boolector backend doesn't support constant "++show e
-exprToNode mp qmp btor (Let lvl defs body) = do
+exprToNode args qmp btor (Let lvl defs body) = do
   nqmp <- foldlM (\cmp (i,expr) -> do
-                     nd <- exprToNode mp cmp btor expr
+                     nd <- exprToNode args cmp btor expr
                      return $ Map.insertWith Map.union lvl (Map.singleton i nd) cmp
                  ) qmp (zip [0..] defs)
-  exprToNode mp nqmp btor body
+  exprToNode args nqmp btor body
 exprToNode mp qmp btor (App SMTEq [x,y]) = do
   ndx <- exprToNode mp qmp btor x
   ndy <- exprToNode mp qmp btor y
   boolectorEq (boolectorInstance btor) ndx ndy
 exprToNode mp qmp btor (App (SMTFun fun _) args) = do
-  funNd <- case Map.lookup fun mp of
-    Just nd -> return nd
+  funNd <- case Map.lookup fun (boolectorVars btor) of
+    Just (nd,_) -> return nd
   let (argLst,_) = unpackArgs (\arg _ _ -> (exprToNode mp qmp btor arg,())) args (extractArgAnnotation args) ()
   argNds <- sequence argLst
   boolectorApply (boolectorInstance btor) argNds funNd
@@ -256,19 +275,27 @@ exprToNode mp qmp btor (UntypedExpr e) = exprToNode mp qmp btor e
 exprToNode mp qmp btor (UntypedExprValue e) = exprToNode mp qmp btor e
 exprToNode _ _ _ e = error $ "smtlib2-boolector: No support for expression: "++show e
 
-mkVar :: BoolectorBackend -> FunInfo -> Sort -> IO BtorNode
+mkVar :: BoolectorBackend -> FunInfo -> Sort -> IO (Integer,BoolectorBackend)
 mkVar btor info sort = do
-  let name = escapeName $ case funInfoName info of
-        Nothing -> Right $ funInfoId info
-        Just name' -> Left name'
+  let vid = boolectorNextVar btor
+      (name,ncs) = case funInfoName info of
+        Nothing -> (escapeName (Right vid),
+                    boolectorNameCount btor)
+        Just name' -> case Map.lookup name' (boolectorNameCount btor) of
+          Nothing -> (escapeName (Left (name',0)),
+                      Map.insert name' 1 (boolectorNameCount btor))
+          Just nc -> (escapeName (Left (name',nc)),
+                      Map.insert name' (nc+1) (boolectorNameCount btor))
   nd <- case sort of
     Fix BoolSort -> boolectorVar (boolectorInstance btor) 1 name
     Fix (BVSort { bvSortWidth = w }) -> boolectorVar (boolectorInstance btor) (fromIntegral w) name
     Fix (ArraySort [Fix (BVSort { bvSortWidth = idx_w })] (Fix (BVSort { bvSortWidth = el_w })))
       -> boolectorArray (boolectorInstance btor) (fromIntegral el_w) (fromIntegral idx_w) name
     _ -> error $ "smtlib2-boolector: Boolector backend doesn't support sort "++show sort
-  modifyIORef (boolectorVars btor) (Map.insert (funInfoId info) nd)
-  return nd
+  return (vid,btor { boolectorNextVar = vid+1
+                   , boolectorNameCount = ncs
+                   , boolectorVars = Map.insert vid (nd,name) (boolectorVars btor)
+                   })
 
 newtype BtorNode = BtorNode (Ptr BtorNode) deriving (Storable)
 newtype BtorSort = BtorSort (Ptr BtorSort) deriving (Storable)

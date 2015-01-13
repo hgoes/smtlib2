@@ -59,6 +59,7 @@ valueToHaskell dtInfo f sort (ConstrValue name args sort')
 extractAnnotation :: SMTExpr a -> SMTAnnotation a
 extractAnnotation (Var _ ann) = ann
 extractAnnotation (QVar _ _ ann) = ann
+extractAnnotation (FunArg _ ann) = ann
 extractAnnotation (Const _ ann) = ann
 extractAnnotation (AsArray f arg) = (arg,inferResAnnotation f arg)
 extractAnnotation (Forall _ _ _) = ()
@@ -127,6 +128,8 @@ entype f (Var i (ProxyArg (_::t) ann))
   = f (Var i ann::SMTExpr t)
 entype f (QVar lvl i (ProxyArg (_::t) ann))
   = f (QVar lvl i ann::SMTExpr t)
+entype f (FunArg i (ProxyArg (_::t) ann))
+  = f (FunArg i ann::SMTExpr t)
 entype f (UntypedExpr x) = f x
 entype f (InternalObj obj (ProxyArg (_::t) ann))
   = f (InternalObj obj ann :: SMTExpr t)
@@ -137,6 +140,8 @@ entypeValue f (Var i (ProxyArgValue (_::t) ann))
   = f (Var i ann::SMTExpr t)
 entypeValue f (QVar lvl i (ProxyArgValue (_::t) ann))
   = f (QVar lvl i ann::SMTExpr t)
+entypeValue f (FunArg i (ProxyArgValue (_::t) ann))
+  = f (FunArg i ann::SMTExpr t)
 entypeValue f (Const (UntypedValue v) (ProxyArgValue (_::t) ann))
   = case cast v of
   Just rv -> f (Const (rv::t) ann)
@@ -196,12 +201,12 @@ instance SMTType UntypedValue where
 
 instance SMTValue UntypedValue where
   unmangle = ComplexUnmangling $
-             \f val (ProxyArgValue _ ann)
+             \f st val (ProxyArgValue _ ann)
              -> entypeValue
                 (\(expr'::SMTExpr t) -> case cast ann of
                   Just ann' -> do
-                    res <- f expr' ann'
-                    return $ Just $ UntypedValue res
+                    (res,nst) <- f st expr' ann'
+                    return (Just $ UntypedValue res,nst)
                 ) val
   mangle = ComplexMangling (\(UntypedValue x) (ProxyArgValue (_::t) ann)
                              -> case cast x of
@@ -930,6 +935,7 @@ conNothing
            , construct = \[Just prx] [] f
                          -> withProxyArg prx $
                             \(_::t) ann -> f [prx] (Nothing::Maybe t) ann
+           , conUndefinedArgs = \_ f -> f () ()
            , conTest = \args x -> case args of
                                    [s] -> withProxyArg s $
                                           \(_::t) _ -> case cast x of
@@ -946,6 +952,9 @@ conJust
                              [v] -> withAnyValue v $
                                     \_ (rv::t) ann
                                     -> f [ProxyArg (undefined::t) ann] (Just rv) ann
+           , conUndefinedArgs = \sorts f -> case sorts of
+                                             [s] -> withProxyArg s $
+                                                    \(_::t) ann -> f (undefined::SMTExpr t) ann
            , conTest = \args x -> case args of
                                    [s] -> withProxyArg s $
                                           \(_::t) _ -> case cast x of
@@ -989,18 +998,18 @@ instance SMTValue a => SMTValue (Maybe a) where
                                      Nothing -> Nothing
                                _ -> Nothing)
     ComplexUnmangling p
-      -> ComplexUnmangling $ \f (expr::SMTExpr (Maybe t)) ann -> do
-        isNothing <- f (App (SMTConTest
-                             (Constructor [ProxyArg (undefined::t) (extractAnnotation expr)]
-                              dtMaybe conNothing :: Constructor () (Maybe a))) expr
-                       ) ()
+      -> ComplexUnmangling $ \f st (expr::SMTExpr (Maybe t)) ann -> do
+        (isNothing,st1) <- f st (App (SMTConTest
+                                      (Constructor [ProxyArg (undefined::t) (extractAnnotation expr)]
+                                       dtMaybe conNothing :: Constructor () (Maybe a))) expr
+                                ) ()
         if isNothing
-          then return (Just Nothing)
+          then return (Just Nothing,st1)
           else do
-           val <- p f (App (SMTFieldSel (Field [ProxyArg (undefined::t) (extractAnnotation expr)] dtMaybe conJust fieldFromJust)) expr) ann
+           (val,st2) <- p f st1 (App (SMTFieldSel (Field [ProxyArg (undefined::t) (extractAnnotation expr)] dtMaybe conJust fieldFromJust)) expr) ann
            case val of
-            Nothing -> return Nothing
-            Just val' -> return (Just (Just val'))
+            Nothing -> return (Nothing,st2)
+            Just val' -> return (Just (Just val'),st2)
   mangle = case mangle of
     PrimitiveMangling p
       -> PrimitiveMangling $
@@ -1047,6 +1056,7 @@ conNil = Constr { conName = "nil"
                 , construct = \[Just sort] args f
                               -> withProxyArg sort $
                                  \(_::t) ann -> f [sort] ([]::[t]) ann
+                , conUndefinedArgs = \_ f -> f () ()
                 , conTest = \args x -> case args of
                 [s] -> withProxyArg s $
                        \(_::t) _ -> case cast x of
@@ -1058,18 +1068,21 @@ conInsert :: Constr
 conInsert = Constr { conName = "insert"
                    , conFields = [fieldHead
                                  ,fieldTail]
-                         , construct = \sort args f
-                                       -> case args of
-                                         [h,t] -> withAnyValue h $
-                                                \_ (v::t) ann
-                                                -> case castAnyValue t of
+                   , construct = \sort args f
+                                 -> case args of
+                                     [h,t] -> withAnyValue h $
+                                              \_ (v::t) ann
+                                              -> case castAnyValue t of
                                                   Just (vs,_) -> f [ProxyArg (undefined::t) ann] (v:vs) ann
-                         , conTest = \args x -> case args of
-                           [s] -> withProxyArg s $
-                                \(_::t) _ -> case cast x of
-                                  Just ((_:_)::[t]) -> True
-                                  _ -> False
-                         }
+                   , conUndefinedArgs = \sorts f -> case sorts of
+                   [s] -> withProxyArg s $
+                          \(_::t) ann -> f (undefined::(SMTExpr t,SMTExpr [t])) (ann,ann)
+                   , conTest = \args x -> case args of
+                   [s] -> withProxyArg s $
+                          \(_::t) _ -> case cast x of
+                                        Just ((_:_)::[t]) -> True
+                                        _ -> False
+                   }
 
 insert' :: SMTType a => SMTAnnotation a -> Constructor (SMTExpr a,SMTExpr [a]) [a]
 insert' ann = withUndef $
@@ -1118,25 +1131,25 @@ instance (Typeable a,SMTValue a) => SMTValue [a] where
         t' <- pUnmangle p t ann
         return (h':t')
       cUnmangle :: Monad m
-                => ((forall b. SMTValue b => SMTExpr b -> SMTAnnotation b -> m b)
-                    -> SMTExpr a -> SMTAnnotation a -> m (Maybe a))
-                -> (forall b. SMTValue b => SMTExpr b -> SMTAnnotation b -> m b)
-                -> SMTExpr [a] -> SMTAnnotation a -> m (Maybe [a])
-      cUnmangle c f (expr::SMTExpr [t]) ann = do
-        isNil <- f (App (SMTConTest
-                         (Constructor [ProxyArg (undefined::t) ann] dtList conNil
-                          ::Constructor () [t]))
-                    expr) ()
+                => ((forall b. SMTValue b => st -> SMTExpr b -> SMTAnnotation b -> m (b,st))
+                    -> st -> SMTExpr a -> SMTAnnotation a -> m (Maybe a,st))
+                -> (forall b. SMTValue b => st -> SMTExpr b -> SMTAnnotation b -> m (b,st))
+                -> st -> SMTExpr [a] -> SMTAnnotation a -> m (Maybe [a],st)
+      cUnmangle c f st (expr::SMTExpr [t]) ann = do
+        (isNil,st1) <- f st (App (SMTConTest
+                                  (Constructor [ProxyArg (undefined::t) ann] dtList conNil
+                                   ::Constructor () [t]))
+                             expr) ()
         if isNil
-          then return (Just [])
+          then return (Just [],st1)
           else do
-           h <- c f (App (SMTFieldSel (Field [ProxyArg (undefined::t) ann] dtList conInsert fieldHead))
+           (h,st2) <- c f st1 (App (SMTFieldSel (Field [ProxyArg (undefined::t) ann] dtList conInsert fieldHead))
                      expr) ann
-           t <- cUnmangle c f (App (SMTFieldSel (Field [ProxyArg (undefined::t) ann] dtList conInsert fieldTail)) expr) ann
-           return $ do
-             h' <- h
-             t' <- t
-             return $ h':t'
+           (t,st3) <- cUnmangle c f st2 (App (SMTFieldSel (Field [ProxyArg (undefined::t) ann] dtList conInsert fieldTail)) expr) ann
+           return (do
+                      h' <- h
+                      t' <- t
+                      return $ h':t',st3)
   mangle = case mangle of
     PrimitiveMangling p
       -> PrimitiveMangling $ pMangle p
@@ -1506,6 +1519,9 @@ compareExprs (QVar lvl1 i1 _) (QVar lvl2 i2 _) = case compare lvl1 lvl2 of
   r -> r
 compareExprs (QVar _ _ _) _ = LT
 compareExprs _ (QVar _ _ _) = GT
+compareExprs (FunArg i _) (FunArg j _) = compare i j
+compareExprs (FunArg _ _) _ = LT
+compareExprs _ (FunArg _ _) = GT
 compareExprs (Const i _) (Const j _) = case cast j of
       Just j' -> compare i j'
       Nothing -> compare (typeOf i) (typeOf j)
@@ -1571,6 +1587,9 @@ eqExpr lhs rhs = case (lhs,rhs) of
   (QVar l1 v1 _,QVar l2 v2 _) -> if l1==l2 && v1==v2
                                  then Just True
                                  else Nothing
+  (FunArg v1 _,FunArg v2 _) -> if v1==v2
+                               then Just True
+                               else Nothing
   (Const v1 _,Const v2 _) -> Just $ v1 == v2
   (AsArray f1 arg1,AsArray f2 arg2) -> case cast f2 of
     Nothing -> Nothing

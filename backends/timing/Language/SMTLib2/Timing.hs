@@ -16,9 +16,11 @@ data TimingBackend b m = TimingBackend { timingBackend' :: b
                                        }
 
 instance (SMTBackend b m,MonadIO m) => SMTBackend (TimingBackend b m) m where
-  smtHandle b st req = do
+  smtGetNames b = smtGetNames (timingBackend' b)
+  smtNextName b = smtNextName (timingBackend' b)
+  smtHandle b req = do
     timeBefore <- liftIO getCurrentTime
-    resp <- smtHandle (timingBackend' b) st req
+    (resp,nb) <- smtHandle (timingBackend' b) req
     timeAfter <- liftIO getCurrentTime
     reportTime b (diffUTCTime timeAfter timeBefore)
-    return resp
+    return (resp,b { timingBackend' = nb })

@@ -1,7 +1,7 @@
 {-# LANGUAGE ViewPatterns #-}
 module Language.SMTLib2.Pipe
        (SMTPipe(),
-        FunctionParser(),
+        FunctionParser(..),
         createSMTPipe,
         withPipe,
         exprToLisp,
@@ -13,7 +13,9 @@ module Language.SMTLib2.Pipe
         renderSMTRequest,
         renderSMTResponse,
         commonFunctions,
-        commonTheorems) where
+        commonTheorems,
+        simpleParser,
+        FunctionParser'(..)) where
 
 import Language.SMTLib2.Internals as SMT
 import Language.SMTLib2.Internals.Instances
@@ -51,46 +53,64 @@ import Data.Char (isDigit)
      process. -}
 data SMTPipe = SMTPipe { channelIn :: Handle
                        , channelOut :: Handle
-                       , processHandle :: ProcessHandle }
+                       , processHandle :: ProcessHandle
+                       , smtState :: SMTState }
 
 renderExpr :: (SMTType t,Monad m) => SMTExpr t -> SMT' m String
-renderExpr expr = do
-  st <- getSMT
-  return $ renderExpr' st expr
-  
-renderExpr' :: SMTType t => SMTState -> SMTExpr t -> String
-renderExpr' st expr
-  = let lexpr = exprToLisp expr (allVars st) (declaredDataTypes st)
+renderExpr expr = smtBackend $ \b -> do
+  getName <- smtGetNames b
+  (dts,nb) <- smtHandle b SMTDeclaredDataTypes
+  return (renderExpr' getName dts expr,nb)
+
+renderExpr' :: SMTType t => (Integer -> String) -> DataTypeInfo -> SMTExpr t -> String
+renderExpr' getName dts expr
+  = let lexpr = exprToLisp expr getName dts
     in show lexpr
 
 instance MonadIO m => SMTBackend SMTPipe m where
-  smtHandle pipe st req@(SMTGetValue (expr::SMTExpr t))
+  smtHandle pipe req@(SMTGetValue (expr::SMTExpr t))
     = case unmangle :: Unmangling t of
-       PrimitiveUnmangling _ -> handleNormal pipe st req
+       PrimitiveUnmangling _ -> handleNormal pipe req
        ComplexUnmangling f -> do
-         res <- f (\expr' ann -> smtHandle pipe st (SMTGetValue expr')) expr (extractAnnotation expr)
+         (res,npipe) <- f (\pipe expr' ann -> smtHandle pipe (SMTGetValue expr')
+                          ) pipe expr (extractAnnotation expr)
          case res of
-          Just x -> return x
+          Just x -> return (x,npipe)
           Nothing -> error $ "smtlib2: Error while unmangling expression "++show expr++" to type "++show (typeOf (undefined::t))
-  smtHandle pipe st req = handleNormal pipe st req
+  smtHandle pipe req = handleNormal pipe req
+  --smtGetState pipe = return $ smtState pipe
+  smtGetNames pipe = return (\idx -> case Map.lookup idx (allVars (smtState pipe)) of
+                              Just (info,nc) -> case funInfoName info of
+                                Nothing -> escapeName (Right idx)
+                                Just name -> escapeName (Left (name,nc)))
+  smtNextName pipe = return (\name -> case name of
+                              Nothing -> let nxt = nextVar (smtState pipe)
+                                         in escapeName (Right nxt)
+                              Just name' -> case Map.lookup name' (nameCount (smtState pipe)) of
+                                Just nc -> escapeName (Left (name',nc))
+                                Nothing -> escapeName (Left (name',0)))
 
-handleNormal :: (MonadIO m,Typeable a) => SMTPipe -> SMTState -> SMTRequest a -> m a
-handleNormal pipe st req = do
+handleNormal :: (MonadIO m,Typeable a) => SMTPipe -> SMTRequest a -> m (a,SMTPipe)
+handleNormal pipe req = do
   case cast req of
    Just (_::SMTRequest ()) -> return ()
    _ -> clearInput pipe
-  case renderSMTRequest st req of
+  getName <- smtGetNames pipe
+  nxtName <- smtNextName pipe
+  case renderSMTRequest nxtName getName (declaredDataTypes $ smtState pipe) req of
    Left l -> putRequest pipe l
+   Right "" -> return ()
    Right msg -> liftIO $ IO.hPutStr (channelIn pipe) $ Prelude.unlines (fmap (';':) (Prelude.lines msg))
-  handleRequest pipe st req
+  handleRequest pipe req
 
-renderSMTRequest :: SMTState -> SMTRequest r -> Either L.Lisp String
-renderSMTRequest st (SMTGetInfo SMTSolverName)
+renderSMTRequest :: (Maybe String -> String) -> (Integer -> String) -> DataTypeInfo
+                 -> SMTRequest r -> Either L.Lisp String
+renderSMTRequest _ _ _ (SMTGetInfo SMTSolverName)
   = Left $ L.List [L.Symbol "get-info",L.Symbol ":name"]
-renderSMTRequest st (SMTGetInfo SMTSolverVersion)
+renderSMTRequest _ _ _ (SMTGetInfo SMTSolverVersion)
   = Left $ L.List [L.Symbol "get-info",L.Symbol ":version"]
-renderSMTRequest st (SMTAssert expr interp cid)
-  = let expr1 = exprToLisp expr (allVars st) (declaredDataTypes st)
+renderSMTRequest _ getName dts (SMTAssert expr interp cid)
+  = let expr1 = exprToLisp expr getName dts
         expr2 = case interp of
           Nothing -> expr1
           Just (InterpolationGroup gr)
@@ -106,7 +126,7 @@ renderSMTRequest st (SMTAssert expr interp cid)
                       ,L.Symbol ":named"
                       ,L.Symbol (T.pack $ "_cid"++show cid)]
     in Left $ L.List [L.Symbol "assert",expr3]
-renderSMTRequest st (SMTCheckSat tactic limits)
+renderSMTRequest _ _ _ (SMTCheckSat tactic limits)
   = Left $ L.List (if extendedCheckSat
                    then [L.Symbol "check-sat-using"
                         ,case tactic of
@@ -129,7 +149,8 @@ renderSMTRequest st (SMTCheckSat tactic limits)
         _ -> case limitMemory limits of
           Just _ -> True
           _ -> False
-renderSMTRequest st (SMTDeclareDataTypes dts)
+renderSMTRequest _ _ _ SMTDeclaredDataTypes = Right ""
+renderSMTRequest _ _ _ (SMTDeclareDataTypes dts)
   = let param x = L.Symbol $ T.pack $ "arg"++show x
     in Left $
        L.List [L.Symbol "declare-datatypes"
@@ -147,109 +168,127 @@ renderSMTRequest st (SMTDeclareDataTypes dts)
                     | con <- dataTypeConstructors dt ]
                | dt <- dataTypes dts ]
               ]
-renderSMTRequest st (SMTDeclareSort name arity)
+renderSMTRequest _ _ _ (SMTDeclareSort name arity)
   = Left $ L.List [L.Symbol "declare-sort",L.Symbol $ T.pack name,L.toLisp arity]
-renderSMTRequest st (SMTDeclareFun name)
-  = let tps = funInfoArgSorts name
-        rtp = funInfoSort name
+renderSMTRequest nextName _ _ (SMTDeclareFun finfo)
+  = let tps = funInfoArgSorts finfo
+        rtp = funInfoSort finfo
     in Left $ L.List [L.Symbol "declare-fun"
-                     ,L.Symbol $ T.pack $ getSMTName name
+                     ,L.Symbol $ T.pack (nextName (funInfoName finfo))
                      ,args (fmap sortToLisp tps)
                      ,sortToLisp rtp
                      ]
-renderSMTRequest st (SMTDefineFun name arg definition)
-  = let ann = extractAnnotation definition
-        retSort = getSort (getUndef definition) ann
+renderSMTRequest nextName getName dts (SMTDefineFun name (_::Proxy arg) argAnn (body::SMTExpr res))
+  = let tpLst = zip [0..] (getTypes (undefined::arg) argAnn)
+        annRes = extractAnnotation body
+        name' = nextName name
+        retSort = getSort (undefined::res) annRes
     in Left $ L.List [L.Symbol "define-fun"
-                     ,L.Symbol $ T.pack $ getSMTName name
-                     ,args [ L.List [ L.Symbol $ T.pack $ getSMTName n, sortToLisp $ funInfoSort n ]
-                           | n <- arg ]
+                     ,L.Symbol $ T.pack name'
+                     ,args [ L.List [ L.Symbol $ T.pack $ "farg_"++show j
+                                    , sortToLisp $ getSort u ann ]
+                           | (j,ProxyArg u ann) <- tpLst ]
                      ,sortToLisp retSort
-                     ,exprToLisp definition (allVars st) (declaredDataTypes st)]
-renderSMTRequest st (SMTComment msg) = Right msg
-renderSMTRequest st SMTExit = Left $ L.List [L.Symbol "exit"]
-renderSMTRequest st (SMTGetInterpolant grps)
+                     ,exprToLisp body getName dts]
+renderSMTRequest _ _ _ (SMTComment msg) = Right msg
+renderSMTRequest _ _ _ SMTExit = Left $ L.List [L.Symbol "exit"]
+renderSMTRequest _ _ _ (SMTGetInterpolant grps)
   = Left $ L.List [L.Symbol "get-interpolant"
                   ,L.List [ L.Symbol $ T.pack ("i"++show g) | InterpolationGroup g <- grps ]
                   ]
-renderSMTRequest st (SMTSetOption opt)
+renderSMTRequest _ _ _ (SMTSetOption opt)
   = Left $ L.List $ [L.Symbol "set-option"]
     ++(case opt of
-          PrintSuccess v -> [L.Symbol ":print-success"
-                            ,L.Symbol $ if v then "true" else "false"]
-          ProduceModels v -> [L.Symbol ":produce-models"
-                             ,L.Symbol $ if v then "true" else "false"]
-          SMT.ProduceProofs v -> [L.Symbol ":produce-proofs"
-                                 ,L.Symbol $ if v then "true" else "false"]
-          SMT.ProduceUnsatCores v -> [L.Symbol ":produce-unsat-cores"
-                                     ,L.Symbol $ if v then "true" else "false"]
-          ProduceInterpolants v -> [L.Symbol ":produce-interpolants"
+        PrintSuccess v -> [L.Symbol ":print-success"
+                          ,L.Symbol $ if v then "true" else "false"]
+        ProduceModels v -> [L.Symbol ":produce-models"
+                           ,L.Symbol $ if v then "true" else "false"]
+        SMT.ProduceProofs v -> [L.Symbol ":produce-proofs"
+                               ,L.Symbol $ if v then "true" else "false"]
+        SMT.ProduceUnsatCores v -> [L.Symbol ":produce-unsat-cores"
                                    ,L.Symbol $ if v then "true" else "false"]
+        ProduceInterpolants v -> [L.Symbol ":produce-interpolants"
+                                 ,L.Symbol $ if v then "true" else "false"]
       )
-renderSMTRequest st (SMTSetLogic name)
+renderSMTRequest _ _ _ (SMTSetLogic name)
   = Left $ L.List [L.Symbol "set-logic"
                   ,L.Symbol $ T.pack name]
-renderSMTRequest st SMTGetProof
+renderSMTRequest _ _ _ SMTGetProof
   = Left $ L.List [L.Symbol "get-proof"]
-renderSMTRequest st SMTGetUnsatCore
+renderSMTRequest _ _ _ SMTGetUnsatCore
   = Left $ L.List [L.Symbol "get-unsat-core"]
-renderSMTRequest st (SMTSimplify expr)
-  = let lexpr = exprToLisp expr (allVars st) (declaredDataTypes st)
+renderSMTRequest _ getName dts (SMTSimplify expr)
+  = let lexpr = exprToLisp expr getName dts
     in Left $ L.List [L.Symbol "simplify"
                      ,lexpr]
-renderSMTRequest st SMTPush = Left $ L.List [L.Symbol "push",L.toLisp (1::Integer)]
-renderSMTRequest st SMTPop = Left $ L.List [L.Symbol "pop",L.toLisp (1::Integer)]
-renderSMTRequest st (SMTGetValue expr)
-  = let lexpr = exprToLisp expr (allVars st) (declaredDataTypes st)
+renderSMTRequest _ _ _ SMTPush = Left $ L.List [L.Symbol "push",L.toLisp (1::Integer)]
+renderSMTRequest _ _ _ SMTPop = Left $ L.List [L.Symbol "pop",L.toLisp (1::Integer)]
+renderSMTRequest _ getName dts (SMTGetValue expr)
+  = let lexpr = exprToLisp expr getName dts
     in Left $ L.List [L.Symbol "get-value"
                      ,L.List [lexpr]]
-renderSMTRequest st SMTGetModel = Left $ L.List [L.Symbol "get-model"]
-renderSMTRequest st (SMTApply tactic)
+renderSMTRequest _ _ _ SMTGetModel = Left $ L.List [L.Symbol "get-model"]
+renderSMTRequest _ _ _ (SMTApply tactic)
   = Left $ L.List [L.Symbol "apply"
                   ,tacticToLisp tactic]
+renderSMTRequest _ _ _ (SMTNameExpr _ _) = Right ""
+renderSMTRequest _ _ _ SMTNewInterpolationGroup = Right ""
+renderSMTRequest _ _ _ SMTNewClauseId = Right ""
 
-handleRequest :: MonadIO m => SMTPipe -> SMTState -> SMTRequest response -> m response
-handleRequest pipe _ (SMTGetInfo SMTSolverName) = do
+handleRequest :: MonadIO m => SMTPipe -> SMTRequest response -> m (response,SMTPipe)
+handleRequest pipe (SMTGetInfo SMTSolverName) = do
   res <- parseResponse pipe
   case res of
-    L.List [L.Symbol ":name",L.String name] -> return $ T.unpack name
+    L.List [L.Symbol ":name",L.String name] -> return (T.unpack name,pipe)
     _ -> error "Invalid solver response to 'get-info' name query"
-handleRequest pipe _ (SMTGetInfo SMTSolverVersion) = do
+handleRequest pipe (SMTGetInfo SMTSolverVersion) = do
   res <- parseResponse pipe
   case res of
-    L.List [L.Symbol ":version",L.String name] -> return $ T.unpack name
+    L.List [L.Symbol ":version",L.String name] -> return (T.unpack name,pipe)
     _ -> error "Invalid solver response to 'get-info' version query"
-handleRequest pipe st (SMTAssert _ _ _) = return ()
-handleRequest pipe _ (SMTCheckSat tactic limits) = do
+handleRequest pipe (SMTAssert _ _ _) = return ((),pipe)
+handleRequest pipe (SMTCheckSat tactic limits) = do
   res <- liftIO $ BS.hGetLine (channelOut pipe)
-  case res of
-    "sat" -> return Sat
-    "sat\r" -> return Sat
-    "unsat" -> return Unsat
-    "unsat\r" -> return Unsat
-    "unknown" -> return Unknown
-    "unknown\r" -> return Unknown
-    _ -> error $ "smtlib2: unknown check-sat response: "++show res
-handleRequest pipe _ (SMTDeclareDataTypes dts) = return ()
-handleRequest pipe _ (SMTDeclareSort name arity) = return ()
-handleRequest pipe _ (SMTDeclareFun name) = return ()
-handleRequest _ _ (SMTDefineFun name arg definition) = return ()
-handleRequest _ _ (SMTComment msg) = return ()
-handleRequest pipe _ SMTExit = do
+  return (case res of
+           "sat" -> Sat
+           "sat\r" -> Sat
+           "unsat" -> Unsat
+           "unsat\r" -> Unsat
+           "unknown" -> Unknown
+           "unknown\r" -> Unknown
+           _ -> error $ "smtlib2: unknown check-sat response: "++show res,pipe)
+handleRequest pipe SMTDeclaredDataTypes = return (declaredDataTypes $ smtState pipe,pipe)
+handleRequest pipe (SMTDeclareDataTypes dts) = do
+  let ndts = addDataTypeStructure dts (declaredDataTypes $ smtState pipe)
+  return ((),pipe { smtState = (smtState pipe) { declaredDataTypes = ndts } })
+handleRequest pipe (SMTDeclareSort name arity) = return ((),pipe)
+handleRequest pipe (SMTDeclareFun info)
+  = let (v,name,nst) = smtStateAddFun info (smtState pipe)
+    in return (v,pipe { smtState = nst })
+handleRequest pipe (SMTDefineFun name (_::Proxy arg) argAnn (body::SMTExpr res)) = do
+  let finfo = FunInfo { funInfoProxy = Proxy::Proxy (arg,res)
+                      , funInfoArgAnn = argAnn
+                      , funInfoResAnn = extractAnnotation body
+                      , funInfoName = name }
+      (i,_,nst) = smtStateAddFun finfo (smtState pipe)
+  return (i,pipe { smtState = nst })
+handleRequest pipe (SMTComment msg) = return ((),pipe)
+handleRequest pipe SMTExit = do
   liftIO $ hClose (channelIn pipe)
   liftIO $ hClose (channelOut pipe)
   liftIO $ terminateProcess (processHandle pipe)
   _ <- liftIO $ waitForProcess (processHandle pipe)
-  return ()
-handleRequest pipe st (SMTGetInterpolant grps) = do
+  return ((),pipe)
+handleRequest pipe (SMTGetInterpolant grps) = do
   val <- parseResponse pipe
   case lispToExpr commonFunctions
-       (findName st) (declaredDataTypes st) gcast (Just $ Fix BoolSort) 0 val of
-    Just (Just x) -> return x
+       (findName $ smtState pipe) (declaredDataTypes $ smtState pipe)
+       gcast (Just $ Fix BoolSort) 0 val of
+    Just (Just x) -> return (x,pipe)
     _ -> error $ "smtlib2: Failed to parse get-interpolant result: "++show val
-handleRequest _ _ (SMTSetOption opt) = return ()
-handleRequest _ _ (SMTSetLogic name) = return ()
-handleRequest pipe st SMTGetProof = do
+handleRequest pipe (SMTSetOption opt) = return ((),pipe)
+handleRequest pipe (SMTSetLogic name) = return ((),pipe)
+handleRequest pipe SMTGetProof = do
   res <- parseResponse pipe
   let proof = case res of
         L.List items -> case findProof items of
@@ -257,36 +296,37 @@ handleRequest pipe st SMTGetProof = do
           Just p -> p
         _ -> res
   case lispToExpr (commonFunctions `mappend` commonTheorems)
-       (findName st)
-       (declaredDataTypes st) gcast (Just $ Fix BoolSort) 0 proof of
-    Just (Just x) -> return x
+       (findName $ smtState pipe)
+       (declaredDataTypes $ smtState pipe) gcast (Just $ Fix BoolSort) 0 proof of
+    Just (Just x) -> return (x,pipe)
     _ -> error $ "smtlib2: Couldn't parse proof "++show res
   where
     findProof [] = Nothing
     findProof ((L.List [L.Symbol "proof",proof]):_) = Just proof
     findProof (x:xs) = findProof xs
-handleRequest pipe _ SMTGetUnsatCore = do
+handleRequest pipe SMTGetUnsatCore = do
   res <- parseResponse pipe
   case res of
-    L.List names -> return $
-                    fmap (\name -> case name of
-                             L.Symbol s -> case T.unpack s of
-                               '_':'c':'i':'d':cid
-                                 | all isDigit cid -> ClauseId (read cid)
-                               str -> error $ "Language.SMTLib2.getUnsatCore: Unknown clause id "++str
-                             _ -> error $ "Language.SMTLib2.getUnsatCore: Unknown expression "
-                                  ++show name++" in core list."
-                         ) names
+    L.List names -> return
+                    (fmap (\name -> case name of
+                            L.Symbol s -> case T.unpack s of
+                              '_':'c':'i':'d':cid
+                                | all isDigit cid -> ClauseId (read cid)
+                              str -> error $ "Language.SMTLib2.getUnsatCore: Unknown clause id "++str
+                            _ -> error $ "Language.SMTLib2.getUnsatCore: Unknown expression "
+                                 ++show name++" in core list."
+                          ) names,pipe)
     _ -> error $ "Language.SMTLib2.getUnsatCore: Unknown response "++show res++" to query."
-handleRequest pipe st (SMTSimplify (expr::SMTExpr t)) = do
+handleRequest pipe (SMTSimplify (expr::SMTExpr t)) = do
   val <- parseResponse pipe
   case lispToExpr commonFunctions
-       (findName st) (declaredDataTypes st) gcast (Just $ getSort (undefined::t) (extractAnnotation expr)) 0 val of
-    Just (Just x) -> return x
+       (findName $ smtState pipe) (declaredDataTypes $ smtState pipe)
+       gcast (Just $ getSort (undefined::t) (extractAnnotation expr)) 0 val of
+    Just (Just x) -> return (x,pipe)
     _ -> error $ "smtlib2: Failed to parse simplify result: "++show val
-handleRequest _ _ SMTPush = return ()
-handleRequest _ _ SMTPop = return ()
-handleRequest pipe st (SMTGetValue (expr::SMTExpr t)) = do
+handleRequest pipe SMTPush = return ((),pipe)
+handleRequest pipe SMTPop = return ((),pipe)
+handleRequest pipe (SMTGetValue (expr::SMTExpr t)) = do
   let ann = extractAnnotation expr
       sort = getSort (undefined::t) ann
       PrimitiveUnmangling unm = unmangle :: Unmangling t
@@ -294,16 +334,16 @@ handleRequest pipe st (SMTGetValue (expr::SMTExpr t)) = do
   case val of
     L.List [L.List [_,res]]
       -> let res' = removeLets res
-         in case lispToValue' (declaredDataTypes st) (Just sort) res' of
+         in case lispToValue' (declaredDataTypes $ smtState pipe) (Just sort) res' of
            Just val' -> case unm val' ann of
-             Just val'' -> return val''
+             Just val'' -> return (val'',pipe)
              Nothing -> error $ "smtlib2: Failed to unmangle value "++show val'++" to type "++show (typeOf (undefined::t))
            Nothing -> error $ "smtlib2: Failed to parse value from "++show res
     _ -> error $ "smtlib2: Unexpected get-value response: "++show val
-handleRequest pipe st SMTGetModel = do
+handleRequest pipe SMTGetModel = do
   val <- parseResponse pipe
   case val of
-   L.List (L.Symbol "model":mdl) -> return $ foldl parseModel (SMTModel Map.empty) mdl
+   L.List (L.Symbol "model":mdl) -> return (foldl parseModel (SMTModel Map.empty) mdl,pipe)
    _ -> error $ "smtlib2: Unexpected get-model response: "++show val
   where
     parseModel cur (L.List [L.Symbol "define-fun",
@@ -313,7 +353,7 @@ handleRequest pipe st SMTGetModel = do
                             fun]) = case mapM (\arg -> case arg of
                                                 L.List [L.Symbol argName,
                                                         argTp] -> case lispToSort argTp of
-                                                  Just argTp' -> withSort (declaredDataTypes st) argTp' $
+                                                  Just argTp' -> withSort (declaredDataTypes $ smtState pipe ) argTp' $
                                                                  \u ann -> Just (argName,ProxyArg u ann)
                                                   _ -> Nothing
                                                 _ -> Nothing
@@ -324,13 +364,13 @@ handleRequest pipe st SMTGetModel = do
                          funId = case unescapeName (T.unpack fname) of
                            Nothing -> Nothing
                            Just (Right idx) -> Just idx
-                           Just (Left name) -> case Map.lookup name (namedVars st) of
+                           Just (Left name) -> case Map.lookup name (namedVars $ smtState pipe) of
                              Just idx -> Just idx
                              Nothing -> Nothing
                      in case lispToExpr commonFunctions (\n -> do
                                                             (i,tp) <- Map.lookup n argMp
                                                             return $ QVar 0 i tp)
-                             (declaredDataTypes st)
+                             (declaredDataTypes $ smtState pipe)
                              UntypedExpr
                              (Just rtp')
                              1
@@ -343,45 +383,62 @@ handleRequest pipe st SMTGetModel = do
         Nothing -> error $ "smtlib2: Failed to parse return type: "++show rtp
       Nothing -> error $ "smtlib2: Failed to parse argument specification "++show args
     parseModel _ def = error $ "smtlib2: Failed to parse model entry: "++show def
-handleRequest pipe st (SMTApply tactic) = do
+handleRequest pipe (SMTApply tactic) = do
   val <- parseResponse pipe
   case val of
     L.List (L.Symbol "goals":goals)
-      -> return $
-         fmap (\goal -> case goal of
-                  L.List ((L.Symbol "goal"):expr:_)
-                    -> case lispToExpr (commonFunctions `mappend` commonTheorems)
-                            (findName st)
-                            (declaredDataTypes st) gcast (Just $ Fix BoolSort) 0 expr of
-                         Just (Just x) -> x
-                         _ -> error $ "smtlib2: Couldn't parse goal "++show expr
-                  _ -> error $ "smtlib2: Couldn't parse goal description "++show val
-              ) goals
+      -> return
+         (fmap (\goal -> case goal of
+                 L.List ((L.Symbol "goal"):expr:_)
+                   -> case lispToExpr (commonFunctions `mappend` commonTheorems)
+                           (findName $ smtState pipe)
+                           (declaredDataTypes $ smtState pipe) gcast (Just $ Fix BoolSort) 0 expr of
+                       Just (Just x) -> x
+                       _ -> error $ "smtlib2: Couldn't parse goal "++show expr
+                 _ -> error $ "smtlib2: Couldn't parse goal description "++show val
+               ) goals,pipe)
+handleRequest pipe (SMTNameExpr name expr) = do
+  return (nc,pipe { smtState = nst })
+  where
+    nc = case Map.lookup name (nameCount $ smtState pipe) of
+      Just n -> n
+      Nothing -> 0
+    nst = (smtState pipe) { nameCount = Map.insert name (nc+1) (nameCount $ smtState pipe) }
+handleRequest pipe SMTNewInterpolationGroup = do
+  return (InterpolationGroup igrp,pipe { smtState = nst })
+  where
+    igrp = nextInterpolationGroup (smtState pipe)
+    nst = (smtState pipe) { nextInterpolationGroup = igrp+1 }
+handleRequest pipe SMTNewClauseId = do
+  return (ClauseId icl,pipe { smtState = nst })
+  where
+    icl = nextClauseId (smtState pipe)
+    nst = (smtState pipe) { nextClauseId = icl+1 }
 
-renderSMTResponse :: SMTState -> SMTRequest response -> response -> Maybe String
-renderSMTResponse _ (SMTGetInfo SMTSolverName) name
+renderSMTResponse :: (Integer -> String) -> DataTypeInfo -> SMTRequest response -> response -> Maybe String
+renderSMTResponse _ _ (SMTGetInfo SMTSolverName) name
   = Just $ show $ L.List [L.Symbol ":name",L.String $ T.pack name]
-renderSMTResponse _ (SMTGetInfo SMTSolverVersion) vers
+renderSMTResponse _ _ (SMTGetInfo SMTSolverVersion) vers
   = Just $ show $ L.List [L.Symbol ":version",L.String $ T.pack vers]
-renderSMTResponse _ (SMTCheckSat _ _) res = case res of
+renderSMTResponse _ _ (SMTCheckSat _ _) res = case res of
   Sat -> Just "sat"
   Unsat -> Just "unsat"
   Unknown -> Just "unknown"
-renderSMTResponse st (SMTGetInterpolant grps) expr
-  = Just $ renderExpr' st expr
-renderSMTResponse st SMTGetProof proof
-  = Just $ renderExpr' st proof
-renderSMTResponse st (SMTSimplify _) expr
-  = Just $ renderExpr' st expr
-renderSMTResponse _ (SMTGetValue _) v = Just $ show v
-renderSMTResponse st (SMTApply _) goals
+renderSMTResponse getName dts (SMTGetInterpolant grps) expr
+  = Just $ renderExpr' getName dts expr
+renderSMTResponse getName dts SMTGetProof proof
+  = Just $ renderExpr' getName dts proof
+renderSMTResponse getName dts (SMTSimplify _) expr
+  = Just $ renderExpr' getName dts expr
+renderSMTResponse _ _ (SMTGetValue _) v = Just $ show v
+renderSMTResponse getName dts (SMTApply _) goals
   = Just $ show $
     L.List $ [L.Symbol "goals"]++
-    [exprToLisp goal (allVars st) (declaredDataTypes st)
+    [exprToLisp goal getName dts
     | goal <- goals ]
-renderSMTResponse _ SMTGetUnsatCore core = Just (show core)
-renderSMTResponse _ SMTGetModel mdl = Just (show mdl)
-renderSMTResponse _ _ _ = Nothing
+renderSMTResponse _ _ SMTGetUnsatCore core = Just (show core)
+renderSMTResponse _ _ SMTGetModel mdl = Just (show mdl)
+renderSMTResponse _ _ _ _ = Nothing
 
 -- | Spawn a new SMT solver process and create a pipe to communicate with it.
 createSMTPipe :: String -- ^ Path to the binary of the SMT solver
@@ -403,7 +460,8 @@ createSMTPipe solver args = do
   (Just hin,Just hout,_,handle) <- createProcess cmd
   return $ SMTPipe { channelIn = hin
                    , channelOut = hout
-                   , processHandle = handle }
+                   , processHandle = handle
+                   , smtState = emptySMTState }
 
 sortToLisp :: Sort -> L.Lisp
 sortToLisp s = sortToLisp' sortToLisp (unFix s)
@@ -452,10 +510,10 @@ lispToSort (L.List ((L.Symbol x):args)) = do
   return $ Fix $ NamedSort (T.unpack x) argSorts
 lispToSort _ = Nothing
 
-getSMTName :: FunInfo -> String
+{-getSMTName :: FunInfo -> String
 getSMTName info = escapeName (case funInfoName info of
   Nothing -> Right (funInfoId info)
-  Just name -> Left name)
+  Just name -> Left name)-}
 
 findName :: SMTState -> T.Text -> Maybe (SMTExpr Untyped)
 findName st name = case unescapeName (T.unpack name) of
@@ -464,18 +522,18 @@ findName st name = case unescapeName (T.unpack name) of
     Nothing -> Nothing
     Just (FunInfo { funInfoProxy = _::Proxy (a,t)
                   , funInfoResAnn = ann
-                  }) -> let expr :: SMTExpr t
-                            expr = Var idx ann
-                        in Just $ mkUntyped expr
+                  },nc) -> let expr :: SMTExpr t
+                               expr = Var idx ann
+                           in Just $ mkUntyped expr
   Just (Left name') -> case Map.lookup name' (namedVars st) of
     Nothing -> Nothing
     Just idx -> case Map.lookup idx (allVars st) of
       Nothing -> Nothing
       Just (FunInfo { funInfoProxy = _::Proxy (a,t)
                     , funInfoResAnn = ann
-                    }) -> let expr :: SMTExpr t
-                              expr = Var idx ann
-                          in Just $ mkUntyped expr
+                    },_) -> let expr :: SMTExpr t
+                                expr = Var idx ann
+                            in Just $ mkUntyped expr
 
 mkUntyped :: SMTType t => SMTExpr t -> SMTExpr Untyped
 mkUntyped e = case cast e of
@@ -484,20 +542,18 @@ mkUntyped e = case cast e of
     Just e' -> entypeValue UntypedExpr e'
     Nothing -> UntypedExpr e
 
-exprToLisp :: SMTExpr t -> Map Integer FunInfo -> DataTypeInfo -> L.Lisp
+exprToLisp :: SMTExpr t -> (Integer -> String) -> DataTypeInfo -> L.Lisp
 exprToLisp
   = exprToLispWith
     (\obj -> error $ "smtlib2: Can't translate internal object "++
              show obj++" to s-expression.")
 
-exprToLispWith :: (forall a. (Typeable a,Ord a,Show a) => a -> L.Lisp) -> SMTExpr t -> Map Integer FunInfo -> DataTypeInfo -> L.Lisp
-exprToLispWith _ (Var idx _) mp _ = case Map.lookup idx mp of
-  Just info -> L.Symbol $ T.pack $
-               escapeName (case funInfoName info of
-                            Nothing -> Right (funInfoId info)
-                            Just name -> Left name)
-  Nothing -> L.Symbol $ T.pack $ escapeName (Right idx)
+exprToLispWith :: (forall a. (Typeable a,Ord a,Show a) => a -> L.Lisp) -> SMTExpr t
+                  -> (Integer -> String)
+                  -> DataTypeInfo -> L.Lisp
+exprToLispWith _ (Var idx _) mp _ = L.Symbol $ T.pack $ mp idx
 exprToLispWith _ (QVar lvl idx _) _ _ = L.Symbol $ T.pack $ "q_"++show lvl++"_"++show idx
+exprToLispWith _ (FunArg i _) _ _ = L.Symbol $ T.pack $ "farg_"++show i
 exprToLispWith objs (Const x ann) mp dts = case mangle of
   PrimitiveMangling f -> valueToLisp dts $ f x ann
   ComplexMangling f -> exprToLispWith objs (f x ann) mp dts
@@ -574,7 +630,7 @@ functionSignature f argAnn = withUndef f $
     withUndef :: SMTFunction a b -> (a -> b -> r) -> r
     withUndef _ f = f undefined undefined
 
-functionGetSymbol :: Map Integer FunInfo -> SMTFunction a b -> ArgAnnotation a -> L.Lisp
+functionGetSymbol :: (Integer -> String) -> SMTFunction a b -> ArgAnnotation a -> L.Lisp
 functionGetSymbol _ SMTEq _ = L.Symbol "="
 functionGetSymbol mp fun@(SMTMap f) ann
   = L.List [L.Symbol "_",
@@ -595,8 +651,7 @@ functionGetSymbol mp fun@(SMTMap f) ann
                        L.List (fmap sortToLisp sigArg),
                        sortToLisp sigRes]
           else sym'     
-functionGetSymbol mp (SMTFun name _) _ = case Map.lookup name mp of
-  Just info -> L.Symbol (T.pack $ getSMTName info)
+functionGetSymbol mp (SMTFun i _) _ = L.Symbol (T.pack $ mp i)
 functionGetSymbol _ (SMTBuiltIn name _) _ = L.Symbol $ T.pack name
 functionGetSymbol _ (SMTOrd op) _ = L.Symbol $ case op of
   Ge -> ">="
@@ -828,6 +883,7 @@ lispToValue' dts sort l = case lispToValue dts sort l of
   Just res -> Just res
   Nothing -> case sort of
     Just (Fix (NamedSort name argSorts)) -> lispToConstr dts (Just (name,argSorts)) l
+    _ -> error $ "smtlib2: Cannot translate "++show l++" to value"
 
 lispToConstr :: DataTypeInfo -> Maybe (String,[Sort]) -> L.Lisp -> Maybe Value
 lispToConstr dts sort (L.List [L.Symbol "as",
@@ -1589,7 +1645,7 @@ fieldParser
 withPipe :: MonadIO m => String -> [String] -> SMT' m a -> m a
 withPipe prog args act = do
   pipe <- liftIO $ createSMTPipe prog args
-  withSMTBackend pipe act
+  withSMTBackend' pipe True act
 
 tacticToLisp :: Tactic -> L.Lisp
 tacticToLisp Skip = L.Symbol "skip"

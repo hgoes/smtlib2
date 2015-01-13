@@ -14,42 +14,50 @@ optimizeBackend = OptB
 data OptimizeBackend b = OptB b
 
 instance SMTBackend b m => SMTBackend (OptimizeBackend b) m where
-  smtHandle (OptB b) st (SMTAssert expr grp cid)
+  smtHandle (OptB b) (SMTAssert expr grp cid)
     = let nexpr = case optimizeExpr expr of
             Just e -> e
             Nothing -> expr
       in case nexpr of
-        Const True _ -> return ()
-        _ -> smtHandle b st (SMTAssert nexpr grp cid)
-  smtHandle (OptB b) st (SMTDefineFun name args body)
-    = let nbody = case optimizeExpr body of
-            Just e -> e
-            Nothing -> body
-      in smtHandle b st (SMTDefineFun name args nbody)
-  smtHandle (OptB b) st (SMTGetValue expr)
-    = let nexpr = case optimizeExpr expr of
-            Just e -> e
-            Nothing -> expr
-      in smtHandle b st (SMTGetValue nexpr)
-  smtHandle (OptB b) st SMTGetProof = do
-    res <- smtHandle b st SMTGetProof
-    case optimizeExpr res of
-      Just e -> return e
-      Nothing -> return res
-  smtHandle (OptB b) st (SMTSimplify expr) = do
+        Const True _ -> return ((),OptB b)
+        _ -> do
+          (res,nb) <- smtHandle b (SMTAssert nexpr grp cid)
+          return (res,OptB nb)
+  smtHandle (OptB b) (SMTDefineFun name prx ann body) = do
+    let nbody = case optimizeExpr body of
+                 Just e -> e
+                 Nothing -> body
+    (res,nb) <- smtHandle b (SMTDefineFun name prx ann nbody)
+    return (res,OptB nb)
+  smtHandle (OptB b) (SMTGetValue expr) = do
+    let nexpr = case optimizeExpr expr of
+                 Just e -> e
+                 Nothing -> expr
+    (res,nb) <- smtHandle b (SMTGetValue nexpr)
+    return (res,OptB nb)
+  smtHandle (OptB b) SMTGetProof = do
+    (res,nb) <- smtHandle b SMTGetProof
+    return (case optimizeExpr res of
+             Just e -> e
+             Nothing -> res,OptB nb)
+  smtHandle (OptB b) (SMTSimplify expr) = do
     let nexpr = case optimizeExpr expr of
           Just e -> e
           Nothing -> expr
-    simp <- smtHandle b st (SMTSimplify nexpr)
-    case optimizeExpr simp of
-      Nothing -> return simp
-      Just simp' -> return simp'
-  smtHandle (OptB b) st (SMTGetInterpolant grps) = do
-    inter <- smtHandle b st (SMTGetInterpolant grps)
-    case optimizeExpr inter of
-      Nothing -> return inter
-      Just e -> return e
-  smtHandle (OptB b) st req = smtHandle b st req
+    (simp,nb) <- smtHandle b (SMTSimplify nexpr)
+    return (case optimizeExpr simp of
+             Nothing -> simp
+             Just simp' -> simp',OptB nb)
+  smtHandle (OptB b) (SMTGetInterpolant grps) = do
+    (inter,nb) <- smtHandle b (SMTGetInterpolant grps)
+    return (case optimizeExpr inter of
+             Nothing -> inter
+             Just e -> e,OptB nb)
+  smtHandle (OptB b) req = do
+    (res,nb) <- smtHandle b req
+    return (res,OptB nb)
+  smtGetNames (OptB b) = smtGetNames b
+  smtNextName (OptB b) = smtNextName b
 
 optimizeExpr :: SMTExpr t -> Maybe (SMTExpr t)
 optimizeExpr (App fun x) = let (opt,x') = foldExprsId (\opt expr ann -> case optimizeExpr expr of
@@ -61,7 +69,6 @@ optimizeExpr (App fun x) = let (opt,x') = foldExprsId (\opt expr ann -> case opt
                                         then Just $ App fun x'
                                         else Nothing
                              Just res -> Just res
-
 optimizeExpr _ = Nothing
 
 optimizeCall :: SMTFunction arg res -> arg -> Maybe (SMTExpr res)
