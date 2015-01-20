@@ -2,8 +2,6 @@ module Language.SMTLib2.Strategy where
 
 import Language.SMTLib2.Internals.Operators
 
-import Text.Show
-
 data Tactic
   = Skip
   | AndThen [Tactic]

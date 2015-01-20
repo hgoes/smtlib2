@@ -35,7 +35,6 @@ import qualified Data.ByteString as BS hiding (reverse)
 import qualified Data.ByteString.Char8 as BS8
 import Blaze.ByteString.Builder
 import Data.Typeable
-import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Fix
 import Data.Proxy
@@ -743,7 +742,7 @@ putRequest :: MonadIO m => SMTPipe -> L.Lisp -> m ()
 putRequest pipe expr = do
   clearInput pipe
   liftIO $ toByteStringIO (BS.hPutStr $ channelIn pipe) (mappend (L.fromLispExpr expr) flush)
-  liftIO $ BS.hPutStrLn (channelIn pipe) ""
+  liftIO $ BS8.hPutStrLn (channelIn pipe) ""
   liftIO $ hFlush (channelIn pipe)
 
 parseResponse :: MonadIO m => SMTPipe -> m L.Lisp
