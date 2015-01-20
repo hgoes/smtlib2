@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell,OverloadedStrings,FlexibleContexts,ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell,OverloadedStrings,FlexibleContexts,ScopedTypeVariables,CPP #-}
 {- | This module can be used to automatically lift haskell data-types into the SMT realm.
  -}
 module Language.SMTLib2.TH
@@ -434,8 +434,14 @@ deriveSMT name = do
                              inst1 <- instanceD (cxt [classP ''SMTType [varT n]
                                                      | n <- fmap tyVarName tyvars ])
                                       (appT (conT ''SMTType) fullType)
+#if MIN_VERSION_template_haskell(2,9,0)
+                                      [tySynInstD ''SMTAnnotation
+                                       (tySynEqn [fullType] (foldl appT (tupleT (genericLength tyvars)) [ appT (conT ''SMTAnnotation) (varT $ tyVarName tyvar)
+                                                                                                        | tyvar <- tyvars ])),
+#else
                                       [tySynInstD ''SMTAnnotation [fullType] (foldl appT (tupleT (genericLength tyvars)) [ appT (conT ''SMTAnnotation) (varT $ tyVarName tyvar)
                                                                                                                          | tyvar <- tyvars ]),
+#endif
                                        generateGetSort dec,
                                        funD 'asDataType [ clause [wildP,wildP]
                                                             (normalB $ appsE [ [| Just |]
