@@ -185,7 +185,7 @@ renderSMTRequest nextName getName dts (SMTDefineFun name (_::Proxy arg) argAnn (
         retSort = getSort (undefined::res) annRes
     in Left $ L.List [L.Symbol "define-fun"
                      ,L.Symbol $ T.pack name'
-                     ,args [ L.List [ L.Symbol $ T.pack $ "farg_"++show j
+                     ,args [ L.List [ L.Symbol $ T.pack $ "farg_"++show (j::Integer)
                                     , sortToLisp $ getSort u ann ]
                            | (j,ProxyArg u ann) <- tpLst ]
                      ,sortToLisp retSort
@@ -567,19 +567,19 @@ exprToLispWith _ (AsArray f arg) mp _
                                                 else f']
 exprToLispWith objs (Forall lvl tps body) mp dts
   = L.List [L.Symbol "forall"
-           ,L.List [L.List [L.Symbol $ T.pack $ "q_"++show lvl++"_"++show i,sortToLisp sort]
+           ,L.List [L.List [L.Symbol $ T.pack $ "q_"++show lvl++"_"++show (i::Integer),sortToLisp sort]
                    | (i,tp) <- Prelude.zip [0..] tps
                    , let sort = withProxyArg tp getSort ]
            ,exprToLispWith objs body mp dts]
 exprToLispWith objs (Exists lvl tps body) mp dts
   = L.List [L.Symbol "exists"
-           ,L.List [L.List [L.Symbol $ T.pack $ "q_"++show lvl++"_"++show i,sortToLisp sort]
+           ,L.List [L.List [L.Symbol $ T.pack $ "q_"++show lvl++"_"++show (i::Integer),sortToLisp sort]
                    | (i,tp) <- Prelude.zip [0..] tps
                    , let sort = withProxyArg tp getSort ]
            ,exprToLispWith objs body mp dts]
 exprToLispWith objs (Let lvl args body) mp dts
   = L.List [L.Symbol "let"
-           ,L.List [L.List [L.Symbol $ T.pack $ "q_"++show lvl++"_"++show i,
+           ,L.List [L.List [L.Symbol $ T.pack $ "q_"++show lvl++"_"++show (i::Integer),
                             exprToLispWith objs def mp dts]
                    | (i,def) <- Prelude.zip [0..] args ]
            ,exprToLispWith objs body mp dts]

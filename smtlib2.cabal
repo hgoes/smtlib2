@@ -29,6 +29,7 @@ Library
               MultiParamTypeClasses,FlexibleContexts,OverloadedStrings,
               DeriveFunctor,FlexibleInstances,DeriveTraversable,DeriveFoldable,
               DeriveDataTypeable
+  GHC-Options: -fcontext-stack=100
   if flag(WithConstraints)
     Build-Depends:      constraints
     CPP-Options: -DSMTLIB2_WITH_CONSTRAINTS
