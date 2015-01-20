@@ -23,7 +23,7 @@ Flag WithDataKinds
 
 Library
   Build-Depends:        base >= 4 && < 5,text,mtl,process,blaze-builder,bytestring,
-                        attoparsec,atto-lisp >= 0.2,array,
+                        attoparsec,atto-lisp >= 0.2 && < 0.3,array,
                         containers, transformers, data-fix, tagged
   Extensions: GADTs,RankNTypes,CPP,ScopedTypeVariables,
               MultiParamTypeClasses,FlexibleContexts,OverloadedStrings,
