@@ -221,7 +221,7 @@ data Sort' a = BoolSort
                       , bvSortUntyped :: Bool }
              | ArraySort [a] a
              | NamedSort String [a]
-             deriving (Eq,Show,Functor,Foldable,Traversable)
+             deriving (Eq,Ord,Show,Functor,Foldable,Traversable)
 
 type Sort = Fix Sort'
 
@@ -231,7 +231,7 @@ data Value = BoolValue Bool
            | BVValue { bvValueWidth :: Integer
                      , bvValueValue :: Integer }
            | ConstrValue String [Value] (Maybe (String,[Sort]))
-           deriving (Eq,Show)
+           deriving (Eq,Ord,Show)
 
 data SMTFunction arg res where
   SMTEq :: SMTType a => SMTFunction [SMTExpr a] Bool
