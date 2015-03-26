@@ -6,7 +6,7 @@ module Language.SMTLib2.Pipe
         withPipe,
         exprToLisp,
         exprToLispWith,
-        lispToExpr,
+        lispToExpr,lispToExprWith,
         sortToLisp,lispToSort,
         renderExpr,
         renderExpr',
@@ -973,7 +973,24 @@ lispToExpr :: FunctionParser -- ^ The parser to use for function symbols
               -> Integer -- ^ The current quantification level
               -> L.Lisp -- ^ The lisp expression to parse
               -> Maybe b
-lispToExpr fun bound dts f expected lvl l = case lispToValue dts expected l of
+lispToExpr = lispToExprWith lispToExpr
+
+lispToExprWith :: (forall b. FunctionParser
+                   -> (T.Text -> Maybe (SMTExpr Untyped))
+                   -> DataTypeInfo
+                   -> (forall a. SMTType a => SMTExpr a -> b)
+                   -> Maybe Sort
+                   -> Integer
+                   -> L.Lisp -> Maybe b) -- ^ Recursive descend function
+                  -> FunctionParser -- ^ The parser to use for function symbols
+                  -> (T.Text -> Maybe (SMTExpr Untyped)) -- ^ How to handle variable names
+                  -> DataTypeInfo -- ^ Information about declared data types
+                  -> (forall a. SMTType a => SMTExpr a -> b) -- ^ A function to apply to the resulting SMT expression
+                  -> Maybe Sort -- ^ If you know the sort of the expression, you can pass it here.
+                  -> Integer -- ^ The current quantification level
+                  -> L.Lisp -- ^ The lisp expression to parse
+                  -> Maybe b
+lispToExprWith recp fun bound dts f expected lvl l = case lispToValue dts expected l of
   Just val -> valueToHaskell dts
               (\_ (val'::t) ann
                -> asValueType (undefined::t) ann $
@@ -985,11 +1002,11 @@ lispToExpr fun bound dts f expected lvl l = case lispToValue dts expected l of
       Nothing -> Nothing
       Just subst -> entype (\expr -> Just $ f expr) subst
     L.List [L.Symbol "forall",L.List args',body]
-      -> fmap f $ quantToExpr Forall fun bound dts args' lvl body
+      -> fmap f $ quantToExpr recp Forall fun bound dts args' lvl body
     L.List [L.Symbol "exists",L.List args',body]
-      -> fmap f $ quantToExpr Exists fun bound dts args' lvl body
+      -> fmap f $ quantToExpr recp Exists fun bound dts args' lvl body
     L.List [L.Symbol "let",L.List args',body]
-      -> parseLet fun bound dts f expected args' lvl body
+      -> parseLet recp fun bound dts f expected args' lvl body
     L.List [L.Symbol "_",L.Symbol "as-array",fsym]
       -> case parseFun fun fsym fun dts of
       Nothing -> Nothing
@@ -1022,7 +1039,7 @@ lispToExpr fun bound dts f expected lvl l = case lispToValue dts expected l of
                Just e -> f e
                Nothing -> error $ "smtlib2: Wrong arguments for function "++show fsym++": "++show arg_tps++" ("++show args'++")."
       Just (DefinedParser arg_tps _ parse) -> do
-        nargs <- mapM (\(el,tp) -> lispToExpr fun bound dts mkUntyped (Just tp) lvl el)
+        nargs <- mapM (\(el,tp) -> recp fun bound dts mkUntyped (Just tp) lvl el)
                  (zip args' arg_tps)
         parse $ \(rfun :: SMTFunction arg res)
                 -> case (do
@@ -1036,12 +1053,12 @@ lispToExpr fun bound dts f expected lvl l = case lispToValue dts expected l of
     _ -> Nothing
   where
     lispToExprs constr exprs = do
-      res <- mapM (\arg -> lispToExpr fun bound dts mkUntyped Nothing lvl arg) exprs
+      res <- mapM (\arg -> recp fun bound dts mkUntyped Nothing lvl arg) exprs
       let sorts = fmap (entype exprSort) res
       if constr sorts
         then return res
         else (case generalizeSorts sorts of
-                 Just sorts' -> mapM (\(arg,sort') -> lispToExpr fun bound dts mkUntyped (Just sort') lvl arg) (zip exprs sorts')
+                 Just sorts' -> mapM (\(arg,sort') -> recp fun bound dts mkUntyped (Just sort') lvl arg) (zip exprs sorts')
                  Nothing -> return res)
     preprocessHack (L.List ((L.Symbol "concat"):args)) = foldl1 (\expr arg -> L.List [L.Symbol "concat",expr,arg]) args
     preprocessHack x = x
@@ -1073,12 +1090,19 @@ generalizeSorts (x:xs) = case generalizeSort x of
 exprSort :: SMTType a => SMTExpr a -> Sort
 exprSort (expr::SMTExpr a) = getSort (undefined::a) (extractAnnotation expr)
 
-quantToExpr :: (Integer -> [ProxyArg] -> SMTExpr Bool -> SMTExpr Bool)
+quantToExpr :: (forall b. FunctionParser
+                -> (T.Text -> Maybe (SMTExpr Untyped))
+                -> DataTypeInfo
+                -> (forall a. SMTType a => SMTExpr a -> b)
+                -> Maybe Sort
+                -> Integer
+                -> L.Lisp -> Maybe b) -- ^ Recursive descend function
+            -> (Integer -> [ProxyArg] -> SMTExpr Bool -> SMTExpr Bool)
             -> FunctionParser
             -> (T.Text -> Maybe (SMTExpr Untyped))
             -> DataTypeInfo
             -> [L.Lisp] -> Integer -> L.Lisp -> Maybe (SMTExpr Bool)
-quantToExpr con fun bound dts args lvl body = do
+quantToExpr recp con fun bound dts args lvl body = do
   argLst <- mapM (\el -> case el of
                    L.List [L.Symbol name,tp] -> do
                      sort <- lispToSort tp
@@ -1090,21 +1114,28 @@ quantToExpr con fun bound dts args lvl body = do
       bound' name = case Map.lookup name argMp of
         Just (idx,tp) -> Just (QVar lvl idx tp)
         Nothing -> bound name
-  lispToExpr fun bound' dts
+  recp fun bound' dts
     (\body' -> case cast body' of
       Just body'' -> con lvl (fmap snd argLst) body''
     ) (Just $ Fix BoolSort) (lvl+1) body
 
-parseLet :: FunctionParser
+parseLet :: (forall b. FunctionParser
+             -> (T.Text -> Maybe (SMTExpr Untyped))
+             -> DataTypeInfo
+             -> (forall a. SMTType a => SMTExpr a -> b)
+             -> Maybe Sort
+             -> Integer
+             -> L.Lisp -> Maybe b) -- ^ Recursive descend function
+         -> FunctionParser
          -> (T.Text -> Maybe (SMTExpr Untyped))
          -> DataTypeInfo
          -> (forall a. SMTType a => SMTExpr a -> b)
          -> Maybe Sort
          -> [L.Lisp] -> Integer -> L.Lisp -> Maybe b
-parseLet fun bound dts app expected args lvl body = do
+parseLet recp fun bound dts app expected args lvl body = do
   argLst <- mapM (\el -> case el of
                    L.List [L.Symbol name,expr] -> do
-                     expr' <- lispToExpr fun bound dts UntypedExpr Nothing (lvl+1) expr
+                     expr' <- recp fun bound dts UntypedExpr Nothing (lvl+1) expr
                      return (name,expr')
                    _ -> Nothing
                  ) args
@@ -1113,50 +1144,10 @@ parseLet fun bound dts app expected args lvl body = do
       bound' name = case Map.lookup name argMp of
         Just (idx,tp) -> Just (QVar lvl idx tp)
         Nothing -> bound name
-  lispToExpr fun bound' dts
+  recp fun bound' dts
     (\body' -> app (Let lvl (fmap snd argLst) body')
     ) expected (lvl+1) body
-{-
-data LetStruct where
-  LetStruct :: SMTType a => SMTAnnotation a -> SMTExpr a -> (SMTExpr a -> LetStruct) -> LetStruct
-  EndLet :: SMTType a => SMTExpr a -> LetStruct
 
-parseLetStruct :: FunctionParser
-                  -> (T.Text -> Maybe (SMTExpr Untyped))
-                  -> DataTypeInfo
-                  -> Maybe Sort
-                  -> [L.Lisp] -> L.Lisp -> LetStruct
-parseLetStruct fun bound tps expected (L.List [L.Symbol name,expr]:rest) arg
-  = case lispToExpr fun bound tps
-         (\expr' -> LetStruct (extractAnnotation expr') expr' $
-                    \sym -> parseLetStruct fun
-                            (\txt -> if txt==name
-                                     then Just $ mkUntyped sym
-                                     else bound txt) tps expected rest arg
-         ) Nothing expr of
-      Nothing -> error $ "smtlib2: Failed to parse argument in let-expression "++show expr
-      Just x -> x
-parseLetStruct fun bound tps expected [] arg
-  = case lispToExpr fun bound tps EndLet expected arg of
-    Nothing -> error $ "smtlib2: Failed to parse body of let-expression: "++show arg
-    Just x -> x
-parseLetStruct _ _ _ _ (el:_) _ = error $ "smtlib2: Invalid entry "++show el++" in let construct."
-
-extractType :: (forall a. SMTType a => a -> b) -> LetStruct -> b
-extractType f (EndLet x) = f (getUndef x)
-extractType f (LetStruct _ expr g) = extractType f (g expr)
-
-convertLetStructT :: SMTType a => LetStruct -> SMTExpr a
-convertLetStructT (EndLet x) = case gcast x of
-  Just x' -> x'
-  Nothing -> error "smtlib2: Type error while converting let structure."
-convertLetStructT (LetStruct ann x g) = Let ann x (\sym -> convertLetStructT (g sym))
-
-convertLetStruct :: (forall a. SMTType a => SMTExpr a -> b) -> LetStruct -> b
-convertLetStruct f x
-  = extractType
-    (\(_::t) -> f (convertLetStructT x :: SMTExpr t)) x
--}
 withFirstArgSort :: DataTypeInfo -> L.Lisp -> [Sort] -> (forall t. SMTType t => t -> SMTAnnotation t -> a) -> a
 withFirstArgSort dts _ (s:rest) f = case s of
   Fix (BVSort i False) -> if any (\sort -> case sort of
