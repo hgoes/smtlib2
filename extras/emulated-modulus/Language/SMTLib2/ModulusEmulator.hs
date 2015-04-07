@@ -76,7 +76,9 @@ emulateModulus (App (SMTIntArith Mod) (x,y)) b = case y of
                                            , funInfoResAnn = ()
                                            , funInfoName = Nothing }))
     let b2 = b1 { emulatedBackend = nb }
-    return (Var resVar (),addEmulation (EmulatedMod resVar y x') b2)
+    return (if y>=0
+            then Var resVar ()
+            else App SMTNeg (Var resVar ()),addEmulation (EmulatedMod resVar y x') b2)
 emulateModulus (App (SMTIntArith Rem) (x,y)) b = case y of
   Const y () -> do
     (x',b1) <- emulateModulus x b
@@ -86,9 +88,7 @@ emulateModulus (App (SMTIntArith Rem) (x,y)) b = case y of
                                            , funInfoResAnn = ()
                                            , funInfoName = Nothing }))
     let b2 = b1 { emulatedBackend = nb }
-    return (ite (x' .>. 0)
-            (Var resVar ())
-            ((Var resVar ())-(constant y)),addEmulation (EmulatedMod resVar y x') b2)
+    return (Var resVar (),addEmulation (EmulatedMod resVar y x') b2)
 emulateModulus (App (SMTIntArith Div) (x,y)) b = do
   (x',b1) <- emulateModulus x b
   (y',b2) <- emulateModulus y b1
