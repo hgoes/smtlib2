@@ -777,7 +777,7 @@ data BVKind = BVUntyped
 
 class TypeableNat n where
   typeOfNat :: Proxy n -> TypeRep
-  typeOfNat p = Prelude.foldl
+  typeOfNat p = foldl
                 (\c _ -> mkTyConApp (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals" "'S") [c])
                 (mkTyConApp (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals" "'Z") [])
                 (genericReplicate (reflectNat p 0) ())
@@ -858,7 +858,7 @@ reifyNat x f
     reifyNat' 0 f = f (Proxy :: Proxy Z)
     reifyNat' n f = reifyNat' (n-1) (\(_::Proxy n) -> f (Proxy::Proxy (S n)))
 
-data BitVector (b :: BVKind) = BitVector Integer deriving (Eq,Ord)
+data BitVector (b :: BVKind) = BitVector Integer deriving (Eq,Ord,Typeable)
 
 instance TypeableBVKind k => Typeable (BitVector k) where
   typeOf _ = mkTyConApp
@@ -899,15 +899,16 @@ reifyNat n f
 reifySum :: (Num a,Ord a) => a -> a -> (forall n1 n2. (TypeableNat n1,TypeableNat n2,TypeableNat (Add n1 n2))
                                         => Proxy n1 -> Proxy n2 -> Proxy (Add n1 n2) -> r) -> r
 reifySum n1 n2 f
-  | n1 < 0 || n2 < 0 = error "smtlib2: Cann only reify numbers >= 0."
+  | n1 < 0 || n2 < 0 = error "smtlib2: Can only reify numbers >= 0."
   | otherwise = reifySum' n1 n2 f
   where
     reifySum' :: (Num a,Ord a) => a -> a
                  -> (forall n1 n2. (TypeableNat n1,TypeableNat n2,TypeableNat (Add n1 n2))
                      => Proxy n1 -> Proxy n2 -> Proxy (Add n1 n2) -> r) -> r
     reifySum' 0 n2' f' = reifyNat n2' $ \(_::Proxy i) -> f' (Proxy::Proxy Z) (Proxy::Proxy i) (Proxy::Proxy i)
-    reifySum' n1' n2' f' = reifySum' (n1'-1) n2' $ \(_::Proxy i1) (_::Proxy i2) (_::Proxy i3)
-                                                   -> f' (Proxy::Proxy (S i1)) (Proxy::Proxy i2) (Proxy::Proxy (S i3))
+    reifySum' n1' n2' f' = reifySum' (n1'-1) n2' $
+                           \(_::Proxy i1) (_::Proxy i2) (_::Proxy (Add i1 i2))
+                           -> f' (Proxy::Proxy (S i1)) (Proxy::Proxy i2) (Proxy::Proxy (S (Add i1 i2)))
 
 reifyExtract :: (Num a,Ord a) => a -> a -> a
                 -> (forall n1 n2 n3 n4. (TypeableNat n1,TypeableNat n2,TypeableNat n3,TypeableNat n4,Add n4 n2 ~ S n3)
