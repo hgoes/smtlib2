@@ -51,7 +51,7 @@ data SMTRequest response where
   SMTComment :: String -> SMTRequest ()
   SMTExit :: SMTRequest ()
   SMTApply :: Tactic -> SMTRequest [SMTExpr Bool]
-  SMTNameExpr :: String -> SMTExpr t -> SMTRequest Integer
+  SMTNameExpr :: SMTType t => String -> SMTExpr t -> SMTRequest Integer
   SMTNewInterpolationGroup :: SMTRequest InterpolationGroup
   SMTNewClauseId :: SMTRequest ClauseId
   deriving Typeable
@@ -208,7 +208,7 @@ data SMTExpr t where
   Exists :: Integer -> [ProxyArg] -> SMTExpr Bool -> SMTExpr Bool
   Let :: Integer -> [SMTExpr Untyped] -> SMTExpr b -> SMTExpr b
   App :: (Args arg,SMTType res) => SMTFunction arg res -> arg -> SMTExpr res
-  Named :: SMTExpr a -> String -> Integer -> SMTExpr a
+  Named :: SMTExpr a -> Integer -> SMTExpr a
   InternalObj :: (SMTType t,Typeable a,Ord a,Show a) => a -> SMTAnnotation t -> SMTExpr t
   UntypedExpr :: SMTType t => SMTExpr t -> SMTExpr Untyped
   UntypedExprValue :: SMTValue t => SMTExpr t -> SMTExpr UntypedValue
@@ -1080,13 +1080,11 @@ showExpr p (App fun arg) = let strArgs = showsPrec 11 arg
                                                 showsPrec 11 fun .
                                                 showChar ' ' .
                                                 strArgs)
-showExpr p (Named expr name nc) = let strExpr = showExpr 11 expr
-                                  in showParen (p>10) (showString "Named " .
-                                                       strExpr .
-                                                       showChar ' ' .
-                                                       showsPrec 11 name .
-                                                       showChar ' ' .
-                                                       showsPrec 11 nc)
+showExpr p (Named expr i) = let strExpr = showExpr 11 expr
+                            in showParen (p>10) (showString "Named " .
+                                                 strExpr .
+                                                 showChar ' ' .
+                                                 showsPrec 11 i)
 showExpr p (InternalObj obj ann) = showParen (p>10) (showString "InternalObj " .
                                                      showsPrec 11 obj .
                                                      showChar ' ' .
@@ -1171,7 +1169,7 @@ quantificationLevel (Forall lvl _ _) = lvl+1
 quantificationLevel (Exists lvl _ _) = lvl+1
 quantificationLevel (Let lvl _ _) = lvl+1
 quantificationLevel (App _ arg) = maximum $ fmap quantificationLevel $ fromArgs arg
-quantificationLevel (Named expr _ _) = quantificationLevel expr
+quantificationLevel (Named expr _) = quantificationLevel expr
 quantificationLevel (UntypedExpr e) = quantificationLevel e
 quantificationLevel (UntypedExprValue e) = quantificationLevel e
 quantificationLevel _ = 0

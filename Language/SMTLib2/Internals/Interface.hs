@@ -647,7 +647,7 @@ named :: (SMTType a,SMTAnnotation a ~ (),Monad m)
          => String -> SMTExpr a -> SMT' m (SMTExpr a,SMTExpr a)
 named name expr = do
   i <- smtBackend $ \b -> smtHandle b (SMTNameExpr name expr)
-  return (Named expr name i,Var i (extractAnnotation expr))
+  return (Named expr i,Var i (extractAnnotation expr))
 
 -- | Like `named`, but defaults the name to "named".
 named' :: (SMTType a,SMTAnnotation a ~ (),Monad m)

@@ -65,7 +65,7 @@ extractAnnotation (AsArray f arg) = (arg,inferResAnnotation f arg)
 extractAnnotation (Forall _ _ _) = ()
 extractAnnotation (Exists _ _ _) = ()
 extractAnnotation (Let _ _ f) = extractAnnotation f
-extractAnnotation (Named x _ _) = extractAnnotation x
+extractAnnotation (Named x _) = extractAnnotation x
 extractAnnotation (App f arg) = inferResAnnotation f (extractArgAnnotation arg)
 extractAnnotation (InternalObj _ ann) = ann
 extractAnnotation (UntypedExpr (expr::SMTExpr t)) = ProxyArg (undefined::t) (extractAnnotation expr)
@@ -1330,9 +1330,9 @@ foldExprM f s (App fun arg) = do
   (s',args') <- foldArgsM f s arg
   return (s',[ App fun arg'
              | arg' <- args' ])
-foldExprM f s (Named expr name i) = do
+foldExprM f s (Named expr i) = do
   (s',exprs') <- foldExprM f s expr
-  return (s',[ Named expr' name i
+  return (s',[ Named expr' i
              | expr' <- exprs' ])
 foldExprM f s (UntypedExpr e) = do
   (s',exprs') <- foldExprM f s e
@@ -1559,9 +1559,9 @@ compareExprs (App f1 arg1) (App f2 arg2) = case compareFun f1 f2 of
   x -> x
 compareExprs (App _ _) _ = LT
 compareExprs _ (App _ _) = GT
-compareExprs (Named _ n1 i1) (Named _ n2 i2) = compare (n1,i1) (n2,i2)
-compareExprs (Named _ _ _) _ = LT
-compareExprs _ (Named _ _ _) = GT
+compareExprs (Named _ i1) (Named _ i2) = compare i1 i2
+compareExprs (Named _ _) _ = LT
+compareExprs _ (Named _ _) = GT
 compareExprs (InternalObj o1 ann1) (InternalObj o2 ann2) = case compare (typeOf o1) (typeOf o2) of
       EQ -> case compare (typeOf ann1) (typeOf ann2) of
         EQ -> case cast (o2,ann2) of
@@ -1607,9 +1607,9 @@ eqExpr lhs rhs = case (lhs,rhs) of
   (Let l1 a1 f1,Let l2 a2 f2) -> if l1==l2 && a1==a2
                                  then eqExpr f1 f2
                                  else Nothing
-  (Named e1 n1 nc1,Named e2 n2 nc2) -> if n1==n2 && nc1 == nc2
-                                       then eqExpr e1 e2
-                                       else Nothing
+  (Named e1 i1,Named e2 i2) -> if i1==i2
+                               then eqExpr e1 e2
+                               else Nothing
   (App f1 arg1,App f2 arg2) -> case cast f2 of
       Nothing -> Nothing
       Just f2' -> case cast arg2 of

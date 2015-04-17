@@ -262,7 +262,7 @@ handleRequest pipe (SMTDeclareDataTypes dts) = do
   return ((),pipe { smtState = (smtState pipe) { declaredDataTypes = ndts } })
 handleRequest pipe (SMTDeclareSort name arity) = return ((),pipe)
 handleRequest pipe (SMTDeclareFun info)
-  = let (v,name,nst) = smtStateAddFun info (smtState pipe)
+  = let (v,_,nst) = smtStateAddFun info (smtState pipe)
     in return (v,pipe { smtState = nst })
 handleRequest pipe (SMTDefineFun name (_::Proxy arg) argAnn (body::SMTExpr res)) = do
   let finfo = FunInfo { funInfoProxy = Proxy::Proxy (arg,res)
@@ -396,13 +396,14 @@ handleRequest pipe (SMTApply tactic) = do
                        _ -> error $ "smtlib2: Couldn't parse goal "++show expr
                  _ -> error $ "smtlib2: Couldn't parse goal description "++show val
                ) goals,pipe)
-handleRequest pipe (SMTNameExpr name expr) = do
-  return (nc,pipe { smtState = nst })
+handleRequest pipe (SMTNameExpr name (expr::SMTExpr t)) = do
+  return (i,pipe { smtState = nst })
   where
-    nc = case Map.lookup name (nameCount $ smtState pipe) of
-      Just n -> n
-      Nothing -> 0
-    nst = (smtState pipe) { nameCount = Map.insert name (nc+1) (nameCount $ smtState pipe) }
+    finfo = FunInfo { funInfoProxy = Proxy::Proxy ((),t)
+                    , funInfoArgAnn = ()
+                    , funInfoResAnn = extractAnnotation expr
+                    , funInfoName = Just name }
+    (i,_,nst) = smtStateAddFun finfo (smtState pipe)
 handleRequest pipe SMTNewInterpolationGroup = do
   return (InterpolationGroup igrp,pipe { smtState = nst })
   where
@@ -589,11 +590,12 @@ exprToLispWith objs (App fun x) mp dts
     in if Prelude.null x'
        then l
        else L.List $ l:x'
-exprToLispWith objs (Named expr name nc) mp dts
+exprToLispWith objs (Named expr idx) mp dts
   = let expr' = exprToLispWith objs expr mp dts
+        name = mp idx
     in L.List [L.Symbol "!",expr'
               ,L.Symbol ":named"
-              ,L.Symbol $ T.pack $ escapeName (Left (name,nc))]
+              ,L.Symbol $ T.pack name]
 exprToLispWith objs (InternalObj obj ann) _ _ = objs obj
 exprToLispWith objs (UntypedExpr expr) mp dts
   = exprToLispWith objs expr mp dts
