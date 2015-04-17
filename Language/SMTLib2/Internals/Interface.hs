@@ -231,6 +231,9 @@ assertInterp expr interp = smtBackend $ \b -> smtHandle b (SMTAssert expr (Just 
 getInterpolant :: Monad m => [InterpolationGroup] -> SMT' m (SMTExpr Bool)
 getInterpolant grps = smtBackend $ \b -> smtHandle b (SMTGetInterpolant grps)
 
+interpolate :: Monad m => [SMTExpr Bool] -> SMT' m [SMTExpr Bool]
+interpolate exprs = smtBackend $ \b -> smtHandle b (SMTInterpolate exprs)
+
 -- | Set an option for the underlying SMT solver
 setOption :: Monad m => SMTOption -> SMT' m ()
 setOption opt = smtBackend $ \b -> smtHandle b (SMTSetOption opt)

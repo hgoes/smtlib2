@@ -56,6 +56,7 @@ module Language.SMTLib2
          interpolationGroup,
          assertInterp,
          getInterpolant,
+         interpolate,
          -- * Expressions
          var,varNamed,varNamedAnn,varAnn,argVars,argVarsAnn,argVarsAnnNamed,
          untypedVar,untypedNamedVar,

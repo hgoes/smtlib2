@@ -195,6 +195,10 @@ renderSMTRequest _ _ _ (SMTGetInterpolant grps)
   = Left $ L.List [L.Symbol "get-interpolant"
                   ,L.List [ L.Symbol $ T.pack ("i"++show g) | InterpolationGroup g <- grps ]
                   ]
+renderSMTRequest _ getName dts (SMTInterpolate exprs)
+  = Left $ L.List $ (L.Symbol "get-interpolant"):
+    [ exprToLisp expr getName dts
+    | expr <- exprs ]
 renderSMTRequest _ _ _ (SMTSetOption opt)
   = Left $ L.List $ [L.Symbol "set-option"]
     ++(case opt of
@@ -285,6 +289,19 @@ handleRequest pipe (SMTGetInterpolant grps) = do
        gcast (Just $ Fix BoolSort) 0 val of
     Just (Just x) -> return (x,pipe)
     _ -> error $ "smtlib2: Failed to parse get-interpolant result: "++show val
+handleRequest pipe (SMTInterpolate exprs) = case exprs of
+  [] -> return ([],pipe)
+  e:es -> do
+    resp <- mapM (\_ -> do
+                     val <- parseResponse pipe
+                     case lispToExpr commonFunctions
+                          (findName $ smtState pipe)
+                          (declaredDataTypes $ smtState pipe)
+                          gcast (Just $ Fix BoolSort) 0 val of
+                      Just (Just x) -> return x
+                      _ -> error $ "smtlib2: Failed to parse get-interpolant result: "++show val
+                 ) es
+    return (resp,pipe)
 handleRequest pipe (SMTSetOption opt) = return ((),pipe)
 handleRequest pipe (SMTSetLogic name) = return ((),pipe)
 handleRequest pipe SMTGetProof = do
@@ -426,6 +443,9 @@ renderSMTResponse _ _ (SMTCheckSat _ _) res = case res of
   Unknown -> Just "unknown"
 renderSMTResponse getName dts (SMTGetInterpolant grps) expr
   = Just $ renderExpr' getName dts expr
+renderSMTResponse getName dts (SMTInterpolate _) exprs
+  = Just $ unwords [ renderExpr' getName dts expr
+                   | expr <- exprs ]
 renderSMTResponse getName dts SMTGetProof proof
   = Just $ renderExpr' getName dts proof
 renderSMTResponse getName dts (SMTSimplify _) expr

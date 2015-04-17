@@ -48,6 +48,7 @@ data SMTRequest response where
   SMTGetUnsatCore :: SMTRequest [ClauseId]
   SMTSimplify :: SMTType t => SMTExpr t -> SMTRequest (SMTExpr t)
   SMTGetInterpolant :: [InterpolationGroup] -> SMTRequest (SMTExpr Bool)
+  SMTInterpolate :: [SMTExpr Bool] -> SMTRequest [SMTExpr Bool]
   SMTComment :: String -> SMTRequest ()
   SMTExit :: SMTRequest ()
   SMTApply :: Tactic -> SMTRequest [SMTExpr Bool]
