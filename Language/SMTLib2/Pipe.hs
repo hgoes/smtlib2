@@ -1059,7 +1059,7 @@ lispToExprWith recp fun bound dts f expected lvl l = case lispToValue dts expect
                         [] -> Just $ App rfun rargs
                         _ -> Nothing) of
                Just e -> f e
-               Nothing -> error $ "smtlib2: Wrong arguments for function "++show fsym++": "++show arg_tps++" ("++show args'++")."
+               Nothing -> error $ "smtlib2: Wrong arguments for function "++show fsym++": "++show arg_tps++" (Expected: "++show args'++")."
       Just (DefinedParser arg_tps _ parse) -> do
         nargs <- mapM (\(el,tp) -> recp fun bound dts mkUntyped (Just tp) lvl el)
                  (zip args' arg_tps)
@@ -1071,7 +1071,7 @@ lispToExprWith recp fun bound dts f expected lvl l = case lispToValue dts expect
                               [] -> Just $ App rfun rargs
                               _ -> Nothing) of
                      Just e -> f e
-                     Nothing -> error $ "smtlib2: Wrong arguments for function "++show fsym
+                     Nothing -> error $ "smtlib2: Wrong arguments for function "++show fsym++" (Expected: "++show arg_tps++")"
     _ -> Nothing
   where
     lispToExprs constr exprs = do
@@ -1449,13 +1449,13 @@ selectParser = FunctionParser $ \sym _ dts -> case sym of
     -> Just $ OverloadedParser (const True)
        (\sort_arg -> case sort_arg of
            (Fix (ArraySort _ vsort):_) -> Just vsort
-           _ -> error "smtlib2: Wrong arguments for select function.") $
+           _ -> error $ "smtlib2: Wrong arguments for select function ("++show sort_arg++").") $
        \sort_arg sort_ret f -> case sort_arg of
          (Fix (ArraySort isort1 _):_)
            -> withSorts dts isort1 $
               \(_::i) _ -> withSort dts sort_ret $
                            \(_::v) _ -> Just $ f (SMTSelect::SMTFunction (SMTExpr (SMTArray i v),i) v)
-         _ -> error "smtlib2: Wrong arguments for select function."
+         _ -> error $ "smtlib2: Wrong arguments for select function ("++show sort_arg++")."
   _ -> Nothing
 
 storeParser = FunctionParser $ \sym _ dts -> case sym of
