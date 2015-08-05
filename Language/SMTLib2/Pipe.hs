@@ -457,7 +457,12 @@ renderSMTResponse getName dts (SMTApply _) goals
     [exprToLisp goal getName dts
     | goal <- goals ]
 renderSMTResponse _ _ SMTGetUnsatCore core = Just (show core)
-renderSMTResponse _ _ SMTGetModel mdl = Just (show mdl)
+renderSMTResponse getName dts SMTGetModel mdl
+  = Just $ "(model"++concat assignments++")"
+  where
+    assignments = [ "\n  ("++getName fun++" "++
+                    renderExpr' getName dts expr++")"
+                  | (fun,(_,_,expr)) <- Map.toList $ modelFunctions mdl ]
 renderSMTResponse _ _ _ _ = Nothing
 
 -- | Spawn a new SMT solver process and create a pipe to communicate with it.
