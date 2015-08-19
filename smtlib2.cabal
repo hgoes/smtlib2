@@ -25,28 +25,9 @@ Library
   Build-Depends:        base >= 4 && < 5,text,mtl,process,blaze-builder,bytestring,
                         attoparsec,atto-lisp >= 0.2 && < 0.3,array,
                         containers, transformers, data-fix, tagged
-  Extensions: GADTs,RankNTypes,CPP,ScopedTypeVariables,
-              MultiParamTypeClasses,FlexibleContexts,OverloadedStrings,
-              DeriveFunctor,FlexibleInstances,DeriveTraversable,DeriveFoldable,
-              DeriveDataTypeable
-  GHC-Options: -fcontext-stack=100
-  if flag(WithConstraints)
-    Build-Depends:      constraints
-    CPP-Options: -DSMTLIB2_WITH_CONSTRAINTS
-  if flag(WithDataKinds)
-    Extensions: DataKinds,PolyKinds
-    CPP-Options: -DSMTLIB2_WITH_DATAKINDS
-  
+  Extensions: GADTs,FlexibleContexts,FlexibleInstances,ExistentialQuantification,KindSignatures,DataKinds,TypeFamilies,AllowAmbiguousTypes,TypeOperators,MultiParamTypeClasses
   GHC-Options: -fwarn-unused-imports
   Exposed-Modules:
-    Language.SMTLib2
-    Language.SMTLib2.Solver
-    Language.SMTLib2.Connection
-    Language.SMTLib2.Internals
-    Language.SMTLib2.Internals.Instances
-    Language.SMTLib2.Internals.Interface
-    Language.SMTLib2.Internals.Optimize
-    Language.SMTLib2.Internals.Operators
-    Language.SMTLib2.Pipe
-    Language.SMTLib2.Strategy
-    Data.Unit
+    Language.SMTLib2.Internals.Value
+    Language.SMTLib2.Internals.Backend
+    Language.SMTLib2.Internals.Expression
