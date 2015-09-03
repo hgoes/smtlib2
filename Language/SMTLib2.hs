@@ -125,6 +125,45 @@ data SMTExpr b t where
   SMTExpr :: SMTType t => SMTExpr' b (SMTRepr t) -> SMTExpr b t
   SMTDynExpr :: (T.GetType a,SMTDynType t) => SMTExpr' b a -> SMTExpr b t
 
+class SMTType' t where
+  type SMTRepr' t :: Maybe T.Type
+  type SMTAnnotation' t :: Maybe *
+  getRepr' :: (SMTRepr' t ~ Nothing,SMTAnnotation' t ~ Just ann) => Proxy t -> ann -> (forall t'. T.GetType t' => Proxy t' -> a) -> a
+  getRepr' = undefined
+
+class Args' t where
+  type ArgRepr' t :: Maybe [T.Type]
+  type ArgAnnotation' t :: Maybe *
+  getArgRepr' :: (ArgRepr' t ~ Nothing,ArgAnnotation' t ~ Just ann) => Proxy t -> ann -> (forall t'. T.GetTypes t' => Proxy t' -> a) -> a
+
+instance SMTType' Bool where
+  type SMTRepr' Bool = Just T.BoolType
+  type SMTAnnotation' Bool = Nothing
+
+--class (Args' args,SMTType' el) => LiftArray args el where
+--  type LiftArray 
+
+type family LiftArray (args :: Maybe [T.Type]) (tp :: Maybe T.Type) :: Maybe T.Type where
+  LiftArray Nothing Nothing = Nothing
+  LiftArray Nothing (Just a) = Nothing
+  LiftArray (Just a) Nothing = Nothing
+  LiftArray (Just arg) (Just tp) = Just (T.ArrayType arg tp)
+
+type family LiftArrayAnn (args :: Maybe *) (tp :: Maybe *) :: Maybe * where
+  LiftArrayAnn Nothing Nothing = Nothing
+  LiftArrayAnn (Just arg) Nothing = Just arg
+  LiftArrayAnn Nothing (Just tp) = Just tp
+  LiftArrayAnn (Just arg) (Just tp) = Just (arg,tp)
+
+instance (Args' arg,SMTType' el) => SMTType' (SMTArray arg el) where
+  type SMTRepr' (SMTArray arg el) = LiftArray (ArgRepr' arg) (SMTRepr' el)
+  type SMTAnnotation' (SMTArray arg el) = LiftArrayAnn (ArgAnnotation' arg) (SMTAnnotation' el)
+  --getRepr' 
+
+--instance (Args' arg,SMTType' el,ArgRepr' arg ~ Just arg',SMTRepr' el ~ Just el') => SMTType' (SMTArray arg el) where
+--  type SMTRepr' (SMTArray arg el) = Just (arg',el')
+--  type SMTAnnotation' (SMTArray arg el) = Nothing
+
 app :: (Args arg,ArgRepr arg '[] ~ arg',SMTType res,SMTRepr res ~ res',ArgBackend arg ~ b)
     => Function (Fun b) (Constr b) (Field b) arg' res'
     -> arg -> SMTExpr b res
