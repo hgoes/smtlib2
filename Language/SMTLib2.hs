@@ -51,358 +51,357 @@ instance Backend b => MonadState b (SMT' b) where
 data SMTArray idx t = SMTArray
 data SMTBV = SMTBV
 
-class (Typeable t,T.GetType (SMTRepr t)) => SMTType t where
-  type SMTRepr t :: T.Type
+class (Typeable t) => SMTType b t where
+  type SMTRepr t :: Either T.Type *
+  getRepr :: (SMTRepr t ~ Right ann)
+          => Proxy b -> Proxy t -> ann
+          -> (forall t'. T.GetType t' => Proxy t' -> a)
+          -> a
+  getRepr _ p = error $ "smtlib2: getRepr not implemented for type "++show (typeRep p)
 
-class SMTType t => SMTValue t where
-  toValue :: t -> T.Value con (SMTRepr t)
-  fromValue :: T.Value con (SMTRepr t) -> t
+data Lst (a :: [*]) where
+  Nil :: Lst '[]
+  Cons :: t -> Lst ts -> Lst (t ': ts)
 
-class (Typeable args,T.Liftable (ArgRepr args '[])) => Args args where
-  type ArgBackend args
-  type ArgRepr args (oargs :: [T.Type]) :: [T.Type]
-  toArgs :: args -> T.Args (SMTExpr' (ArgBackend args)) oargs -> T.Args (SMTExpr' (ArgBackend args)) (ArgRepr args oargs)
-  fromArgs :: Proxy oargs -> T.Args (SMTExpr' (ArgBackend args)) (ArgRepr args oargs) -> (args,T.Args (SMTExpr' (ArgBackend args)) oargs)
+data ArgLst (e :: * -> *) (arg :: [*]) where
+  ArgNil :: ArgLst e '[]
+  ArgCons :: e t -> ArgLst e ts -> ArgLst e (t ': ts)
 
-class SMTDynType t where
-  type SMTAnnotation t
-  getSMTRepr :: Proxy t -> SMTAnnotation t
-             -> (forall (q :: T.Type). T.GetType q => Proxy q -> a) -> a
+class (Typeable arg) => Args b arg where
+  type ArgRepr arg :: Either [T.Type] *
+  getArgRepr :: (ArgRepr arg ~ Right ann)
+             => Proxy b -> Proxy arg -> ann
+             -> (forall arg'. T.Liftable arg' => Proxy arg' -> a)
+             -> a
+  getArgRepr _ p = error $ "smtlib2: getArgRepr not implemented for type "++show (typeRep p)
+  mkArgs :: arg -> SMTArgs b arg
+  toArgs :: (ArgRepr arg ~ Left arg') => arg -> T.Args (SMTExpr' b) arg'
+  toArgs (_::arg) = error $ "smtlib2: toArgs not implemented for type "++
+                            show (typeRep (Proxy::Proxy arg))
+  argAnnotation :: (ArgRepr arg ~ Right ann) => arg -> ann
+  argAnnotation (_::arg) = error $ "smtlib2: argAnnotation not implemented for type "++
+                                   show (typeRep (Proxy::Proxy arg))
 
-class DynArgs args where
-  type DynArgBackend args
-  type ArgAnnotation args
-  getArgRepr :: Proxy args -> ArgAnnotation args
-             -> (forall (q :: [T.Type]). T.Liftable q => Proxy q -> a) -> a
-  asArgs :: T.GetTypes oarg => args -> T.Args (SMTExpr' (DynArgBackend args)) oarg
-         -> (forall arg. T.GetTypes arg => T.Args (SMTExpr' (DynArgBackend args)) arg -> a) -> a 
+instance SMTType b Bool where
+  type SMTRepr Bool = Left T.BoolType
+
+class SMTArray' b idx el (idx' :: Either [T.Type] *) (el' :: Either T.Type *) where
+  type ArrayRepr idx' el' :: Either T.Type *
+  getArrayRepr :: (ArrayRepr idx' el' ~ Right ann)
+               => Proxy '(idx',el') -> Proxy b -> Proxy (SMTArray idx el) -> ann
+               -> (forall idx'' el''. (T.Liftable idx'',T.GetType el'')
+                   => Proxy (T.ArrayType idx'' el'') -> a)
+               -> a
+  getArrayRepr = error $ "smtlib2: getArrayRepr not implemented."
 
 
-instance SMTType Bool where
-  type SMTRepr Bool = T.BoolType
+-- Both arguments static
+instance (Args b idx,SMTType b el,ArgRepr idx ~ Left idx',SMTRepr el ~ Left el')
+         => SMTArray' b idx el (Left idx') (Left el') where
+  type ArrayRepr (Left idx') (Left el') = Left (T.ArrayType idx' el')
 
-instance SMTValue Bool where
-  toValue b = T.BoolValue b
-  fromValue (T.BoolValue b) = b
+-- Index static, element dynamic
+instance (Args b idx,SMTType b el,ArgRepr idx ~ Left idx',SMTRepr el ~ Right el',T.Liftable idx')
+         => SMTArray' b idx el (Left idx') (Right el') where
+  type ArrayRepr (Left idx') (Right el') = Right el'
+  getArrayRepr (_::Proxy '(Left idx',Right el')) prB (_::Proxy (SMTArray idx el)) eann f
+    = getRepr prB (Proxy::Proxy el) eann $
+      \(Proxy::Proxy tel) -> f (Proxy::Proxy (T.ArrayType idx' tel))
 
-instance SMTType Integer where
-  type SMTRepr Integer = T.IntType
+-- Index dynamic, element static
+instance (Args b idx,SMTType b el,ArgRepr idx ~ Right idx',SMTRepr el ~ Left el',T.GetType el')
+         => SMTArray' b idx el (Right idx') (Left el') where
+  type ArrayRepr (Right idx') (Left el') = Right idx'
+  getArrayRepr (_::Proxy '(Right idx',Left el')) prB (_::Proxy (SMTArray idx el)) iann f
+    = getArgRepr prB (Proxy::Proxy idx) iann $
+      \(Proxy::Proxy tidx) -> f (Proxy::Proxy (T.ArrayType tidx el'))
 
-instance SMTValue Integer where
-  toValue i = T.IntValue i
-  fromValue (T.IntValue i) = i
+-- Both arguments dynamic
+instance (Args b idx,SMTType b el,ArgRepr idx ~ Right idx',SMTRepr el ~ Right el')
+         => SMTArray' b idx el (Right idx') (Right el') where
+  type ArrayRepr (Right idx') (Right el') = Right (idx',el')
+  getArrayRepr _ prB (_::Proxy (SMTArray idx el)) (iann,eann) f
+    = getArgRepr prB (Proxy::Proxy idx) iann $
+      \(_::Proxy tidx) -> getRepr prB (Proxy::Proxy el) eann $
+      \(_::Proxy tel) -> f (Proxy::Proxy (T.ArrayType tidx tel))
 
-instance (Typeable idx,Args idx,SMTType el,T.Liftable (ArgRepr idx '[]))
-         => SMTType (SMTArray idx el) where
-  type SMTRepr (SMTArray idx el) = T.ArrayType (ArgRepr idx '[]) (SMTRepr el)
-
-instance (Typeable idx,Args idx,SMTDynType el,T.Liftable (ArgRepr idx '[]))
-         => SMTDynType (SMTArray idx el) where
-  type SMTAnnotation (SMTArray idx el) = SMTAnnotation el
-  getSMTRepr (_::Proxy (SMTArray idx el)) ann f
-    = getSMTRepr (Proxy::Proxy el) ann $
-      \(_::Proxy eltp) -> f (Proxy::Proxy (T.ArrayType (ArgRepr idx '[]) eltp))
-
-instance (Typeable b,SMTType t) => Args (SMTExpr b t) where
-  type ArgBackend (SMTExpr b t) = b
-  type ArgRepr (SMTExpr b t) as = (SMTRepr t) ': as
-  toArgs (SMTExpr e) args = T.Arg e args
-  fromArgs _ (T.Arg x xs) = (SMTExpr x,xs)
-
-instance (Args a,Args b,ArgBackend a ~ ArgBackend b,
-          T.Liftable (ArgRepr a (ArgRepr b '[])))
-         => Args (a,b) where
-  type ArgBackend (a,b) = ArgBackend a
-  type ArgRepr (a,b) oarg = ArgRepr a (ArgRepr b oarg)
-  toArgs (x,y) args = toArgs x (toArgs y args)
-  fromArgs _ r0 = let (x,r1) = fromArgs Proxy r0
-                      (y,r2) = fromArgs Proxy r1
-                  in ((x,y),r2)
+instance (Args b idx,SMTType b el,SMTArray' b idx el (ArgRepr idx) (SMTRepr el))
+         => SMTType b (SMTArray idx el) where
+  type SMTRepr (SMTArray idx el) = ArrayRepr (ArgRepr idx) (SMTRepr el)
+  getRepr pB pr@(_::Proxy (SMTArray idx el))
+    = getArrayRepr (Proxy::Proxy '(ArgRepr idx,SMTRepr el)) pB pr
 
 newtype SMTExpr' b t = SMTExpr' (Expression (Var b) (QVar b) (Fun b) (B.Constr b) (B.Field b) (FunArg b) (SMTExpr' b) t)
 
 data SMTExpr b t where
-  SMTExpr :: SMTType t => SMTExpr' b (SMTRepr t) -> SMTExpr b t
-  SMTDynExpr :: (T.GetType a,SMTDynType t) => SMTExpr' b a -> SMTExpr b t
+  SExpr :: (SMTType b t,SMTRepr t ~ Left repr,T.GetType repr) => SMTExpr' b repr -> SMTExpr b t
+  DExpr :: (SMTType b t,SMTRepr t ~ Right ann,T.GetType repr) => SMTExpr' b repr -> ann -> SMTExpr b t
 
-class SMTType' t where
-  type SMTRepr' t :: Maybe T.Type
-  type SMTAnnotation' t :: Maybe *
-  getRepr' :: (SMTRepr' t ~ Nothing,SMTAnnotation' t ~ Just ann) => Proxy t -> ann -> (forall t'. T.GetType t' => Proxy t' -> a) -> a
-  getRepr' = undefined
+withSMTExpr :: SMTExpr b t -> (forall repr. T.GetType repr => SMTExpr' b repr -> a) -> a
+withSMTExpr (SExpr e) f = f e
+withSMTExpr (DExpr e _) f = f e
 
-class Args' t where
-  type ArgRepr' t :: Maybe [T.Type]
-  type ArgAnnotation' t :: Maybe *
-  getArgRepr' :: (ArgRepr' t ~ Nothing,ArgAnnotation' t ~ Just ann) => Proxy t -> ann -> (forall t'. T.GetTypes t' => Proxy t' -> a) -> a
+class (SMTType b tp,SMTRepr tp ~ tp',BoundedLst b tps,BoundedLstRepr tps ~ lst)
+      => AddArg b tp tp' (tps :: [*]) (lst :: Either [T.Type] *) where
+  type AddedArg tp' lst :: Either [T.Type] *
+  getAddedArg :: (AddedArg tp' lst ~ Right anns)
+              => Proxy b -> Proxy tp -> Proxy tp' -> Proxy tps -> Proxy lst -> anns
+                 -> (forall (arg :: [T.Type]). T.Liftable arg => Proxy arg -> a)
+                 -> a
+  getAddedArg _ pr = error $ "smtlib2: getAddedArg not implemented for "++show (typeRep pr)
+  toAddedArg :: (AddedArg tp' lst ~ Left tps')
+             => ArgLst (SMTExpr b) (tp ': tps)
+             -> T.Args (SMTExpr' b) tps'
+  toAddedArg (_::ArgLst (SMTExpr b) (tp ': tps))
+    = error $ "smtlib2: toAddedArg not implemented for "++
+              show (typeRep (Proxy::Proxy tp))++" and "++
+              show (typeRep (Proxy::Proxy tps))
+  withAddedArg :: ArgLst (SMTExpr b) (tp ': tps)
+               -> (forall repr. (AddedArg (SMTRepr tp) (BoundedLstRepr tps) ~ Left repr,
+                                 T.Liftable repr)
+                   => T.Args (SMTExpr' b) repr -> a)
+               -> (forall ann repr. (AddedArg (SMTRepr tp) (BoundedLstRepr tps) ~ Right ann,
+                                     T.Liftable repr)
+                   => T.Args (SMTExpr' b) repr -> ann -> a)
+               -> a
+  addedArgAnn :: (AddedArg (SMTRepr tp) (BoundedLstRepr tps) ~ Right ann)
+              => ArgLst (SMTExpr b) (tp ': tps)
+              -> ann
+  addedArgAnn (_::ArgLst (SMTExpr b) (tp ': tps))
+    = error $ "smtlib2: addedArgAnn not implemented for "++
+              show (typeRep (Proxy::Proxy tp))++" and "++
+              show (typeRep (Proxy::Proxy tps))
 
-instance SMTType' Bool where
-  type SMTRepr' Bool = Just T.BoolType
-  type SMTAnnotation' Bool = Nothing
+class Typeable tps => BoundedLst b (tps :: [*]) where
+  type BoundedLstRepr tps :: Either [T.Type] *
+  getBoundedRepr :: (BoundedLstRepr tps ~ Right anns)
+                 => Proxy b -> Proxy tps -> anns
+                 -> (forall (arg :: [T.Type]). T.Liftable arg => Proxy arg -> a)
+                 -> a
+  getBoundedRepr _ pr
+    = error $ "smtlib2: getBoundedRepr not implemented for "++show (typeRep pr)
+  toBoundedArgs :: (BoundedLstRepr tps ~ Left tps')
+                => ArgLst (SMTExpr b) tps -> T.Args (SMTExpr' b) tps'
+  toBoundedArgs (_::ArgLst (SMTExpr b) tps)
+    = error $ "smtlib2: toBoundedArgs not implemented for "++
+              show (typeRep (Proxy::Proxy tps))
+  withBoundedArgs :: ArgLst (SMTExpr b) tps
+                  -> (forall repr. (BoundedLstRepr tps ~ Left repr,
+                                    T.Liftable repr)
+                      => T.Args (SMTExpr' b) repr -> a)
+                  -> (forall ann repr. (BoundedLstRepr tps ~ Right ann,T.Liftable repr)
+                      => T.Args (SMTExpr' b) repr -> ann -> a)
+                  -> a
+  boundedArgAnn :: (BoundedLstRepr tps ~ Right ann)
+                => ArgLst (SMTExpr b) tps
+                -> ann
+  boundedArgAnn (_::ArgLst (SMTExpr b) tps)
+    = error $ "smtlib2: boundedArgAnn not implemented for "++
+               show (typeRep (Proxy::Proxy tps))
 
---class (Args' args,SMTType' el) => LiftArray args el where
---  type LiftArray 
+instance BoundedLst b '[] where
+  type BoundedLstRepr '[] = Left '[]
+  toBoundedArgs _ = T.NoArg
+  withBoundedArgs _ f _ = f T.NoArg
 
-type family LiftArray (args :: Maybe [T.Type]) (tp :: Maybe T.Type) :: Maybe T.Type where
-  LiftArray Nothing Nothing = Nothing
-  LiftArray Nothing (Just a) = Nothing
-  LiftArray (Just a) Nothing = Nothing
-  LiftArray (Just arg) (Just tp) = Just (T.ArrayType arg tp)
+instance (BoundedLst b tps,AddArg b tp tp' tps (BoundedLstRepr tps))
+         => BoundedLst b (tp ': tps) where
+  type BoundedLstRepr (tp ': tps) = AddedArg (SMTRepr tp) (BoundedLstRepr tps)
+  getBoundedRepr prB (_::Proxy (tp ': tps)) anns f
+    = getAddedArg prB (Proxy::Proxy tp)
+                      (Proxy::Proxy (SMTRepr tp))
+                      (Proxy::Proxy tps)
+                      (Proxy::Proxy (BoundedLstRepr tps)) anns f
+  toBoundedArgs = toAddedArg
+  withBoundedArgs = withAddedArg
+  boundedArgAnn = addedArgAnn
 
-type family LiftArrayAnn (args :: Maybe *) (tp :: Maybe *) :: Maybe * where
-  LiftArrayAnn Nothing Nothing = Nothing
-  LiftArrayAnn (Just arg) Nothing = Just arg
-  LiftArrayAnn Nothing (Just tp) = Just tp
-  LiftArrayAnn (Just arg) (Just tp) = Just (arg,tp)
+instance (SMTType b tp,SMTRepr tp ~ Left tp',
+          BoundedLst b tps,BoundedLstRepr tps ~ Left tps',T.Liftable tps')
+         => AddArg b tp (Left tp') tps (Left tps') where
+  type AddedArg (Left tp') (Left tps') = Left (tp' ': tps')
+  toAddedArg (ArgCons (SExpr x) xs) = T.Arg x (toBoundedArgs xs)
+  withAddedArg (ArgCons (SExpr x) xs) f g
+    = f (T.Arg x (toBoundedArgs xs))
 
-instance (Args' arg,SMTType' el) => SMTType' (SMTArray arg el) where
-  type SMTRepr' (SMTArray arg el) = LiftArray (ArgRepr' arg) (SMTRepr' el)
-  type SMTAnnotation' (SMTArray arg el) = LiftArrayAnn (ArgAnnotation' arg) (SMTAnnotation' el)
-  --getRepr' 
+instance (SMTType b tp,SMTRepr tp ~ Left tp',T.GetType tp',
+          BoundedLst b tps,BoundedLstRepr tps ~ Right (Lst anns))
+         => AddArg b tp (Left tp') tps (Right (Lst anns)) where
+  type AddedArg (Left tp') (Right (Lst anns)) = Right (Lst anns)
+  getAddedArg prB _ (_::Proxy (Left tp')) prTps _ anns f
+    = getBoundedRepr prB prTps anns $
+      \(_::Proxy arg) -> f (Proxy::Proxy (tp' ': arg))
+  withAddedArg (ArgCons (SExpr x) xs) f g
+    = argLstToArgs xs (\xs' -> g (T.Arg x xs') (boundedArgAnn xs))
+  addedArgAnn (ArgCons _ xs) = boundedArgAnn xs
 
---instance (Args' arg,SMTType' el,ArgRepr' arg ~ Just arg',SMTRepr' el ~ Just el') => SMTType' (SMTArray arg el) where
---  type SMTRepr' (SMTArray arg el) = Just (arg',el')
---  type SMTAnnotation' (SMTArray arg el) = Nothing
+argLstToArgs :: ArgLst (SMTExpr b) arg
+             -> (forall repr. T.Liftable repr => T.Args (SMTExpr' b) repr -> a)
+             -> a
+argLstToArgs ArgNil f = f T.NoArg
+argLstToArgs (ArgCons (SExpr x) xs) f
+  = argLstToArgs xs (\xs' -> f (T.Arg x xs'))
+argLstToArgs (ArgCons (DExpr x _) xs) f
+  = argLstToArgs xs (\xs' -> f (T.Arg x xs'))
 
-app :: (Args arg,ArgRepr arg '[] ~ arg',SMTType res,SMTRepr res ~ res',ArgBackend arg ~ b)
-    => Function (Fun b) (Constr b) (Field b) arg' res'
-    -> arg -> SMTExpr b res
-app f arg = SMTExpr (SMTExpr' (App f (toArgs arg T.NoArg)))
+instance (SMTType b tp,SMTRepr tp ~ Right ann,
+          BoundedLst b tps,BoundedLstRepr tps ~ Left tps',T.Liftable tps')
+         => AddArg b tp (Right ann) tps (Left tps') where
+  type AddedArg (Right ann) (Left tps') = Right (Lst '[ann])
+  getAddedArg prB prTp _ _ (_::Proxy (Left tps')) (Cons ann Nil) f
+    = getRepr prB prTp ann $
+      \(_::Proxy tp') -> f (Proxy::Proxy (tp' ': tps'))
+  withAddedArg (ArgCons (DExpr x ann) xs) f g
+    = g (T.Arg x (toBoundedArgs xs)) (Cons ann Nil)
+  addedArgAnn (ArgCons (DExpr _ ann) _) = Cons ann Nil
 
-appDyn :: (Args arg,ArgRepr arg '[] ~ arg',SMTDynType res,T.GetType res',ArgBackend arg ~ b)
-       => Function (Fun b) (Constr b) (Field b) arg' res'
-       -> arg -> SMTExpr b res
-appDyn f arg = SMTDynExpr (SMTExpr' (App f (toArgs arg T.NoArg)))
+instance (SMTType b tp,SMTRepr tp ~ Right ann,
+          BoundedLst b tps,BoundedLstRepr tps ~ Right (Lst anns))
+         => AddArg b tp (Right ann) tps (Right (Lst anns)) where
+  type AddedArg (Right ann) (Right (Lst anns)) = Right (Lst (ann ': anns))
+  getAddedArg prB prTp _ prTps _ (Cons ann anns) f
+    = getRepr prB prTp ann $
+      \(_::Proxy tp') -> getBoundedRepr prB prTps anns $
+      \(_::Proxy tps') -> f (Proxy::Proxy (tp' ': tps'))
+  withAddedArg (ArgCons (DExpr x ann) xs) f g
+    = argLstToArgs xs $
+      \xs' -> g (T.Arg x xs') (Cons ann (boundedArgAnn xs))
+  addedArgAnn (ArgCons (DExpr _ ann) xs) = Cons ann (boundedArgAnn xs)
 
-liftSMT :: Backend b => SMTMonad b a -> SMT' b a
-liftSMT act = SMT' (lift act)
+instance Args b () where
+  type ArgRepr () = Left '[]
+  toArgs _ = T.NoArg
+  mkArgs _ = SArg T.NoArg
 
-push :: Backend b => SMT' b ()
-push = do
-  b <- get
-  nb <- liftSMT (B.push b)
-  put nb
+instance (Typeable b,SMTType b tp,BoundedLst b '[tp]) => Args b (SMTExpr b tp) where
+  type ArgRepr (SMTExpr b tp) = BoundedLstRepr '[tp]
+  getArgRepr prB (_::Proxy (SMTExpr b tp)) ann f
+    = getBoundedRepr prB (Proxy::Proxy '[tp]) ann f
+  mkArgs x = withBoundedArgs (ArgCons x ArgNil) SArg DArg
+  argAnnotation e = boundedArgAnn (ArgCons e ArgNil)
 
-pop :: Backend b => SMT' b ()
-pop = do
-  b <- get
-  nb <- liftSMT (B.pop b)
-  put nb
+instance (Typeable b,
+          SMTType b t1,SMTType b t2,
+          BoundedLst b '[t1,t2])
+         => Args b (SMTExpr b t1,SMTExpr b t2) where
+  type ArgRepr (SMTExpr b t1,SMTExpr b t2) = BoundedLstRepr '[t1,t2]
+  getArgRepr prB (_::Proxy (SMTExpr b t1,SMTExpr b t2)) ann f
+    = getBoundedRepr prB (Proxy::Proxy '[t1,t2]) ann f
+  mkArgs (x1,x2) = withBoundedArgs (ArgCons x1
+                                    (ArgCons x2
+                                     ArgNil)) SArg DArg
+  argAnnotation (e1,e2) = boundedArgAnn (ArgCons e1 (ArgCons e2 ArgNil))
 
-var :: (Backend b,SMTType t) => SMT' b (SMTExpr b t)
-var = do
-  b <- get
-  (v,nb) <- liftSMT (declareVar b Nothing)
-  put nb
-  return (SMTExpr (SMTExpr' (Var v)))
+instance (Typeable b,
+          SMTType b t1,SMTType b t2,SMTType b t3,
+          BoundedLst b '[t1,t2,t3])
+         => Args b (SMTExpr b t1,SMTExpr b t2,SMTExpr b t3) where
+  type ArgRepr (SMTExpr b t1,SMTExpr b t2,SMTExpr b t3) = BoundedLstRepr '[t1,t2,t3]
+  getArgRepr prB (_::Proxy (SMTExpr b t1,SMTExpr b t2,SMTExpr b t3)) ann f
+    = getBoundedRepr prB (Proxy::Proxy '[t1,t2,t3]) ann f
+  mkArgs (x1,x2,x3)
+    = withBoundedArgs (ArgCons x1
+                       (ArgCons x2
+                        (ArgCons x3
+                         ArgNil))) SArg DArg
+  argAnnotation (e1,e2,e3) = boundedArgAnn (ArgCons e1 (ArgCons e2 (ArgCons e3 ArgNil)))
 
-varAnn :: (Backend b,SMTDynType t) => SMTAnnotation t -> SMT' b (SMTExpr b t)
-varAnn ann
-  = with $ \pr -> getSMTRepr pr ann $
-                  \(_::Proxy u) -> do
-                    (b :: b) <- get
-                    (v,nb) <- liftSMT (declareVar b Nothing)
-                    put nb
-                    return (SMTDynExpr (SMTExpr' (Var (v :: Var b u))))
-  where
-    with :: (Proxy t -> SMT' b (SMTExpr b t)) -> SMT' b (SMTExpr b t)
-    with f = f Proxy
+class (SMTType b tp,SMTRepr tp ~ tp',ArgListRepr tp tp' ~ repr) => ArgList b tp tp' repr where
+  type ArgListRepr t tp'
+  getArgListRepr :: Proxy b -> Proxy tp -> Proxy tp' -> repr
+                 -> (forall arg. T.Liftable arg => Proxy arg -> a)
+                 -> a
 
-argVars :: (Backend b,Args arg,ArgBackend arg ~ b) => SMT' b arg
-argVars = with $ \(_::Proxy arg) -> do
-  args <- constr (T.getTypes (Proxy::Proxy (ArgRepr arg '[])))
-  let (res,T.NoArg) = fromArgs (Proxy::Proxy ('[]::[T.Type])) args
-  return res
-  where
-    with :: (Proxy arg -> SMT' b arg) -> SMT' b arg
-    with f = f Proxy
+instance (SMTType b tp,SMTRepr tp ~ Left tp',T.GetType tp')
+         => ArgList b tp (Left tp') Integer where
+  type ArgListRepr tp (Left tp') = Integer
+  getArgListRepr prB _ (_::Proxy (Left tp')) len f
+    = g len f
+    where
+      g :: Integer -> (forall arg. T.Liftable arg => Proxy arg -> a) -> a
+      g 0 f = f (Proxy::Proxy ('[]::[T.Type]))
+      g n f = g (n-1) (\(_::Proxy tps) -> f (Proxy::Proxy (tp' ': tps)))
 
-    constr :: Backend b => T.Args T.Repr arg -> SMT' b (T.Args (SMTExpr' b) arg)
-    constr T.NoArg = return T.NoArg
-    constr (T.Arg (_::T.Repr t) xs) = do
-      b <- get
-      (v,nb) <- liftSMT (declareVar b Nothing)
-      put nb
-      rest <- constr xs
-      return (T.Arg (SMTExpr' (Var v)) rest)
+instance (SMTType b tp,SMTRepr tp ~ Right ann) => ArgList b tp (Right ann) (ann,Integer) where
+  type ArgListRepr tp (Right ann) = (ann,Integer)
+  getArgListRepr prB prTp (_::Proxy (Right ann)) (ann,len) f
+    = getRepr prB prTp ann $
+      \pr -> g pr len f
+    where
+      g :: T.GetType tp' => Proxy (tp'::T.Type) -> Integer -> (forall arg. T.Liftable arg => Proxy arg -> a) -> a
+      g _ 0 f = f (Proxy::Proxy ('[]::[T.Type]))
+      g pr@(_::Proxy tp') n f = g pr (n-1) (\(_::Proxy tps) -> f (Proxy::Proxy (tp' ': tps)))
 
-assert :: Backend b => SMTExpr b Bool -> SMT' b ()
-assert expr = do
-  expr' <- fromSMTExpr expr
-  b <- get
-  nb <- liftSMT (B.assert b expr')
-  put nb
+instance (Typeable b,Typeable tp,ArgList b tp (SMTRepr tp) repr) => Args b [SMTExpr b tp] where
+  type ArgRepr [SMTExpr b t] = Right (ArgListRepr t (SMTRepr t))
+  getArgRepr prB (Proxy::Proxy [SMTExpr b t]) ann f
+    = getArgListRepr prB (Proxy::Proxy t) (Proxy::Proxy (SMTRepr t)) ann f
+  {-mkArgs xs = fromLst xs DArg
+    where
+      fromLst :: [SMTExpr b t] -> (forall repr. T.Liftable repr => T.Args (SMTExpr' b) repr -> a) -> a
+      fromLst [] f = f T.NoArg
+      fromLst ((SExpr x):xs) f = fromLst xs (\xs' -> f (T.Arg x xs'))
+      fromLst ((DExpr x _):xs) f = fromLst xs (\xs' -> f (T.Arg x xs'))-}
+      
+data SMTArgs b arg where
+  SArg :: (Args b arg,ArgRepr arg ~ Left repr,T.Liftable repr)
+          => T.Args (SMTExpr' b) repr -> SMTArgs b arg
+  DArg :: (Args b arg,ArgRepr arg ~ Right ann,T.Liftable repr)
+          => T.Args (SMTExpr' b) repr -> ann -> SMTArgs b arg
 
-getProof :: Backend b => SMT' b (SMTExpr b Bool)
-getProof = do
-  b <- get
-  (pr,nb) <- liftSMT (B.getProof b)
-  put nb
-  toSMTExpr pr
+data SMTFun b arg t where
+  SFunS :: (Args b arg,SMTType b t,ArgRepr arg ~ Left arg',SMTRepr t ~ Left t',
+            T.Liftable arg',T.GetType t')
+        => Function (Fun b) (Constr b) (Field b) arg' t'
+        -> SMTFun b arg t
+  SFunD :: (Args b arg,SMTType b t,ArgRepr arg ~ Left arg',SMTRepr t ~ Right tAnn,
+            T.Liftable arg',T.GetType t')
+        => Function (Fun b) (Constr b) (Field b) arg' t'
+        -> tAnn
+        -> SMTFun b arg t
+  DFunS :: (Args b arg,SMTType b t,ArgRepr arg ~ Right argAnn,SMTRepr t ~ Left t',
+            T.GetType t')
+        => (forall tps. (T.Liftable tps)
+            => argAnn -> Proxy tps
+            -> Function (Fun b) (Constr b) (Field b) tps t')
+        -> SMTFun b arg t
+  DFunD :: (Args b arg,SMTType b t,ArgRepr arg ~ Right argAnn,SMTRepr t ~ Right tAnn)
+           => (forall tps a. (T.Liftable tps)
+               => argAnn -> Proxy tps
+               -> (forall res. (T.GetType res)
+                    => Function (Fun b) (Constr b) (Field b) tps res -> a)
+               -> a)
+           -> (argAnn -> tAnn)
+           -> SMTFun b arg t
 
-simplify :: (Backend b,SMTType t) => SMTExpr b t -> SMT' b (SMTExpr b t)
-simplify e = do
-  e' <- fromSMTExpr e
-  b <- get
-  (res,nb) <- liftSMT (B.simplify b e')
-  put nb
-  toSMTExpr res
+app :: Args b arg => SMTFun b arg t -> arg -> SMTExpr b t
+app fun args = app' fun (mkArgs args)
 
-(.==.) :: (Backend b,SMTType t) => SMTExpr b t -> SMTExpr b t -> SMTExpr b Bool
-(.==.) (SMTExpr e1) (SMTExpr e2) = SMTExpr (SMTExpr' (App Eq (T.Arg e1 (T.Arg e2 T.NoArg))))
+app' :: SMTFun b arg t -> SMTArgs b arg -> SMTExpr b t
+app' (SFunS fun) (SArg args)
+  = SExpr (SMTExpr' (App fun args))
+app' (SFunD fun ann) (SArg args) = DExpr (SMTExpr' (App fun args)) ann
+app' (DFunS fun) (DArg (args::T.Args (SMTExpr' b) arg) ann)
+  = SExpr (SMTExpr' (App (fun ann (Proxy::Proxy arg)) args))
+app' (DFunD fun deriv) (DArg (args::T.Args (SMTExpr' b) arg) ann)
+  = fun ann (Proxy::Proxy arg) $
+    \rfun -> DExpr (SMTExpr' (App rfun args)) (deriv ann)
 
-eq :: (Backend b,SMTType t) => [SMTExpr b t] -> SMTExpr b Bool
-eq [] = error $ "smtlib2: eq called with empty list."
-eq xs = allEqFromList [ x | SMTExpr x <- xs ]
-        (\args -> SMTExpr (SMTExpr' (App Eq args)))
+(.&&.) :: Backend b => SMTFun b (SMTExpr b Bool,SMTExpr b Bool) Bool
+(.&&.) = SFunS (Logic And)
 
-asEqOf :: (Backend b,SMTType u) => SMTExpr b Bool -> Maybe [SMTExpr b u]
-asEqOf (SMTExpr (SMTExpr' e)) = case e of
-  App Eq args -> do
-    lst <- gcast (allEqToList args)
-    return $ fmap SMTExpr lst
-  _ -> Nothing
+and' :: Backend b => SMTFun b [SMTExpr b Bool] Bool
+and' = DFunS (\len _ -> allEqOfList (Proxy::Proxy T.BoolType) len $
+                        \(_::Proxy (T.BoolType ': tps))
+                         -> case cast (Logic And :: Function (Fun b) (Constr b) (Field b) (T.BoolType ': tps) T.BoolType) of
+                           Just res -> res)
 
-asEq :: Backend b => (forall u. SMTType u => [SMTExpr b u] -> a) -> SMTExpr b Bool -> Maybe a
-asEq f (SMTExpr (SMTExpr' e)) = case e of
-  App Eq args -> Just $ smtExprList (allEqToList args) f
-  _ -> Nothing
-
-ite :: SMTExpr b Bool -> SMTExpr b t -> SMTExpr b t -> SMTExpr b t
-ite (SMTExpr c) (SMTExpr t) (SMTExpr f)
-  = SMTExpr (SMTExpr' (App ITE (T.Arg c (T.Arg t (T.Arg f T.NoArg)))))
-ite (SMTExpr c) (SMTDynExpr t) (SMTDynExpr f)
-  = case gcast f of
-    Just f' -> SMTDynExpr (SMTExpr' (App ITE (T.Arg c (T.Arg t (T.Arg f' T.NoArg)))))
-    Nothing -> error $ "smtlib2: Type error in ite expression."
-
-asITE :: SMTExpr b t -> Maybe (SMTExpr b Bool,SMTExpr b t,SMTExpr b t)
-asITE (SMTExpr (SMTExpr' e)) = case e of
-  App ITE (T.Arg c (T.Arg t (T.Arg f T.NoArg))) -> Just (SMTExpr c,SMTExpr t,SMTExpr f)
-  _ -> Nothing
-asITE (SMTDynExpr (SMTExpr' e)) = case e of
-  App ITE (T.Arg c (T.Arg t (T.Arg f T.NoArg))) -> Just (SMTExpr c,SMTDynExpr t,SMTDynExpr f)
-  _ -> Nothing
-
-constant :: (Backend b,SMTValue t) => t -> SMTExpr b t
-constant v = SMTExpr (SMTExpr' (Const (toValue v)))
-
-asConstant :: SMTValue t => SMTExpr b t -> Maybe t
-asConstant (SMTExpr (SMTExpr' e)) = case e of
-  Const val -> Just $ fromValue val
-  _ -> Nothing
-
-forall :: (Args arg,b ~ ArgBackend arg,Backend b)
-       => (arg -> SMTExpr b Bool)
-       -> SMT' b (SMTExpr b Bool)
-forall = quant False
-
-exists :: (Args arg,b ~ ArgBackend arg,Backend b)
-       => (arg -> SMTExpr b Bool)
-       -> SMT' b (SMTExpr b Bool)
-exists = quant True
-
-asForallOf :: (Args args, b ~ ArgBackend args)
-           => SMTExpr b Bool -> Maybe (args,SMTExpr b Bool)
-asForallOf (SMTExpr (SMTExpr' e)) = case e of
-  Forall arg body -> do
-    arg' <- gcast arg
-    let arg'' = runIdentity $ T.mapArgs (return . SMTExpr' . QVar) arg'
-    return (fst $ fromArgs (Proxy::Proxy ('[]::[T.Type])) arg'',SMTExpr body)
-  _ -> Nothing
-
-asExistsOf :: (Args args, b ~ ArgBackend args)
-           => SMTExpr b Bool -> Maybe (args,SMTExpr b Bool)
-asExistsOf (SMTExpr (SMTExpr' e)) = case e of
-  Exists arg body -> do
-    arg' <- gcast arg
-    let arg'' = runIdentity $ T.mapArgs (return . SMTExpr' . QVar) arg'
-    return (fst $ fromArgs (Proxy::Proxy ('[]::[T.Type])) arg'',SMTExpr body)
-  _ -> Nothing
-
-select :: (Args idx,SMTType el,b ~ ArgBackend idx) => SMTExpr b (SMTArray idx el) -> idx -> SMTExpr b el
-select (SMTExpr arr) idx
-  = SMTExpr (SMTExpr' (App Select (T.Arg arr (toArgs idx T.NoArg))))
-
-constArray :: (Args idx,b ~ ArgBackend idx)
-           => SMTExpr b el -> SMTExpr b (SMTArray idx el)
-constArray (SMTExpr el) = SMTExpr (SMTExpr' (App ConstArray (T.Arg el T.NoArg)))
-constArray (SMTDynExpr (el :: SMTExpr' b el))
-  = with (\(_::Proxy idx)
-          -> SMTDynExpr (SMTExpr' (App ConstArray (T.Arg el T.NoArg))
-                          :: SMTExpr' b (T.ArrayType (ArgRepr idx '[]) el)))
-  where
-    with :: (Proxy idx -> SMTExpr b (SMTArray idx el')) -> SMTExpr b (SMTArray idx el')
-    with f = f Proxy
-
-quant :: (Args arg,b ~ ArgBackend arg,Backend b)
-       => Bool -> (arg -> SMTExpr b Bool)
-       -> SMT' b (SMTExpr b Bool)
-quant ex (f :: arg -> SMTExpr b Bool) = do
-  args <- constr (T.getTypes (Proxy::Proxy (ArgRepr arg ('[]::[T.Type]))))
-  args' <- T.mapArgs (return . SMTExpr' . QVar) args
-  let (args'',T.NoArg) = fromArgs (Proxy::Proxy ('[]::[T.Type])) args'
-      SMTExpr body = f args''
-      app = if ex then Exists else Forall
-  return (SMTExpr (SMTExpr' (app args body)))
-  where
-    constr :: Backend b => T.Args T.Repr args -> SMT' b (T.Args (QVar b) args)
-    constr T.NoArg = return T.NoArg
-    constr (T.Arg _ xs) = do
-      b <- get
-      (qv,nb) <- liftSMT (B.createQVar b Nothing)
-      put b
-      xs' <- constr xs
-      return (T.Arg qv xs')
-
-smtExprList :: (Backend b,T.GetType a) => [SMTExpr' b a]
-            -> (forall c. SMTType c => [SMTExpr b c] -> r) -> r
-smtExprList (lst::[SMTExpr' b a]) f
-  = smtRepr (Proxy::Proxy b) (Proxy::Proxy a) $
-    \(_::Proxy t) -> f [ SMTExpr e :: SMTExpr b t | e <- lst ]
-
-smtRepr :: (Backend b,T.GetType t) => Proxy b -> e t
-        -> (forall t'. (SMTType t',SMTRepr t' ~ t) => Proxy t' -> a)
-        -> a
-smtRepr prB pr f = case T.getType pr of
-  T.BoolRepr -> f (Proxy::Proxy Bool) 
-  T.IntRepr -> f (Proxy::Proxy Integer)
-  T.ArrayRepr (_::T.Args T.Repr idx) (_::T.Repr el)
-    -> argRepr prB (Proxy::Proxy idx) $
-       \(_::Proxy idx') -> smtRepr prB (Proxy::Proxy el) $
-       \(_::Proxy el') -> f (Proxy::Proxy (SMTArray idx' el'))
-
-argRepr :: (Backend b,T.GetTypes arg) => Proxy b -> e arg
-        -> (forall arg'. (Args arg',ArgRepr arg' '[] ~ arg,ArgBackend arg' ~ b)
-            => Proxy arg' -> a)
-        -> a
-argRepr prB@(_::Proxy b) pr f = case T.getTypes pr of
-  T.Arg (_::T.Repr x1)  T.NoArg
-    -> smtRepr prB (Proxy::Proxy x1) $
-       \(_::Proxy y1) -> f (Proxy::Proxy (SMTExpr b y1))
-  T.Arg (_::T.Repr x1) (T.Arg (_::T.Repr x2) T.NoArg)
-    -> smtRepr prB (Proxy::Proxy x1) $
-       \(_::Proxy y1) -> smtRepr prB (Proxy::Proxy x2) $
-       \(_::Proxy y2) -> f (Proxy::Proxy (SMTExpr b y1,SMTExpr b y2))
-
-fromSMTExpr :: (Backend b,SMTType t) => SMTExpr b t -> SMT' b (Expr b (SMTRepr t))
-fromSMTExpr (SMTExpr e) = fromSMTExpr' e
-  where
-    fromSMTExpr' :: Backend b => SMTExpr' b t -> SMT' b (Expr b t)
-    fromSMTExpr' (SMTExpr' e) = do
-      ne <- mapExpr return return return return return return fromSMTExpr' e
-      b <- get
-      (res,nb) <- liftSMT (toBackend b ne)
-      put nb
-      return res
-
-toSMTExpr :: (Backend b,SMTType t) => Expr b (SMTRepr t) -> SMT' b (SMTExpr b t)
-toSMTExpr expr = fmap SMTExpr (toSMTExpr' expr)
-  where
-    toSMTExpr' :: Backend b => Expr b t -> SMT' b (SMTExpr' b t)
-    toSMTExpr' e = do
-      b <- get
-      (ne,nb) <- liftSMT (fromBackend b e)
-      put nb
-      ne' <- mapExpr return return return return return return toSMTExpr' ne
-      return (SMTExpr' ne')
+allEqOfList :: T.GetType t => Proxy t
+            -> Integer
+            -> (forall arg. (AllEq (t ': arg),SameType (t ': arg) ~ t)
+                => Proxy (t ': arg) -> a)
+            -> a
+allEqOfList (_::Proxy t) 1 f = f (Proxy::Proxy ('[t]::[T.Type]))
+allEqOfList pr@(_::Proxy t) n f
+  = allEqOfList pr (n-1) $
+    \(_::Proxy (t ': ts)) -> f (Proxy::Proxy (t ': t ': ts))

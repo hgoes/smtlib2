@@ -7,7 +7,15 @@ import Language.SMTLib2.Strategy
 
 import Data.Typeable
 
-class (Typeable b,Monad (SMTMonad b)) => Backend b where
+class (Typeable b,Monad (SMTMonad b),
+       Typeable (Expr b),
+       Typeable (Var b),
+       Typeable (QVar b),
+       Typeable (Fun b),
+       Typeable (Constr b),
+       Typeable (Field b),
+       Typeable (FunArg b),
+       Typeable (ClauseId b)) => Backend b where
   type SMTMonad b :: * -> *
   type Expr b :: Type -> *
   type Var b :: Type -> *

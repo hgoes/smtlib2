@@ -56,6 +56,7 @@ data AnyRepr = forall (t :: Type). AnyRepr (Repr t)
 data Args (e :: Type -> *) (a :: [Type]) where
   NoArg :: Args e '[]
   Arg :: GetType t => e t -> Args e ts -> Args e (t ': ts)
+  deriving Typeable
 
 data Constrs (con :: [Type] -> * -> *) (a :: [[Type]]) t where
   NoCon :: Constrs con '[] t
