@@ -7,7 +7,7 @@ import Language.SMTLib2.Strategy
 
 import Data.Typeable
 
-class (Typeable b,Monad (SMTMonad b),
+class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
        Typeable (Expr b),
        Typeable (Var b),
        Typeable (QVar b),

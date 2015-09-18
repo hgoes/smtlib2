@@ -56,7 +56,7 @@ instance Backend b => MonadState b (SMT' b) where
 liftSMT :: Backend b => SMTMonad b a -> SMT' b a
 liftSMT act = SMT' (lift act)
 
-data SMTArray idx t = SMTArray
+data SMTArray idx t = SMTArray deriving (Typeable)
 data SMTBV = SMTBV Integer deriving (Show,Eq,Ord)
 
 class (Typeable t) => SMTType t where
@@ -268,8 +268,12 @@ class (SMTType tp,SMTRepr tp ~ tp',
               show (typeRep (Proxy::Proxy tps))
   addedArgContext :: Proxy tp -> Proxy tps -> BoundedLstInfo (tp ': tps)
 
+#if __GLASGOW_HASKELL__ >= 710
 class (Typeable tps)
       => BoundedLst (tps :: [*]) where
+#else
+class BoundedLst (tps :: [*]) where
+#endif
   type BoundedLstRepr tps :: Either [T.Type] *
   getBoundedRepr :: (BoundedLstRepr tps ~ Right anns)
                  => Proxy tps -> anns

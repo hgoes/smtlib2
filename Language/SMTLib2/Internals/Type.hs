@@ -92,7 +92,7 @@ instance GetType RealType where
                  (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type" "'RealType")
                  []
 #endif
-instance (Typeable n,KnownNat n) => GetType (BitVecType n) where
+instance (KnownNat n) => GetType (BitVecType n) where
   getType (_::e (BitVecType n)) = BitVecRepr (natVal (Proxy::Proxy n))
 #if __GLASGOW_HASKELL__ < 710
   typeOfType (_::Proxy (BitVecType n))
