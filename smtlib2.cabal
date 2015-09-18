@@ -23,9 +23,9 @@ Flag WithDataKinds
 
 Library
   Build-Depends: base >=4 && <5, constraints, mtl, containers
-  Extensions: GADTs,FlexibleContexts,FlexibleInstances,ExistentialQuantification,KindSignatures,DataKinds,TypeFamilies,AllowAmbiguousTypes,TypeOperators,MultiParamTypeClasses,ScopedTypeVariables,RankNTypes,UndecidableInstances,GeneralizedNewtypeDeriving,DeriveDataTypeable,CPP,StandaloneDeriving
+  Extensions: GADTs,FlexibleContexts,FlexibleInstances,ExistentialQuantification,KindSignatures,DataKinds,TypeFamilies,AllowAmbiguousTypes,TypeOperators,MultiParamTypeClasses,ScopedTypeVariables,RankNTypes,UndecidableInstances,GeneralizedNewtypeDeriving,DeriveDataTypeable,CPP
   if impl(ghc < 7.10) {
-    Extensions: PolyKinds
+    Extensions: PolyKinds,StandaloneDeriving
   }
   GHC-Options: -fwarn-unused-imports
   Exposed-Modules:

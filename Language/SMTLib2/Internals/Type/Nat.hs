@@ -5,8 +5,10 @@ import Data.Typeable
 
 data Nat = Z | S Nat deriving Typeable
 
+#if __GLASGOW_HASKELL__ < 710
 deriving instance Typeable 'Z
 deriving instance Typeable 'S
+#endif
 
 #if  __GLASGOW_HASKELL__ >= 708
 class Typeable n => KnownNat (n :: Nat) where
