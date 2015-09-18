@@ -14,6 +14,13 @@ data Type = BoolType
           | forall a. DataType a
           deriving Typeable
 
+deriving instance Typeable 'BoolType
+deriving instance Typeable 'IntType
+deriving instance Typeable 'RealType
+deriving instance Typeable 'BitVecType
+deriving instance Typeable 'ArrayType
+deriving instance Typeable 'DataType
+
 data PolyDatatype = PolyDatatype { numArgs :: Integer
                                  , instantiate :: [AnyRepr] -> AnyDatatype }
 
@@ -62,7 +69,7 @@ data Constrs (con :: [Type] -> * -> *) (a :: [[Type]]) t where
   NoCon :: Constrs con '[] t
   ConsCon :: con arg t -> Constrs con args t -> Constrs con (arg ': args) t
 
-#if __GLASGOW_HASKELL__ >= 710
+#if __GLASGOW_HASKELL__ >= 708
 class Typeable t => GetType (t :: Type) where
   getType :: e t -> Repr t
 #else
@@ -73,28 +80,28 @@ class GetType (t :: Type) where
 
 instance GetType BoolType where
   getType _ = BoolRepr
-#if __GLASGOW_HASKELL__ < 710
+#if __GLASGOW_HASKELL__ < 708
   typeOfType _ = mkTyConApp
                  (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type" "'BoolType")
                  []
 #endif
 instance GetType IntType where
   getType _ = IntRepr
-#if __GLASGOW_HASKELL__ < 710
+#if __GLASGOW_HASKELL__ < 708
   typeOfType _ = mkTyConApp
                  (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type" "'IntType")
                  []
 #endif
 instance GetType RealType where
   getType _ = RealRepr
-#if __GLASGOW_HASKELL__ < 710
+#if __GLASGOW_HASKELL__ < 708
   typeOfType _ = mkTyConApp
                  (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type" "'RealType")
                  []
 #endif
 instance (KnownNat n) => GetType (BitVecType n) where
   getType (_::e (BitVecType n)) = BitVecRepr (natVal (Proxy::Proxy n))
-#if __GLASGOW_HASKELL__ < 710
+#if __GLASGOW_HASKELL__ < 708
   typeOfType (_::Proxy (BitVecType n))
     = mkTyConApp
       (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type" "'BitVecType")
@@ -103,7 +110,7 @@ instance (KnownNat n) => GetType (BitVecType n) where
 instance (Liftable idx,GetType el) => GetType (ArrayType idx el) where
   getType (_::e (ArrayType idx el)) = ArrayRepr (getTypes (Proxy::Proxy idx))
                                                 (getType (Proxy::Proxy el))
-#if __GLASGOW_HASKELL__ < 710
+#if __GLASGOW_HASKELL__ < 708
   typeOfType (_::Proxy (ArrayType idx el))
     = mkTyConApp
       (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type" "'ArrayType")
@@ -112,14 +119,14 @@ instance (Liftable idx,GetType el) => GetType (ArrayType idx el) where
 #endif
 instance IsDatatype t => GetType (DataType t) where
   getType (_::e (DataType t)) = DataRepr (getDatatype (Proxy::Proxy t))
-#if __GLASGOW_HASKELL__ < 710
+#if __GLASGOW_HASKELL__ < 708
   typeOfType (_::Proxy (DataType t))
     = mkTyConApp
       (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type" "'DataType")
       [typeOf (Proxy::Proxy t)]
 #endif
 
-#if __GLASGOW_HASKELL__ >= 710
+#if __GLASGOW_HASKELL__ >= 708
 class Typeable t => GetTypes (t :: [Type]) where
   getTypes :: e t -> Args Repr t
 #else
@@ -130,7 +137,7 @@ class GetTypes (t :: [Type]) where
 
 instance GetTypes '[] where
   getTypes _ = NoArg
-#if __GLASGOW_HASKELL__ < 710
+#if __GLASGOW_HASKELL__ < 708
   typeOfTypes _
     = mkTyConApp
       (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type" "'[]")
@@ -139,7 +146,7 @@ instance GetTypes '[] where
 
 instance (GetType t,GetTypes ts) => GetTypes (t ': ts) where
   getTypes (_::e (t ': ts)) = Arg (getType (Proxy::Proxy t)) (getTypes (Proxy::Proxy ts))
-#if __GLASGOW_HASKELL__ < 710
+#if __GLASGOW_HASKELL__ < 708
   typeOfTypes (_::Proxy (t ': ts))
     = mkTyConApp
       (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type" "':")
