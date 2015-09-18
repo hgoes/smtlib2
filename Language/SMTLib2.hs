@@ -232,6 +232,15 @@ data SMTExpr' b t where
                   -> SMTExpr' b T.BoolType
                   -> SMTExpr' b T.BoolType
 
+#if __GLASGOW_HASKELL__ < 710
+instance (Typeable b,T.GetType t) => Typeable (SMTExpr' b t) where
+  typeOf (_::Proxy (SMTExpr' b t))
+    = mkTyConApp
+      (mkTyCon3 "smtlib2" "Language.SMTLib2" "SMTExpr'")
+      [typeOf (Proxy::Proxy b)
+      ,typeOfType (Proxy::Proxy t)]
+#endif
+
 data SMTExpr b t where
   SExpr :: (SMTType t,SMTRepr t ~ Left repr,T.GetType repr)
         => SMTExpr' b repr -> SMTExpr b t
@@ -561,9 +570,15 @@ not' (SExpr x) = SExpr (SMTExpr' (App Not (T.Arg x T.NoArg)))
   = SExpr (SMTExpr' $ App Eq (T.Arg e1
                               (T.Arg (mkEqual e1 e2) T.NoArg)))
   where
-    mkEqual :: (T.GetType t1,T.GetType t2) => SMTExpr' b t1 -> SMTExpr' b t2 -> SMTExpr' b t1
+    mkEqual :: (Backend b,T.GetType t1,T.GetType t2)
+            => SMTExpr' b t1 -> SMTExpr' b t2 -> SMTExpr' b t1
+#if __GLASGOW_HASKELL__ >= 710
     mkEqual _ e2 = case gcast e2 of
       Just r -> r
+#else
+    mkEqual _ e2 = case cast e2 of
+      Just r -> r
+#endif
 
 eq :: (Backend b,SMTType t) => [SMTExpr b t] -> SMTExpr b Bool
 eq xs@(SExpr _:_)
