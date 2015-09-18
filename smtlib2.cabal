@@ -23,7 +23,7 @@ Flag WithDataKinds
 
 Library
   Build-Depends: base >=4 && <5, constraints, mtl, containers
-  Extensions: GADTs,FlexibleContexts,FlexibleInstances,ExistentialQuantification,KindSignatures,DataKinds,TypeFamilies,AllowAmbiguousTypes,TypeOperators,MultiParamTypeClasses,ScopedTypeVariables,RankNTypes,UndecidableInstances,GeneralizedNewtypeDeriving
+  Extensions: GADTs,FlexibleContexts,FlexibleInstances,ExistentialQuantification,KindSignatures,DataKinds,TypeFamilies,AllowAmbiguousTypes,TypeOperators,MultiParamTypeClasses,ScopedTypeVariables,RankNTypes,UndecidableInstances,GeneralizedNewtypeDeriving,DeriveDataTypeable
   GHC-Options: -fwarn-unused-imports
   Exposed-Modules:
     Language.SMTLib2.Internals.Backend

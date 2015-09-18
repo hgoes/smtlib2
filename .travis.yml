@@ -4,3 +4,4 @@ ghc:
 script:
   - cabal install
   - cabal install ./backends/pipe
+sudo: false
