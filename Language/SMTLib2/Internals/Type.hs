@@ -39,7 +39,7 @@ data Value (con :: [Type] -> * -> *) (a :: Type) where
   IntValue :: Integer -> Value con IntType
   RealValue :: Rational -> Value con RealType
   BitVecValue :: KnownNat n => Integer -> Value con (BitVecType n)
-  ConstrValue :: con arg t -> Args (Value con) arg -> Value con (DataType t)
+  ConstrValue :: GetTypes arg => con arg t -> Args (Value con) arg -> Value con (DataType t)
 
 data AnyValue (con :: [Type] -> * -> *) = forall (t :: Type). GetType t => AnyValue (Value con t)
 
@@ -115,7 +115,7 @@ argsToList _ NoArg = []
 argsToList f (Arg x xs) = f x:argsToList f xs
 
 mapValue :: Monad m
-         => (forall arg t. con1 arg t -> m (con2 arg t))
+         => (forall arg t. GetTypes arg => con1 arg t -> m (con2 arg t))
          -> Value con1 a
          -> m (Value con2 a)
 mapValue _ (BoolValue b) = return (BoolValue b)

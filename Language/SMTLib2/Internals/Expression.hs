@@ -4,8 +4,9 @@ import Language.SMTLib2.Internals.Type hiding (Field)
 import Language.SMTLib2.Internals.Type.Nat
 
 import Data.Proxy
+import Data.Typeable
 
-class (GetTypes arg,GetType (SameType arg)) => AllEq (arg::[Type]) where
+class (Liftable arg,GetType (SameType arg)) => AllEq (arg::[Type]) where
   type SameType arg :: Type
   allEqToList :: Args e arg -> [e (SameType arg)]
 
@@ -45,7 +46,7 @@ data Function (fun :: [Type] -> Type -> *) (con :: [Type] -> * -> *) (field :: *
             (BitVecType (n1 + n2))
   Extract :: (KnownNat start,KnownNat len,((start + len) <= a) ~ True) => Proxy start -> Function fun con field '[BitVecType a] (BitVecType len)
   Constructor :: con arg a -> Function fun con field arg (DataType a)
-  Test :: con arg a -> Function fun con field '[DataType a] BoolType
+  Test :: GetTypes arg => con arg a -> Function fun con field '[DataType a] BoolType
   Field :: field a t -> Function fun con field '[DataType a] t
   Divisible :: Integer -> Function fun con field '[IntType] BoolType
 
@@ -96,6 +97,8 @@ data LetBinding (v :: Type -> *) (e :: Type -> *) (t :: Type)
   = LetBinding { letVar :: v t
                , letExpr :: e t }
 
+data Quantifier = Forall | Exists deriving (Typeable,Eq,Ord,Show)
+
 data Expression (v :: Type -> *) (qv :: Type -> *) (fun :: [Type] -> Type -> *) (con :: [Type] -> * -> *) (field :: * -> Type -> *) (fv :: Type -> *) (e :: Type -> *) (res :: Type) where
   Var :: v res -> Expression v qv fun con field fv e res
   QVar :: qv res -> Expression v qv fun con field fv e res
@@ -105,24 +108,22 @@ data Expression (v :: Type -> *) (qv :: Type -> *) (fun :: [Type] -> Type -> *) 
   Const :: Value con a -> Expression v qv fun con field fv e a
   AsArray :: (GetTypes arg,GetType res) => Function fun con field arg res
           -> Expression v qv fun con field fv e (ArrayType arg res)
-  Forall :: GetTypes arg => Args qv arg -> e BoolType
-         -> Expression v qv fun con field fv e BoolType
-  Exists :: GetTypes arg => Args qv arg -> e BoolType
-         -> Expression v qv fun con field fv e BoolType
+  Quantification :: GetTypes arg => Quantifier -> Args qv arg -> e BoolType
+                 -> Expression v qv fun con field fv e BoolType
   Let :: Args (LetBinding v e) arg -> e res -> Expression v qv fun con field fv e res
   Named :: e res -> String -> Expression v qv fun con field fv e res
 
 functionType :: (GetTypes arg,GetType res) => Function fun con field arg res -> (Args Repr arg,Repr res)
 functionType (_::Function fun con field arg res) = (getTypes (Proxy::Proxy arg),getType (Proxy::Proxy res))
 
-mapExpr :: Monad m
-        => (forall t. v1 t -> m (v2 t))
-        -> (forall t. qv1 t -> m (qv2 t))
-        -> (forall arg t. fun1 arg t -> m (fun2 arg t))
-        -> (forall arg t. con1 arg t -> m (con2 arg t))
-        -> (forall t res. field1 t res -> m (field2 t res))
-        -> (forall t. fv1 t -> m (fv2 t))
-        -> (forall t. e1 t -> m (e2 t))
+mapExpr :: (Monad m,GetType r)
+        => (forall t. GetType t => v1 t -> m (v2 t))
+        -> (forall t. GetType t => qv1 t -> m (qv2 t))
+        -> (forall arg t. (GetTypes arg,GetType t) => fun1 arg t -> m (fun2 arg t))
+        -> (forall arg t. (GetTypes arg) => con1 arg t -> m (con2 arg t))
+        -> (forall t res. GetType res => field1 t res -> m (field2 t res))
+        -> (forall t. GetType t => fv1 t -> m (fv2 t))
+        -> (forall t. GetType t => e1 t -> m (e2 t))
         -> Expression v1 qv1 fun1 con1 field1 fv1 e1 r
         -> m (Expression v2 qv2 fun2 con2 field2 fv2 e2 r)
 mapExpr f _ _ _ _ _ _ (Var v) = fmap Var (f v)
@@ -134,14 +135,10 @@ mapExpr _ _ f g h _ i (App fun args) = do
   return (App fun' args')
 mapExpr _ _ _ f _ _ _ (Const val) = fmap Const (mapValue f val)
 mapExpr _ _ f g h _ _ (AsArray fun) = fmap AsArray (mapFunction f g h fun)
-mapExpr _ f _ _ _ _ g (Forall args body) = do
+mapExpr _ f _ _ _ _ g (Quantification q args body) = do
   args' <- mapArgs f args
   body' <- g body
-  return (Forall args' body')
-mapExpr _ f _ _ _ _ g (Exists args body) = do
-  args' <- mapArgs f args
-  body' <- g body
-  return (Exists args' body')
+  return (Quantification q args' body')
 mapExpr f _ _ _ _ _ g (Let args body) = do
   args' <- mapArgs (\bind -> do
                       nv <- f (letVar bind)
@@ -154,10 +151,10 @@ mapExpr _ _ _ _ _ _ f (Named e name) = do
   e' <- f e
   return (Named e' name)
 
-mapFunction :: Monad m
-            => (forall arg t. fun1 arg t -> m (fun2 arg t))
-            -> (forall arg t. con1 arg t -> m (con2 arg t))
-            -> (forall t res. field1 t res -> m (field2 t res))
+mapFunction :: (Monad m,GetTypes arg,GetType res)
+            => (forall arg t. (GetTypes arg,GetType t) => fun1 arg t -> m (fun2 arg t))
+            -> (forall arg t. (GetTypes arg) => con1 arg t -> m (con2 arg t))
+            -> (forall t res. (GetType res) => field1 t res -> m (field2 t res))
             -> Function fun1 con1 field1 arg res
             -> m (Function fun2 con2 field2 arg res)
 mapFunction f _ _ (Fun x) = fmap Fun (f x)
