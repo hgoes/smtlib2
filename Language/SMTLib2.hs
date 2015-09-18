@@ -57,7 +57,7 @@ liftSMT :: Backend b => SMTMonad b a -> SMT' b a
 liftSMT act = SMT' (lift act)
 
 data SMTArray idx t = SMTArray deriving (Typeable)
-data SMTBV = SMTBV Integer deriving (Show,Eq,Ord)
+data SMTBV = SMTBV Integer deriving (Typeable,Show,Eq,Ord)
 
 class (Typeable t) => SMTType t where
   type SMTRepr t :: Either T.Type *
@@ -269,7 +269,11 @@ class (SMTType tp,SMTRepr tp ~ tp',
   addedArgAnn (_::ArgLst (SMTExpr b) (tp ': tps))
     = error $ "smtlib2: addedArgAnn not implemented for "++
               show (typeRep (Proxy::Proxy tp))++" and "++
+#if __GLASGOW_HASKELL__ >= 710
               show (typeRep (Proxy::Proxy tps))
+#else
+              show (typeOfBoundedLst (Proxy::Proxy tps))
+#endif
   withAddedArgs :: (AddedArg (SMTRepr tp) (BoundedLstRepr tps) ~ Right ann)
                 => ArgLst (SMTExpr b) (tp ': tps)
                 -> (forall arg'. T.Liftable arg' => T.Args (SMTExpr' b) arg' -> ann -> a)
@@ -277,7 +281,11 @@ class (SMTType tp,SMTRepr tp ~ tp',
   withAddedArgs (_::ArgLst (SMTExpr b) (tp ': tps)) _
     = error $ "smtlib2: withAddedArgs not implemented for "++
               show (typeRep (Proxy::Proxy tp))++" and "++
+#if __GLASGOW_HASKELL__ >= 710
               show (typeRep (Proxy::Proxy tps))
+#else
+              show (typeOfBoundedLst (Proxy::Proxy tps))
+#endif
   addedArgContext :: Proxy tp -> Proxy tps -> BoundedLstInfo (tp ': tps)
 #if __GLASGOW_HASKELL__ < 710
   typeOfAddArg :: Proxy (tp ': tps) -> TypeRep
@@ -295,26 +303,43 @@ class BoundedLst (tps :: [*]) where
                  -> (forall (arg :: [T.Type]). T.Liftable arg => Proxy arg -> a)
                  -> a
   getBoundedRepr pr
-    = error $ "smtlib2: getBoundedRepr not implemented for "++show (typeRep pr)
+    = error $ "smtlib2: getBoundedRepr not implemented for "++
+#if __GLASGOW_HASKELL__ >= 710
+              show (typeRep pr)
+#else
+              show (typeOfBoundedLst pr)
+#endif
   toBoundedArgs :: (BoundedLstRepr tps ~ Left tps')
                 => ArgLst (SMTExpr b) tps
                 -> T.Args (SMTExpr' b) tps'
   toBoundedArgs (_::ArgLst (SMTExpr b) tps)
     = error $ "smtlib2: toBoundedArgs not implemented for "++
+#if __GLASGOW_HASKELL__ >= 710
               show (typeRep (Proxy::Proxy tps))
+#else
+              show (typeOfBoundedLst (Proxy::Proxy tps))
+#endif
   boundedArgAnn :: (BoundedLstRepr tps ~ Right ann)
                 => ArgLst (SMTExpr b) tps
                 -> ann
   boundedArgAnn (_::ArgLst (SMTExpr b) tps)
     = error $ "smtlib2: boundedArgAnn not implemented for "++
-               show (typeRep (Proxy::Proxy tps))
+#if __GLASGOW_HASKELL__ >= 710
+              show (typeRep (Proxy::Proxy tps))
+#else
+              show (typeOfBoundedLst (Proxy::Proxy tps))
+#endif
   withBoundedArgs :: (BoundedLstRepr tps ~ Right ann)
                   => ArgLst (SMTExpr b) tps
                   -> (forall arg'. T.Liftable arg' => T.Args (SMTExpr' b) arg' -> ann -> a)
                   -> a
   withBoundedArgs (_::ArgLst (SMTExpr b) tps) _
     = error $ "smtlib2: withBoundedArgs not implemented for type "++
+#if __GLASGOW_HASKELL__ >= 710
               show (typeRep (Proxy::Proxy tps))
+#else
+              show (typeOfBoundedLst (Proxy::Proxy tps))
+#endif
   boundedLstContext :: Proxy tps -> BoundedLstInfo tps
 #if __GLASGOW_HASKELL__ < 710
   typeOfBoundedLst :: Proxy tps -> TypeRep
