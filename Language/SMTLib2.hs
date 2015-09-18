@@ -237,6 +237,7 @@ data SMTExpr b t where
         => SMTExpr' b repr -> SMTExpr b t
   DExpr :: (SMTType t,SMTRepr t ~ Right ann,T.GetType repr)
         => SMTExpr' b repr -> ann -> SMTExpr b t
+  deriving (Typeable)
 
 withSMTExpr :: SMTExpr b t -> (forall repr. T.GetType repr => SMTExpr' b repr -> a) -> a
 withSMTExpr (SExpr e) f = f e
@@ -540,17 +541,12 @@ instance (Backend b,Typeable tp,ArgList tp (SMTRepr tp) repr) => Args [SMTExpr b
     = getArgListRepr (Proxy::Proxy t) (Proxy::Proxy (SMTRepr t)) ann f
   withArgs = mkArgListRepr
   argContext _ = ArgInfoD Proxy Dict
-      
-data SMTArgs b arg where
-  SArg :: (Args arg,ArgBackend arg ~ b,ArgRepr arg ~ Left repr,T.Liftable repr)
-          => T.Args (SMTExpr' b) repr -> SMTArgs b arg
-  DArg :: (Args arg,ArgBackend arg ~ b,ArgRepr arg ~ Right ann,T.Liftable repr)
-          => T.Args (SMTExpr' b) repr -> ann -> SMTArgs b arg
 
 and' :: Backend b => [SMTExpr b Bool] -> SMTExpr b Bool
-and' xs = allEqFromList
-          (fmap (\(SExpr e) -> e) xs)
-          (SExpr . SMTExpr' . App (Logic And))
+and' (xs::[SMTExpr b Bool])
+  = allEqFromList
+    (fmap (\(SExpr e) -> e) xs :: [SMTExpr' b T.BoolType])
+    (SExpr . SMTExpr' . App (Logic And))
 
 (.&&.) :: Backend b => SMTExpr b Bool -> SMTExpr b Bool -> SMTExpr b Bool
 (.&&.) (SExpr x) (SExpr y) = SExpr (SMTExpr' (App (Logic And) (T.Arg x (T.Arg y T.NoArg))))
