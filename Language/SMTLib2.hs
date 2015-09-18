@@ -160,11 +160,19 @@ instance SMTValue b SMTBV where
 class (Args idx,ArgRepr idx ~ idx',SMTType el,SMTRepr el ~ el')
       => SMTArray' idx el (idx' :: Either [T.Type] *) (el' :: Either T.Type *) where
   type ArrayRepr idx' el' :: Either T.Type *
+#if __GLASGOW_HASKELL__ >= 710
   getArrayRepr :: (ArrayRepr idx' el' ~ Right ann)
                => Proxy '(idx',el') -> Proxy (SMTArray idx el) -> ann
                -> (forall idx'' el''. (T.Liftable idx'',T.GetType el'')
                    => Proxy (T.ArrayType idx'' el'') -> a)
                -> a
+#else
+  getArrayRepr :: (ArrayRepr idx' el' ~ Right ann)
+               => Proxy '(idx',el') -> Proxy (SMTArray idx el) -> ann
+               -> (forall tp. (T.GetType tp)
+                   => Proxy tp -> a)
+               -> a
+#endif
   getArrayRepr = error $ "smtlib2: getArrayRepr not implemented."
   arrayContext :: Proxy (SMTArray idx el) -> TypeInfo (SMTArray idx el)
 
@@ -250,7 +258,11 @@ class (SMTType tp,SMTRepr tp ~ tp',
   toAddedArg (_::ArgLst (SMTExpr b) (tp ': tps))
     = error $ "smtlib2: toAddedArg not implemented for "++
               show (typeRep (Proxy::Proxy tp))++" and "++
+#if __GLASGOW_HASKELL__ >= 710
               show (typeRep (Proxy::Proxy tps))
+#else
+              show (typeOfBoundedLst (Proxy::Proxy tps))
+#endif
   addedArgAnn :: (AddedArg (SMTRepr tp) (BoundedLstRepr tps) ~ Right ann)
               => ArgLst (SMTExpr b) (tp ': tps)
               -> ann
@@ -267,6 +279,9 @@ class (SMTType tp,SMTRepr tp ~ tp',
               show (typeRep (Proxy::Proxy tp))++" and "++
               show (typeRep (Proxy::Proxy tps))
   addedArgContext :: Proxy tp -> Proxy tps -> BoundedLstInfo (tp ': tps)
+#if __GLASGOW_HASKELL__ < 710
+  typeOfAddArg :: Proxy (tp ': tps) -> TypeRep
+#endif
 
 #if __GLASGOW_HASKELL__ >= 710
 class (Typeable tps)
@@ -301,6 +316,9 @@ class BoundedLst (tps :: [*]) where
     = error $ "smtlib2: withBoundedArgs not implemented for type "++
               show (typeRep (Proxy::Proxy tps))
   boundedLstContext :: Proxy tps -> BoundedLstInfo tps
+#if __GLASGOW_HASKELL__ < 710
+  typeOfBoundedLst :: Proxy tps -> TypeRep
+#endif
 
 data BoundedLstInfo (tps :: [*])
   = forall (el::[T.Type]). BoundedLstInfoS { bndProxyS :: Proxy el
@@ -313,6 +331,11 @@ instance BoundedLst '[] where
   type BoundedLstRepr '[] = Left '[]
   toBoundedArgs _ = T.NoArg
   boundedLstContext _ = BoundedLstInfoS Proxy Dict
+#if __GLASGOW_HASKELL__ < 710
+  typeOfBoundedLst _ = mkTyConApp
+                       (mkTyCon3 "smtlib2" "Language.SMTLib2" "'[]")
+                       []
+#endif
 
 instance (BoundedLst tps,
           AddArg tp tp' tps (BoundedLstRepr tps))
@@ -327,6 +350,9 @@ instance (BoundedLst tps,
   boundedArgAnn = addedArgAnn
   withBoundedArgs = withAddedArgs
   boundedLstContext (_::Proxy (tp ': tps)) = addedArgContext (Proxy::Proxy tp) (Proxy::Proxy tps)
+#if __GLASGOW_HASKELL__ < 710
+  typeOfBoundedLst = typeOfAddArg
+#endif
 
 instance (SMTType tp,SMTRepr tp ~ Left tp',
           BoundedLst tps,BoundedLstRepr tps ~ Left tps',
@@ -335,6 +361,13 @@ instance (SMTType tp,SMTRepr tp ~ Left tp',
   type AddedArg (Left tp') (Left tps') = Left (tp' ': tps')
   toAddedArg (ArgCons (SExpr x) xs) = T.Arg x (toBoundedArgs xs)
   addedArgContext _ _ = BoundedLstInfoS Proxy Dict
+#if __GLASGOW_HASKELL__ < 710
+  typeOfAddArg (_::Proxy (tp ': tps))
+    = mkTyConApp
+      (mkTyCon3 "smtlib2" "Language.SMTLib2" "':")
+      [typeOf (Proxy::Proxy tp)
+      ,typeOfBoundedLst (Proxy::Proxy tps)]
+#endif
 
 instance (SMTType tp,SMTRepr tp ~ Left tp',T.GetType tp',
           BoundedLst tps,BoundedLstRepr tps ~ Right (Lst anns))
@@ -367,6 +400,13 @@ instance (SMTType tp,SMTRepr tp ~ Right ann,
   addedArgAnn (ArgCons (DExpr _ ann) _) = Cons ann Nil
   withAddedArgs (ArgCons (DExpr x ann) xs) f = f (T.Arg x (toBoundedArgs xs)) (Cons ann Nil)
   addedArgContext _ _ = BoundedLstInfoD Proxy Dict
+#if __GLASGOW_HASKELL__ < 710
+  typeOfAddArg (_::Proxy (tp ': tps))
+    = mkTyConApp
+      (mkTyCon3 "smtlib2" "Language.SMTLib2" "':")
+      [typeOf (Proxy::Proxy tp)
+      ,typeOfBoundedLst (Proxy::Proxy tps)]
+#endif
 
 instance (SMTType tp,SMTRepr tp ~ Right ann,
           BoundedLst tps,BoundedLstRepr tps ~ Right (Lst anns))
@@ -380,6 +420,13 @@ instance (SMTType tp,SMTRepr tp ~ Right ann,
   withAddedArgs (ArgCons (DExpr x ann) xs) f
     = withBoundedArgs xs $ \xs' ann' -> f (T.Arg x xs') (Cons ann ann')
   addedArgContext _ _ = BoundedLstInfoD Proxy Dict
+#if __GLASGOW_HASKELL__ < 710
+  typeOfAddArg (_::Proxy (tp ': tps))
+    = mkTyConApp
+      (mkTyCon3 "smtlib2" "Language.SMTLib2" "':")
+      [typeOf (Proxy::Proxy tp)
+      ,typeOfBoundedLst (Proxy::Proxy tps)]
+#endif
 
 instance (Backend b,SMTType tp,BoundedLst '[tp])
          => Args (SMTExpr b tp) where
