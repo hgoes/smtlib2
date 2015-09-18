@@ -31,6 +31,9 @@ import Data.Typeable
 import Data.Constraint
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IMap
+#if __GLASGOW_HASKELL__ < 710
+import Control.Applicative (Applicative(..))
+#endif
 
 newtype Backend b => SMT' b a = SMT' (StateT b (SMTMonad b) a)
 
