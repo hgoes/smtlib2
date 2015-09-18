@@ -116,7 +116,7 @@ data Expression (v :: Type -> *) (qv :: Type -> *) (fun :: [Type] -> Type -> *) 
 functionType :: (GetTypes arg,GetType res) => Function fun con field arg res -> (Args Repr arg,Repr res)
 functionType (_::Function fun con field arg res) = (getTypes (Proxy::Proxy arg),getType (Proxy::Proxy res))
 
-mapExpr :: (Monad m,GetType r)
+mapExpr :: (Functor m,Monad m,GetType r)
         => (forall t. GetType t => v1 t -> m (v2 t))
         -> (forall t. GetType t => qv1 t -> m (qv2 t))
         -> (forall arg t. (GetTypes arg,GetType t) => fun1 arg t -> m (fun2 arg t))
@@ -151,7 +151,7 @@ mapExpr _ _ _ _ _ _ f (Named e name) = do
   e' <- f e
   return (Named e' name)
 
-mapFunction :: (Monad m,GetTypes arg,GetType res)
+mapFunction :: (Functor m,Monad m,GetTypes arg,GetType res)
             => (forall arg t. (GetTypes arg,GetType t) => fun1 arg t -> m (fun2 arg t))
             -> (forall arg t. (GetTypes arg) => con1 arg t -> m (con2 arg t))
             -> (forall t res. (GetType res) => field1 t res -> m (field2 t res))
