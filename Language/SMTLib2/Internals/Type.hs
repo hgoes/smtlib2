@@ -23,7 +23,7 @@ deriving instance Typeable 'ArrayType
 deriving instance Typeable 'DataType
 
 deriving instance Typeable ('[])
-deriving instance Typeable (':)
+deriving instance Typeable (a ': b)
 #endif
 
 data PolyDatatype = PolyDatatype { numArgs :: Integer
