@@ -5,6 +5,7 @@ import Data.Typeable
 
 data Nat = Z | S Nat deriving Typeable
 
+#if  __GLASGOW_HASKELL__ >= 710
 class Typeable n => KnownNat (n :: Nat) where
   natVal :: p n -> Integer
 
@@ -12,6 +13,23 @@ instance KnownNat Z where
   natVal _ = 0
 instance KnownNat n => KnownNat (S n) where
   natVal (_::p (S n)) = succ (natVal (Proxy::Proxy n))
+#else
+class KnownNat (n :: Nat) where
+  natVal :: p n -> Integer
+  typeOfNat :: Proxy n -> TypeRep
+
+instance KnownNat Z where
+  natVal _ = 0
+  typeOfNat _ = mkTyConApp
+                (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type.Nat" "'Z")
+                []
+
+instance KnownNat n => KnownNat (S n) where
+  natVal (_::p (S n)) = succ (natVal (Proxy::Proxy n))
+  typeOfNat _ = mkTyConApp
+                (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type.Nat" "'S")
+                [typeOfNat (Proxy::Proxy n)]
+#endif
 
 type family (+) (n :: Nat) (m :: Nat) :: Nat where
   (+) Z n = n
