@@ -2,6 +2,6 @@ language: haskell
 ghc:
   - 7.8
 script:
-  - cabal install
-  - cabal install ./backends/pipe
+  - cabal install -v1
+  - cabal install -v1 ./backends/pipe
 sudo: false
