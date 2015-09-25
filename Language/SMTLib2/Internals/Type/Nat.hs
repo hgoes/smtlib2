@@ -1,7 +1,22 @@
+{-# LANGUAGE StandaloneDeriving #-}
 module Language.SMTLib2.Internals.Type.Nat where
+  --(module GHC.TypeLits,reifyNat,N8) where
+
+{-import GHC.TypeLits
+import Data.Proxy
+import Data.Typeable
+
+reifyNat :: Integer -> (forall n. KnownNat n => Proxy n -> r) -> r
+reifyNat n f = case someNatVal n of
+  Just (SomeNat pr) -> f pr
+
+deriving instance KnownNat n => Typeable n
+
+type N8 = 8-}
 
 import Data.Proxy
 import Data.Typeable
+import Data.Constraint
 
 data Nat = Z | S Nat deriving Typeable
 
@@ -10,7 +25,6 @@ deriving instance Typeable 'Z
 deriving instance Typeable 'S
 #endif
 
-#if  __GLASGOW_HASKELL__ >= 708
 class Typeable n => KnownNat (n :: Nat) where
   natVal :: p n -> Integer
 
@@ -18,23 +32,6 @@ instance KnownNat Z where
   natVal _ = 0
 instance KnownNat n => KnownNat (S n) where
   natVal (_::p (S n)) = succ (natVal (Proxy::Proxy n))
-#else
-class KnownNat (n :: Nat) where
-  natVal :: p n -> Integer
-  typeOfNat :: Proxy n -> TypeRep
-
-instance KnownNat Z where
-  natVal _ = 0
-  typeOfNat _ = mkTyConApp
-                (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type.Nat" "'Z")
-                []
-
-instance KnownNat n => KnownNat (S n) where
-  natVal (_::p (S n)) = succ (natVal (Proxy::Proxy n))
-  typeOfNat _ = mkTyConApp
-                (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type.Nat" "'S")
-                [typeOfNat (Proxy::Proxy n)]
-#endif
 
 type family (+) (n :: Nat) (m :: Nat) :: Nat where
   (+) Z n = n
@@ -107,6 +104,12 @@ reifyExtract start len sz f
                         \(_::Proxy len) (_::Proxy sz)
                          -> f (Proxy::Proxy (S len)) (Proxy::Proxy (S sz))
 
+deriveAdd :: (KnownNat n1,KnownNat n2) => Proxy n1 -> Proxy n2 -> Dict (KnownNat (n1 + n2))
+deriveAdd (n1::Proxy n1) (n2::Proxy n2) = reifyAdd (natVal n1) (natVal n2) $
+                  \(_::Proxy n1') (_::Proxy n2') -> case eqT of
+                     Just (Refl::n1 :~: n1') -> case eqT of
+                       Just (Refl::n2 :~: n2') -> Dict
+
 type N0  = Z
 type N1  = S N0
 type N2  = S N1
@@ -172,3 +175,4 @@ type N61 = S N60
 type N62 = S N61
 type N63 = S N62
 type N64 = S N63
+

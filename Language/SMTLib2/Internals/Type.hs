@@ -5,6 +5,9 @@ import Language.SMTLib2.Internals.Type.Nat
 import Data.Proxy
 import Data.Typeable
 import Data.Constraint
+import Numeric
+import Text.Show
+import Data.List (genericLength,genericReplicate)
 
 data Type = BoolType
           | IntType
@@ -23,35 +26,46 @@ deriving instance Typeable 'ArrayType
 deriving instance Typeable 'DataType
 
 deriving instance Typeable ('[])
-deriving instance Typeable (a ': b)
+deriving instance Typeable (':)
 #endif
 
-data PolyDatatype = PolyDatatype { numArgs :: Integer
-                                 , instantiate :: [AnyRepr] -> AnyDatatype }
+class (Typeable t,Typeable (DatatypeSig t)) => IsDatatype t where
+  type DatatypeSig t :: [[Type]]
+  type TypeCollectionSig t :: [([[Type]],*)]
+  getDatatype :: e t -> Datatype (DatatypeSig t) t
+  getTypeCollection :: e t -> TypeCollection (TypeCollectionSig t)
 
-data Datatype a = Datatype { datatypeName :: String
-                           , constructors :: [AnyConstr a]
-                           , parameter :: [AnyRepr] }
+type TypeCollection sigs = Datatypes Datatype sigs
 
-data AnyDatatype = forall a. IsDatatype a => AnyDatatype (Datatype a)
+data Datatype (sig::[[Type]]) dt
+  = Datatype { datatypeName :: String
+             , constructors :: Constrs Constr sig dt }
 
-data AnyConstr a = forall (arg :: [Type]). AnyConstr (Constr arg a)
-                                 
 data Constr (arg :: [Type]) a
   = Constr { conName :: String
            , conFields :: Args (Field a) arg
-           , construct :: Args (Value Constr) arg -> a
+           , construct :: Args ConcreteValue arg -> a
            , conTest :: a -> Bool }
 
 data Field a (t :: Type) = Field { fieldName :: String
-                                 , fieldGet :: a -> Value Constr t }
+                                 , fieldGet :: a -> ConcreteValue t }
 
 data Value (con :: [Type] -> * -> *) (a :: Type) where
   BoolValue :: Bool -> Value con BoolType
   IntValue :: Integer -> Value con IntType
   RealValue :: Rational -> Value con RealType
   BitVecValue :: KnownNat n => Integer -> Value con (BitVecType n)
-  ConstrValue :: GetTypes arg => con arg t -> Args (Value con) arg -> Value con (DataType t)
+  ConstrValue :: (Typeable con,GetTypes arg,IsDatatype t)
+              => con arg t
+              -> Args (Value con) arg
+              -> Value con (DataType t)
+
+data ConcreteValue (a :: Type) where
+  BoolValueC :: Bool -> ConcreteValue BoolType
+  IntValueC :: Integer -> ConcreteValue IntType
+  RealValueC :: Rational -> ConcreteValue RealType
+  BitVecValueC :: KnownNat n => Integer -> ConcreteValue (BitVecType n)
+  ConstrValueC :: IsDatatype t => t -> ConcreteValue (DataType t)
 
 data AnyValue (con :: [Type] -> * -> *) = forall (t :: Type). GetType t => AnyValue (Value con t)
 
@@ -61,7 +75,7 @@ data Repr (t :: Type) where
   RealRepr :: Repr RealType
   BitVecRepr :: KnownNat n => Integer -> Repr (BitVecType n)
   ArrayRepr :: (Liftable idx,GetType val) => Args Repr idx -> Repr val -> Repr (ArrayType idx val)
-  DataRepr :: Datatype a -> Repr (DataType a)
+  DataRepr :: IsDatatype dt => Datatype (DatatypeSig dt) dt -> Repr (DataType dt)
 
 data AnyRepr = forall (t :: Type). AnyRepr (Repr t)
 
@@ -72,92 +86,40 @@ data Args (e :: Type -> *) (a :: [Type]) where
 
 data Constrs (con :: [Type] -> * -> *) (a :: [[Type]]) t where
   NoCon :: Constrs con '[] t
-  ConsCon :: con arg t -> Constrs con args t -> Constrs con (arg ': args) t
+  ConsCon :: Liftable arg => con arg t -> Constrs con args t -> Constrs con (arg ': args) t
 
-#if __GLASGOW_HASKELL__ >= 708
+data Datatypes (dts :: [[Type]] -> * -> *) (sigs :: [([[Type]],*)]) where
+  NoDts :: Datatypes dts '[]
+  ConsDts :: IsDatatype dt
+          => dts (DatatypeSig dt) dt
+          -> Datatypes dts sigs
+          -> Datatypes dts ('(DatatypeSig dt,dt) ': sigs)
+
 class Typeable t => GetType (t :: Type) where
   getType :: e t -> Repr t
-#else
-class GetType (t :: Type) where
-  getType :: e t -> Repr t
-  typeOfType :: Proxy t -> TypeRep
-#endif
 
 instance GetType BoolType where
   getType _ = BoolRepr
-#if __GLASGOW_HASKELL__ < 708
-  typeOfType _ = mkTyConApp
-                 (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type" "'BoolType")
-                 []
-#endif
 instance GetType IntType where
   getType _ = IntRepr
-#if __GLASGOW_HASKELL__ < 708
-  typeOfType _ = mkTyConApp
-                 (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type" "'IntType")
-                 []
-#endif
 instance GetType RealType where
   getType _ = RealRepr
-#if __GLASGOW_HASKELL__ < 708
-  typeOfType _ = mkTyConApp
-                 (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type" "'RealType")
-                 []
-#endif
-instance (KnownNat n) => GetType (BitVecType n) where
+instance (KnownNat n,Typeable n) => GetType (BitVecType n) where
   getType (_::e (BitVecType n)) = BitVecRepr (natVal (Proxy::Proxy n))
-#if __GLASGOW_HASKELL__ < 708
-  typeOfType (_::Proxy (BitVecType n))
-    = mkTyConApp
-      (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type" "'BitVecType")
-      [typeOfNat (Proxy::Proxy n)]
-#endif
 instance (Liftable idx,GetType el) => GetType (ArrayType idx el) where
   getType (_::e (ArrayType idx el)) = ArrayRepr (getTypes (Proxy::Proxy idx))
                                                 (getType (Proxy::Proxy el))
-#if __GLASGOW_HASKELL__ < 708
-  typeOfType (_::Proxy (ArrayType idx el))
-    = mkTyConApp
-      (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type" "'ArrayType")
-      [typeOfTypes (Proxy::Proxy idx)
-      ,typeOfType (Proxy::Proxy el)]
-#endif
 instance IsDatatype t => GetType (DataType t) where
   getType (_::e (DataType t)) = DataRepr (getDatatype (Proxy::Proxy t))
-#if __GLASGOW_HASKELL__ < 708
-  typeOfType (_::Proxy (DataType t))
-    = mkTyConApp
-      (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type" "'DataType")
-      [typeOf (Proxy::Proxy t)]
-#endif
 
-#if __GLASGOW_HASKELL__ >= 708
 class Typeable t => GetTypes (t :: [Type]) where
   getTypes :: e t -> Args Repr t
-#else
-class GetTypes (t :: [Type]) where
-  getTypes :: e t -> Args Repr t
-  typeOfTypes :: Proxy t -> TypeRep
-#endif
 
 instance GetTypes '[] where
   getTypes _ = NoArg
-#if __GLASGOW_HASKELL__ < 708
-  typeOfTypes _
-    = mkTyConApp
-      (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type" "'[]")
-      []
-#endif
 
 instance (GetType t,GetTypes ts) => GetTypes (t ': ts) where
   getTypes (_::e (t ': ts)) = Arg (getType (Proxy::Proxy t)) (getTypes (Proxy::Proxy ts))
-#if __GLASGOW_HASKELL__ < 708
-  typeOfTypes (_::Proxy (t ': ts))
-    = mkTyConApp
-      (mkTyCon3 "smtlib2" "Language.SMTLib2.Internals.Type" "':")
-      [typeOfType (Proxy::Proxy t)
-      ,typeOfTypes (Proxy::Proxy ts)]
-#endif
 
 class GetTypes l => Liftable (l :: [Type]) where
   type Lifted l (idx :: [Type]) :: [Type]
@@ -170,9 +132,6 @@ instance (GetType a,Liftable b) => Liftable (a ': b) where
   type Lifted (a ': b) idx = (ArrayType idx a) ': (Lifted b idx)
   getTypeConstr (_::p (a ': b)) pidx = case getTypeConstr (Proxy::Proxy b) pidx of
     Dict -> Dict
-
-class Typeable t => IsDatatype t where
-  getDatatype :: e t -> Datatype t
 
 mapArgs :: Monad m => (forall t. GetType t => e1 t -> m (e2 t))
         -> Args e1 arg
@@ -187,7 +146,15 @@ argsToList :: (forall (t :: Type). GetType t => e t -> a) -> Args e arg -> [a]
 argsToList _ NoArg = []
 argsToList f (Arg x xs) = f x:argsToList f xs
 
-mapValue :: Monad m
+argsToListM :: Monad m => (forall (t :: Type). GetType t => e t -> m a)
+            -> Args e arg -> m [a]
+argsToListM _ NoArg = return []
+argsToListM f (Arg x xs) = do
+  x' <- f x
+  xs' <- argsToListM f xs
+  return (x':xs')
+
+mapValue :: (Monad m,Typeable con2)
          => (forall arg t. GetTypes arg => con1 arg t -> m (con2 arg t))
          -> Value con1 a
          -> m (Value con2 a)
@@ -199,3 +166,20 @@ mapValue f (ConstrValue con args) = do
   con' <- f con
   args' <- mapArgs (mapValue f) args
   return (ConstrValue con' args')
+
+findConstrByName :: String -> Datatype sig dt
+                 -> (forall arg. GetTypes arg => Constr arg dt -> a) -> a
+findConstrByName name dt f = find f (constructors dt)
+  where
+    find :: (forall arg. GetTypes arg => Constr arg dt -> a) -> Constrs Constr sigs dt -> a
+    find f NoCon = error $ "smtlib2: Cannot find constructor "++name++" of "++datatypeName dt
+    find f (ConsCon con cons)
+      = if conName con == name
+        then f con
+        else find f cons
+
+findConstrByName' :: (IsDatatype dt,Typeable arg) => String -> Datatype sig dt
+                  -> Constr arg dt
+findConstrByName' name dt = findConstrByName name dt
+                            (\con -> case cast con of
+                               Just con' -> con')

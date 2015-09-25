@@ -22,8 +22,8 @@ Flag WithDataKinds
   Default: False
 
 Library
-  Build-Depends: base >=4 && <5, constraints, mtl, containers
-  Extensions: GADTs,FlexibleContexts,FlexibleInstances,ExistentialQuantification,KindSignatures,DataKinds,TypeFamilies,AllowAmbiguousTypes,TypeOperators,MultiParamTypeClasses,ScopedTypeVariables,RankNTypes,UndecidableInstances,GeneralizedNewtypeDeriving,DeriveDataTypeable,CPP
+  Build-Depends: base >=4 && <5, constraints, mtl, containers, template-haskell
+  Extensions: GADTs,FlexibleContexts,FlexibleInstances,ExistentialQuantification,KindSignatures,DataKinds,TypeFamilies,AllowAmbiguousTypes,TypeOperators,MultiParamTypeClasses,ScopedTypeVariables,RankNTypes,UndecidableInstances,GeneralizedNewtypeDeriving,DeriveDataTypeable,CPP,PolyKinds
   if impl(ghc < 7.10) {
     Extensions: PolyKinds,StandaloneDeriving
   }
@@ -33,5 +33,7 @@ Library
     Language.SMTLib2.Internals.Expression
     Language.SMTLib2.Internals.Type
     Language.SMTLib2.Internals.Type.Nat
+    Language.SMTLib2.Internals.TH
     Language.SMTLib2.Strategy
     Language.SMTLib2
+    Language.SMTLib2.LowLevel

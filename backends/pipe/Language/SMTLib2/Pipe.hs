@@ -1,7 +1,8 @@
 module Language.SMTLib2.Pipe where
 
-import Language.SMTLib2.Internals.Backend
-import Language.SMTLib2.Internals.Type as Type hiding (Constr,Field)
+import Language.SMTLib2.Internals.Backend as B
+import Language.SMTLib2.Internals.Type hiding (Constr,Field,Datatype)
+import qualified Language.SMTLib2.Internals.Type as Type
 import Language.SMTLib2.Internals.Type.Nat as Type
 import Language.SMTLib2.Internals.Expression hiding (Fun,Field,Var,QVar)
 import qualified Language.SMTLib2.Internals.Expression as Expr
@@ -38,7 +39,8 @@ data SMTPipe = SMTPipe { channelIn :: Handle
                        , processHandle :: ProcessHandle
                        , names :: Map String Int
                        , vars :: Map T.Text RevVar
-                       , datatypes :: Map T.Text PipeDatatype }
+                       , datatypes :: Map T.Text PipeDatatype
+                       , interpolationMode :: InterpolationMode }
 
 data RevVar = forall (t::Type). GetType t => Var !(Proxy t)
             | forall (t::Type). GetType t => QVar !(Proxy t)
@@ -48,12 +50,45 @@ data RevVar = forall (t::Type). GetType t => Var !(Proxy t)
             | forall (t::Type). GetType t => FunArg !(Proxy t)
             | forall (t :: *). IsDatatype t => Datatype !(Proxy t)
 
+data InterpolationMode = Z3Interpolation [T.Text] [T.Text]
+                       | MathSATInterpolation
+
 newtype PipeExpr (t :: Type) = PipeExpr (Expression PipeVar PipeVar PipeFun PipeConstr PipeField PipeVar PipeExpr t)
 newtype PipeVar (t :: Type) = PipeVar T.Text
 newtype PipeFun (arg :: [Type]) (t :: Type) = PipeFun T.Text
 newtype PipeConstr (arg :: [Type]) (t :: *) = PipeConstr T.Text
 newtype PipeField (t :: *) (res :: Type) = PipeField T.Text
 newtype PipeClauseId = PipeClauseId T.Text
+
+instance OrdVar PipeExpr where
+  cmpVar (PipeExpr e1) (PipeExpr e2) = exprCompare' e1 e2
+
+instance ShowVar PipeExpr where
+  showVar p (PipeExpr e) = showExpression p e
+
+instance OrdVar PipeVar where
+  cmpVar (PipeVar e1) (PipeVar e2) = compare e1 e2
+
+instance ShowVar PipeVar where
+  showVar p (PipeVar e) = showString (T.unpack e)
+
+instance OrdFun PipeFun where
+  cmpFun (PipeFun e1) (PipeFun e2) = compare e1 e2
+
+instance ShowFun PipeFun where
+  showFun p (PipeFun e) = showString (T.unpack e)
+
+instance OrdCon PipeConstr where
+  cmpCon (PipeConstr e1) (PipeConstr e2) = compare e1 e2
+
+instance ShowCon PipeConstr where
+  showCon p (PipeConstr e) = showString (T.unpack e)
+
+instance OrdField PipeField where
+  cmpField (PipeField e1) (PipeField e2) = compare e1 e2
+
+instance ShowField PipeField where
+  showField p (PipeField e) = showString (T.unpack e)
 
 instance Backend SMTPipe where
   type SMTMonad SMTPipe = IO
@@ -65,10 +100,31 @@ instance Backend SMTPipe where
   type Field SMTPipe = PipeField
   type FunArg SMTPipe = PipeVar
   type ClauseId SMTPipe = PipeClauseId
+  setOption b opt = do
+    putRequest b $ renderSetOption opt
+    return b
   declareVar b name = do
     let (var,req,nb) = renderDeclareVar b name
     putRequest nb req
     return (var,nb)
+  createQVar b name = with $ \pr -> do
+    let name' = case name of
+          Just n -> n
+          Nothing -> "qv"
+        (name'',nb) = genName b name'
+    return (PipeVar name'',nb { vars = Map.insert name'' (QVar pr) (vars nb) })
+    where
+      with :: (Proxy t -> IO (PipeVar t,SMTPipe)) -> IO (PipeVar t,SMTPipe)
+      with f = f Proxy
+  createFunArg b name = with $ \pr -> do
+    let name' = case name of
+          Just n -> n
+          Nothing -> "fv"
+        (name'',nb) = genName b name'
+    return (PipeVar name'',nb { vars = Map.insert name'' (FunArg pr) (vars nb) })
+    where
+      with :: (Proxy t -> IO (PipeVar t,SMTPipe)) -> IO (PipeVar t,SMTPipe)
+      with f = f Proxy
   defineVar b name expr = do
     let (var,req,nb) = renderDefineVar b name expr
     putRequest nb req
@@ -86,25 +142,23 @@ instance Backend SMTPipe where
     where
       withProxy :: (Proxy arg -> Proxy t -> IO (PipeFun arg t,SMTPipe)) -> IO (PipeFun arg t,SMTPipe)
       withProxy f = f Proxy Proxy
-  defineFun b name (f :: Args PipeVar arg -> PipeExpr r) = do
+  defineFun b name (arg :: Args PipeVar arg) (PipeExpr body :: PipeExpr r) = do
     let name' = case name of
           Just n -> n
           Nothing -> "fun"
         (name'',b1) = genName b name'
-        (args,b2) = mkArgs b1 (getTypes (Proxy::Proxy arg))
-        PipeExpr def = f args
-    putRequest b2 (L.List [L.Symbol "define-fun"
+    putRequest b1 (L.List [L.Symbol "define-fun"
                           ,L.Symbol name''
-                          ,typeList (getTypes (Proxy::Proxy arg))
+                          ,L.List $ mkArgs arg
                           ,typeSymbol (getType (Proxy::Proxy r))
-                          ,exprToLisp def])
+                          ,exprToLisp body])
     return (PipeFun name'',b1)
     where
-      mkArgs :: SMTPipe -> Args Repr arg' -> (Args PipeVar arg',SMTPipe)
-      mkArgs b NoArg = (NoArg,b)
-      mkArgs b (Arg _ args) = let (name,b1) = genName b "arg"
-                                  (nargs,b2) = mkArgs b1 args
-                              in (Arg (PipeVar name) nargs,b2)
+      mkArgs :: Args PipeVar ts -> [L.Lisp]
+      mkArgs NoArg = []
+      mkArgs (Arg var@(PipeVar name) xs)
+        = (L.List [L.Symbol name,typeSymbol (getType var)]):
+          mkArgs xs
   assert b (PipeExpr expr) = do
     putRequest b (L.List [L.Symbol "assert"
                          ,exprToLisp expr])
@@ -117,6 +171,26 @@ instance Backend SMTPipe where
                                   ,L.Symbol ":named"
                                   ,L.Symbol name]])
     return (PipeClauseId name,b1)
+  assertPartition b (PipeExpr expr) part = case interpolationMode b of
+    Z3Interpolation grpA grpB -> do
+      let (name,b1) = genName b "grp"
+      putRequest b1 (L.List [L.Symbol "assert"
+                          ,L.List [L.Symbol "!"
+                                  ,exprToLisp expr
+                                  ,L.Symbol ":named"
+                                  ,L.Symbol name]])
+      return (b1 { interpolationMode = case part of
+                     PartitionA -> Z3Interpolation (name:grpA) grpB
+                     PartitionB -> Z3Interpolation grpA (name:grpB) })
+    MathSATInterpolation -> do
+      putRequest b (L.List [L.Symbol "assert"
+                           ,L.List [L.Symbol "!"
+                                  ,exprToLisp expr
+                                  ,L.Symbol ":interpolation-group"
+                                  ,L.Symbol (case part of
+                                               PartitionA -> "partA"
+                                               PartitionB -> "partB")]])
+      return b
   getUnsatCore b = do
     putRequest b (L.List [L.Symbol "get-unsat-core"])
     resp <- parseResponse b
@@ -189,6 +263,108 @@ instance Backend SMTPipe where
       Nothing -> error $ "smtlib2: Unknown simplify response: "++show resp
   toBackend b expr = return (PipeExpr expr,b)
   fromBackend b (PipeExpr expr) = return (expr,b)
+  interpolate b = do
+    case interpolationMode b of
+      Z3Interpolation grpA grpB -> do
+        putRequest b (L.List [L.Symbol "get-interpolant",getAnd grpA,getAnd grpB])
+      MathSATInterpolation -> do
+        putRequest b (L.List [L.Symbol "get-interpolant",L.List [L.Symbol "partA"]])
+    resp <- parseResponse b
+    case lispToExprTyped b resp of
+      Just res -> return (res,b)
+      Nothing -> error $ "smtlib2: Unknown get-interpolant response: "++show resp
+    where
+      getAnd [] = L.Symbol "true"
+      getAnd [x] = L.Symbol x
+      getAnd xs = L.List $ (L.Symbol "and"):fmap L.Symbol xs
+  declareDatatypes b coll = do
+    putRequest b (renderDeclareDatatype coll)
+    return (mkTypes b coll)
+    where
+      mkTypes :: SMTPipe -> TypeCollection sigs
+              -> (BackendTypeCollection PipeConstr PipeField sigs,SMTPipe)
+      mkTypes b NoDts = (NoDts,b)
+      mkTypes b (ConsDts (dt::Type.Datatype (DatatypeSig dt) dt) dts)
+        = let (dt',b1) = mkCons b (constructors dt)
+              b2 = b1 { vars = Map.insert (T.pack $ datatypeName dt)
+                                          (Datatype (Proxy::Proxy dt))
+                                          (vars b1) }
+              (dts',b3) = mkTypes b2 dts
+          in (ConsDts (BackendDatatype dt') dts',b3)
+
+      mkCons :: IsDatatype dt => SMTPipe -> Constrs Type.Constr sig dt
+             -> (Constrs (BackendConstr PipeConstr PipeField) sig dt,SMTPipe)
+      mkCons b NoCon = (NoCon,b)
+      mkCons b (ConsCon (con::Type.Constr arg dt) cons)
+        = let (fields,b1) = mkFields b (conFields con)
+              b2 = b1 { vars = Map.insert (T.pack $ conName con)
+                                          (Constr (Proxy::Proxy arg) (Proxy::Proxy dt))
+                                          (vars b1) }
+              (cons',b3) = mkCons b2 cons
+          in (ConsCon (BackendConstr (conName con)
+                                     (PipeConstr $ T.pack $ conName con)
+                                     fields
+                                     (construct con)
+                                     (conTest con))
+                      cons',b3)
+
+      mkFields :: IsDatatype dt => SMTPipe -> Args (Type.Field dt) arg
+               -> (Args (BackendField PipeField dt) arg,SMTPipe)
+      mkFields b NoArg = (NoArg,b)
+      mkFields b (Arg (f::Type.Field dt t) fs)
+        = let b1 = b { vars = Map.insert (T.pack $ fieldName f)
+                                         (Field (Proxy::Proxy dt) (Proxy::Proxy t))
+                                         (vars b) }
+              (fs',b2) = mkFields b1 fs
+          in (Arg (BackendField (fieldName f)
+                                (PipeField $ T.pack $ fieldName f)
+                                (fieldGet f))
+                  fs',b2)
+
+renderDeclareDatatype :: TypeCollection sigs -> L.Lisp
+renderDeclareDatatype coll
+  = L.List [L.Symbol "declare-datatypes"
+           ,L.Symbol "()"
+           ,L.List (mkTypes coll)]
+  where
+    mkTypes :: TypeCollection sigs -> [L.Lisp]
+    mkTypes NoDts = []
+    mkTypes (ConsDts dt dts) = mkType dt : mkTypes dts
+
+    mkType :: Type.Datatype cons dt -> L.Lisp
+    mkType dt = L.List $ (L.Symbol $ T.pack $ datatypeName dt) :
+                         mkCons (constructors dt)
+
+    mkCons :: Constrs Type.Constr sig dt -> [L.Lisp]
+    mkCons NoCon = []
+    mkCons (ConsCon con cons) = mkCon con : mkCons cons
+
+    mkCon :: Type.Constr arg dt -> L.Lisp
+    mkCon con = L.List $ (L.Symbol $ T.pack $ conName con) :
+                         mkFields (conFields con)
+
+    mkFields :: Args (Type.Field dt) arg -> [L.Lisp]
+    mkFields NoArg = []
+    mkFields (Arg f fs) = mkField f : mkFields fs
+
+    mkField :: GetType t => Type.Field dt t -> L.Lisp
+    mkField f = L.List [L.Symbol $ T.pack $ fieldName f
+                       ,typeSymbol (getType f)]
+      
+renderSetOption :: SMTOption -> L.Lisp
+renderSetOption opt
+  = L.List $ [L.Symbol "set-option"]++
+    (case opt of
+        PrintSuccess v -> [L.Symbol ":print-success"
+                          ,L.Symbol $ if v then "true" else "false"]
+        ProduceModels v -> [L.Symbol ":produce-models"
+                           ,L.Symbol $ if v then "true" else "false"]
+        B.ProduceProofs v -> [L.Symbol ":produce-proofs"
+                             ,L.Symbol $ if v then "true" else "false"]
+        B.ProduceUnsatCores v -> [L.Symbol ":produce-unsat-cores"
+                                 ,L.Symbol $ if v then "true" else "false"]
+        ProduceInterpolants v -> [L.Symbol ":produce-interpolants"
+                                 ,L.Symbol $ if v then "true" else "false"])
 
 renderDeclareVar :: GetType t => SMTPipe -> Maybe String -> (PipeVar t,L.Lisp,SMTPipe)
 renderDeclareVar b name
@@ -330,12 +506,21 @@ createPipe solver args = do
 #endif
                           }
   (Just hin,Just hout,_,handle) <- createProcess cmd
-  return $ SMTPipe { channelIn = hin
+  let p0 = SMTPipe { channelIn = hin
                    , channelOut = hout
                    , processHandle = handle
                    , names = Map.empty
                    , vars = Map.empty
-                   , datatypes = Map.empty }
+                   , datatypes = Map.empty
+                   , interpolationMode = MathSATInterpolation }
+  putRequest p0 (L.List [L.Symbol "get-info"
+                        ,L.Symbol ":name"])
+  resp <- parseResponse p0
+  case resp of
+    L.List [L.Symbol ":name",L.String name] -> case name of
+      "Z3" -> return $ p0 { interpolationMode = Z3Interpolation [] [] }
+      _ -> return p0
+    _ -> return p0
 
 lispToExprUntyped :: SMTPipe -> L.Lisp
            -> (forall (t::Type). GetType t => PipeExpr t -> Maybe a)
@@ -425,9 +610,6 @@ lispToExprWith p hint (L.List [L.Symbol "let",L.List args,body]) res
   = mkLet p args $
     \np args' -> parseRecursive np hint body $
                  \body' -> res (Let args' body')
-lispToExprWith p hint (L.List [L.Symbol "!",expr,L.Symbol ":named",L.Symbol name]) res
-  = parseRecursive p hint expr $
-    \expr' -> res (Named expr' (T.unpack name))
 lispToExprWith p hint (L.List (fun:args)) res = do
   parsed <- lispToFunction p hint fun
   args' <- matchArgs (argumentTypeRequired parsed) 0 args
@@ -544,17 +726,17 @@ lispToFunction _ _ (L.Symbol "<=") = lispToOrdFunction Le
 lispToFunction _ _ (L.Symbol "<") = lispToOrdFunction Lt
 lispToFunction _ sort (L.Symbol "+") = lispToArithFunction sort Plus
 lispToFunction _ sort (L.Symbol "*") = lispToArithFunction sort Mult
-lispToFunction _ sort (L.Symbol "-") = lispToMinusFunction sort
+lispToFunction _ sort (L.Symbol "-") = lispToArithFunction sort Minus
 lispToFunction _ sort (L.Symbol "abs") = case sort of
   Just (Sort srt) -> case getType srt of
-    IntRepr -> Just $ ParsedFunction (const False) (\_ -> Just $ AnyFunction $ ArithIntUn Abs)
-    RealRepr -> Just $ ParsedFunction (const False) (\_ -> Just $ AnyFunction $ ArithRealUn Abs)
+    IntRepr -> Just $ ParsedFunction (const False) (\_ -> Just $ AnyFunction AbsInt)
+    RealRepr -> Just $ ParsedFunction (const False) (\_ -> Just $ AnyFunction AbsReal)
     _ -> Nothing
   Nothing -> Just $ ParsedFunction (==0) $
              \args -> case args of
                 [Just (Sort srt)] -> case getType srt of
-                  IntRepr -> Just $ AnyFunction $ ArithIntUn Abs
-                  RealRepr -> Just $ AnyFunction $ ArithRealUn Abs
+                  IntRepr -> Just $ AnyFunction AbsInt
+                  RealRepr -> Just $ AnyFunction AbsReal
                   _ -> Nothing
                 _ -> Nothing
 lispToFunction _ _ (L.Symbol "not")
@@ -709,29 +891,6 @@ lispToArithFunction sort op = case sort of
                                        \(_::Proxy ('RealType ': arg))
                                        -> Just $ AnyFunction (ArithReal op :: Function fun con field ('RealType ': arg) RealType)
                         _ -> Nothing))
-
-lispToMinusFunction :: Maybe Sort -> Maybe (ParsedFunction fun con field)
-lispToMinusFunction (Just (Sort srt)) = case getType srt of
-  IntRepr -> return (ParsedFunction (const False)
-                     (\args -> case args of
-                        [_] -> Just $ AnyFunction (ArithIntUn Neg)
-                        _ -> Just $ AnyFunction (ArithIntBin MinusInt)))
-  RealRepr -> return (ParsedFunction (const False)
-                      (\args -> case args of
-                         [_] -> Just $ AnyFunction (ArithRealUn Neg)
-                         _ -> Just $ AnyFunction (ArithRealBin MinusReal)))
-  _ -> Nothing
-lispToMinusFunction Nothing
-  = return $ ParsedFunction (==0) $
-    \args -> case args of
-      [Just (Sort srt)] -> case getType srt of
-        IntRepr -> Just $ AnyFunction (ArithIntUn Neg)
-        RealRepr -> Just $ AnyFunction (ArithRealUn Neg)
-        _ -> Nothing
-      Just (Sort srt):_ -> case getType srt of
-        IntRepr -> Just $ AnyFunction (ArithIntBin MinusInt)
-        RealRepr -> Just $ AnyFunction (ArithRealBin MinusReal)
-        _ -> Nothing
 
 lispToLogicFunction :: LogicOp -> ParsedFunction fun con field
 lispToLogicFunction op = ParsedFunction (const False)
@@ -915,6 +1074,7 @@ exprToLispWith :: (forall (t' :: Type). v t' -> L.Lisp)                         
                -> L.Lisp
 exprToLispWith f _ _ _ _ _ _ _ (Expr.Var v) = f v
 exprToLispWith _ f _ _ _ _ _ _ (Expr.QVar v) = f v
+exprToLispWith _ _ _ _ _ _ f _ (Expr.FVar v) = f v
 -- This is a special case because the argument order is different
 exprToLispWith _ _ f g h i _ j (Expr.App Store (Arg arr (Arg val idx)))
   = L.List ((L.Symbol "store"):(j arr):(argsToList j idx)++[j val])
@@ -944,11 +1104,6 @@ exprToLispWith f _ _ _ _ _ _ g (Expr.Let args body)
                                                 ,g (letExpr bind)]
                                ) args)
            ,g body]
-exprToLispWith _ _ _ _ _ _ _ f (Expr.Named e name)
-  = L.List [L.Symbol "!"
-           ,f e
-           ,L.Symbol ":named"
-           ,L.Symbol $ T.pack name]
 
 valueToLisp :: Value con t -> L.Lisp
 valueToLisp (BoolValue True) = L.Symbol "true"
@@ -971,10 +1126,8 @@ isOverloaded (Expr.OrdInt _) = True
 isOverloaded (Expr.OrdReal _) = True
 isOverloaded (Expr.ArithInt _) = True
 isOverloaded (Expr.ArithReal _) = True
-isOverloaded (Expr.ArithIntBin MinusInt) = True
-isOverloaded (Expr.ArithRealBin MinusReal) = True
-isOverloaded (Expr.ArithIntUn _) = True
-isOverloaded (Expr.ArithRealUn _) = True
+isOverloaded Expr.AbsInt = True
+isOverloaded Expr.AbsReal = True
 isOverloaded Expr.ITE = True
 isOverloaded (Expr.BVComp _) = True
 isOverloaded (Expr.BVBin _) = True
@@ -1003,19 +1156,17 @@ functionSymbol _ _ _ _ (OrdInt op) = ordSymbol op
 functionSymbol _ _ _ _ (OrdReal op) = ordSymbol op
 functionSymbol _ _ _ _ (ArithInt op) = arithSymbol op
 functionSymbol _ _ _ _ (ArithReal op) = arithSymbol op
-functionSymbol _ _ _ _ (ArithIntBin MinusInt) = L.Symbol "-"
 functionSymbol _ _ _ _ (ArithIntBin Div) = L.Symbol "div"
 functionSymbol _ _ _ _ (ArithIntBin Mod) = L.Symbol "mod"
 functionSymbol _ _ _ _ (ArithIntBin Rem) = L.Symbol "rem"
-functionSymbol _ _ _ _ (ArithRealBin MinusReal) = L.Symbol "-"
-functionSymbol _ _ _ _ (ArithRealBin Divide) = L.Symbol "/"
-functionSymbol _ _ _ _ (ArithIntUn op) = arithUnSymbol op
-functionSymbol _ _ _ _ (ArithRealUn op) = arithUnSymbol op
+functionSymbol _ _ _ _ Divide = L.Symbol "/"
+functionSymbol _ _ _ _ AbsInt = L.Symbol "abs"
+functionSymbol _ _ _ _ AbsReal = L.Symbol "abs"
 functionSymbol _ _ _ _ Not = L.Symbol "not"
 functionSymbol _ _ _ _ (Logic And) = L.Symbol "and"
 functionSymbol _ _ _ _ (Logic Or) = L.Symbol "or"
 functionSymbol _ _ _ _ (Logic XOr) = L.Symbol "xor"
-functionSymbol _ _ _ _ (Logic Implies) = L.Symbol "implies"
+functionSymbol _ _ _ _ (Logic Implies) = L.Symbol "=>"
 functionSymbol _ _ _ _ ToReal = L.Symbol "to-real"
 functionSymbol _ _ _ _ ToInt = L.Symbol "to-int"
 functionSymbol _ _ _ _ ITE = L.Symbol "ite"
@@ -1109,10 +1260,6 @@ ordSymbol Lt = L.Symbol "<"
 arithSymbol :: ArithOp -> L.Lisp
 arithSymbol Plus = L.Symbol "+"
 arithSymbol Mult = L.Symbol "*"
-
-arithUnSymbol :: ArithOpUn -> L.Lisp
-arithUnSymbol Abs = L.Symbol "abs"
-arithUnSymbol Neg = L.Symbol "-"
 
 numToLisp :: Integer -> L.Lisp
 numToLisp n = if n>=0
