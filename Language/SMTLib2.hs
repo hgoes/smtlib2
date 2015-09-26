@@ -50,7 +50,7 @@ interpolate = L.interpolate
 analyze :: (Backend b,GetType tp) => SMTExpr b tp -> E.Expression (B.Var b) (B.QVar b) (B.Fun b) (B.Constr b) (B.Field b) (B.FunArg b) (SMTExpr b) tp
 analyze e = case L.extract e of
   Left e' -> e'
-  Right sub -> error $ "smtlib2: Cannot analyze embedded object "++E.showVar 11 sub ""++" using this API. Use the LowLevel module."
+  Right sub -> error $ "smtlib2: Cannot analyze embedded object "++show sub++" using this API. Use the LowLevel module."
 
 getValue :: (Backend b,L.SMTValue c repr) => SMTExpr b repr -> SMT b c
 getValue = L.getValue

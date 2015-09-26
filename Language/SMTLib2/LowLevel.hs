@@ -18,7 +18,6 @@ module Language.SMTLib2.LowLevel (
   -- * Expressions
   Type(..),
   SMTExpr(..),SMTExpr'(..),SMTValue(..),Embed(..),
-  showExpr,
   -- ** Variables
   var,
   -- ** Constants
@@ -55,6 +54,8 @@ import Control.Monad.State.Strict
 import Control.Monad.Identity
 import qualified Data.Map.Strict as Map
 import qualified Data.IntMap.Strict as IMap
+import Data.GADT.Compare
+import Data.GADT.Show
 
 newtype Backend b => SMT b a = SMT (StateT (SMTState b) (SMTMonad b) a)
 
@@ -85,7 +86,7 @@ class (ValueRepr c ~ repr,ValueType repr ~ c,GetType repr) => SMTValue c repr wh
   type ValueType repr :: *
   toValue :: (Typeable con,Typeable field)
           => DatatypeInfo con field -> c -> Value con (ValueRepr c)
-  fromValue :: (Typeable con,OrdCon con,Typeable field)
+  fromValue :: (Typeable con,GCompare2 con,Typeable field)
             => DatatypeInfo con field -> Value con repr -> ValueType repr
 
 instance SMTValue Bool BoolType where
@@ -171,17 +172,15 @@ instance IsDatatype dt => SMTValue (DT dt) (DataType dt) where
               -> Maybe (B.BackendDatatype con field (DatatypeSig dt) dt)
       castReg = cast
 
-      findConstr :: (Typeable con,OrdCon con,Typeable field,GetTypes arg)
+      findConstr :: (Typeable con,GEq2 con,Typeable field,GetTypes arg)
                  => DatatypeInfo con field
                  -> con arg dt -> Args (Value con) arg
                  -> Constrs (B.BackendConstr con field) sig dt
                  -> DT dt
       findConstr info con args (ConsCon con' cons)
-        = case castCon con' of
-           Just con'' -> if cmpCon con (bconRepr con'')==EQ
-                         then DT (bconstruct con'' (transArgs info args))
-                         else findConstr info con args cons
-           Nothing -> findConstr info con args cons
+        = case geqXX con (bconRepr con') of
+            Just (Refl,Refl) -> DT (bconstruct con' (transArgs info args))
+            Nothing -> findConstr info con args cons
 
       castCon :: (Typeable con,Typeable field,Typeable arg,Typeable arg',Typeable dt)
               => B.BackendConstr con field arg dt
@@ -215,41 +214,119 @@ data SMTExpr b t where
   SpecialExpr :: SMTExpr' b t -> SMTExpr b t
 
 data SMTExpr' b t where
-  QVar' :: Int -> !Int -> SMTExpr' b t
+  QVar' :: GetType t => Int -> !Int -> SMTExpr' b t
   Quantification' :: GetTypes arg => Quantifier -> Int -> Args Proxy arg
                   -> SMTExpr b BoolType
                   -> SMTExpr' b BoolType
   TestConstr :: IsDatatype dt => String -> Proxy (dt:: *) -> SMTExpr b (DataType dt) -> SMTExpr' b BoolType
   GetField :: (IsDatatype dt,GetType tp) => String -> String -> Proxy (dt :: *) -> Proxy tp -> SMTExpr b (DataType dt) -> SMTExpr' b tp
 
-data NoEmbed (t::Type) = NoEmbed
-
-instance Backend b => ShowVar (SMTExpr' b) where
-  showVar p (QVar' lvl n) = showParen (p>10) $
-                            showString "QVar' " .
-                            showsPrec 11 lvl .
-                            showChar ' ' .
-                            showsPrec 11 n
-  showVar p (Quantification' q lvl args body)
+instance Backend b => Show (SMTExpr' b t) where
+  showsPrec p (QVar' lvl n) = showParen (p>10) $
+                              showString "QVar' " .
+                              showsPrec 11 lvl .
+                              showChar ' ' .
+                              showsPrec 11 n
+  showsPrec p (Quantification' q lvl args body)
     = showParen (p>10) $
       showString "Quantification' " .
       showsPrec 11 q . showChar ' ' .
       showsPrec 11 lvl . showChar ' ' .
       showsPrec 11 (length (argsToList (const ()) args)) . showChar ' ' .
-      showVar 11 body
+      showsPrec 11 body
 
-instance ShowVar NoEmbed where
-  showVar _ _ = showString "NoEmbed"
+instance Backend b => GShow (SMTExpr' b) where
+  gshowsPrec = showsPrec
 
-instance Backend b => OrdVar (SMTExpr b) where
-  cmpVar (SMTExpr x) (SMTExpr y) = exprCompare' x y
+instance Backend b => GEq (SMTExpr b) where
+  geq (SMTExpr x) (SMTExpr y) = geq x y
+  geq (SpecialExpr x) (SpecialExpr y) = geq x y
+  geq _ _ = Nothing
 
-instance Backend b => ShowVar (SMTExpr b) where
-  showVar p (SMTExpr e) = showExpression p e
-  showVar p (SpecialExpr e) = showVar p e
+instance Backend b => GEq (SMTExpr' b) where
+  geq v1@(QVar' lvl1 nr1) v2@(QVar' lvl2 nr2)
+    = if (lvl1,nr1) == (lvl2,nr2)
+      then case v1 of
+             (_::SMTExpr' b t1) -> case v2 of
+               (_::SMTExpr' b t2) -> do
+                 Refl <- eqT :: Maybe (t1 :~: t2)
+                 return Refl
+      else Nothing
+  geq (Quantification' q1 lvl1 (_::Args Proxy args1) body1)
+      (Quantification' q2 lvl2 (_::Args Proxy args2) body2)
+    | (q1,lvl1) == (q2,lvl2) = do
+        Refl <- geq (getTypes (Proxy::Proxy args1))
+                    (getTypes (Proxy::Proxy args2))
+        Refl <- geq body1 body2
+        return Refl
+    | otherwise = Nothing
+  geq (TestConstr name1 _ body1) (TestConstr name2 _ body2)
+    | name1==name2 = do
+      Refl <- geq body1 body2
+      return Refl
+    | otherwise = Nothing
+  geq (GetField cname1 fname1 _ (_::Proxy t1) body1)
+      (GetField cname2 fname2 _ (_::Proxy t2) body2)
+    | (cname1,fname1) == (cname2,fname2) = do
+        Refl <- eqT :: Maybe (t1 :~: t2)
+        Refl <- geq body1 body2
+        return Refl
+    | otherwise = Nothing
+  geq _ _ = Nothing
 
-instance (Backend b,GetType tp) => Show (SMTExpr b tp) where
-  showsPrec = showVar
+instance Backend b => GCompare (SMTExpr b) where
+  gcompare (SMTExpr x) (SMTExpr y) = gcompare x y
+  gcompare (SMTExpr _) _ = GLT
+  gcompare _ (SMTExpr _) = GGT
+  gcompare (SpecialExpr e1) (SpecialExpr e2) = gcompare e1 e2
+
+instance Backend b => GCompare (SMTExpr' b) where
+  gcompare q1@(QVar' lvl1 nr1) q2@(QVar' lvl2 nr2)
+    = case compare (lvl1,nr1) (lvl2,nr2) of
+        EQ -> case q1 of
+          (_::SMTExpr' b t1) -> case q2 of
+            (_::SMTExpr' b t2) -> gcompare (getType (Proxy::Proxy t1))
+                                           (getType (Proxy::Proxy t2))
+        LT -> GLT
+        GT -> GGT
+  gcompare (QVar' _ _) _ = GLT
+  gcompare _ (QVar' _ _) = GGT
+  gcompare e1@(Quantification' q1 lvl1 args1 body1) e2@(Quantification' q2 lvl2 args2 body2)
+    = case compare (q1,lvl1) (q2,lvl2) of
+        EQ -> case e1 of
+          (_::SMTExpr' b t1) -> case e2 of
+            (_::SMTExpr' b t2) -> gcompare (getType (Proxy::Proxy t1))
+                                           (getType (Proxy::Proxy t2))
+        GT -> GGT
+        LT -> GLT
+  gcompare (Quantification' _ _ _ _) _ = GLT
+  gcompare _ (Quantification' _ _ _ _) = GGT
+  gcompare (TestConstr name1 _ body1) (TestConstr name2 _ body2) = case compare name1 name2 of
+    EQ -> case gcompare body1 body2 of
+      GEQ -> GEQ
+      GLT -> GLT
+      GGT -> GGT
+    LT -> GLT
+    GT -> GGT
+  gcompare (TestConstr _ _ _) _ = GLT
+  gcompare _ (TestConstr _ _ _) = GGT
+  gcompare (GetField cname1 fname1 _ (Proxy::Proxy t1) body1)
+           (GetField cname2 fname2 _ (Proxy::Proxy t2) body2)
+    = case compare (cname1,fname1) (cname2,fname2) of
+        EQ -> case gcompare body1 body2 of
+          GEQ -> case eqT :: Maybe (t1 :~: t2) of
+            Just Refl -> GEQ
+          GLT -> GLT
+          GGT -> GGT
+        LT -> GLT
+        GT -> GGT
+
+instance Backend b => Show (SMTExpr b t) where
+  showsPrec p (SMTExpr e) = showsPrec p e
+  showsPrec p (SpecialExpr e) = showsPrec p e
+
+instance Backend b => GShow (SMTExpr b) where
+  gshowsPrec = showsPrec
 
 instance Backend b => Embed (SMTExpr b) where
   type EmbedBackend (SMTExpr b) = b
@@ -329,7 +406,7 @@ instance Backend b => Embed (SMTExpr b) where
 
   extractSub _ = return Nothing
 
-class (Backend (EmbedBackend e),ShowVar e) => Embed e where
+class (Backend (EmbedBackend e),GShow e) => Embed e where
   type EmbedBackend e :: *
   type EmbedSub e :: Type -> *
   type EmbedState e :: *
@@ -463,40 +540,40 @@ distinct = Distinct
 (./=.) :: (Embed e,GetType t) => e t -> e t -> e BoolType
 (./=.) x y = app distinct (Arg x (Arg y NoArg))
 
-map' :: (GetTypes arg,GetType res)
+map' :: (Liftable arg,GetTypes idx,GetType res)
      => Function fun con field arg res
      -> Function fun con field (Lifted arg idx) (ArrayType idx res)
 map' = Map
 
 class GetType t => SMTOrd (t :: Type) where
   lt :: Function fun con field '[t,t] BoolType
-  leq :: Function fun con field '[t,t] BoolType
+  le :: Function fun con field '[t,t] BoolType
   gt :: Function fun con field '[t,t] BoolType
-  geq :: Function fun con field '[t,t] BoolType
+  ge :: Function fun con field '[t,t] BoolType
 
 instance SMTOrd IntType where
   lt = OrdInt Lt
-  leq = OrdInt Le
+  le = OrdInt Le
   gt = OrdInt Gt
-  geq = OrdInt Ge
+  ge = OrdInt Ge
 
 instance SMTOrd RealType where
   lt = OrdReal Lt
-  leq = OrdReal Le
+  le = OrdReal Le
   gt = OrdReal Gt
-  geq = OrdReal Ge
+  ge = OrdReal Ge
 
 (.<.) :: (Embed e,SMTOrd t) => e t -> e t -> e BoolType
 (.<.) x y = app lt (Arg x (Arg y NoArg))
 
 (.<=.) :: (Embed e,SMTOrd t) => e t -> e t -> e BoolType
-(.<=.) x y = app leq (Arg x (Arg y NoArg))
+(.<=.) x y = app le (Arg x (Arg y NoArg))
 
 (.>.) :: (Embed e,SMTOrd t) => e t -> e t -> e BoolType
 (.>.) x y = app gt (Arg x (Arg y NoArg))
 
 (.>=.) :: (Embed e,SMTOrd t) => e t -> e t -> e BoolType
-(.>=.) x y = app geq (Arg x (Arg y NoArg))
+(.>=.) x y = app ge (Arg x (Arg y NoArg))
 
 mapSubExpressions :: (Monad m,GetType tp)
                   => (forall t. GetType t => e t -> m (e' t))
@@ -654,9 +731,6 @@ instance SMTArith RealType where
   minus = ArithReal Minus
   mult = ArithReal Mult
   abs' = AbsReal
-
-showExpr :: (Embed e,GetType t) => e t -> String
-showExpr e = showVar 0 e ""
 
 class (AppExpr' fun ~ e,
        AppRet' sig fun ~ res,

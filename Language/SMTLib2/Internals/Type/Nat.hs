@@ -46,6 +46,10 @@ type family Sum (n :: [Nat]) :: Nat where
   Sum '[] = Z
   Sum (a ': b) = a + (Sum b)
 
+sameNat :: (KnownNat a,KnownNat b) => Proxy a -> Proxy b
+        -> Maybe (a :~: b)
+sameNat _ _ = eqT
+
 reifyNat :: (Num a,Ord a) => a -> (forall n. KnownNat n => Proxy n -> r) -> r
 reifyNat n f
   | n < 0 = error "smtlib2: Can only reify numbers >= 0."

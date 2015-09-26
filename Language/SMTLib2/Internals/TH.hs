@@ -244,9 +244,9 @@ funName (List [Atom "_",Atom "map",f]) = do
   f' <- funName f
   return (FunCon 'Map [f'])
 funName (Atom "<") = Just $ FunVar 'lt
-funName (Atom "<=") = Just $ FunVar 'leq
+funName (Atom "<=") = Just $ FunVar 'le
 funName (Atom ">") = Just $ FunVar 'gt
-funName (Atom ">=") = Just $ FunVar 'geq
+funName (Atom ">=") = Just $ FunVar 'ge
 funName (Atom "+") = Just $ FunVar 'plus
 funName (Atom "-") = Just $ FunVar 'minus
 funName (Atom "*") = Just $ FunVar 'mult

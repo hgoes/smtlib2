@@ -22,7 +22,7 @@ Flag WithDataKinds
   Default: False
 
 Library
-  Build-Depends: base >=4 && <5, constraints, mtl, containers, template-haskell
+  Build-Depends: base >=4 && <5, constraints, mtl, containers, template-haskell, dependent-sum, dependent-map
   Extensions: GADTs,FlexibleContexts,FlexibleInstances,ExistentialQuantification,KindSignatures,DataKinds,TypeFamilies,AllowAmbiguousTypes,TypeOperators,MultiParamTypeClasses,ScopedTypeVariables,RankNTypes,UndecidableInstances,GeneralizedNewtypeDeriving,DeriveDataTypeable,CPP,PolyKinds
   if impl(ghc < 7.10) {
     Extensions: PolyKinds,StandaloneDeriving
