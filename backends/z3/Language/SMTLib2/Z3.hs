@@ -50,35 +50,11 @@ nextSymbol solv = do
   sym <- mkIntSymbol ctx (solverNxtVar solv)
   return (sym,nsolv { solverNxtVar = solverNxtVar solv+1 })
 
-type Z3Expr t = UntypedVar AST t
-newtype Z3Var (t::Type) = Z3Var FuncDecl deriving Typeable
-newtype Z3Fun (sig::[Type]) (t::Type) = Z3Fun FuncDecl deriving Typeable
-newtype Z3Con (args::[Type]) (dt:: *) = Z3Con Constructor deriving Typeable
-newtype Z3Field (dt:: *) (t::Type) = Z3Field FuncDecl deriving Typeable
-
-instance ShowVar Z3Var where
-  showVar p (Z3Var n) = showsPrec p n
-
-instance ShowFun Z3Fun where
-  showFun p (Z3Fun n) = showsPrec p n
-
-instance ShowCon Z3Con where
-  showCon p (Z3Con con) = showsPrec p con
-
-instance ShowField Z3Field where
-  showField p (Z3Field f) = showsPrec p f
-
-instance OrdVar Z3Var where
-  cmpVar (Z3Var x) (Z3Var y) = compare x y
-
-instance OrdFun Z3Fun where
-  cmpFun (Z3Fun x) (Z3Fun y) = compare x y
-
-instance OrdCon Z3Con where
-  cmpCon (Z3Con x) (Z3Con y) = compare x y
-
-instance OrdField Z3Field where
-  cmpField (Z3Field x) (Z3Field y) = compare x y
+type Z3Expr = UntypedVar AST
+type Z3Var = UntypedVar FuncDecl
+type Z3Fun = UntypedFun FuncDecl
+type Z3Con = UntypedCon Constructor
+type Z3Field = UntypedField FuncDecl
 
 instance Backend Z3Solver where
   type SMTMonad Z3Solver = IO
@@ -105,7 +81,7 @@ instance Backend Z3Solver where
           "QF_IDL" -> QF_IDL
           "QF_LIA" -> QF_LIA
           "QF_LRA" -> QF_LRA
-          "QF_NIA" -> QF_NIA	
+          "QF_NIA" -> QF_NIA
           "QF_NRA" -> QF_NRA
           "QF_RDL" -> QF_RDL
           "QF_UF" -> QF_UF
@@ -129,7 +105,7 @@ instance Backend Z3Solver where
     tp <- typeToZ3 ctx (getType pr)
     (sym,solv2) <- nextSymbol solv1
     decl <- mkFuncDecl ctx sym [] tp
-    return (Z3Var decl,solv2)
+    return (UntypedVar decl,solv2)
     where
       with :: (Proxy t -> IO (Z3Var t,Z3Solver)) -> IO (Z3Var t,Z3Solver)
       with f = f Proxy
@@ -149,28 +125,28 @@ instance Backend Z3Solver where
           Unsat -> B.Unsat
           Undef -> B.Unknown
     return (res',solv1)
-  getValue solv v = do
+  getValue solv (UntypedVar v) = do
     (ctx,solver,solv1) <- getSolver solv
     mdl <- solverGetModel ctx solver
-    res <- modelEval ctx mdl (untypedVar v) True
+    res <- modelEval ctx mdl v True
     case res of
       Just ast -> do
         res <- fromZ3Value ctx (UntypedVar ast)
         return (res,solv1)
 
 fromZ3Value :: GetType t => Context -> Z3Expr t -> IO (Value Z3Con t)
-fromZ3Value ctx e = case getType e of
+fromZ3Value ctx p@(UntypedVar e) = case getType p of
   BoolRepr -> do
-    v <- getBool ctx (untypedVar e)
+    v <- getBool ctx e
     return (BoolValue v)
   IntRepr -> do
-    v <- getInt ctx (untypedVar e)
+    v <- getInt ctx e
     return (IntValue v)
   RealRepr -> do
-    v <- getReal ctx (untypedVar e)
+    v <- getReal ctx e
     return (RealValue v)
   BitVecRepr bw -> do
-    v <- getInt ctx (untypedVar e)
+    v <- getInt ctx e
     return (BitVecValue v)
 
 typeToZ3 :: Context -> Repr t -> IO Sort
@@ -186,16 +162,19 @@ typeToZ3 ctx (ArrayRepr (Arg idx NoArg) el) = do
 toZ3 :: GetType t => Context
      -> Expression Z3Var Z3Var Z3Fun Z3Con Z3Field Z3Var (UntypedVar AST) t
      -> IO AST
-toZ3 ctx (Var (Z3Var decl)) = mkApp ctx decl []
+toZ3 ctx (Var (UntypedVar decl)) = mkApp ctx decl []
 toZ3 ctx (Const val) = toZ3Const ctx val
 toZ3 ctx (App fun args) = toZ3App ctx fun args
 --toZ3 ctx (AsArray fun
-toZ3 ctx e = error $ "toZ3: "++showExpression 11 e ""
+toZ3 ctx e = error $ "toZ3: "++show e
 
-toZ3App :: (GetTypes sig,GetType tp) => Context -> Function Z3Fun Z3Con Z3Field sig tp
+untypedVar :: Z3Expr t -> AST
+untypedVar (UntypedVar x) = x
+
+toZ3App :: (GetTypes sig,GetType tp) => Context -> Function Z3Fun Z3Con Z3Field '(sig,tp)
         -> Args (UntypedVar AST) sig
         -> IO AST
-toZ3App ctx Eq args = mkEq' (argsToList untypedVar args)
+toZ3App ctx Eq args = mkEq' (argsToList (\(UntypedVar v) -> v) args)
   where
     mkEq' [] = mkTrue ctx
     mkEq' [x] = mkTrue ctx
@@ -209,12 +188,12 @@ toZ3App ctx Select (Arg arr (Arg idx NoArg)) = mkSelect ctx (untypedVar arr) (un
 toZ3App ctx Store (Arg arr (Arg val (Arg idx NoArg)))
   = mkStore ctx (untypedVar arr) (untypedVar idx) (untypedVar val)
 toZ3App ctx carr@ConstArray (Arg arg NoArg) = case carr of
-  (_::Function Z3Fun Z3Con Z3Field '[val] (ArrayType sig val))
+  (_::Function Z3Fun Z3Con Z3Field '( '[val],ArrayType sig val))
     -> case getTypes (Proxy::Proxy sig) of
          Arg idx NoArg -> do
            srt <- typeToZ3 ctx idx
            mkConstArray ctx srt (untypedVar arg)
-toZ3App ctx f _ = error $ "toZ3App: "++showFunction 11 f ""
+toZ3App ctx f _ = error $ "toZ3App: "++show f
 
 toZ3Const :: Context -> Value Z3Con t -> IO AST
 toZ3Const ctx (BoolValue False) = mkFalse ctx
@@ -226,7 +205,7 @@ toZ3Const ctx val@(BitVecValue v)
   where
     bw :: KnownNat n => Value Z3Con (BitVecType n) -> Integer
     bw (_::Value Z3Con (BitVecType n)) = natVal (Proxy::Proxy n)
-toZ3Const ctx val = error $ "toZ3Const: "++showValue 11 val ""
+toZ3Const ctx val = error $ "toZ3Const: "++show val
 
 
 {-

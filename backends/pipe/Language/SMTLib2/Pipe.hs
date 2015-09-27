@@ -124,7 +124,7 @@ instance Backend SMTPipe where
     putRequest nb req
     return (UntypedFun sym,nb)    
     where
-      withProxy :: (Proxy arg -> Proxy t -> IO (PipeFun arg t,SMTPipe)) -> IO (PipeFun arg t,SMTPipe)
+      withProxy :: (Proxy arg -> Proxy t -> IO (PipeFun '(arg,t),SMTPipe)) -> IO (PipeFun '(arg,t),SMTPipe)
       withProxy f = f Proxy Proxy
   defineFun b name (arg :: Args PipeVar arg) (PipeExpr body :: PipeExpr r) = do
     let name' = case name of
@@ -247,7 +247,7 @@ instance Backend SMTPipe where
       mkTypes :: SMTPipe -> TypeCollection sigs
               -> (BackendTypeCollection PipeConstr PipeField sigs,SMTPipe)
       mkTypes b NoDts = (NoDts,b)
-      mkTypes b (ConsDts (dt::Type.Datatype (DatatypeSig dt) dt) dts)
+      mkTypes b (ConsDts (dt::Type.Datatype '(DatatypeSig dt,dt)) dts)
         = let (dt',b1) = mkCons b (constructors dt)
               b2 = b1 { vars = Map.insert (T.pack $ datatypeName dt)
                                           (Datatype (Proxy::Proxy dt))
@@ -258,7 +258,7 @@ instance Backend SMTPipe where
       mkCons :: IsDatatype dt => SMTPipe -> Constrs Type.Constr sig dt
              -> (Constrs (BackendConstr PipeConstr PipeField) sig dt,SMTPipe)
       mkCons b NoCon = (NoCon,b)
-      mkCons b (ConsCon (con::Type.Constr arg dt) cons)
+      mkCons b (ConsCon (con::Type.Constr '(arg,dt)) cons)
         = let (fields,b1) = mkFields b (conFields con)
               b2 = b1 { vars = Map.insert (T.pack $ conName con)
                                           (Constr (Proxy::Proxy arg) (Proxy::Proxy dt))
@@ -333,7 +333,7 @@ renderDeclareDatatype coll
     mkTypes NoDts = []
     mkTypes (ConsDts dt dts) = mkType dt : mkTypes dts
 
-    mkType :: Type.Datatype cons dt -> L.Lisp
+    mkType :: Type.Datatype '(cons,dt) -> L.Lisp
     mkType dt = L.List $ (L.Symbol $ T.pack $ datatypeName dt) :
                          mkCons (constructors dt)
 
@@ -341,7 +341,7 @@ renderDeclareDatatype coll
     mkCons NoCon = []
     mkCons (ConsCon con cons) = mkCon con : mkCons cons
 
-    mkCon :: Type.Constr arg dt -> L.Lisp
+    mkCon :: Type.Constr '(arg,dt) -> L.Lisp
     mkCon con = L.List $ (L.Symbol $ T.pack $ conName con) :
                          mkFields (conFields con)
 
@@ -464,12 +464,12 @@ data ParsedFunction fun con field
 
 data AnyExpr e = forall (t :: Type). GetType t => AnyExpr (e t)
 
-data LispParser (v :: Type -> *) (qv :: Type -> *) (fun :: [Type] -> Type -> *) (con :: [Type] -> * -> *) (field :: * -> Type -> *) (fv :: Type -> *) (e :: Type -> *)
+data LispParser (v :: Type -> *) (qv :: Type -> *) (fun :: ([Type],Type) -> *) (con :: ([Type],*) -> *) (field :: (*,Type) -> *) (fv :: Type -> *) (e :: Type -> *)
   = LispParser { parseFunction :: forall a. Maybe Sort -> T.Text
-                               -> (forall args res. (Liftable args,GetType res) => fun args res -> a)
-                               -> (forall args res. (Liftable args,IsDatatype res) => con args res -> a) -- ^ constructor
-                               -> (forall args res. (Liftable args,IsDatatype res) => con args res -> a) -- ^ constructor test
-                               -> (forall t res. (IsDatatype t,GetType res) => field t res -> a)
+                               -> (forall args res. (Liftable args,GetType res) => fun '(args,res) -> a)
+                               -> (forall args res. (Liftable args,IsDatatype res) => con '(args,res) -> a) -- ^ constructor
+                               -> (forall args res. (Liftable args,IsDatatype res) => con '(args,res) -> a) -- ^ constructor test
+                               -> (forall t res. (IsDatatype t,GetType res) => field '(t,res) -> a)
                                -> Maybe a
                , parseDatatype :: forall a. T.Text
                                -> (forall t. IsDatatype t => Proxy t -> a)
@@ -543,15 +543,15 @@ pipeParser st = parse
                                        -> case T.stripPrefix "is-" name of
                                        Just con -> case Map.lookup name (vars st) of
                                          Just (Constr (_::Proxy arg) (_::Proxy t))
-                                           -> Just $ test (UntypedCon name :: PipeConstr arg t)
+                                           -> Just $ test (UntypedCon name :: PipeConstr '(arg,t))
                                          _ -> Nothing
                                        Nothing -> case Map.lookup name (vars st) of
                                          Just (Fun (_::Proxy arg) (_::Proxy t))
-                                           -> Just $ fun (UntypedFun name :: PipeFun arg t)
+                                           -> Just $ fun (UntypedFun name :: PipeFun '(arg,t))
                                          Just (Constr (_::Proxy arg) (_::Proxy t))
-                                           -> Just $ con (UntypedCon name :: PipeConstr arg t)
+                                           -> Just $ con (UntypedCon name :: PipeConstr '(arg,t))
                                          Just (Field (_::Proxy t) (_::Proxy res))
-                                           -> Just $ field (UntypedField name :: PipeField t res)
+                                           -> Just $ field (UntypedField name :: PipeField '(t,res))
                                          _ -> Nothing
                      , parseDatatype = \name res -> case Map.lookup name (datatypes st) of
                                          Just (PipeDatatype p) -> Just $ res p
@@ -680,14 +680,14 @@ lispToFunction _ _ (L.Symbol "=")
   = Just $ ParsedFunction (==0)
     (\args -> case args of
        Just (Sort p):_ -> withEq p args $
-                          \(_::Proxy (t ': arg)) -> Just $ AnyFunction (Eq::Function fun con field (t ': arg) BoolType)
+                          \(_::Proxy (t ': arg)) -> Just $ AnyFunction (Eq::Function fun con field '(t ': arg,BoolType))
        _ -> Nothing)
 lispToFunction _ _ (L.Symbol "distinct")
   = Just $ ParsedFunction (==0)
     (\args -> case args of
        Just (Sort p):_ -> withEq p args $
                           \(_::Proxy (t ': arg))
-                          -> Just $ AnyFunction (Distinct::Function fun con field (t ': arg) BoolType)
+                          -> Just $ AnyFunction (Distinct::Function fun con field '(t ': arg,BoolType))
        _ -> Nothing)
 lispToFunction rf sort (L.List [L.Symbol "_",L.Symbol "map",sym]) = do
   f <- lispToFunction rf sort' sym
@@ -753,12 +753,12 @@ lispToFunction _ sort (L.Symbol "ite") = case sort of
   Just (Sort (_::Proxy srt))
     -> Just $ ParsedFunction (const False)
        (\_ -> Just $ AnyFunction
-              (ITE :: Function fun con field '[BoolType,srt,srt] srt))
+              (ITE :: Function fun con field '( '[BoolType,srt,srt],srt)))
   Nothing -> Just $ ParsedFunction (==1) $
              \args -> case args of
                [_,Just (Sort (_::Proxy srt)),_]
                  -> Just $ AnyFunction
-                      (ITE :: Function fun con field '[BoolType,srt,srt] srt)
+                      (ITE :: Function fun con field '( '[BoolType,srt,srt],srt))
                _ -> Nothing
 lispToFunction _ _ (L.Symbol "bvule") = Just $ lispToBVCompFunction BVULE
 lispToFunction _ _ (L.Symbol "bvult") = Just $ lispToBVCompFunction BVULT
@@ -788,7 +788,7 @@ lispToFunction _ _ (L.Symbol "select")
     (\args -> case args of
        Just (Sort arr):_ -> case getType arr of
          ArrayRepr (_::Args Repr idx) (_::Repr val)
-           -> Just $ AnyFunction (Select :: Function fun con field (ArrayType idx val ': idx) val)
+           -> Just $ AnyFunction (Select :: Function fun con field '(ArrayType idx val ': idx,val))
          _ -> Nothing
        _ -> Nothing)
 lispToFunction _ sort (L.Symbol "store") = case sort of
@@ -796,16 +796,14 @@ lispToFunction _ sort (L.Symbol "store") = case sort of
     ArrayRepr (_::Args Repr idx) (_::Repr val)
       -> Just (ParsedFunction (const False)
                (\_ -> Just $ AnyFunction
-                      (Store :: Function fun con field (ArrayType idx val ': val ': idx)
-                                (ArrayType idx val))))
+                      (Store :: Function fun con field '(ArrayType idx val ': val ': idx,ArrayType idx val))))
     _ -> Nothing
   Nothing -> Just $ ParsedFunction (==0)
              (\args -> case args of
                 Just (Sort arr):_ -> case getType arr of
                   ArrayRepr (_::Args Repr idx) (_::Repr val)
                     -> Just $ AnyFunction
-                       (Store :: Function fun con field (ArrayType idx val ': val ': idx)
-                                 (ArrayType idx val))
+                       (Store :: Function fun con field '(ArrayType idx val ': val ': idx,ArrayType idx val))
                   _ -> Nothing
                 _ -> Nothing)
 lispToFunction r sort (L.List [L.Symbol "as",L.Symbol "const",sig]) = do
@@ -815,8 +813,7 @@ lispToFunction r sort (L.List [L.Symbol "as",L.Symbol "const",sig]) = do
   case getType rsig of
     ArrayRepr (_::Args Repr idx) (_::Repr val)
       -> Just $ ParsedFunction (const False)
-         (\_ -> Just $ AnyFunction (ConstArray :: Function fun con field '[val]
-                                                  (ArrayType idx val)))
+         (\_ -> Just $ AnyFunction (ConstArray :: Function fun con field '( '[val],ArrayType idx val)))
     _ -> Nothing
 lispToFunction _ sort (L.Symbol "concat")
   = Just $ ParsedFunction (const True)
@@ -827,7 +824,7 @@ lispToFunction _ sort (L.Symbol "concat")
            -> reifyAdd sz1 sz2 $
               \(_::Proxy p1) (_::Proxy p2)
               -> Just $ AnyFunction (Concat :: Function fun con field
-                                               '[BitVecType p1,BitVecType p2] (BitVecType (p1 + p2)))
+                                               '( '[BitVecType p1,BitVecType p2],BitVecType (p1 + p2)))
          _ -> Nothing
        _ -> Nothing)
 lispToFunction _ sort (L.List [L.Symbol "_",L.Symbol "extract",L.Number (L.I end),L.Number (L.I start)])
@@ -838,7 +835,7 @@ lispToFunction _ sort (L.List [L.Symbol "_",L.Symbol "extract",L.Number (L.I end
                             \pstart (_::Proxy len) (_::Proxy size)
                              -> AnyFunction
                                 (Extract pstart :: Function fun con field
-                                                   '[BitVecType size] (BitVecType len))
+                                                   '( '[BitVecType size],BitVecType len))
          _ -> Nothing
        _ -> Nothing)
 lispToFunction _ sort (L.List [L.Symbol "_",L.Symbol "divisible",L.Number (L.I div)])
@@ -875,21 +872,21 @@ lispToArithFunction sort op = case sort of
     IntRepr -> return (ParsedFunction (const False)
                        (\args -> withEq (Proxy::Proxy IntType) args $
                                  \(_::Proxy ('IntType ': arg))
-                                 -> Just $ AnyFunction (ArithInt op :: Function fun con field ('IntType ': arg) IntType)))
+                                 -> Just $ AnyFunction (ArithInt op :: Function fun con field '( 'IntType ': arg,IntType))))
     RealRepr -> return (ParsedFunction (const False)
                         (\args -> withEq (Proxy::Proxy RealType) args $
                                  \(_::Proxy ('RealType ': arg))
-                                 -> Just $ AnyFunction (ArithReal op :: Function fun con field ('RealType ': arg) RealType)))
+                                 -> Just $ AnyFunction (ArithReal op :: Function fun con field '( 'RealType ': arg,RealType))))
     _ -> Nothing
   Nothing -> return (ParsedFunction (==0)
                      (\argSrt -> case argSrt of
                         (Just (Sort srt)):_ -> case getType srt of
                            IntRepr -> withEq (Proxy::Proxy IntType) argSrt $
                                       \(_::Proxy ('IntType ': arg))
-                                      -> Just $ AnyFunction (ArithInt op :: Function fun con field ('IntType ': arg) IntType)
+                                      -> Just $ AnyFunction (ArithInt op :: Function fun con field '( 'IntType ': arg,IntType))
                            RealRepr -> withEq (Proxy::Proxy RealType) argSrt $
                                        \(_::Proxy ('RealType ': arg))
-                                       -> Just $ AnyFunction (ArithReal op :: Function fun con field ('RealType ': arg) RealType)
+                                       -> Just $ AnyFunction (ArithReal op :: Function fun con field '( 'RealType ': arg,RealType))
                         _ -> Nothing))
 
 lispToLogicFunction :: LogicOp -> ParsedFunction fun con field
@@ -897,7 +894,7 @@ lispToLogicFunction op = ParsedFunction (const False)
                          (\args -> withEq (Proxy::Proxy BoolType) args $
                                    \(_::Proxy (BoolType ': args))
                                    -> Just $ AnyFunction
-                                      (Logic op :: Function fun con field (BoolType ': args) BoolType))
+                                      (Logic op :: Function fun con field '(BoolType ': args,BoolType)))
 
 lispToBVCompFunction :: BVCompOp -> ParsedFunction fun con field
 lispToBVCompFunction op
@@ -906,7 +903,7 @@ lispToBVCompFunction op
        [Just (Sort srt),_] -> case getType srt of
          BitVecRepr sz -> reifyNat sz $
            \(_::Proxy sz)
-           -> Just $ AnyFunction (BVComp op :: Function fun con field '[BitVecType sz,BitVecType sz] BoolType)
+           -> Just $ AnyFunction (BVComp op :: Function fun con field '( '[BitVecType sz,BitVecType sz],BoolType))
          _ -> Nothing
        _ -> Nothing)
 
@@ -916,7 +913,7 @@ lispToBVBinFunction (Just (Sort srt)) op = case getType srt of
     \(_::Proxy sz)
     -> Just $ ParsedFunction (const False) $
        \_ -> Just $ AnyFunction
-             (BVBin op :: Function fun con field '[BitVecType sz,BitVecType sz] (BitVecType sz))
+             (BVBin op :: Function fun con field '( '[BitVecType sz,BitVecType sz],BitVecType sz))
   _ -> Nothing
 lispToBVBinFunction Nothing op
   = Just $ ParsedFunction (==0) $
@@ -925,7 +922,7 @@ lispToBVBinFunction Nothing op
         BitVecRepr sz -> reifyNat sz $
           \(_::Proxy sz)
           -> Just $ AnyFunction
-             (BVBin op :: Function fun con field '[BitVecType sz,BitVecType sz] (BitVecType sz))
+             (BVBin op :: Function fun con field '( '[BitVecType sz,BitVecType sz],BitVecType sz))
         _ -> Nothing
       _ -> Nothing
 
@@ -935,7 +932,7 @@ lispToBVUnFunction (Just (Sort srt)) op = case getType srt of
     \(_::Proxy sz) 
     -> Just $ ParsedFunction (const False) $
        \_ -> Just $ AnyFunction
-             (BVUn op :: Function fun con field '[BitVecType sz] (BitVecType sz))
+             (BVUn op :: Function fun con field '( '[BitVecType sz],BitVecType sz))
   _ -> Nothing
 lispToBVUnFunction Nothing op
   = Just $ ParsedFunction (==0) $
@@ -944,13 +941,13 @@ lispToBVUnFunction Nothing op
         BitVecRepr sz -> reifyNat sz $
           \(_::Proxy sz)
           -> Just $ AnyFunction
-             (BVUn op :: Function fun con field '[BitVecType sz] (BitVecType sz))
+             (BVUn op :: Function fun con field '( '[BitVecType sz],BitVecType sz))
         _ -> Nothing
       _ -> Nothing
 
 mkMap :: Liftable idx => p idx -> AnyFunction fun con field -> AnyFunction fun con field
-mkMap (pidx::p idx) (AnyFunction (f :: Function fun con field arg res)) = case getTypeConstr (Proxy::Proxy arg) pidx of
-  Dict -> AnyFunction (Map f :: Function fun con field (Lifted arg idx) (ArrayType idx res))
+mkMap (pidx::p idx) (AnyFunction (f :: Function fun con field '(arg,res))) = case getTypeConstr (Proxy::Proxy arg) pidx of
+  Dict -> AnyFunction (Map f :: Function fun con field '(Lifted arg idx,ArrayType idx res))
 
 asArraySort :: Sort -> Maybe (Sorts,Sort)
 asArraySort (Sort p) = case getType p of
@@ -1070,13 +1067,13 @@ exprToLispWith :: (Monad m,GetType t)
                -> (forall (t' :: Type).
                    GetType t' => qv t' -> m L.Lisp)                        -- ^ quantified variables
                -> (forall (arg :: [Type]) (res :: Type).
-                   (GetTypes arg,GetType res) => fun arg res -> m L.Lisp) -- ^ functions
+                   (GetTypes arg,GetType res) => fun '(arg,res) -> m L.Lisp) -- ^ functions
                -> (forall (arg :: [Type]) (res :: *).
-                   GetTypes arg => con arg res -> m L.Lisp)    -- ^ constructor
+                   GetTypes arg => con '(arg,res) -> m L.Lisp)    -- ^ constructor
                -> (forall (arg :: [Type]) (res :: *).
-                   GetTypes arg => con arg res -> m L.Lisp)    -- ^ constructor tests
+                   GetTypes arg => con '(arg,res) -> m L.Lisp)    -- ^ constructor tests
                -> (forall (t' :: *) (res :: Type).
-                   GetType res => field t' res -> m L.Lisp)      -- ^ field accesses
+                   GetType res => field '(t',res) -> m L.Lisp)      -- ^ field accesses
                -> (fv t -> m L.Lisp)                                              -- ^ function variables
                -> (forall (t' :: Type).
                    GetType t' => e t' -> m L.Lisp)                         -- ^ sub expressions
@@ -1138,7 +1135,7 @@ valueToLisp val@(BitVecValue n) = case getType val of
                           ,L.Number $ L.I sz]
 --valueToLisp (ConstrValue con args) = 
 
-isOverloaded :: Function fun con field arg res -> Bool
+isOverloaded :: Function fun con field sig -> Bool
 isOverloaded Expr.Eq = True
 isOverloaded Expr.Distinct = True
 isOverloaded (Expr.Map _) = True
@@ -1161,14 +1158,14 @@ isOverloaded _ = False
 
 functionSymbol :: (Monad m,GetTypes arg,GetType res)
                   => (forall (arg' :: [Type]) (res' :: Type).
-                      (GetTypes arg',GetType res') => fun arg' res' -> m L.Lisp) -- ^ How to render user functions
+                      (GetTypes arg',GetType res') => fun '(arg',res') -> m L.Lisp) -- ^ How to render user functions
                   -> (forall (arg' :: [Type]) (res' :: *).
-                      GetTypes arg' => con arg' res' -> m L.Lisp)    -- ^ How to render constructor applications
+                      GetTypes arg' => con '(arg',res') -> m L.Lisp)    -- ^ How to render constructor applications
                   -> (forall (arg' :: [Type]) (res' :: *).
-                      GetTypes arg' => con arg' res' -> m L.Lisp)    -- ^ How to render constructor tests
+                      GetTypes arg' => con '(arg',res') -> m L.Lisp)    -- ^ How to render constructor tests
                   -> (forall (t :: *) (res' :: Type).
-                      GetType res' => field t res' -> m L.Lisp)          -- ^ How to render field acceses
-                  -> Function fun con field arg res -> m L.Lisp
+                      GetType res' => field '(t,res') -> m L.Lisp)          -- ^ How to render field acceses
+                  -> Function fun con field '(arg,res) -> m L.Lisp
 functionSymbol f _ _ _ (Expr.Fun g) = f g
 functionSymbol _ _ _ _ Expr.Eq = return $ L.Symbol "="
 functionSymbol _ _ _ _ Expr.Distinct = return $ L.Symbol "distinct"
@@ -1223,14 +1220,14 @@ functionSymbol _ _ _ _ (BVUn op) = return $ L.Symbol $ case op of
   BVNeg -> "bvneg"
 functionSymbol _ _ _ _ Select = return $ L.Symbol "select"
 functionSymbol _ _ _ _ Store = return $ L.Symbol "store"
-functionSymbol _ _ _ _ (ConstArray::Function fun con field arg res)
+functionSymbol _ _ _ _ (ConstArray::Function fun con field '(arg,res))
   = return $ L.List [L.Symbol "as"
                     ,L.Symbol "const"
                     ,typeSymbol (getType (Proxy::Proxy res))]
 functionSymbol _ _ _ _ Concat = return $ L.Symbol "concat"
 functionSymbol _ _ _ _ f@(Extract start)
   = return $ case f of
-  (_::Function fun con field '[BitVecType size] (BitVecType len))
+  (_::Function fun con field '( '[BitVecType size],BitVecType len))
       -> L.List [L.Symbol "_"
                 ,L.Symbol "extract"
                 ,L.Number $ L.I $ start'+len'-1
@@ -1248,15 +1245,15 @@ functionSymbol _ _ _ _ (Divisible n) = return $ L.List [L.Symbol "_"
 functionSymbolWithSig :: (Monad m,GetTypes arg,GetType res)
                       => (forall (arg' :: [Type]) (res' :: Type).
                           (GetTypes arg',GetType res')
-                          => fun arg' res' -> m L.Lisp) -- ^ How to render user functions
+                          => fun '(arg',res') -> m L.Lisp) -- ^ How to render user functions
                       -> (forall (arg' :: [Type]) (res' :: *).
-                          GetTypes arg' => con arg' res' -> m L.Lisp)    -- ^ How to render constructor applications
+                          GetTypes arg' => con '(arg',res') -> m L.Lisp)    -- ^ How to render constructor applications
                       -> (forall (arg' :: [Type]) (res' :: *).
-                          GetTypes arg' => con arg' res' -> m L.Lisp)    -- ^ How to render constructor tests
+                          GetTypes arg' => con '(arg',res') -> m L.Lisp)    -- ^ How to render constructor tests
                       -> (forall (t :: *) (res' :: Type).
-                          GetType res' => field t res' -> m L.Lisp)          -- ^ How to render field acceses
-                      -> Function fun con field arg res -> m L.Lisp
-functionSymbolWithSig f g h i (j::Function fun con field arg res) = do
+                          GetType res' => field '(t,res') -> m L.Lisp)          -- ^ How to render field acceses
+                      -> Function fun con field '(arg,res) -> m L.Lisp
+functionSymbolWithSig f g h i (j::Function fun con field '(arg,res)) = do
   sym <- functionSymbol f g h i j
   if isOverloaded j
     then return $ L.List [sym

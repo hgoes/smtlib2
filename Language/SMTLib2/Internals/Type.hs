@@ -31,48 +31,40 @@ deriving instance Typeable ('[])
 deriving instance Typeable (':)
 #endif
 
-class GEq2 f where
-  geqXX :: f a1 b1 -> f a2 b2 -> Maybe (a1 :~: a2, b1 :~: b2)
+type family Fst (a :: (p,q)) :: p where
+  Fst '(x,y) = x
 
-data GOrdering2 a1 a2 b1 b2 where
-  GEQ2 :: GOrdering2 a a b b
-  GLT2 :: GOrdering2 a1 a2 b1 b2
-  GGT2 :: GOrdering2 a1 a2 b1 b2
-
-class GEq2 f => GCompare2 f where
-  gcompareXX :: f a1 b1 -> f a2 b2 -> GOrdering2 a1 a2 b1 b2
-
-class GShow2 f where
-  gshowsPrec2 :: Int -> f a b -> ShowS
+type family Snd (a :: (p,q)) :: q where
+  Snd '(x,y) = y
 
 class (Typeable t,Typeable (DatatypeSig t)) => IsDatatype t where
   type DatatypeSig t :: [[Type]]
   type TypeCollectionSig t :: [([[Type]],*)]
-  getDatatype :: e t -> Datatype (DatatypeSig t) t
+  getDatatype :: e t -> Datatype '(DatatypeSig t,t)
   getTypeCollection :: e t -> TypeCollection (TypeCollectionSig t)
 
 type TypeCollection sigs = Datatypes Datatype sigs
 
-data Datatype (sig::[[Type]]) dt
+data Datatype (sig :: ([[Type]],*))
   = Datatype { datatypeName :: String
-             , constructors :: Constrs Constr sig dt }
+             , constructors :: Constrs Constr (Fst sig) (Snd sig) }
 
-data Constr (arg :: [Type]) a
+data Constr (sig :: ([Type],*))
   = Constr { conName :: String
-           , conFields :: Args (Field a) arg
-           , construct :: Args ConcreteValue arg -> a
-           , conTest :: a -> Bool }
+           , conFields :: Args (Field (Snd sig)) (Fst sig)
+           , construct :: Args ConcreteValue (Fst sig) -> Snd sig
+           , conTest :: Snd sig -> Bool }
 
 data Field a (t :: Type) = Field { fieldName :: String
                                  , fieldGet :: a -> ConcreteValue t }
 
-data Value (con :: [Type] -> * -> *) (a :: Type) where
+data Value (con :: ([Type],*) -> *) (a :: Type) where
   BoolValue :: Bool -> Value con BoolType
   IntValue :: Integer -> Value con IntType
   RealValue :: Rational -> Value con RealType
   BitVecValue :: KnownNat n => Integer -> Value con (BitVecType n)
   ConstrValue :: (Typeable con,GetTypes arg,IsDatatype t)
-              => con arg t
+              => con '(arg,t)
               -> Args (Value con) arg
               -> Value con (DataType t)
 
@@ -83,7 +75,7 @@ data ConcreteValue (a :: Type) where
   BitVecValueC :: KnownNat n => Integer -> ConcreteValue (BitVecType n)
   ConstrValueC :: IsDatatype t => t -> ConcreteValue (DataType t)
 
-data AnyValue (con :: [Type] -> * -> *) = forall (t :: Type). GetType t => AnyValue (Value con t)
+data AnyValue (con :: ([Type],*) -> *) = forall (t :: Type). GetType t => AnyValue (Value con t)
 
 data Repr (t :: Type) where
   BoolRepr :: Repr BoolType
@@ -91,7 +83,7 @@ data Repr (t :: Type) where
   RealRepr :: Repr RealType
   BitVecRepr :: KnownNat n => Integer -> Repr (BitVecType n)
   ArrayRepr :: (Liftable idx,GetType val) => Args Repr idx -> Repr val -> Repr (ArrayType idx val)
-  DataRepr :: IsDatatype dt => Datatype (DatatypeSig dt) dt -> Repr (DataType dt)
+  DataRepr :: IsDatatype dt => Datatype '(DatatypeSig dt,dt) -> Repr (DataType dt)
 
 data AnyRepr = forall (t :: Type). AnyRepr (Repr t)
 
@@ -100,14 +92,15 @@ data Args (e :: Type -> *) (a :: [Type]) where
   Arg :: GetType t => e t -> Args e ts -> Args e (t ': ts)
   deriving Typeable
 
-data Constrs (con :: [Type] -> * -> *) (a :: [[Type]]) t where
+data Constrs (con :: ([Type],*) -> *) (a :: [[Type]]) t where
   NoCon :: Constrs con '[] t
-  ConsCon :: Liftable arg => con arg t -> Constrs con args t -> Constrs con (arg ': args) t
+  ConsCon :: Liftable arg => con '(arg,dt) -> Constrs con args dt
+          -> Constrs con (arg ': args) dt
 
-data Datatypes (dts :: [[Type]] -> * -> *) (sigs :: [([[Type]],*)]) where
+data Datatypes (dts :: ([[Type]],*) -> *) (sigs :: [([[Type]],*)]) where
   NoDts :: Datatypes dts '[]
   ConsDts :: IsDatatype dt
-          => dts (DatatypeSig dt) dt
+          => dts '(DatatypeSig dt,dt)
           -> Datatypes dts sigs
           -> Datatypes dts ('(DatatypeSig dt,dt) ': sigs)
 
@@ -149,7 +142,7 @@ instance (GetType a,Liftable b) => Liftable (a ': b) where
   getTypeConstr (_::p (a ': b)) pidx = case getTypeConstr (Proxy::Proxy b) pidx of
     Dict -> Dict
 
-instance GEq2 con => GEq (Value con) where
+instance GEq con => GEq (Value con) where
   geq (BoolValue v1) (BoolValue v2) = if v1==v2 then Just Refl else Nothing
   geq (IntValue v1) (IntValue v2) = if v1==v2 then Just Refl else Nothing
   geq (RealValue v1) (RealValue v2) = if v1==v2 then Just Refl else Nothing
@@ -164,12 +157,12 @@ instance GEq2 con => GEq (Value con) where
         Refl <- eqT :: Maybe (bw1 :~: bw2)
         if v1==v2 then Just Refl else Nothing
   geq (ConstrValue c1 arg1) (ConstrValue c2 arg2) = do
-    (Refl,Refl) <- geqXX c1 c2
+    Refl <- geq c1 c2
     Refl <- geq arg1 arg2
     return Refl
   geq _ _ = Nothing
 
-instance GCompare2 con => GCompare (Value con) where
+instance GCompare con => GCompare (Value con) where
   gcompare (BoolValue v1) (BoolValue v2) = case compare v1 v2 of
     EQ -> GEQ
     LT -> GLT
@@ -200,10 +193,10 @@ instance GCompare2 con => GCompare (Value con) where
           GT -> GGT
   gcompare (BitVecValue _) _ = GLT
   gcompare _ (BitVecValue _) = GGT
-  gcompare (ConstrValue c1 arg1) (ConstrValue c2 arg2) = case gcompareXX c1 c2 of
-    GLT2 -> GLT
-    GGT2 -> GGT
-    GEQ2 -> GEQ
+  gcompare (ConstrValue c1 arg1) (ConstrValue c2 arg2) = case gcompare c1 c2 of
+    GLT -> GLT
+    GGT -> GGT
+    GEQ -> GEQ
 
 instance GEq e => GEq (Args e) where
   geq NoArg NoArg = Just Refl
@@ -281,7 +274,7 @@ instance GCompare Repr where
                    then GLT
                    else GGT
 
-instance GShow2 con => Show (Value con tp) where
+instance GShow con => Show (Value con tp) where
   showsPrec p (BoolValue b) = showsPrec p b
   showsPrec p (IntValue i) = showsPrec p i
   showsPrec p (RealValue i) = showsPrec p i
@@ -303,11 +296,11 @@ instance GShow2 con => Show (Value con tp) where
                         showString str
   showsPrec p (ConstrValue con args) = showParen (p>10) $
                                        showString "ConstrValue " .
-                                       gshowsPrec2 11 con.
+                                       gshowsPrec 11 con.
                                        showChar ' ' .
                                        showListWith id (argsToList (showsPrec 0) args)
 
-instance GShow2 con => GShow (Value con) where
+instance GShow con => GShow (Value con) where
   gshowsPrec = showsPrec
 
 mapArgs :: Monad m => (forall t. GetType t => e1 t -> m (e2 t))
@@ -332,7 +325,7 @@ argsToListM f (Arg x xs) = do
   return (x':xs')
 
 mapValue :: (Monad m,Typeable con2)
-         => (forall arg t. GetTypes arg => con1 arg t -> m (con2 arg t))
+         => (forall arg dt. GetTypes arg => con1 '(arg,dt) -> m (con2 '(arg,dt)))
          -> Value con1 a
          -> m (Value con2 a)
 mapValue _ (BoolValue b) = return (BoolValue b)
@@ -344,24 +337,19 @@ mapValue f (ConstrValue con args) = do
   args' <- mapArgs (mapValue f) args
   return (ConstrValue con' args')
 
-findConstrByName :: String -> Datatype sig dt
-                 -> (forall arg. GetTypes arg => Constr arg dt -> a) -> a
+findConstrByName :: String -> Datatype '(cons,dt)
+                 -> (forall arg. GetTypes arg => Constr '(arg,dt) -> a) -> a
 findConstrByName name dt f = find f (constructors dt)
   where
-    find :: (forall arg. GetTypes arg => Constr arg dt -> a) -> Constrs Constr sigs dt -> a
+    find :: (forall arg. GetTypes arg => Constr '(arg,dt) -> a) -> Constrs Constr sigs dt -> a
     find f NoCon = error $ "smtlib2: Cannot find constructor "++name++" of "++datatypeName dt
     find f (ConsCon con cons)
       = if conName con == name
         then f con
         else find f cons
 
-findConstrByName' :: (Typeable arg,Typeable dt) => String -> Datatype sig dt
-                  -> Constr arg dt
+findConstrByName' :: (Typeable arg,Typeable dt) => String -> Datatype '(cons,dt)
+                  -> Constr '(arg,dt)
 findConstrByName' name dt = findConstrByName name dt
                             (\con -> case cast con of
                                Just con' -> con')
-
-weakenOrdering2 :: GOrdering2 a1 a2 b1 b2 -> Ordering
-weakenOrdering2 GEQ2 = EQ
-weakenOrdering2 GLT2 = LT
-weakenOrdering2 GGT2 = GT

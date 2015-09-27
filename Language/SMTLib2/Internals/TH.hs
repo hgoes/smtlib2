@@ -103,7 +103,7 @@ declare' expr = QuasiQuoter { quoteExp = quoteExpr }
           Just exprName -> do
             TH.sigE [| var |] (exprName (toType tp))
         Just [List sig,tp] -> do
-          TH.sigE [| fun |] [t| forall b con field. Backend b => SMT b (Function (B.Fun b) con field $(toTypes sig) $(toType tp)) |]
+          TH.sigE [| fun |] [t| forall b con field. Backend b => SMT b (Function (B.Fun b) con field '( $(toTypes sig),$(toType tp))) |]
 
 toArgs :: [BasicExpr] -> TH.ExpQ
 toArgs [] = [| NoArg |]
@@ -237,7 +237,7 @@ funIsAllEq _ = False
 funName :: BasicExpr -> Maybe FunName
 funName (List [name,List sig,tp]) = do
   f <- funName name
-  return $ FunSig f [t| forall fun con field. Function fun con field $(toTypes sig) $(toType tp) |]
+  return $ FunSig f [t| forall fun con field. Function fun con field '( $(toTypes sig),$(toType tp)) |]
 funName (Atom "=") = Just $ FunCon 'Eq []
 funName (Atom "distinct") = Just $ FunCon 'Distinct []
 funName (List [Atom "_",Atom "map",f]) = do
@@ -290,13 +290,13 @@ funName (Atom "select") = Just $ FunCon 'Select []
 funName (Atom "store") = Just $ FunCon 'Store []
 funName (List [Atom "as",Atom "const",List [Atom "Array",List idx,el]])
   = Just $ FunSig (FunCon 'ConstArray [])
-           [t| forall fun con field. Function fun con field '[$(toType el)] (ArrayType $(toTypes idx) $(toType el)) |]
+           [t| forall fun con field. Function fun con field '( '[$(toType el)],ArrayType $(toTypes idx) $(toType el)) |]
 funName (Atom "concat") = Just $ FunCon 'Concat []
 funName (List [Atom "_",Atom "extract",Atom end,Atom start])
   = Just $ FunSig (FunCon 'Extract
                           [FunSig (FunCon 'Proxy [])
                                   [t| Proxy $(mkNum start') |]])
-                  [t| forall fun con field bv. Function fun con field '[BitVecType bv] (BitVecType $(mkNum $ end'-start')) |]
+                  [t| forall fun con field bv. Function fun con field '( '[BitVecType bv],BitVecType $(mkNum $ end'-start')) |]
   where
     end' = read end
     start' = read start

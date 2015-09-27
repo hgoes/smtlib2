@@ -86,7 +86,7 @@ class (ValueRepr c ~ repr,ValueType repr ~ c,GetType repr) => SMTValue c repr wh
   type ValueType repr :: *
   toValue :: (Typeable con,Typeable field)
           => DatatypeInfo con field -> c -> Value con (ValueRepr c)
-  fromValue :: (Typeable con,GCompare2 con,Typeable field)
+  fromValue :: (Typeable con,GCompare con,Typeable field)
             => DatatypeInfo con field -> Value con repr -> ValueType repr
 
 instance SMTValue Bool BoolType where
@@ -122,7 +122,7 @@ instance IsDatatype dt => SMTValue (DT dt) (DataType dt) where
   type ValueType (DataType dt) = (DT dt)
   toValue info (DT (dt::dt)) = case Map.lookup (typeOf (Proxy::Proxy dt)) info of
     Just (RegisteredDT rdt) -> case castReg rdt of
-      Just (rdt'::B.BackendDatatype con field (DatatypeSig dt) dt)
+      Just (rdt'::B.BackendDatatype con field '(DatatypeSig dt,dt))
         -> findConstr info dt (bconstructors rdt')
     where
       findConstr :: (Typeable con,Typeable field)
@@ -137,8 +137,8 @@ instance IsDatatype dt => SMTValue (DT dt) (DataType dt) where
       castReg :: (Typeable con,Typeable field,
                   Typeable dt,Typeable dt',
                   Typeable (DatatypeSig dt),Typeable (DatatypeSig dt'))
-              => B.BackendDatatype con field (DatatypeSig dt') dt'
-              -> Maybe (B.BackendDatatype con field (DatatypeSig dt) dt)
+              => B.BackendDatatype con field '(DatatypeSig dt',dt')
+              -> Maybe (B.BackendDatatype con field '(DatatypeSig dt,dt))
       castReg = cast
 
       extractVal :: (Typeable con,Typeable field)
@@ -162,29 +162,29 @@ instance IsDatatype dt => SMTValue (DT dt) (DataType dt) where
   fromValue info (ConstrValue con args :: Value con (DataType dt))
     = case Map.lookup (typeOf (Proxy::Proxy dt)) info of
         Just (RegisteredDT rdt) -> case castReg rdt of
-          Just (rdt'::B.BackendDatatype con field (DatatypeSig dt) dt)
+          Just (rdt'::B.BackendDatatype con field '(DatatypeSig dt,dt))
             -> findConstr info con args (bconstructors rdt')
     where
       castReg :: (Typeable con,Typeable field,
                   Typeable dt,Typeable dt',
                   Typeable (DatatypeSig dt),Typeable (DatatypeSig dt'))
-              => B.BackendDatatype con field (DatatypeSig dt') dt'
-              -> Maybe (B.BackendDatatype con field (DatatypeSig dt) dt)
+              => B.BackendDatatype con field '(DatatypeSig dt',dt')
+              -> Maybe (B.BackendDatatype con field '(DatatypeSig dt,dt))
       castReg = cast
 
-      findConstr :: (Typeable con,GEq2 con,Typeable field,GetTypes arg)
+      findConstr :: (Typeable con,GEq con,Typeable field,GetTypes arg)
                  => DatatypeInfo con field
-                 -> con arg dt -> Args (Value con) arg
+                 -> con '(arg,dt) -> Args (Value con) arg
                  -> Constrs (B.BackendConstr con field) sig dt
                  -> DT dt
       findConstr info con args (ConsCon con' cons)
-        = case geqXX con (bconRepr con') of
-            Just (Refl,Refl) -> DT (bconstruct con' (transArgs info args))
+        = case geq con (bconRepr con') of
+            Just Refl -> DT (bconstruct con' (transArgs info args))
             Nothing -> findConstr info con args cons
 
       castCon :: (Typeable con,Typeable field,Typeable arg,Typeable arg',Typeable dt)
-              => B.BackendConstr con field arg dt
-              -> Maybe (B.BackendConstr con field arg' dt)
+              => B.BackendConstr con field '(arg,dt)
+              -> Maybe (B.BackendConstr con field '(arg',dt))
       castCon = cast
 
       transArgs :: Typeable field => DatatypeInfo con field
@@ -437,7 +437,7 @@ class (Backend (EmbedBackend e),GShow e) => Embed e where
 type DatatypeInfo con field = Map.Map TypeRep (RegisteredDT con field)
 
 data RegisteredDT con field
-  = forall dt. IsDatatype dt => RegisteredDT (B.BackendDatatype con field (DatatypeSig dt) dt)
+  = forall dt. IsDatatype dt => RegisteredDT (B.BackendDatatype con field '(DatatypeSig dt,dt))
   deriving (Typeable)
 
 registerDatatype :: (Backend b,IsDatatype dt) => Proxy dt -> SMT b ()
@@ -453,25 +453,25 @@ registerDatatype pr = do
   where
     insertTypes :: B.BackendTypeCollection con field sigs -> DatatypeInfo con field -> DatatypeInfo con field
     insertTypes NoDts mp = mp
-    insertTypes (ConsDts (dt::B.BackendDatatype con field (DatatypeSig dt) dt) dts) mp
+    insertTypes (ConsDts (dt::B.BackendDatatype con field '(DatatypeSig dt,dt)) dts) mp
       = let repr = typeOf (Proxy::Proxy dt)
             nmp =  Map.insert repr (RegisteredDT dt) mp
          in insertTypes dts nmp
 
 lookupDatatype :: TypeRep -> DatatypeInfo con field
-               -> (forall dt. IsDatatype dt => B.BackendDatatype con field (DatatypeSig dt) dt -> a)
+               -> (forall dt. IsDatatype dt => B.BackendDatatype con field '(DatatypeSig dt,dt) -> a)
                -> a
 lookupDatatype rep dts f = case Map.lookup rep dts of
   Just (RegisteredDT dt) -> f dt
   Nothing -> error $ "smtlib2: Datatype "++show rep++" is not registered."
 
-lookupConstructor :: String -> B.BackendDatatype con field (DatatypeSig dt) dt
-                  -> (forall arg. GetTypes arg => B.BackendConstr con field arg dt -> a)
+lookupConstructor :: String -> B.BackendDatatype con field '(DatatypeSig dt,dt)
+                  -> (forall arg. GetTypes arg => B.BackendConstr con field '(arg,dt) -> a)
                   -> a
 lookupConstructor name dt f = lookup (bconstructors dt) f
   where
     lookup :: Constrs (B.BackendConstr con field) sigs dt
-           -> (forall arg. GetTypes arg => B.BackendConstr con field arg dt -> a)
+           -> (forall arg. GetTypes arg => B.BackendConstr con field '(arg,dt) -> a)
            -> a
     lookup NoCon _ = error $ "smtlib2: "++name++" is not a constructor."
     lookup (ConsCon con cons) f = if bconName con==name
@@ -479,7 +479,7 @@ lookupConstructor name dt f = lookup (bconstructors dt) f
                                   else lookup cons f
 
 
-lookupField :: String -> B.BackendConstr con field arg dt
+lookupField :: String -> B.BackendConstr con field '(arg,dt)
             -> (forall tp. GetType tp => B.BackendField field dt tp -> a)
             -> a
 lookupField name con f = lookup (bconFields con) f
@@ -494,7 +494,7 @@ lookupField name con f = lookup (bconFields con) f
 
 lookupDatatypeCon :: (IsDatatype dt,Typeable con,Typeable field)
                   => Proxy dt -> String -> DatatypeInfo con field
-                  -> (forall arg. GetTypes arg => B.BackendConstr con field arg dt -> a)
+                  -> (forall arg. GetTypes arg => B.BackendConstr con field '(arg,dt) -> a)
                   -> a
 lookupDatatypeCon pr name info f
   = lookupDatatype (typeOf pr) info $
@@ -515,7 +515,7 @@ withBackend b (SMT act) = do
   return res
 
 app :: (Embed e,GetType tp,GetTypes arg)
-    => Function (Fun (EmbedBackend e)) (B.Constr (EmbedBackend e)) (B.Field (EmbedBackend e)) arg tp
+    => Function (Fun (EmbedBackend e)) (B.Constr (EmbedBackend e)) (B.Field (EmbedBackend e)) '(arg,tp)
     -> Args e arg
     -> e tp
 app f arg = embed (App f arg)
@@ -523,33 +523,33 @@ app f arg = embed (App f arg)
 appLst :: (Embed e,GetType tp,GetType t,
            fun ~ Fun (EmbedBackend e),
            con ~ B.Constr (EmbedBackend e),field ~ B.Field (EmbedBackend e))
-       => (forall arg. (AllEq arg,SameType arg ~ t) => Function fun con field arg tp)
+       => (forall arg. (AllEq arg,SameType arg ~ t) => Function fun con field '(arg,tp))
        -> [e t]
        -> e tp
 appLst fun args = embed $ allEqFromList args $ App fun
 
-eq :: AllEq arg => Function fun con field arg BoolType
+eq :: AllEq arg => Function fun con field '(arg,BoolType)
 eq = Eq
 
 (.==.) :: (Embed e,GetType t) => e t -> e t -> e BoolType
 (.==.) x y = app eq (Arg x (Arg y NoArg))
 
-distinct :: AllEq arg => Function fun con field arg BoolType
+distinct :: AllEq arg => Function fun con field '(arg,BoolType)
 distinct = Distinct
 
 (./=.) :: (Embed e,GetType t) => e t -> e t -> e BoolType
 (./=.) x y = app distinct (Arg x (Arg y NoArg))
 
 map' :: (Liftable arg,GetTypes idx,GetType res)
-     => Function fun con field arg res
-     -> Function fun con field (Lifted arg idx) (ArrayType idx res)
+     => Function fun con field '(arg,res)
+     -> Function fun con field '(Lifted arg idx,ArrayType idx res)
 map' = Map
 
 class GetType t => SMTOrd (t :: Type) where
-  lt :: Function fun con field '[t,t] BoolType
-  le :: Function fun con field '[t,t] BoolType
-  gt :: Function fun con field '[t,t] BoolType
-  ge :: Function fun con field '[t,t] BoolType
+  lt :: Function fun con field '( '[t,t],BoolType)
+  le :: Function fun con field '( '[t,t],BoolType)
+  gt :: Function fun con field '( '[t,t],BoolType)
+  ge :: Function fun con field '( '[t,t],BoolType)
 
 instance SMTOrd IntType where
   lt = OrdInt Lt
@@ -695,14 +695,14 @@ getValue e = do
   dtinfo <- gets datatypes
   return $ fromValue dtinfo val
 
-fun :: (Backend b,Liftable arg,GetType res) => SMT b (Function (Fun b) con field arg res)
+fun :: (Backend b,Liftable arg,GetType res) => SMT b (Function (Fun b) con field '(arg,res))
 fun = do
   fun <- updateBackend $ \b -> declareFun b Nothing
   return (Fun fun)
 
 defFun :: (Embed e,Liftable arg,GetType res)
        => (Args e arg -> e res)
-       -> SMT (EmbedBackend e) (Function (Fun (EmbedBackend e)) con field arg res)
+       -> SMT (EmbedBackend e) (Function (Fun (EmbedBackend e)) con field '(arg,res))
 defFun (f :: Args e arg -> e res) = do
   args <- mapArgs (\_ -> updateBackend $ \b -> B.createFunArg b Nothing
                   ) (getTypes (Proxy::Proxy arg))
@@ -713,12 +713,12 @@ defFun (f :: Args e arg -> e res) = do
 
 class GetType t => SMTArith t where
   plus :: (AllEq arg, SameType arg ~ t)
-       => Function fun con field arg t
+       => Function fun con field '(arg,t)
   minus :: (AllEq arg,SameType arg ~ t)
-        => Function fun con field arg t
+        => Function fun con field '(arg,t)
   mult :: (AllEq arg, SameType arg ~ t)
-       => Function fun con field arg t
-  abs' :: Function fun con field '[t] t
+       => Function fun con field '(arg,t)
+  abs' :: Function fun con field '( '[t],t)
 
 instance SMTArith IntType where
   plus = ArithInt Plus
@@ -760,6 +760,6 @@ instance (GetType x1,MkApp (x2 ': xs) e res fun)
   toApp f p = toApp (\arg -> f (Arg p arg))
 
 app' :: (Embed e,GetTypes sig,MkApp sig e (e ret) rfun,GetType ret)
-    => Function (Fun (EmbedBackend e)) (B.Constr (EmbedBackend e)) (B.Field (EmbedBackend e)) sig ret
+    => Function (Fun (EmbedBackend e)) (B.Constr (EmbedBackend e)) (B.Field (EmbedBackend e)) '(sig,ret)
     -> rfun
 app' fun = toApp (embed . App fun)

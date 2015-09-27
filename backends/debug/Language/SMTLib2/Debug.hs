@@ -29,16 +29,6 @@ namedDebugBackend :: (Backend b,MonadIO (SMTMonad b)) => String -> b -> DebugBac
 namedDebugBackend name b = DebugBackend b stderr (Just 0) (Just name) True
                            Map.empty DMap.empty --DMap.empty
 
-type family Fst (a :: (p,q)) :: p where
-  Fst '(x,y) = x
-
-type family Snd (a :: (p,q)) :: q where
-  Snd '(x,y) = y
-
-newtype Fun' b x = Fun' (Fun b (Fst x) (Snd x))
-
-data Untyped v (a :: k) = Untyped v
-
 data DebugBackend (b :: *)
   = (Backend b,MonadIO (SMTMonad b))
     => DebugBackend { debugBackend' :: b
@@ -47,7 +37,7 @@ data DebugBackend (b :: *)
                     , debugPrefix :: Maybe String
                     , debugUseColor :: Bool
                     , debugNames :: Map String Int
-                    , debugVars :: DMap (Var b :: Type -> *) (UntypedVar T.Text :: Type -> *)
+                    , debugVars :: DMap (Var b) (UntypedVar T.Text)
 --                    , debugFuns :: DMap (Fun' b) (Untyped T.Text)
                     }
 
