@@ -37,7 +37,7 @@ type family Fst (a :: (p,q)) :: p where
 type family Snd (a :: (p,q)) :: q where
   Snd '(x,y) = y
 
-class (Typeable t,Typeable (DatatypeSig t)) => IsDatatype t where
+class (Typeable t,Typeable (DatatypeSig t),Show t,Ord t) => IsDatatype t where
   type DatatypeSig t :: [[Type]]
   type TypeCollectionSig t :: [([[Type]],*)]
   getDatatype :: e t -> Datatype '(DatatypeSig t,t)
@@ -82,7 +82,7 @@ data Repr (t :: Type) where
   IntRepr :: Repr IntType
   RealRepr :: Repr RealType
   BitVecRepr :: KnownNat n => Integer -> Repr (BitVecType n)
-  ArrayRepr :: (Liftable idx,GetType val) => Args Repr idx -> Repr val -> Repr (ArrayType idx val)
+  ArrayRepr :: (GetTypes idx,GetType val) => Args Repr idx -> Repr val -> Repr (ArrayType idx val)
   DataRepr :: IsDatatype dt => Datatype '(DatatypeSig dt,dt) -> Repr (DataType dt)
 
 data AnyRepr = forall (t :: Type). AnyRepr (Repr t)
@@ -94,7 +94,7 @@ data Args (e :: Type -> *) (a :: [Type]) where
 
 data Constrs (con :: ([Type],*) -> *) (a :: [[Type]]) t where
   NoCon :: Constrs con '[] t
-  ConsCon :: Liftable arg => con '(arg,dt) -> Constrs con args dt
+  ConsCon :: GetTypes arg => con '(arg,dt) -> Constrs con args dt
           -> Constrs con (arg ': args) dt
 
 data Datatypes (dts :: ([[Type]],*) -> *) (sigs :: [([[Type]],*)]) where
@@ -115,30 +115,25 @@ instance GetType RealType where
   getType _ = RealRepr
 instance (KnownNat n,Typeable n) => GetType (BitVecType n) where
   getType (_::e (BitVecType n)) = BitVecRepr (natVal (Proxy::Proxy n))
-instance (Liftable idx,GetType el) => GetType (ArrayType idx el) where
+instance (GetTypes idx,GetType el) => GetType (ArrayType idx el) where
   getType (_::e (ArrayType idx el)) = ArrayRepr (getTypes (Proxy::Proxy idx))
                                                 (getType (Proxy::Proxy el))
 instance IsDatatype t => GetType (DataType t) where
   getType (_::e (DataType t)) = DataRepr (getDatatype (Proxy::Proxy t))
 
 class Typeable t => GetTypes (t :: [Type]) where
+  type Lifted t (idx :: [Type]) :: [Type]
   getTypes :: e t -> Args Repr t
+  getTypeConstr :: GetTypes idx => p t -> q idx -> Dict (GetTypes (Lifted t idx))
 
 instance GetTypes '[] where
+  type Lifted '[] idx = '[]
   getTypes _ = NoArg
+  getTypeConstr _ _ = Dict
 
 instance (GetType t,GetTypes ts) => GetTypes (t ': ts) where
-  getTypes (_::e (t ': ts)) = Arg (getType (Proxy::Proxy t)) (getTypes (Proxy::Proxy ts))
-
-class GetTypes l => Liftable (l :: [Type]) where
-  type Lifted l (idx :: [Type]) :: [Type]
-  getTypeConstr :: Liftable idx => p l -> q idx -> Dict (Liftable (Lifted l idx))
-
-instance Liftable '[] where
-  type Lifted '[] idx = '[]
-  getTypeConstr _ _ = Dict
-instance (GetType a,Liftable b) => Liftable (a ': b) where
   type Lifted (a ': b) idx = (ArrayType idx a) ': (Lifted b idx)
+  getTypes (_::e (t ': ts)) = Arg (getType (Proxy::Proxy t)) (getTypes (Proxy::Proxy ts))
   getTypeConstr (_::p (a ': b)) pidx = case getTypeConstr (Proxy::Proxy b) pidx of
     Dict -> Dict
 

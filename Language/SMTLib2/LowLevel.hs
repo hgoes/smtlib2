@@ -1,7 +1,8 @@
 {-# LANGUAGE ViewPatterns,ConstraintKinds,QuasiQuotes #-}
 module Language.SMTLib2.LowLevel (
   -- * SMT Monad
-  Backend(ClauseId),SMT(),withBackend,
+  Backend(Expr,Var,QVar,Fun,Constr,Field,FunArg,ClauseId),
+  SMT(),withBackend,withBackendExitCleanly,
   SMTOption(..),setOption,
   SMTInfo(..),getInfo,
   comment,
@@ -16,10 +17,13 @@ module Language.SMTLib2.LowLevel (
   -- * Interpolation
   Partition(..),assertPartition,interpolate,
   -- * Expressions
-  Type(..),
-  SMTExpr(..),SMTExpr'(..),SMTValue(..),Embed(..),
+  Type(..),Nat(..),GetType(..),GetTypes(..),
+  SMTExpr(..),SMTExpr'(..),SMTValue(..),Embed(..),Expression(..),Function(..),
+  Args(..),
+  -- ** Operators
+  LogicOp(..),OrdOp(..),ArithOp(..),ArithOpInt(..),BVCompOp(..),BVBinOp(..),BVUnOp(..),
   -- ** Variables
-  var,
+  var,varNamed,
   -- ** Constants
   Value(..),
   constant,
@@ -29,7 +33,6 @@ module Language.SMTLib2.LowLevel (
   -- ** Arithmetic
   SMTArith(..),
   -- ** Functions
-  Function(),
   fun,
   defFun,
   app,app',appLst,
@@ -50,12 +53,14 @@ import Language.SMTLib2.Internals.Type hiding (Field)
 import Language.SMTLib2.Internals.Type.Nat
 
 import Data.Typeable
+import Data.Type.Equality
 import Control.Monad.State.Strict
 import Control.Monad.Identity
 import qualified Data.Map.Strict as Map
 import qualified Data.IntMap.Strict as IMap
 import Data.GADT.Compare
 import Data.GADT.Show
+import Control.Exception (bracket)
 
 newtype Backend b => SMT b a = SMT (StateT (SMTState b) (SMTMonad b) a)
 
@@ -81,7 +86,7 @@ instance Backend b => MonadState (SMTState b) (SMT b) where
 liftSMT :: Backend b => SMTMonad b a -> SMT b a
 liftSMT act = SMT (lift act)
 
-class (ValueRepr c ~ repr,ValueType repr ~ c,GetType repr) => SMTValue c repr where
+class (Typeable c,Show c,Ord c,ValueRepr c ~ repr,ValueType repr ~ c,GetType repr) => SMTValue c repr where
   type ValueRepr c :: Type
   type ValueType repr :: *
   toValue :: (Typeable con,Typeable field)
@@ -107,7 +112,7 @@ instance SMTValue Rational RealType where
   toValue _ v = RealValue v
   fromValue _ (RealValue v) = v
 
-newtype SMTBV (bw::Nat) = SMTBV Integer deriving Show
+newtype SMTBV (bw::Nat) = SMTBV Integer deriving (Show,Eq,Ord)
 
 instance KnownNat n => SMTValue (SMTBV n) (BitVecType n) where
   type ValueRepr (SMTBV n) = BitVecType n
@@ -115,9 +120,9 @@ instance KnownNat n => SMTValue (SMTBV n) (BitVecType n) where
   toValue _ (SMTBV v) = BitVecValue v
   fromValue _ (BitVecValue v) = SMTBV v
 
-data DT dt = DT dt deriving Show
+data DT dt = DT dt deriving (Show,Eq,Ord)
 
-instance IsDatatype dt => SMTValue (DT dt) (DataType dt) where
+instance (IsDatatype dt) => SMTValue (DT dt) (DataType dt) where
   type ValueRepr (DT dt) = DataType dt
   type ValueType (DataType dt) = (DT dt)
   toValue info (DT (dt::dt)) = case Map.lookup (typeOf (Proxy::Proxy dt)) info of
@@ -220,6 +225,7 @@ data SMTExpr' b t where
                   -> SMTExpr' b BoolType
   TestConstr :: IsDatatype dt => String -> Proxy (dt:: *) -> SMTExpr b (DataType dt) -> SMTExpr' b BoolType
   GetField :: (IsDatatype dt,GetType tp) => String -> String -> Proxy (dt :: *) -> Proxy tp -> SMTExpr b (DataType dt) -> SMTExpr' b tp
+  Const' :: SMTValue c tp => c -> SMTExpr' b tp
 
 instance Backend b => Show (SMTExpr' b t) where
   showsPrec p (QVar' lvl n) = showParen (p>10) $
@@ -234,6 +240,9 @@ instance Backend b => Show (SMTExpr' b t) where
       showsPrec 11 lvl . showChar ' ' .
       showsPrec 11 (length (argsToList (const ()) args)) . showChar ' ' .
       showsPrec 11 body
+  showsPrec p (Const' c) = showParen (p>10) $
+                           showString "Const' " .
+                           showsPrec 11 c
 
 instance Backend b => GShow (SMTExpr' b) where
   gshowsPrec = showsPrec
@@ -272,6 +281,11 @@ instance Backend b => GEq (SMTExpr' b) where
         Refl <- geq body1 body2
         return Refl
     | otherwise = Nothing
+  geq (Const' (c1::t1)) (Const' (c2::t2)) = do
+    Refl <- eqT :: Maybe (t1 :~: t2)
+    if c1==castWith Refl c2
+      then return Refl
+      else Nothing
   geq _ _ = Nothing
 
 instance Backend b => GCompare (SMTExpr b) where
@@ -320,6 +334,16 @@ instance Backend b => GCompare (SMTExpr' b) where
           GGT -> GGT
         LT -> GLT
         GT -> GGT
+  gcompare (GetField _ _ _ _ _) _ = GLT
+  gcompare _ (GetField _ _ _ _ _) = GGT
+  gcompare (Const' (c1::t1)) (Const' (c2::t2)) = case eqT :: Maybe (t1 :~: t2) of
+    Just Refl -> case compare c1 (castWith Refl c2) of
+      EQ -> GEQ
+      LT -> GLT
+      GT -> GGT
+    Nothing -> case compare (typeOf c1) (typeOf c2) of
+      LT -> GLT
+      GT -> GGT
 
 instance Backend b => Show (SMTExpr b t) where
   showsPrec p (SMTExpr e) = showsPrec p e
@@ -391,6 +415,9 @@ instance Backend b => Embed (SMTExpr b) where
                expr' <- encode' pr mp expr
                let res = App (Field $ bfieldRepr rfield') (Arg expr' NoArg)
                updateBackend $ \b -> B.toBackend b res
+      encode' pr mp (SpecialExpr (Const' c)) = do
+        st <- get
+        updateBackend $ \b -> B.toBackend b (Const $ toValue (datatypes st) c)
       encode' pr mp (SMTExpr e) = do
         e' <- mapSubExpressions (encode' pr mp) e
         updateBackend $ \b -> B.toBackend b e'
@@ -512,7 +539,18 @@ lookupDatatypeField pr con field info f
 withBackend :: Backend b => b -> SMT b a -> SMTMonad b a
 withBackend b (SMT act) = do
   (res,nb) <- runStateT act (SMTState b Map.empty)
+  exit (backend nb)
   return res
+
+withBackendExitCleanly :: (Backend b,SMTMonad b ~ IO) => b -> SMT b a -> IO a
+withBackendExitCleanly b (SMT act)
+  = bracket
+    (return b)
+    (\b -> exit b)
+    (\b -> do
+        (res,nb) <- runStateT act (SMTState b Map.empty)
+        return res)
+
 
 app :: (Embed e,GetType tp,GetTypes arg)
     => Function (Fun (EmbedBackend e)) (B.Constr (EmbedBackend e)) (B.Field (EmbedBackend e)) '(arg,tp)
@@ -528,19 +566,7 @@ appLst :: (Embed e,GetType tp,GetType t,
        -> e tp
 appLst fun args = embed $ allEqFromList args $ App fun
 
-eq :: AllEq arg => Function fun con field '(arg,BoolType)
-eq = Eq
-
-(.==.) :: (Embed e,GetType t) => e t -> e t -> e BoolType
-(.==.) x y = app eq (Arg x (Arg y NoArg))
-
-distinct :: AllEq arg => Function fun con field '(arg,BoolType)
-distinct = Distinct
-
-(./=.) :: (Embed e,GetType t) => e t -> e t -> e BoolType
-(./=.) x y = app distinct (Arg x (Arg y NoArg))
-
-map' :: (Liftable arg,GetTypes idx,GetType res)
+map' :: (GetTypes arg,GetTypes idx,GetType res)
      => Function fun con field '(arg,res)
      -> Function fun con field '(Lifted arg idx,ArrayType idx res)
 map' = Map
@@ -562,18 +588,6 @@ instance SMTOrd RealType where
   le = OrdReal Le
   gt = OrdReal Gt
   ge = OrdReal Ge
-
-(.<.) :: (Embed e,SMTOrd t) => e t -> e t -> e BoolType
-(.<.) x y = app lt (Arg x (Arg y NoArg))
-
-(.<=.) :: (Embed e,SMTOrd t) => e t -> e t -> e BoolType
-(.<=.) x y = app le (Arg x (Arg y NoArg))
-
-(.>.) :: (Embed e,SMTOrd t) => e t -> e t -> e BoolType
-(.>.) x y = app gt (Arg x (Arg y NoArg))
-
-(.>=.) :: (Embed e,SMTOrd t) => e t -> e t -> e BoolType
-(.>=.) x y = app ge (Arg x (Arg y NoArg))
 
 mapSubExpressions :: (Monad m,GetType tp)
                   => (forall t. GetType t => e t -> m (e' t))
@@ -685,6 +699,11 @@ var = do
   v <- updateBackend $ \b -> B.declareVar b Nothing
   return $ embed (Var v)
 
+varNamed :: (Embed e,GetType t) => String -> SMT (EmbedBackend e) (e t)
+varNamed name = do
+  v <- updateBackend $ \b -> B.declareVar b (Just name)
+  return $ embed (Var v)
+
 constant :: (Embed e,GetType t) => Value (B.Constr (EmbedBackend e)) t -> e t
 constant v = embed (Const v)
 
@@ -695,12 +714,12 @@ getValue e = do
   dtinfo <- gets datatypes
   return $ fromValue dtinfo val
 
-fun :: (Backend b,Liftable arg,GetType res) => SMT b (Function (Fun b) con field '(arg,res))
+fun :: (Backend b,GetTypes arg,GetType res) => SMT b (Function (Fun b) con field '(arg,res))
 fun = do
   fun <- updateBackend $ \b -> declareFun b Nothing
   return (Fun fun)
 
-defFun :: (Embed e,Liftable arg,GetType res)
+defFun :: (Embed e,GetTypes arg,GetType res)
        => (Args e arg -> e res)
        -> SMT (EmbedBackend e) (Function (Fun (EmbedBackend e)) con field '(arg,res))
 defFun (f :: Args e arg -> e res) = do

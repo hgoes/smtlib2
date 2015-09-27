@@ -20,13 +20,24 @@ program = do
 main = withZ3 program >>= print
      @ -}
 module Language.SMTLib2 (
+  B.Backend(SMTMonad,ClauseId),
   L.withBackend,
   SMT(),SMTExpr(),Type(..),analyze,L.setOption,B.SMTOption(..),
-  declare,TH.expr,assert,L.CheckSatResult(..),L.checkSat,getValue,KnownNat(),
+  declare,TH.expr,assert,assertId,L.CheckSatResult(..),L.checkSat,getValue,KnownNat(),
   L.Partition(..),
   assertPartition,
-  interpolate,
-  L.registerDatatype
+  interpolate,L.getUnsatCore,
+  L.registerDatatype,
+  -- * Expressions
+  -- ** Constants
+  constant,
+  -- ** Comparison
+  (.==.),(./=.),
+  (.<.),(.<=.),(.>.),(.>=.),
+  -- ** Basic logic
+  ite,
+  -- ** Arithmetic
+  (.+.),(.-.),(.*.),abs'
   ) where
 
 import qualified Language.SMTLib2.Internals.Backend as B
@@ -40,6 +51,9 @@ import Language.Haskell.TH.Quote
 
 assert :: Backend b => SMTExpr b BoolType -> SMT b ()
 assert = L.assert
+
+assertId :: Backend b => SMTExpr b BoolType -> SMT b (L.ClauseId b)
+assertId = L.assertId
 
 assertPartition :: Backend b => SMTExpr b BoolType -> L.Partition -> SMT b ()
 assertPartition = L.assertPartition
@@ -57,3 +71,38 @@ getValue = L.getValue
 
 declare :: QuasiQuoter
 declare = TH.declare' (Just $ \tp -> [t| forall b. Backend b => SMT b (SMTExpr b $(tp)) |])
+
+constant :: L.SMTValue c t => c -> SMTExpr b t
+constant v = L.SpecialExpr (L.Const' v)
+
+(.==.) :: GetType t => SMTExpr b t -> SMTExpr b t -> SMTExpr b BoolType
+(.==.) x y = L.SMTExpr (L.App L.Eq (Arg x (Arg y NoArg)))
+
+(./=.) :: GetType t => SMTExpr b t -> SMTExpr b t -> SMTExpr b BoolType
+(./=.) x y = L.SMTExpr (L.App L.Distinct (Arg x (Arg y NoArg)))
+
+(.<.),(.<=.),(.>.),(.>=.) :: L.SMTOrd t => SMTExpr b t -> SMTExpr b t -> SMTExpr b BoolType
+(.<.) x y = L.SMTExpr (L.App L.lt (Arg x (Arg y NoArg)))
+(.<=.) x y = L.SMTExpr (L.App L.le (Arg x (Arg y NoArg)))
+(.>.) x y = L.SMTExpr (L.App L.gt (Arg x (Arg y NoArg)))
+(.>=.) x y = L.SMTExpr (L.App L.ge (Arg x (Arg y NoArg)))
+
+(.+.),(.-.),(.*.) :: L.SMTArith t => SMTExpr b t -> SMTExpr b t -> SMTExpr b t
+(.+.) x y = L.SMTExpr (L.App L.plus (Arg x (Arg y NoArg)))
+(.-.) x y = L.SMTExpr (L.App L.minus (Arg x (Arg y NoArg)))
+(.*.) x y = L.SMTExpr (L.App L.mult (Arg x (Arg y NoArg)))
+
+abs' :: L.SMTArith t => SMTExpr b t -> SMTExpr b t
+abs' x = L.SMTExpr (L.App L.abs' (Arg x NoArg))
+
+ite :: GetType a => SMTExpr b BoolType -> SMTExpr b a -> SMTExpr b a -> SMTExpr b a
+ite c ifT ifF = L.SMTExpr $ L.App L.ITE (Arg c (Arg ifT (Arg ifF NoArg)))
+
+instance Num (SMTExpr b IntType) where
+  (+) = (.+.)
+  (-) = (.-.)
+  (*) = (.*.)
+  negate x = L.SMTExpr (L.App L.minus (Arg x NoArg))
+  abs = abs'
+  fromInteger x = L.SMTExpr (L.Const (L.IntValue x))
+  signum x = ite (x .==. 0) 0 (ite (x .<. 0) (-1) 1)

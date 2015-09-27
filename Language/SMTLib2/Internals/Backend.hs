@@ -23,7 +23,8 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
        GCompare (Fun b),GShow (Fun b),
        GCompare (Constr b),GShow (Constr b),
        GCompare (Field b),GShow (Field b),
-       GCompare (FunArg b),GShow (FunArg b)) => Backend b where
+       GCompare (FunArg b),GShow (FunArg b),
+       Ord (ClauseId b),Show (ClauseId b)) => Backend b where
   type SMTMonad b :: * -> *
   type Expr b :: Type -> *
   type Var b :: Type -> *
@@ -42,8 +43,8 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
   createQVar :: GetType t => b -> Maybe String -> SMTMonad b (QVar b t,b)
   createFunArg :: GetType t => b -> Maybe String -> SMTMonad b (FunArg b t,b)
   defineVar :: GetType t => b -> Maybe String -> Expr b t -> SMTMonad b (Var b t,b)
-  declareFun :: (Liftable arg,GetType t) => b -> Maybe String -> SMTMonad b (Fun b '(arg,t),b)
-  defineFun :: (Liftable arg,GetType r) => b -> Maybe String
+  declareFun :: (GetTypes arg,GetType t) => b -> Maybe String -> SMTMonad b (Fun b '(arg,t),b)
+  defineFun :: (GetTypes arg,GetType r) => b -> Maybe String
             -> Args (FunArg b) arg -> Expr b r -> SMTMonad b (Fun b '(arg,r),b)
   assert :: b -> Expr b BoolType -> SMTMonad b b
   assertId :: b -> Expr b BoolType -> SMTMonad b (ClauseId b,b)
@@ -60,6 +61,7 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
   declareDatatypes :: b -> TypeCollection sigs
                    -> SMTMonad b (BackendTypeCollection (Constr b) (Field b) sigs,b)
   interpolate :: b -> SMTMonad b (Expr b BoolType,b)
+  exit :: b -> SMTMonad b ()
 
 type BackendTypeCollection con field sigs
   = Datatypes (BackendDatatype con field) sigs

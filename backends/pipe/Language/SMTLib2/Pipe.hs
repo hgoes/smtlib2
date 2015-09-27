@@ -47,8 +47,8 @@ data SMTPipe = SMTPipe { channelIn :: Handle
 
 data RevVar = forall (t::Type). GetType t => Var !(Proxy t)
             | forall (t::Type). GetType t => QVar !(Proxy t)
-            | forall (arg::[Type]) (t::Type). (Liftable arg,GetType t) => Fun !(Proxy arg) !(Proxy t)
-            | forall (arg::[Type]) (t :: *). (Liftable arg,IsDatatype t) => Constr !(Proxy arg) !(Proxy t)
+            | forall (arg::[Type]) (t::Type). (GetTypes arg,GetType t) => Fun !(Proxy arg) !(Proxy t)
+            | forall (arg::[Type]) (t :: *). (GetTypes arg,IsDatatype t) => Constr !(Proxy arg) !(Proxy t)
             | forall (t :: *) (res :: Type). (IsDatatype t,GetType res) => Field !(Proxy t) !(Proxy res)
             | forall (t::Type). GetType t => FunArg !(Proxy t)
             | forall (t :: *). IsDatatype t => Datatype !(Proxy t)
@@ -62,7 +62,7 @@ type PipeFun = UntypedFun T.Text
 type PipeConstr = UntypedCon T.Text
 type PipeField = UntypedField T.Text
 
-newtype PipeClauseId = PipeClauseId T.Text
+newtype PipeClauseId = PipeClauseId T.Text deriving (Show,Eq,Ord)
 
 instance GEq PipeExpr where
   geq (PipeExpr e1) (PipeExpr e2) = geq e1 e2
@@ -283,6 +283,13 @@ instance Backend SMTPipe where
                                 (UntypedField $ T.pack $ fieldName f)
                                 (fieldGet f))
                   fs',b2)
+  exit b = do
+    putRequest b (L.List [L.Symbol "exit"])
+    hClose (channelIn b)
+    hClose (channelOut b)
+    terminateProcess (processHandle b)
+    _ <- waitForProcess (processHandle b)
+    return ()
 
 renderDeclareFun :: (GetTypes arg,GetType ret)
                  => Map String Int -> Proxy arg -> Proxy ret -> Maybe String
@@ -455,7 +462,7 @@ parseGetModel b (L.List ((L.Symbol "model"):mdl)) = do
 parseGetModel _ _ = Nothing
 
 data Sort = forall (t :: Type). GetType t => Sort (Proxy t)
-data Sorts = forall (t :: [Type]). Liftable t => Sorts (Proxy t)
+data Sorts = forall (t :: [Type]). GetTypes t => Sorts (Proxy t)
 
 data ParsedFunction fun con field
   = ParsedFunction { argumentTypeRequired :: Integer -> Bool
@@ -466,9 +473,9 @@ data AnyExpr e = forall (t :: Type). GetType t => AnyExpr (e t)
 
 data LispParser (v :: Type -> *) (qv :: Type -> *) (fun :: ([Type],Type) -> *) (con :: ([Type],*) -> *) (field :: (*,Type) -> *) (fv :: Type -> *) (e :: Type -> *)
   = LispParser { parseFunction :: forall a. Maybe Sort -> T.Text
-                               -> (forall args res. (Liftable args,GetType res) => fun '(args,res) -> a)
-                               -> (forall args res. (Liftable args,IsDatatype res) => con '(args,res) -> a) -- ^ constructor
-                               -> (forall args res. (Liftable args,IsDatatype res) => con '(args,res) -> a) -- ^ constructor test
+                               -> (forall args res. (GetTypes args,GetType res) => fun '(args,res) -> a)
+                               -> (forall args res. (GetTypes args,IsDatatype res) => con '(args,res) -> a) -- ^ constructor
+                               -> (forall args res. (GetTypes args,IsDatatype res) => con '(args,res) -> a) -- ^ constructor test
                                -> (forall t res. (IsDatatype t,GetType res) => field '(t,res) -> a)
                                -> Maybe a
                , parseDatatype :: forall a. T.Text
@@ -669,7 +676,7 @@ mkLet p ((L.List [L.Symbol name,expr]):args) f
       let (lvar,np) = registerLetVar p name (Proxy::Proxy t)
       mkLet np args $ \p args -> f p (Arg (LetBinding lvar expr') args)
 
-withEq :: GetType t => Proxy (t :: Type) -> [b] -> (forall (arg::[Type]). (AllEq (t ': arg),Liftable arg,SameType (t ': arg) ~ t) => Proxy (t ': arg) -> a) -> a
+withEq :: GetType t => Proxy (t :: Type) -> [b] -> (forall (arg::[Type]). (AllEq (t ': arg),GetTypes arg,SameType (t ': arg) ~ t) => Proxy (t ': arg) -> a) -> a
 withEq (_::Proxy t) [_] f = f (Proxy::Proxy '[t])
 withEq p@(_::Proxy t) (_:xs) f = withEq p xs $
                                  \(_::Proxy (t ': arg)) -> f (Proxy :: Proxy (t ': t ': arg))
@@ -945,7 +952,7 @@ lispToBVUnFunction Nothing op
         _ -> Nothing
       _ -> Nothing
 
-mkMap :: Liftable idx => p idx -> AnyFunction fun con field -> AnyFunction fun con field
+mkMap :: GetTypes idx => p idx -> AnyFunction fun con field -> AnyFunction fun con field
 mkMap (pidx::p idx) (AnyFunction (f :: Function fun con field '(arg,res))) = case getTypeConstr (Proxy::Proxy arg) pidx of
   Dict -> AnyFunction (Map f :: Function fun con field '(Lifted arg idx,ArrayType idx res))
 
@@ -978,7 +985,7 @@ lispToSort r (L.Symbol name) = parseDatatype r name $
 lispToSort _ _ = Nothing
 
 lispToSorts :: LispParser v qv fun con field fv e -> [L.Lisp]
-            -> (forall (arg :: [Type]). Liftable arg => Proxy arg -> a) -> Maybe a
+            -> (forall (arg :: [Type]). GetTypes arg => Proxy arg -> a) -> Maybe a
 lispToSorts _ [] f = Just (f (Proxy::Proxy ('[]::[Type])))
 lispToSorts r (x:xs) f = do
   Sort (_::Proxy t) <- lispToSort r x

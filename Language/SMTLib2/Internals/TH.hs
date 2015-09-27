@@ -140,6 +140,7 @@ toExpr bind (List [List [Atom "get",Atom dt,Atom con,Atom field],expr])
                               (Proxy::Proxy $(TH.conT $ TH.mkName dt))
                               (fieldProxy $(TH.varE $ TH.mkName field))
                               $(toExpr bind expr) |]
+toExpr bind (List [name,Atom "#",Atom arg]) = [| appLst $(toFun name) $(TH.varE $ TH.mkName arg) |]
 toExpr bind (List (name:args)) = [| app $(toFun name) $(mkArgs bind args) |]
 
 toQuantifier :: Quantifier -> Map String TH.Exp -> [BasicExpr] -> BasicExpr -> TH.ExpQ

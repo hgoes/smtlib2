@@ -5,14 +5,11 @@ import Language.SMTLib2.Internals.Type.Nat
 
 import Data.Proxy
 import Data.Typeable
-import Numeric
 import Text.Show
-import Data.List (genericLength,genericReplicate)
 import Data.GADT.Compare
 import Data.GADT.Show
-import Data.Type.Equality
 
-class (Liftable arg,GetType (SameType arg)) => AllEq (arg::[Type]) where
+class (GetTypes arg,GetType (SameType arg)) => AllEq (arg::[Type]) where
   type SameType arg :: Type
   allEqToList :: Args e arg -> [e (SameType arg)]
 
@@ -28,7 +25,7 @@ data Function (fun :: ([Type],Type) -> *) (con :: ([Type],*) -> *) (field :: (*,
   Fun :: (GetTypes arg,GetType res) => fun '(arg,res) -> Function fun con field '(arg,res)
   Eq :: AllEq arg => Function fun con field '(arg,BoolType)
   Distinct :: AllEq arg => Function fun con field '(arg,BoolType)
-  Map :: (Liftable arg,GetType res,GetTypes idx)
+  Map :: (GetTypes arg,GetType res,GetTypes idx)
       => Function fun con field '(arg,res)
       -> Function fun con field '(Lifted arg idx,ArrayType idx res)
   OrdInt :: OrdOp -> Function fun con field '([IntType,IntType],BoolType)
@@ -64,7 +61,7 @@ data Function (fun :: ([Type],Type) -> *) (con :: ([Type],*) -> *) (field :: (*,
   Divisible :: Integer -> Function fun con field '( '[IntType],BoolType)
 
 data AnyFunction (fun :: ([Type],Type) -> *) (con :: ([Type],*) -> *) (field :: (*,Type) -> *) where
-  AnyFunction :: (Liftable arg,GetType t) => Function fun con field '(arg,t) -> AnyFunction fun con field
+  AnyFunction :: (GetTypes arg,GetType t) => Function fun con field '(arg,t) -> AnyFunction fun con field
 
 data OrdOp = Ge | Gt | Le | Lt deriving (Eq,Ord,Show)
 
