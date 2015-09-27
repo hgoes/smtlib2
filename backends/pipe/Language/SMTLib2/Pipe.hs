@@ -1094,7 +1094,7 @@ exprToLispWith _ _ f g h i _ j (Expr.App fun args) = do
   case args' of
     [] -> return sym
     _ -> return $ L.List $ sym:args'
-exprToLispWith _ _ _ _ _ _ _ _ (Expr.Const val) = return $ valueToLisp val
+exprToLispWith _ _ _ f _ _ _ _ (Expr.Const val) = valueToLisp f val
 exprToLispWith _ _ f g h i _ _ (Expr.AsArray fun) = do
   sym <- functionSymbolWithSig f g h i fun
   return $  L.List [L.Symbol "_"
@@ -1122,18 +1122,27 @@ exprToLispWith f _ _ _ _ _ _ g (Expr.Let args body) = do
                   ,L.List binds
                   ,body']
 
-valueToLisp :: Value con t -> L.Lisp
-valueToLisp (BoolValue True) = L.Symbol "true"
-valueToLisp (BoolValue False) = L.Symbol "false"
-valueToLisp (IntValue n) = numToLisp n
-valueToLisp (RealValue n) = L.List [L.Symbol "/"
-                                   ,numToLisp $ numerator n
-                                   ,numToLisp $ denominator n]
-valueToLisp val@(BitVecValue n) = case getType val of
+valueToLisp :: Monad m
+            => (forall arg tp. (GetTypes arg,IsDatatype tp)
+                => con '(arg,tp) -> m L.Lisp)
+            -> Value con t -> m L.Lisp
+valueToLisp _ (BoolValue True) = return $ L.Symbol "true"
+valueToLisp _ (BoolValue False) = return $ L.Symbol "false"
+valueToLisp _ (IntValue n) = return $ numToLisp n
+valueToLisp _ (RealValue n)
+  = return $ L.List [L.Symbol "/"
+                    ,numToLisp $ numerator n
+                    ,numToLisp $ denominator n]
+valueToLisp _ val@(BitVecValue n) = return $ case getType val of
   BitVecRepr sz -> L.List [L.Symbol "_"
                           ,L.Symbol (T.pack $ "bv"++show n)
                           ,L.Number $ L.I sz]
---valueToLisp (ConstrValue con args) = 
+valueToLisp f (ConstrValue con args) = do
+  con' <- f con
+  args' <- argsToListM (valueToLisp f) args
+  case args' of
+    [] -> return con'
+    xs -> return $ L.List (con' : xs)
 
 isOverloaded :: Function fun con field sig -> Bool
 isOverloaded Expr.Eq = True
