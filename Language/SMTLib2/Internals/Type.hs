@@ -298,6 +298,29 @@ instance GShow con => Show (Value con tp) where
 instance GShow con => GShow (Value con) where
   gshowsPrec = showsPrec
 
+instance GShow e => Show (Args e sig) where
+  showsPrec p NoArg = showString "NoArg"
+  showsPrec p (Arg x xs) = showParen (p>10) $
+                           showString "Arg " .
+                           gshowsPrec 11 x . showChar ' ' .
+                           showsPrec 11 xs
+
+instance GShow e => GShow (Args e) where
+  gshowsPrec = showsPrec
+
+instance Show (Datatype sig) where
+  showsPrec p dt = showParen (p>10) $
+                   showString "Datatype " .
+                   showString (datatypeName dt)
+
+instance GShow Datatype where
+  gshowsPrec = showsPrec
+
+deriving instance Show (Repr t)
+
+instance GShow Repr where
+  gshowsPrec = showsPrec
+
 mapArgs :: Monad m => (forall t. GetType t => e1 t -> m (e2 t))
         -> Args e1 arg
         -> m (Args e2 arg)

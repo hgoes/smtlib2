@@ -15,8 +15,8 @@ Source-Repository head
   Location:     https://github.com/hguenther/smtlib2.git
 
 Library
-  Build-Depends: smtlib2 ==0.3, base >=4 && <5, text, containers, process, atto-lisp >=0.2, attoparsec, mtl, constraints, bytestring, blaze-builder, dependent-sum
-  Extensions: GADTs,FlexibleContexts,FlexibleInstances,ExistentialQuantification,KindSignatures,DataKinds,TypeFamilies,AllowAmbiguousTypes,TypeOperators,MultiParamTypeClasses,OverloadedStrings,ScopedTypeVariables,RankNTypes,GeneralizedNewtypeDeriving,ViewPatterns,CPP
+  Build-Depends: smtlib2 ==0.3, base >=4 && <5, text, containers, process, atto-lisp >=0.2, attoparsec, mtl, constraints, bytestring, blaze-builder, dependent-sum, transformers
+  Extensions: GADTs,FlexibleContexts,FlexibleInstances,ExistentialQuantification,KindSignatures,DataKinds,TypeFamilies,AllowAmbiguousTypes,TypeOperators,MultiParamTypeClasses,OverloadedStrings,ScopedTypeVariables,RankNTypes,GeneralizedNewtypeDeriving,ViewPatterns,CPP,StandaloneDeriving
   GHC-Options: -fwarn-unused-imports
   Exposed-Modules:
     Language.SMTLib2.Pipe

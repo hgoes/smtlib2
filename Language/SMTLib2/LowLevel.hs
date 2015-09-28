@@ -16,8 +16,9 @@ module Language.SMTLib2.LowLevel (
   assertId,getUnsatCore,
   -- * Interpolation
   Partition(..),assertPartition,interpolate,
+  -- * Types
+  Type(..),Nat(..),GetType(..),GetTypes(..),AllEq(SameType),Fst,Snd,
   -- * Expressions
-  Type(..),Nat(..),GetType(..),GetTypes(..),
   SMTExpr(..),SMTExpr'(..),SMTValue(..),Embed(..),Expression(..),Function(..),
   Args(..),
   -- ** Operators
@@ -355,7 +356,6 @@ instance Backend b => GShow (SMTExpr b) where
 instance Backend b => Embed (SMTExpr b) where
   type EmbedBackend (SMTExpr b) = b
   type EmbedSub (SMTExpr b) = SMTExpr' b
-  type EmbedState (SMTExpr b) = IMap.IntMap [AnyQVar b]
   embed = SMTExpr
   embedQuantifier q (f::Args (SMTExpr b) arg -> SMTExpr b BoolType)
     = SpecialExpr (Quantification' q level qargs body)
@@ -436,7 +436,6 @@ instance Backend b => Embed (SMTExpr b) where
 class (Backend (EmbedBackend e),GShow e) => Embed e where
   type EmbedBackend e :: *
   type EmbedSub e :: Type -> *
-  type EmbedState e :: *
   embed :: GetType tp
         => Expression (Var (EmbedBackend e))
                       (QVar (EmbedBackend e))

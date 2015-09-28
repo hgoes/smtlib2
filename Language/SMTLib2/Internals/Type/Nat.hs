@@ -1,22 +1,10 @@
 {-# LANGUAGE StandaloneDeriving #-}
 module Language.SMTLib2.Internals.Type.Nat where
-  --(module GHC.TypeLits,reifyNat,N8) where
-
-{-import GHC.TypeLits
-import Data.Proxy
-import Data.Typeable
-
-reifyNat :: Integer -> (forall n. KnownNat n => Proxy n -> r) -> r
-reifyNat n f = case someNatVal n of
-  Just (SomeNat pr) -> f pr
-
-deriving instance KnownNat n => Typeable n
-
-type N8 = 8-}
 
 import Data.Proxy
 import Data.Typeable
 import Data.Constraint
+import Data.GADT.Compare
 
 data Nat = Z | S Nat deriving Typeable
 
@@ -27,11 +15,18 @@ deriving instance Typeable 'S
 
 class Typeable n => KnownNat (n :: Nat) where
   natVal :: p n -> Integer
+  natPred :: p n -> Pred n
+
+data Pred (n::Nat) where
+   NoPred :: Pred Z
+   Pred :: KnownNat n => Proxy n -> Pred (S n)
 
 instance KnownNat Z where
   natVal _ = 0
+  natPred _ = NoPred
 instance KnownNat n => KnownNat (S n) where
   natVal (_::p (S n)) = succ (natVal (Proxy::Proxy n))
+  natPred _ = Pred Proxy
 
 type family (+) (n :: Nat) (m :: Nat) :: Nat where
   (+) Z n = n
@@ -49,6 +44,13 @@ type family Sum (n :: [Nat]) :: Nat where
 sameNat :: (KnownNat a,KnownNat b) => Proxy a -> Proxy b
         -> Maybe (a :~: b)
 sameNat _ _ = eqT
+
+gcompareNat :: (KnownNat a,KnownNat b) => Proxy a -> Proxy b -> GOrdering a b
+gcompareNat p1 p2 = case sameNat p1 p2 of
+  Just Refl -> GEQ
+  Nothing -> case compare (natVal p1) (natVal p2) of
+    LT -> GLT
+    GT -> GGT
 
 reifyNat :: (Num a,Ord a) => a -> (forall n. KnownNat n => Proxy n -> r) -> r
 reifyNat n f
