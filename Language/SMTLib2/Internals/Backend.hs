@@ -160,8 +160,8 @@ instance Eq v => GEq (UntypedVar v) where
   geq x1@(UntypedVar v1) x2@(UntypedVar v2) = case x1 of
     (_::UntypedVar v p) -> case x2 of
       (_::UntypedVar v q) -> do
-        Refl <- geq (getType (Proxy::Proxy p))
-                    (getType (Proxy::Proxy q))
+        Refl <- geq (getType::Repr p)
+                    (getType::Repr q)
         if v1==v2
           then return Refl
           else Nothing
@@ -170,10 +170,10 @@ instance Eq v => GEq (UntypedFun v) where
   geq x1@(UntypedFun v1) x2@(UntypedFun v2) = case x1 of
     (_::UntypedFun v '(arg1,t1)) -> case x2 of
       (_::UntypedFun v '(arg2,t2)) -> do
-        Refl <- geq (getTypes (Proxy::Proxy arg1))
-                    (getTypes (Proxy::Proxy arg2))
-        Refl <- geq (getType (Proxy::Proxy t1))
-                    (getType (Proxy::Proxy t2))
+        Refl <- geq (getTypes::Args Repr arg1)
+                    (getTypes::Args Repr arg2)
+        Refl <- geq (getType::Repr t1)
+                    (getType::Repr t2)
         if v1==v2
           then return Refl
           else Nothing
@@ -182,8 +182,8 @@ instance Eq v => GEq (UntypedCon v) where
   geq x1@(UntypedCon v1) x2@(UntypedCon v2) = case x1 of
     (_::UntypedCon v '(arg1,dt1)) -> case x2 of
       (_::UntypedCon v '(arg2,dt2)) -> do
-        Refl <- geq (getTypes (Proxy::Proxy arg1))
-                    (getTypes (Proxy::Proxy arg2))
+        Refl <- geq (getTypes::Args Repr arg1)
+                    (getTypes::Args Repr arg2)
         Refl <- eqT :: Maybe (dt1 :~: dt2)
         if v1==v2
           then return Refl
@@ -194,8 +194,8 @@ instance Eq v => GEq (UntypedField v) where
     (_::UntypedField v '(dt1,t1)) -> case x2 of
       (_::UntypedField v '(dt2,t2)) -> do
         Refl <- eqT :: Maybe (dt1 :~: dt2)
-        Refl <- geq (getType (Proxy::Proxy t1))
-                    (getType (Proxy::Proxy t2))
+        Refl <- geq (getType::Repr t1)
+                    (getType::Repr t2)
         if v1==v2
           then return Refl
           else Nothing
@@ -203,8 +203,8 @@ instance Eq v => GEq (UntypedField v) where
 instance Ord v => GCompare (UntypedVar v) where
   gcompare x1@(UntypedVar v1) x2@(UntypedVar v2) = case x1 of
     (_::UntypedVar v p) -> case x2 of
-      (_::UntypedVar v q) -> case gcompare (getType (Proxy::Proxy p))
-                                           (getType (Proxy::Proxy q)) of
+      (_::UntypedVar v q) -> case gcompare (getType::Repr p)
+                                           (getType::Repr q) of
         GEQ -> case compare v1 v2 of
           EQ -> GEQ
           LT -> GLT
@@ -214,10 +214,10 @@ instance Ord v => GCompare (UntypedVar v) where
 instance Ord v => GCompare (UntypedFun v) where
   gcompare x1@(UntypedFun v1) x2@(UntypedFun v2) = case x1 of
     (_::UntypedFun v '(arg1,t1)) -> case x2 of
-      (_::UntypedFun v '(arg2,t2)) -> case gcompare (getTypes (Proxy::Proxy arg1))
-                                                    (getTypes (Proxy::Proxy arg2)) of
-        GEQ -> case gcompare (getType (Proxy::Proxy t1))
-                             (getType (Proxy::Proxy t2)) of
+      (_::UntypedFun v '(arg2,t2)) -> case gcompare (getTypes::Args Repr arg1)
+                                                    (getTypes::Args Repr arg2) of
+        GEQ -> case gcompare (getType::Repr t1)
+                             (getType::Repr t2) of
           GEQ -> case compare v1 v2 of
             EQ -> GEQ
             LT -> GLT
@@ -230,8 +230,8 @@ instance Ord v => GCompare (UntypedFun v) where
 instance Ord v => GCompare (UntypedCon v) where
   gcompare x1@(UntypedCon v1) x2@(UntypedCon v2) = case x1 of
     (_::UntypedCon v '(arg1,dt1)) -> case x2 of
-      (_::UntypedCon v '(arg2,dt2)) -> case gcompare (getTypes (Proxy::Proxy arg1))
-                                                     (getTypes (Proxy::Proxy arg2)) of
+      (_::UntypedCon v '(arg2,dt2)) -> case gcompare (getTypes::Args Repr arg1)
+                                                     (getTypes::Args Repr arg2) of
         GEQ -> case eqT :: Maybe (dt1 :~: dt2) of
           Just Refl -> case compare v1 v2 of
             EQ -> GEQ
@@ -247,8 +247,8 @@ instance Ord v => GCompare (UntypedCon v) where
 instance Ord v => GCompare (UntypedField v) where
   gcompare x1@(UntypedField v1) x2@(UntypedField v2) = case x1 of
     (_::UntypedField v '(dt1,t1)) -> case x2 of
-      (_::UntypedField v '(dt2,t2)) -> case gcompare (getType (Proxy::Proxy t1))
-                                                     (getType (Proxy::Proxy t2)) of
+      (_::UntypedField v '(dt2,t2)) -> case gcompare (getType::Repr t1)
+                                                     (getType::Repr t2) of
         GEQ -> case eqT :: Maybe (dt1 :~: dt2) of
           Just Refl -> case compare v1 v2 of
             EQ -> GEQ

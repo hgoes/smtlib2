@@ -265,8 +265,8 @@ instance Backend b => GEq (SMTExpr' b) where
   geq (Quantification' q1 lvl1 (_::Args Proxy args1) body1)
       (Quantification' q2 lvl2 (_::Args Proxy args2) body2)
     | (q1,lvl1) == (q2,lvl2) = do
-        Refl <- geq (getTypes (Proxy::Proxy args1))
-                    (getTypes (Proxy::Proxy args2))
+        Refl <- geq (getTypes::Args Repr args1)
+                    (getTypes::Args Repr args2)
         Refl <- geq body1 body2
         return Refl
     | otherwise = Nothing
@@ -300,8 +300,8 @@ instance Backend b => GCompare (SMTExpr' b) where
     = case compare (lvl1,nr1) (lvl2,nr2) of
         EQ -> case q1 of
           (_::SMTExpr' b t1) -> case q2 of
-            (_::SMTExpr' b t2) -> gcompare (getType (Proxy::Proxy t1))
-                                           (getType (Proxy::Proxy t2))
+            (_::SMTExpr' b t2) -> gcompare (getType::Repr t1)
+                                           (getType::Repr t2)
         LT -> GLT
         GT -> GGT
   gcompare (QVar' _ _) _ = GLT
@@ -310,8 +310,8 @@ instance Backend b => GCompare (SMTExpr' b) where
     = case compare (q1,lvl1) (q2,lvl2) of
         EQ -> case e1 of
           (_::SMTExpr' b t1) -> case e2 of
-            (_::SMTExpr' b t2) -> gcompare (getType (Proxy::Proxy t1))
-                                           (getType (Proxy::Proxy t2))
+            (_::SMTExpr' b t2) -> gcompare (getType::Repr t1)
+                                           (getType::Repr t2)
         GT -> GGT
         LT -> GLT
   gcompare (Quantification' _ _ _ _) _ = GLT
@@ -363,7 +363,7 @@ instance Backend b => Embed (SMTExpr b) where
       body = f args
       level = getLevel body
       --level = 0
-      args = mkArg 0 (getTypes $ (Proxy::Proxy arg))
+      args = mkArg 0 (getTypes::Args Repr arg)
       qargs = runIdentity $ mapArgs (\_ -> return Proxy) args
 
       mkArg :: Int -> Args Repr arg' -> Args (SMTExpr b) arg'
@@ -723,7 +723,7 @@ defFun :: (Embed e,GetTypes arg,GetType res)
        -> SMT (EmbedBackend e) (Function (Fun (EmbedBackend e)) con field '(arg,res))
 defFun (f :: Args e arg -> e res) = do
   args <- mapArgs (\_ -> updateBackend $ \b -> B.createFunArg b Nothing
-                  ) (getTypes (Proxy::Proxy arg))
+                  ) (getTypes::Args Repr arg)
   fargs <- mapArgs (return . embed . FVar) args
   body <- toBackendExpr (f fargs)
   fun <- updateBackend $ \b -> B.defineFun b Nothing args body

@@ -100,9 +100,9 @@ instance Backend Z3Solver where
   getInfo solv SMTSolverVersion = do
     vers <- getVersion
     return (show vers,solv)
-  declareVar solv name = with $ \pr -> do
+  declareVar solv name = with $ \(_::Proxy tp) -> do
     (ctx,solv1) <- getContext solv
-    tp <- typeToZ3 ctx (getType pr)
+    tp <- typeToZ3 ctx (getType::Repr tp)
     (sym,solv2) <- nextSymbol solv1
     decl <- mkFuncDecl ctx sym [] tp
     return (UntypedVar decl,solv2)
@@ -135,7 +135,7 @@ instance Backend Z3Solver where
         return (res,solv1)
 
 fromZ3Value :: GetType t => Context -> Z3Expr t -> IO (Value Z3Con t)
-fromZ3Value ctx p@(UntypedVar e) = case getType p of
+fromZ3Value ctx (UntypedVar e::Z3Expr t) = case getType::Repr t of
   BoolRepr -> do
     v <- getBool ctx e
     return (BoolValue v)
@@ -189,7 +189,7 @@ toZ3App ctx Store (Arg arr (Arg val (Arg idx NoArg)))
   = mkStore ctx (untypedVar arr) (untypedVar idx) (untypedVar val)
 toZ3App ctx carr@ConstArray (Arg arg NoArg) = case carr of
   (_::Function Z3Fun Z3Con Z3Field '( '[val],ArrayType sig val))
-    -> case getTypes (Proxy::Proxy sig) of
+    -> case getTypes::Args Repr sig of
          Arg idx NoArg -> do
            srt <- typeToZ3 ctx idx
            mkConstArray ctx srt (untypedVar arg)

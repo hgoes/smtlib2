@@ -135,14 +135,14 @@ instance Backend SMTPipe where
     putRequest b1 (L.List [L.Symbol "define-fun"
                           ,L.Symbol name''
                           ,L.List $ mkArgs arg
-                          ,typeSymbol (getType (Proxy::Proxy r))
+                          ,typeSymbol (getType::Repr r)
                           ,exprToLisp body])
     return (UntypedFun name'',b1)
     where
       mkArgs :: Args PipeVar ts -> [L.Lisp]
       mkArgs NoArg = []
-      mkArgs (Arg var@(UntypedVar name) xs)
-        = (L.List [L.Symbol name,typeSymbol (getType var)]):
+      mkArgs (Arg (UntypedVar name::PipeVar t) xs)
+        = (L.List [L.Symbol name,typeSymbol (getType::Repr t)]):
           mkArgs xs
   assert b (PipeExpr expr) = do
     putRequest b (L.List [L.Symbol "assert"
@@ -295,11 +295,11 @@ instance Backend SMTPipe where
 renderDeclareFun :: (GetTypes arg,GetType ret)
                  => Map String Int -> Proxy arg -> Proxy ret -> Maybe String
                  -> (T.Text,L.Lisp,Map String Int)
-renderDeclareFun names parg pr name
+renderDeclareFun names (_::Proxy arg) (_::Proxy ret) name
   = (name'',L.List [L.Symbol "declare-fun"
                    ,L.Symbol name''
-                   ,typeList (getTypes parg)
-                   ,typeSymbol (getType pr)],nnames)
+                   ,typeList (getTypes::Args Repr arg)
+                   ,typeSymbol (getType::Repr ret)],nnames)
   where
     name' = case name of
               Just n -> n
@@ -358,8 +358,8 @@ renderDeclareDatatype coll
     mkFields (Arg f fs) = mkField f : mkFields fs
 
     mkField :: GetType t => Type.Field dt t -> L.Lisp
-    mkField f = L.List [L.Symbol $ T.pack $ fieldName f
-                       ,typeSymbol (getType f)]
+    mkField (f::Type.Field dt t) = L.List [L.Symbol $ T.pack $ fieldName f
+                                          ,typeSymbol (getType::Repr t)]
       
 renderSetOption :: SMTOption -> L.Lisp
 renderSetOption opt
@@ -378,11 +378,11 @@ renderSetOption opt
 
 renderDeclareVar :: GetType tp => Map String Int -> Proxy tp -> Maybe String
                  -> (T.Text,L.Lisp,Map String Int)
-renderDeclareVar names tp name
+renderDeclareVar names (_::Proxy tp) name
   = (name'',L.List [L.Symbol "declare-fun"
                    ,L.Symbol name''
                    ,L.Symbol "()"
-                   ,typeSymbol (getType tp)
+                   ,typeSymbol (getType::Repr tp)
                    ],nnames)
   where
     name' = case name of
@@ -397,7 +397,7 @@ renderDefineVar b name (PipeExpr def :: PipeExpr t)
      L.List [L.Symbol "define-fun"
             ,L.Symbol name''
             ,L.Symbol "()"
-            ,typeSymbol (getType def)
+            ,typeSymbol (getType::Repr t)
             ,exprToLisp def],
      nb { vars = Map.insert name'' (Var (Proxy::Proxy t)) (vars nb) })
   where
@@ -545,7 +545,7 @@ lispToExprTyped :: GetType t => SMTPipe -> L.Lisp -> LispParse (PipeExpr t)
 lispToExprTyped st l = withProxy $
                        \p -> lispToExprWith (pipeParser st) (Just (Sort p)) l $
                              \e -> case gcast e of
-                               Nothing -> throwE $ show l++" has type "++show (getType e)++", but "++show (getType p)++" was expected."
+                               Nothing -> throwE $ show l++" has type "++show (getTypeOf e)++", but "++show (getTypeOf p)++" was expected."
                                Just r -> return (PipeExpr r)
   where
     withProxy :: (Proxy t -> LispParse (PipeExpr t)) -> LispParse (PipeExpr t)
@@ -610,7 +610,7 @@ lispToExprWith p hint (L.List [L.Symbol "_",L.Symbol "as-array",fsym]) res = do
   where
     (idx_hint,el_hint) = case hint of
       Nothing -> ([],Nothing)
-      Just (Sort srt) -> case getType srt of
+      Just (Sort (_::Proxy srt)) -> case getType::Repr srt of
         ArrayRepr args (_::Repr el)
           -> (argsToList (\(_::Repr t) -> Just $ Sort (Proxy::Proxy t)) args,
               Just $ Sort (Proxy::Proxy el))
@@ -745,7 +745,7 @@ lispToFunction rf sort (L.List [L.Symbol "_",L.Symbol "map",sym]) = do
   return (ParsedFunction reqArgs fun)
   where
     (sort',idx') = case sort of
-      Just (Sort p) -> case getType p of
+      Just (Sort (_::Proxy p)) -> case getType::Repr p of
         ArrayRepr (_::Args Repr args) (_::Repr t)
           -> (Just (Sort (Proxy::Proxy t)),
               Just (Sorts (Proxy::Proxy args)))
@@ -759,13 +759,13 @@ lispToFunction _ sort (L.Symbol "+") = lispToArithFunction sort Plus
 lispToFunction _ sort (L.Symbol "*") = lispToArithFunction sort Mult
 lispToFunction _ sort (L.Symbol "-") = lispToArithFunction sort Minus
 lispToFunction _ sort (L.Symbol "abs") = case sort of
-  Just (Sort srt) -> case getType srt of
+  Just (Sort (_::Proxy srt)) -> case getType::Repr srt of
     IntRepr -> return $ ParsedFunction (const False) (\_ -> return $ AnyFunction AbsInt)
     RealRepr -> return $ ParsedFunction (const False) (\_ -> return $ AnyFunction AbsReal)
     exp -> throwE $ "abs function can't have type "++show exp
   Nothing -> return $ ParsedFunction (==0) $
              \args -> case args of
-                [Just (Sort srt)] -> case getType srt of
+                [Just (Sort (_::Proxy srt))] -> case getType::Repr srt of
                   IntRepr -> return $ AnyFunction AbsInt
                   RealRepr -> return $ AnyFunction AbsReal
                   srt -> throwE $ "abs can't take argument of type "++show srt
@@ -817,14 +817,14 @@ lispToFunction _ sort (L.Symbol "bvneg") = lispToBVUnFunction sort BVNeg
 lispToFunction _ _ (L.Symbol "select")
   = return $ ParsedFunction (==0)
     (\args -> case args of
-       Just (Sort arr):_ -> case getType arr of
+       Just (Sort (_::Proxy arr)):_ -> case getType::Repr arr of
          ArrayRepr (_::Args Repr idx) (_::Repr val)
            -> return $ AnyFunction (Select :: Function fun con field
                                               '(ArrayType idx val ': idx,val))
          srt -> throwE $ "Invalid argument type to select function: "++show srt
        _ -> throwE $ "Invalid arguments to select function.")
 lispToFunction _ sort (L.Symbol "store") = case sort of
-  Just (Sort srt) -> case getType srt of
+  Just (Sort (_::Proxy srt)) -> case getType::Repr srt of
     ArrayRepr (_::Args Repr idx) (_::Repr val)
       -> return (ParsedFunction (const False)
                  (\_ -> return $ AnyFunction
@@ -833,7 +833,7 @@ lispToFunction _ sort (L.Symbol "store") = case sort of
     srt' -> throwE $ "Invalid argument types to store function: "++show srt'
   Nothing -> return $ ParsedFunction (==0)
              (\args -> case args of
-                Just (Sort arr):_ -> case getType arr of
+                Just (Sort (_::Proxy arr)):_ -> case getType::Repr arr of
                   ArrayRepr (_::Args Repr idx) (_::Repr val)
                     -> return $ AnyFunction
                        (Store :: Function fun con field
@@ -841,10 +841,10 @@ lispToFunction _ sort (L.Symbol "store") = case sort of
                   srt -> throwE $ "Invalid first argument type to store function: "++show srt
                 _ -> throwE $ "Invalid arguments to store function.")
 lispToFunction r sort (L.List [L.Symbol "as",L.Symbol "const",sig]) = do
-  Sort rsig <- case sort of
+  Sort (_::Proxy rsig) <- case sort of
     Just srt -> return srt
     Nothing -> lispToSort r sig
-  case getType rsig of
+  case getType::Repr rsig of
     ArrayRepr (_::Args Repr idx) (_::Repr val)
       -> return $ ParsedFunction (const False)
          (\_ -> return $ AnyFunction (ConstArray :: Function fun con field '( '[val],ArrayType idx val)))
@@ -852,8 +852,8 @@ lispToFunction r sort (L.List [L.Symbol "as",L.Symbol "const",sig]) = do
 lispToFunction _ sort (L.Symbol "concat")
   = return $ ParsedFunction (const True)
     (\args -> case args of
-       [Just (Sort s1),Just (Sort s2)]
-         -> case (getType s1,getType s2) of
+       [Just (Sort (_::Proxy s1)),Just (Sort (_::Proxy s2))]
+         -> case (getType::Repr s1,getType::Repr s2) of
          (BitVecRepr sz1,BitVecRepr sz2)
            -> reifyAdd sz1 sz2 $
               \(_::Proxy p1) (_::Proxy p2)
@@ -865,7 +865,7 @@ lispToFunction _ sort (L.Symbol "concat")
 lispToFunction _ sort (L.List [L.Symbol "_",L.Symbol "extract",L.Number (L.I end),L.Number (L.I start)])
   = return $ ParsedFunction (==0)
     (\args -> case args of
-       [Just (Sort srt)] -> case getType srt of
+       [Just (Sort (_::Proxy srt))] -> case getType::Repr srt of
          BitVecRepr size -> case reifyExtract start (end-start+1) size $
                                  \pstart (_::Proxy len) (_::Proxy size)
                                    -> AnyFunction
@@ -882,7 +882,8 @@ lispToFunction rf sort (L.List [sym,lispToList -> Just sig,tp]) = do
   nsort <- lispToSort rf tp
   fun <- lispToFunction rf (Just nsort) sym
   rsig <- lispToSorts rf sig $
-            \sig' -> argsToList (\(_::Repr t) -> Just $ Sort (Proxy::Proxy t)) (getTypes sig')
+            \(_::Proxy sig') -> argsToList (\(_::Repr t) -> Just $ Sort (Proxy::Proxy t)
+                                           ) (getTypes::Args Repr sig')
   return $ ParsedFunction (const False) (\_ -> getParsedFunction fun rsig)
 lispToFunction rf sort (L.Symbol name)
   = parseFunction rf sort name
@@ -898,7 +899,7 @@ lispToOrdFunction :: OrdOp -> LispParse (ParsedFunction fun con field)
 lispToOrdFunction op
   = return (ParsedFunction (==0)
             (\argSrt -> case argSrt of
-               (Just (Sort srt)):_ -> case getType srt of
+               (Just (Sort (_::Proxy srt))):_ -> case getType::Repr srt of
                  IntRepr -> return $ AnyFunction (OrdInt op)
                  RealRepr -> return $ AnyFunction (OrdReal op)
                  srt' -> throwE $ "Invalid argument to "++show op++" function: "++show srt'
@@ -906,7 +907,7 @@ lispToOrdFunction op
 
 lispToArithFunction :: Maybe Sort -> ArithOp -> LispParse (ParsedFunction fun con field)
 lispToArithFunction sort op = case sort of
-  Just (Sort pel) -> case getType pel of
+  Just (Sort (_::Proxy pel)) -> case getType::Repr pel of
     IntRepr -> return (ParsedFunction (const False)
                        (\args -> withEq (Proxy::Proxy IntType) args $
                                  \(_::Proxy ('IntType ': arg))
@@ -918,7 +919,7 @@ lispToArithFunction sort op = case sort of
     srt -> throwE $ "Invalid type of "++show op++" function: "++show srt
   Nothing -> return (ParsedFunction (==0)
                      (\argSrt -> case argSrt of
-                        (Just (Sort srt)):_ -> case getType srt of
+                        (Just (Sort (_::Proxy srt))):_ -> case getType::Repr srt of
                            IntRepr -> withEq (Proxy::Proxy IntType) argSrt $
                                       \(_::Proxy ('IntType ': arg))
                                       -> return $ AnyFunction (ArithInt op :: Function fun con field '( 'IntType ': arg,IntType))
@@ -940,7 +941,7 @@ lispToBVCompFunction :: BVCompOp -> ParsedFunction fun con field
 lispToBVCompFunction op
   = ParsedFunction (==0)
     (\args -> case args of
-       [Just (Sort srt),_] -> case getType srt of
+       [Just (Sort (_::Proxy srt)),_] -> case getType::Repr srt of
          BitVecRepr sz -> reifyNat sz $
            \(_::Proxy sz)
            -> return $ AnyFunction (BVComp op :: Function fun con field
@@ -949,7 +950,7 @@ lispToBVCompFunction op
        _ -> throwE $ "Wrong number of arguments to "++show op++" function.")
 
 lispToBVBinFunction :: Maybe Sort -> BVBinOp -> LispParse (ParsedFunction fun con field)
-lispToBVBinFunction (Just (Sort srt)) op = case getType srt of
+lispToBVBinFunction (Just (Sort (_::Proxy srt))) op = case getType::Repr srt of
   BitVecRepr sz -> reifyNat sz $
     \(_::Proxy sz)
     -> return $ ParsedFunction (const False) $
@@ -959,7 +960,7 @@ lispToBVBinFunction (Just (Sort srt)) op = case getType srt of
 lispToBVBinFunction Nothing op
   = return $ ParsedFunction (==0) $
     \args -> case args of
-      [Just (Sort srt),_] -> case getType srt of
+      [Just (Sort (_::Proxy srt)),_] -> case getType::Repr srt of
         BitVecRepr sz -> reifyNat sz $
           \(_::Proxy sz)
           -> return $ AnyFunction
@@ -968,7 +969,7 @@ lispToBVBinFunction Nothing op
       _ -> throwE $ "Wrong number of arguments to "++show op++" function."
 
 lispToBVUnFunction :: Maybe Sort -> BVUnOp -> LispParse (ParsedFunction fun con field)
-lispToBVUnFunction (Just (Sort srt)) op = case getType srt of
+lispToBVUnFunction (Just (Sort (_::Proxy srt))) op = case getType::Repr srt of
   BitVecRepr sz -> reifyNat sz $
     \(_::Proxy sz) 
     -> return $ ParsedFunction (const False) $
@@ -978,7 +979,7 @@ lispToBVUnFunction (Just (Sort srt)) op = case getType srt of
 lispToBVUnFunction Nothing op
   = return $ ParsedFunction (==0) $
     \args -> case args of
-      [Just (Sort srt)] -> case getType srt of
+      [Just (Sort (_::Proxy srt))] -> case getType::Repr srt of
         BitVecRepr sz -> reifyNat sz $
           \(_::Proxy sz)
           -> return $ AnyFunction
@@ -991,7 +992,7 @@ mkMap (pidx::p idx) (AnyFunction (f :: Function fun con field '(arg,res))) = cas
   Dict -> AnyFunction (Map f :: Function fun con field '(Lifted arg idx,ArrayType idx res))
 
 asArraySort :: Sort -> Maybe (Sorts,Sort)
-asArraySort (Sort p) = case getType p of
+asArraySort (Sort (_::Proxy p)) = case getType::Repr p of
   ArrayRepr (_::Args Repr idx) (_::Repr el)
     -> return (Sorts (Proxy::Proxy idx),Sort (Proxy::Proxy el))
   _ -> Nothing
@@ -1054,7 +1055,7 @@ lispToConstrConstant b sym = do
     Nothing -> throwE $ "Invalid constructor "++show constr
   case rev of
     Constr parg (_::Proxy res) -> do
-      args' <- makeArgs (getTypes parg) args
+      args' <- makeArgs (getTypesOf parg) args
       return (AnyValue (ConstrValue (UntypedCon constr) args'
                          :: Value PipeConstr (DataType res)))
     _ -> throwE $ "Invalid constant: "++show sym
@@ -1149,7 +1150,7 @@ exprToLispWith _ _ f g h i _ _ (Expr.AsArray fun) = do
 exprToLispWith _ f _ _ _ _ _ g (Expr.Quantification q args body) = do
   bind <- argsToListM (\arg -> do
                           sym <- f arg
-                          return $ L.List [sym,typeSymbol $ getType arg]
+                          return $ L.List [sym,typeSymbol $ getTypeOf arg]
                       ) args
   body' <- g body
   return $ L.List [L.Symbol (case q of
@@ -1179,7 +1180,7 @@ valueToLisp _ (RealValue n)
   = return $ L.List [L.Symbol "/"
                     ,numToLisp $ numerator n
                     ,numToLisp $ denominator n]
-valueToLisp _ val@(BitVecValue n) = return $ case getType val of
+valueToLisp _ (BitVecValue n::Value con tp) = return $ case getType::Repr tp of
   BitVecRepr sz -> L.List [L.Symbol "_"
                           ,L.Symbol (T.pack $ "bv"++show n)
                           ,L.Number $ L.I sz]
@@ -1278,7 +1279,7 @@ functionSymbol _ _ _ _ Store = return $ L.Symbol "store"
 functionSymbol _ _ _ _ (ConstArray::Function fun con field '(arg,res))
   = return $ L.List [L.Symbol "as"
                     ,L.Symbol "const"
-                    ,typeSymbol (getType (Proxy::Proxy res))]
+                    ,typeSymbol (getType::Repr res)]
 functionSymbol _ _ _ _ Concat = return $ L.Symbol "concat"
 functionSymbol _ _ _ _ f@(Extract start)
   = return $ case f of
@@ -1312,8 +1313,8 @@ functionSymbolWithSig f g h i (j::Function fun con field '(arg,res)) = do
   sym <- functionSymbol f g h i j
   if isOverloaded j
     then return $ L.List [sym
-                         ,typeList (getTypes (Proxy::Proxy arg))
-                         ,typeSymbol (getType (Proxy::Proxy res))]
+                         ,typeList (getTypes::Args Repr arg)
+                         ,typeSymbol (getType::Repr res)]
     else return sym
 
 typeSymbol :: Repr t -> L.Lisp

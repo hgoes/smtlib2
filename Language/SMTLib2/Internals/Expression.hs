@@ -138,7 +138,7 @@ allEqOfList pr@(_::Proxy t) n f
     \(_::Proxy (t ': ts)) -> f (Proxy::Proxy (t ': t ': ts))
 
 functionType :: (GetTypes arg,GetType res) => Function fun con field '(arg,res) -> (Args Repr arg,Repr res)
-functionType (_::Function fun con field '(arg,res)) = (getTypes (Proxy::Proxy arg),getType (Proxy::Proxy res))
+functionType (_::Function fun con field '(arg,res)) = (getTypes::Args Repr arg,getType::Repr res)
 
 mapExpr :: (Functor m,Monad m,GetType r,Typeable con2)
         => (forall t. GetType t => v1 t -> m (v2 t))
@@ -535,8 +535,8 @@ instance (GCompare fun,GCompare con,GCompare field)
   gcompare f1@Eq f2@Eq = case f1 of
     (_::Function fun con field '(arg1,BoolType)) -> case f2 of
       (_::Function fun con field '(arg2,BoolType))
-        -> case gcompare (getTypes (Proxy::Proxy arg1))
-                         (getTypes (Proxy::Proxy arg2)) of
+        -> case gcompare (getTypes::Args Repr arg1)
+                         (getTypes::Args Repr arg2) of
              GEQ -> GEQ
              GLT -> GLT
              GGT -> GGT
@@ -545,8 +545,8 @@ instance (GCompare fun,GCompare con,GCompare field)
   gcompare f1@Distinct f2@Distinct = case f1 of
     (_::Function fun con field '(arg1,BoolType)) -> case f2 of
       (_::Function fun con field '(arg2,BoolType))
-        -> case gcompare (getTypes (Proxy::Proxy arg1))
-                         (getTypes (Proxy::Proxy arg2)) of
+        -> case gcompare (getTypes::Args Repr arg1)
+                         (getTypes::Args Repr arg2) of
              GEQ -> GEQ
              GLT -> GLT
              GGT -> GGT
@@ -557,8 +557,8 @@ instance (GCompare fun,GCompare con,GCompare field)
       (_::Function fun con field '(arg,res)) -> case m1 of
         (_::Function fun con field '(Lifted arg idx1,ArrayType idx1 res)) -> case m2 of
           (_::Function fun con field '(Lifted arg idx2,ArrayType idx2 res))
-            -> case gcompare (getTypes (Proxy::Proxy idx1))
-                             (getTypes (Proxy::Proxy idx2)) of
+            -> case gcompare (getTypes::Args Repr idx1)
+                             (getTypes::Args Repr idx2) of
                  GEQ -> GEQ
                  GLT -> GLT
                  GGT -> GGT
@@ -582,8 +582,8 @@ instance (GCompare fun,GCompare con,GCompare field)
     EQ -> case f1 of
       (_::Function fun con field '(arg1,IntType)) -> case f2 of
         (_::Function fun con field '(arg2,IntType))
-          -> case gcompare (getTypes (Proxy::Proxy arg1))
-                           (getTypes (Proxy::Proxy arg2)) of
+          -> case gcompare (getTypes::Args Repr arg1)
+                           (getTypes::Args Repr arg2) of
                GEQ -> GEQ
                GLT -> GLT
                GGT -> GGT
@@ -595,8 +595,8 @@ instance (GCompare fun,GCompare con,GCompare field)
     EQ -> case f1 of
       (_::Function fun con field '(arg1,RealType)) -> case f2 of
         (_::Function fun con field '(arg2,RealType))
-          -> case gcompare (getTypes (Proxy::Proxy arg1))
-                           (getTypes (Proxy::Proxy arg2)) of
+          -> case gcompare (getTypes::Args Repr arg1)
+                           (getTypes::Args Repr arg2) of
                GEQ -> GEQ
                GLT -> GLT
                GGT -> GGT
@@ -626,8 +626,8 @@ instance (GCompare fun,GCompare con,GCompare field)
     EQ -> case f1 of
       (_::Function fun con field '(arg1,BoolType)) -> case f2 of
         (_::Function fun con field '(arg2,BoolType))
-          -> case gcompare (getTypes (Proxy::Proxy arg1))
-                           (getTypes (Proxy::Proxy arg2)) of
+          -> case gcompare (getTypes::Args Repr arg1)
+                           (getTypes::Args Repr arg2) of
                GEQ -> GEQ
                GLT -> GLT
                GGT -> GGT
@@ -644,8 +644,8 @@ instance (GCompare fun,GCompare con,GCompare field)
   gcompare f1@ITE f2@ITE = case f1 of
     (_::Function fun con field '([BoolType,a,a],a)) -> case f2 of
       (_::Function fun con field '([BoolType,b,b],b))
-        -> case gcompare (getType (Proxy::Proxy a))
-                         (getType (Proxy::Proxy b)) of
+        -> case gcompare (getType::Repr a)
+                         (getType::Repr b) of
              GEQ -> GEQ
              GLT -> GLT
              GGT -> GGT
@@ -690,10 +690,10 @@ instance (GCompare fun,GCompare con,GCompare field)
   gcompare f1@Select f2@Select = case f1 of
     (_::Function fun con field '(ArrayType idx1 val1 ': idx1,val1)) -> case f2 of
       (_::Function fun con field '(ArrayType idx2 val2 ': idx2,val2))
-        -> case gcompare (getTypes (Proxy::Proxy idx1))
-                         (getTypes (Proxy::Proxy idx2)) of
-             GEQ -> case gcompare (getType (Proxy::Proxy val1))
-                                  (getType (Proxy::Proxy val2)) of
+        -> case gcompare (getTypes::Args Repr idx1)
+                         (getTypes::Args Repr idx2) of
+             GEQ -> case gcompare (getType::Repr val1)
+                                  (getType::Repr val2) of
                       GEQ -> GEQ
                       GLT -> GLT
                       GGT -> GGT
@@ -706,10 +706,10 @@ instance (GCompare fun,GCompare con,GCompare field)
                                  ArrayType idx1 val1)) -> case f2 of
       (_::Function fun con field '(ArrayType idx2 val2 ': val2 ': idx2,
                                    ArrayType idx2 val2))
-        -> case gcompare (getTypes (Proxy::Proxy idx1))
-                         (getTypes (Proxy::Proxy idx2)) of
-             GEQ -> case gcompare (getType (Proxy::Proxy val1))
-                                  (getType (Proxy::Proxy val2)) of
+        -> case gcompare (getTypes::Args Repr idx1)
+                         (getTypes::Args Repr idx2) of
+             GEQ -> case gcompare (getType::Repr val1)
+                                  (getType::Repr val2) of
                       GEQ -> GEQ
                       GLT -> GLT
                       GGT -> GGT
@@ -720,10 +720,10 @@ instance (GCompare fun,GCompare con,GCompare field)
   gcompare f1@ConstArray f2@ConstArray = case f1 of
     (_::Function fun con field '( '[val1],ArrayType idx1 val1)) -> case f2 of
       (_::Function fun con field '( '[val2],ArrayType idx2 val2))
-        -> case gcompare (getType (Proxy::Proxy val1))
-                         (getType (Proxy::Proxy val2)) of
-             GEQ -> case gcompare (getTypes (Proxy::Proxy idx1))
-                                  (getTypes (Proxy::Proxy idx2)) of
+        -> case gcompare (getType::Repr val1)
+                         (getType::Repr val2) of
+             GEQ -> case gcompare (getTypes::Args Repr idx1)
+                                  (getTypes::Args Repr idx2) of
                       GEQ -> GEQ
                       GLT -> GLT
                       GGT -> GGT

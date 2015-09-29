@@ -105,37 +105,43 @@ data Datatypes (dts :: ([[Type]],*) -> *) (sigs :: [([[Type]],*)]) where
           -> Datatypes dts ('(DatatypeSig dt,dt) ': sigs)
 
 class Typeable t => GetType (t :: Type) where
-  getType :: e t -> Repr t
+  getType :: Repr t
 
 instance GetType BoolType where
-  getType _ = BoolRepr
+  getType = BoolRepr
 instance GetType IntType where
-  getType _ = IntRepr
+  getType = IntRepr
 instance GetType RealType where
-  getType _ = RealRepr
+  getType = RealRepr
 instance (KnownNat n,Typeable n) => GetType (BitVecType n) where
-  getType (_::e (BitVecType n)) = BitVecRepr (natVal (Proxy::Proxy n))
+  getType = BitVecRepr (natVal (Proxy::Proxy n)) ::Repr (BitVecType n)
 instance (GetTypes idx,GetType el) => GetType (ArrayType idx el) where
-  getType (_::e (ArrayType idx el)) = ArrayRepr (getTypes (Proxy::Proxy idx))
-                                                (getType (Proxy::Proxy el))
+  getType = ArrayRepr (getTypes ::Args Repr idx)
+            (getType::Repr el) :: Repr (ArrayType idx el)
 instance IsDatatype t => GetType (DataType t) where
-  getType (_::e (DataType t)) = DataRepr (getDatatype (Proxy::Proxy t))
+  getType = DataRepr (getDatatype (Proxy::Proxy t)) :: Repr (DataType t)
+
+getTypeOf :: GetType t => p t -> Repr t
+getTypeOf _ = getType
 
 class Typeable t => GetTypes (t :: [Type]) where
   type Lifted t (idx :: [Type]) :: [Type]
-  getTypes :: e t -> Args Repr t
+  getTypes :: Args Repr t
   getTypeConstr :: GetTypes idx => p t -> q idx -> Dict (GetTypes (Lifted t idx))
 
 instance GetTypes '[] where
   type Lifted '[] idx = '[]
-  getTypes _ = NoArg
+  getTypes = NoArg
   getTypeConstr _ _ = Dict
 
 instance (GetType t,GetTypes ts) => GetTypes (t ': ts) where
   type Lifted (a ': b) idx = (ArrayType idx a) ': (Lifted b idx)
-  getTypes (_::e (t ': ts)) = Arg (getType (Proxy::Proxy t)) (getTypes (Proxy::Proxy ts))
+  getTypes = Arg (getType :: Repr t) (getTypes :: Args Repr ts) :: Args Repr (t ': ts)
   getTypeConstr (_::p (a ': b)) pidx = case getTypeConstr (Proxy::Proxy b) pidx of
     Dict -> Dict
+
+getTypesOf :: GetTypes t => p t -> Args Repr t
+getTypesOf _ = getTypes
 
 instance GEq con => GEq (Value con) where
   geq (BoolValue v1) (BoolValue v2) = if v1==v2 then Just Refl else Nothing
@@ -273,7 +279,7 @@ instance GShow con => Show (Value con tp) where
   showsPrec p (BoolValue b) = showsPrec p b
   showsPrec p (IntValue i) = showsPrec p i
   showsPrec p (RealValue i) = showsPrec p i
-  showsPrec p val@(BitVecValue v) = case getType val of
+  showsPrec p (BitVecValue v :: Value con tp) = case getType :: Repr tp of
     BitVecRepr bw
       | bw `mod` 4 == 0 -> let str = showHex v ""
                                exp_len = bw `div` 4
