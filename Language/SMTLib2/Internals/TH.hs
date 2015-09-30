@@ -176,7 +176,7 @@ quantSig ((_,tp):tps) = [t| $(return tp) ': $(quantSig tps) |]
 asSig :: Proxy sig -> (Args e sig -> a) -> (Args e sig -> a)
 asSig _ = id
 
-fieldProxy :: SMTValue tp repr => (dt -> tp) -> Proxy repr
+fieldProxy :: FromSMT repr => (dt -> ValueType repr) -> Proxy repr
 fieldProxy _ = Proxy
 
 toPat :: BasicExpr -> TH.PatQ

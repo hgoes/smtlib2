@@ -12,6 +12,7 @@ module Language.SMTLib2.LowLevel (
   assert,checkSat,push,pop,stack,
   -- * Models
   getValue,
+  getRawValue,
   -- * Unsatisfiable Core
   assertId,getUnsatCore,
   -- * Interpolation
@@ -19,7 +20,7 @@ module Language.SMTLib2.LowLevel (
   -- * Types
   Type(..),Nat(..),GetType(..),GetTypes(..),AllEq(SameType),Fst,Snd,
   -- * Expressions
-  SMTExpr(..),SMTExpr'(..),SMTValue(..),Embed(..),Expression(..),Function(..),
+  SMTExpr(..),SMTExpr'(..),FromSMT(..),ToSMT(..),DatatypeInfo(),Embed(..),Expression(..),Function(..),
   Args(..),
   -- ** Operators
   LogicOp(..),OrdOp(..),ArithOp(..),ArithOpInt(..),BVCompOp(..),BVBinOp(..),BVUnOp(..),
@@ -62,6 +63,7 @@ import qualified Data.IntMap.Strict as IMap
 import Data.GADT.Compare
 import Data.GADT.Show
 import Control.Exception (bracket)
+import Data.Constraint
 
 newtype Backend b => SMT b a = SMT (StateT (SMTState b) (SMTMonad b) a)
 
@@ -87,84 +89,59 @@ instance Backend b => MonadState (SMTState b) (SMT b) where
 liftSMT :: Backend b => SMTMonad b a -> SMT b a
 liftSMT act = SMT (lift act)
 
-class (Typeable c,Show c,Ord c,ValueRepr c ~ repr,ValueType repr ~ c,GetType repr) => SMTValue c repr where
-  type ValueRepr c :: Type
+class (GetType repr,ToSMT (ValueType repr),ValueRepr (ValueType repr) ~ repr) => FromSMT repr where
   type ValueType repr :: *
-  toValue :: (Typeable con,Typeable field)
-          => DatatypeInfo con field -> c -> Value con (ValueRepr c)
   fromValue :: (Typeable con,GCompare con,Typeable field)
             => DatatypeInfo con field -> Value con repr -> ValueType repr
 
-instance SMTValue Bool BoolType where
-  type ValueRepr Bool = BoolType
+class (Typeable tp,Show tp,Ord tp) => ToSMT tp where
+  type ValueRepr tp :: Type
+  toValue :: (Typeable con,Typeable field)
+          => DatatypeInfo con field -> tp -> Value con (ValueRepr tp)
+  toSMTCtx :: Proxy tp -> Dict (FromSMT (ValueRepr tp),ValueType (ValueRepr tp) ~ tp)
+
+instance FromSMT BoolType where
   type ValueType BoolType = Bool
-  toValue _ b = BoolValue b
   fromValue _ (BoolValue b) = b
 
-instance SMTValue Integer IntType where
-  type ValueRepr Integer = IntType
+instance ToSMT Bool where
+  type ValueRepr Bool = BoolType
+  toValue _ b = BoolValue b
+  toSMTCtx _ = Dict
+
+instance FromSMT IntType where
   type ValueType IntType = Integer
-  toValue _ i = IntValue i
   fromValue _ (IntValue i) = i
 
-instance SMTValue Rational RealType where
-  type ValueRepr Rational = RealType
+instance ToSMT Integer where
+  type ValueRepr Integer = IntType
+  toValue _ i = IntValue i
+  toSMTCtx _ = Dict
+
+instance FromSMT RealType where
   type ValueType RealType = Rational
-  toValue _ v = RealValue v
   fromValue _ (RealValue v) = v
+
+instance ToSMT Rational where
+  type ValueRepr Rational = RealType
+  toValue _ v = RealValue v
+  toSMTCtx _ = Dict
 
 newtype SMTBV (bw::Nat) = SMTBV Integer deriving (Show,Eq,Ord)
 
-instance KnownNat n => SMTValue (SMTBV n) (BitVecType n) where
-  type ValueRepr (SMTBV n) = BitVecType n
+instance KnownNat n => FromSMT (BitVecType n) where
   type ValueType (BitVecType n) = SMTBV n
-  toValue _ (SMTBV v) = BitVecValue v
   fromValue _ (BitVecValue v) = SMTBV v
+
+instance KnownNat n => ToSMT (SMTBV n) where
+  type ValueRepr (SMTBV n) = BitVecType n
+  toValue _ (SMTBV v) = BitVecValue v
+  toSMTCtx _ = Dict
 
 data DT dt = DT dt deriving (Show,Eq,Ord)
 
-instance (IsDatatype dt) => SMTValue (DT dt) (DataType dt) where
-  type ValueRepr (DT dt) = DataType dt
+instance (IsDatatype dt) => FromSMT (DataType dt) where
   type ValueType (DataType dt) = (DT dt)
-  toValue info (DT (dt::dt)) = case Map.lookup (typeOf (Proxy::Proxy dt)) info of
-    Just (RegisteredDT rdt) -> case castReg rdt of
-      Just (rdt'::B.BackendDatatype con field '(DatatypeSig dt,dt))
-        -> findConstr info dt (bconstructors rdt')
-    where
-      findConstr :: (Typeable con,Typeable field)
-                 => DatatypeInfo con field
-                 -> dt -> Constrs (B.BackendConstr con field) sig dt
-                 -> Value con (DataType dt)
-      findConstr info dt (ConsCon con cons)
-        = if bconTest con dt
-          then ConstrValue (bconRepr con) (extractVal info dt (bconFields con))
-          else findConstr info dt cons
-
-      castReg :: (Typeable con,Typeable field,
-                  Typeable dt,Typeable dt',
-                  Typeable (DatatypeSig dt),Typeable (DatatypeSig dt'))
-              => B.BackendDatatype con field '(DatatypeSig dt',dt')
-              -> Maybe (B.BackendDatatype con field '(DatatypeSig dt,dt))
-      castReg = cast
-
-      extractVal :: (Typeable con,Typeable field)
-                 => DatatypeInfo con field
-                 -> dt -> Args (B.BackendField field dt) arg
-                 -> Args (Value con) arg
-      extractVal info dt NoArg = NoArg
-      extractVal info dt (Arg f fs) = Arg (transVal info $ bfieldGet f dt)
-                                          (extractVal info dt fs)
-
-      transVal :: (Typeable con,Typeable field)
-               => DatatypeInfo con field
-               -> ConcreteValue t
-               -> Value con t
-      transVal _ (BoolValueC b) = BoolValue b
-      transVal _ (IntValueC v) = IntValue v
-      transVal _ (RealValueC v) = RealValue v
-      transVal _ (BitVecValueC v) = BitVecValue v
-      transVal info (ConstrValueC v)
-        = toValue info (DT v)
   fromValue info (ConstrValue con args :: Value con (DataType dt))
     = case Map.lookup (typeOf (Proxy::Proxy dt)) info of
         Just (RegisteredDT rdt) -> case castReg rdt of
@@ -206,6 +183,49 @@ instance (IsDatatype dt) => SMTValue (DT dt) (DataType dt) where
       transArg info val@(ConstrValue con args) = let DT v = fromValue info val
                                                  in ConstrValueC v
 
+instance IsDatatype dt => ToSMT (DT dt) where
+  type ValueRepr (DT dt) = DataType dt
+  toValue info (DT (dt::dt)) = case Map.lookup (typeOf (Proxy::Proxy dt)) info of
+    Just (RegisteredDT rdt) -> case castReg rdt of
+      Just (rdt'::B.BackendDatatype con field '(DatatypeSig dt,dt))
+        -> findConstr info dt (bconstructors rdt')
+    where
+      findConstr :: (Typeable con,Typeable field)
+                 => DatatypeInfo con field
+                 -> dt -> Constrs (B.BackendConstr con field) sig dt
+                 -> Value con (DataType dt)
+      findConstr info dt (ConsCon con cons)
+        = if bconTest con dt
+          then ConstrValue (bconRepr con) (extractVal info dt (bconFields con))
+          else findConstr info dt cons
+
+      castReg :: (Typeable con,Typeable field,
+                  Typeable dt,Typeable dt',
+                  Typeable (DatatypeSig dt),Typeable (DatatypeSig dt'))
+              => B.BackendDatatype con field '(DatatypeSig dt',dt')
+              -> Maybe (B.BackendDatatype con field '(DatatypeSig dt,dt))
+      castReg = cast
+
+      extractVal :: (Typeable con,Typeable field)
+                 => DatatypeInfo con field
+                 -> dt -> Args (B.BackendField field dt) arg
+                 -> Args (Value con) arg
+      extractVal info dt NoArg = NoArg
+      extractVal info dt (Arg f fs) = Arg (transVal info $ bfieldGet f dt)
+                                          (extractVal info dt fs)
+
+      transVal :: (Typeable con,Typeable field)
+               => DatatypeInfo con field
+               -> ConcreteValue t
+               -> Value con t
+      transVal _ (BoolValueC b) = BoolValue b
+      transVal _ (IntValueC v) = IntValue v
+      transVal _ (RealValueC v) = RealValue v
+      transVal _ (BitVecValueC v) = BitVecValue v
+      transVal info (ConstrValueC v)
+        = toValue info (DT v)
+  toSMTCtx _ = Dict
+
 data AnyQVar b = forall t. GetType t => AnyQVar (QVar b t)
 
 data SMTExpr b t where
@@ -226,7 +246,7 @@ data SMTExpr' b t where
                   -> SMTExpr' b BoolType
   TestConstr :: IsDatatype dt => String -> Proxy (dt:: *) -> SMTExpr b (DataType dt) -> SMTExpr' b BoolType
   GetField :: (IsDatatype dt,GetType tp) => String -> String -> Proxy (dt :: *) -> Proxy tp -> SMTExpr b (DataType dt) -> SMTExpr' b tp
-  Const' :: SMTValue c tp => c -> SMTExpr' b tp
+  Const' :: (ToSMT tp,FromSMT (ValueRepr tp),ValueType (ValueRepr tp) ~ tp) => tp -> SMTExpr' b (ValueRepr tp)
 
 instance Backend b => Show (SMTExpr' b t) where
   showsPrec p (QVar' lvl n) = showParen (p>10) $
@@ -282,10 +302,10 @@ instance Backend b => GEq (SMTExpr' b) where
         Refl <- geq body1 body2
         return Refl
     | otherwise = Nothing
-  geq (Const' (c1::t1)) (Const' (c2::t2)) = do
+  geq (Const' c1 :: SMTExpr' b t1) (Const' c2 :: SMTExpr' b t2) = do
     Refl <- eqT :: Maybe (t1 :~: t2)
-    if c1==castWith Refl c2
-      then return Refl
+    if c1 == castWith Refl c2
+      then Just Refl
       else Nothing
   geq _ _ = Nothing
 
@@ -337,14 +357,15 @@ instance Backend b => GCompare (SMTExpr' b) where
         GT -> GGT
   gcompare (GetField _ _ _ _ _) _ = GLT
   gcompare _ (GetField _ _ _ _ _) = GGT
-  gcompare (Const' (c1::t1)) (Const' (c2::t2)) = case eqT :: Maybe (t1 :~: t2) of
-    Just Refl -> case compare c1 (castWith Refl c2) of
-      EQ -> GEQ
-      LT -> GLT
-      GT -> GGT
-    Nothing -> case compare (typeOf c1) (typeOf c2) of
-      LT -> GLT
-      GT -> GGT
+  gcompare (Const' c1 :: SMTExpr' b t1) (Const' c2 :: SMTExpr' b t2)
+    = case eqT :: Maybe (t1 :~: t2) of
+      Just Refl -> case compare c1 (castWith Refl c2) of
+        EQ -> GEQ
+        LT -> GLT
+        GT -> GGT
+      Nothing -> case compare (typeOf c1) (typeOf c2) of
+        LT -> GLT
+        GT -> GGT
 
 instance Backend b => Show (SMTExpr b t) where
   showsPrec p (SMTExpr e) = showsPrec p e
@@ -380,7 +401,7 @@ instance Backend b => Embed (SMTExpr b) where
         GetField _ _ _ _ dt -> getLevel dt
         _ -> 0
       getLevel _ = 0
-
+  embedConstant = SpecialExpr . Const'
   extract (SMTExpr e) = Left e
   extract (SpecialExpr e) = Right e
 
@@ -447,6 +468,8 @@ class (Backend (EmbedBackend e),GShow e) => Embed e where
   embedQuantifier :: GetTypes arg => Quantifier
                   -> (Args e arg -> e BoolType)
                   -> e BoolType
+  embedConstant :: (ToSMT c,FromSMT (ValueRepr c),ValueType (ValueRepr c) ~ c)
+                => c -> e (ValueRepr c)
   extract :: GetType tp
           => e tp
           -> Either (Expression (Var (EmbedBackend e))
@@ -706,12 +729,16 @@ varNamed name = do
 constant :: (Embed e,GetType t) => Value (B.Constr (EmbedBackend e)) t -> e t
 constant v = embed (Const v)
 
-getValue :: (Embed e,SMTValue c repr) => e repr -> SMT (EmbedBackend e) c
+getValue :: (Embed e,FromSMT repr) => e repr -> SMT (EmbedBackend e) (ValueType repr)
 getValue e = do
-  e' <- toBackendExpr e
-  val <- updateBackend $ \b -> B.getValue b e'
+  val <- getRawValue e
   dtinfo <- gets datatypes
   return $ fromValue dtinfo val
+
+getRawValue :: (Embed e,GetType tp) => e tp -> SMT (EmbedBackend e) (Value (B.Constr (EmbedBackend e)) tp)
+getRawValue e = do
+  e' <- toBackendExpr e
+  updateBackend $ \b -> B.getValue b e'
 
 fun :: (Backend b,GetTypes arg,GetType res) => SMT b (Function (Fun b) con field '(arg,res))
 fun = do

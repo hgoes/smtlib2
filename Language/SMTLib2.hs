@@ -66,13 +66,13 @@ analyze e = case L.extract e of
   Left e' -> e'
   Right sub -> error $ "smtlib2: Cannot analyze embedded object "++show sub++" using this API. Use the LowLevel module."
 
-getValue :: (Backend b,L.SMTValue c repr) => SMTExpr b repr -> SMT b c
+getValue :: (Backend b,L.FromSMT repr) => SMTExpr b repr -> SMT b (L.ValueType repr)
 getValue = L.getValue
 
 declare :: QuasiQuoter
 declare = TH.declare' (Just $ \tp -> [t| forall b. Backend b => SMT b (SMTExpr b $(tp)) |])
 
-constant :: L.SMTValue c t => c -> SMTExpr b t
+constant :: (L.ToSMT t,L.FromSMT (L.ValueRepr t),L.ValueType (L.ValueRepr t) ~ t)  => t -> SMTExpr b (L.ValueRepr t)
 constant v = L.SpecialExpr (L.Const' v)
 
 (.==.) :: GetType t => SMTExpr b t -> SMTExpr b t -> SMTExpr b BoolType
