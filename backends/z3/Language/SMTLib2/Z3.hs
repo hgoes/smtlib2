@@ -51,7 +51,7 @@ nextSymbol solv = do
   return (sym,nsolv { solverNxtVar = solverNxtVar solv+1 })
 
 type Z3Expr = UntypedVar AST
-type Z3Var = UntypedVar FuncDecl
+type Z3Var = UntypedVar AST
 type Z3Fun = UntypedFun FuncDecl
 type Z3Con = UntypedCon Constructor
 type Z3Field = UntypedField FuncDecl
@@ -105,10 +105,12 @@ instance Backend Z3Solver where
     tp <- typeToZ3 ctx (getType::Repr tp)
     (sym,solv2) <- nextSymbol solv1
     decl <- mkFuncDecl ctx sym [] tp
-    return (UntypedVar decl,solv2)
+    var <- mkApp ctx decl []
+    return (UntypedVar var,solv2)
     where
       with :: (Proxy t -> IO (Z3Var t,Z3Solver)) -> IO (Z3Var t,Z3Solver)
       with f = f Proxy
+  defineVar solv name expr = return (expr,solv)
   toBackend solv expr = do
     (ctx,solv1) <- getContext solv
     nd <- toZ3 ctx expr
@@ -133,6 +135,15 @@ instance Backend Z3Solver where
       Just ast -> do
         res <- fromZ3Value ctx (UntypedVar ast)
         return (res,solv1)
+  push solv = do
+    (ctx,solver,solv1) <- getSolver solv
+    solverPush ctx solver
+    return solv1
+  pop solv = do
+    (ctx,solver,solv1) <- getSolver solv
+    solverPop ctx solver 1
+    return solv1
+  exit solv = return ()
 
 fromZ3Value :: GetType t => Context -> Z3Expr t -> IO (Value Z3Con t)
 fromZ3Value ctx (UntypedVar e::Z3Expr t) = case getType::Repr t of
@@ -162,7 +173,7 @@ typeToZ3 ctx (ArrayRepr (Arg idx NoArg) el) = do
 toZ3 :: GetType t => Context
      -> Expression Z3Var Z3Var Z3Fun Z3Con Z3Field Z3Var (UntypedVar AST) t
      -> IO AST
-toZ3 ctx (Var (UntypedVar decl)) = mkApp ctx decl []
+toZ3 ctx (Var (UntypedVar var)) = return var
 toZ3 ctx (Const val) = toZ3Const ctx val
 toZ3 ctx (App fun args) = toZ3App ctx fun args
 --toZ3 ctx (AsArray fun
@@ -184,6 +195,8 @@ toZ3App ctx Eq args = mkEq' (argsToList (\(UntypedVar v) -> v) args)
       mkAnd ctx lst
 toZ3App ctx Not (Arg (UntypedVar x) NoArg) = mkNot ctx x
 toZ3App ctx (Logic And) args = mkAnd ctx $ argsToList untypedVar args
+toZ3App ctx (Logic Or) args = mkOr ctx $ argsToList untypedVar args
+toZ3App ctx (Logic Implies) (Arg lhs (Arg rhs NoArg)) = mkImplies ctx (untypedVar lhs) (untypedVar rhs)
 toZ3App ctx Select (Arg arr (Arg idx NoArg)) = mkSelect ctx (untypedVar arr) (untypedVar idx)
 toZ3App ctx Store (Arg arr (Arg val (Arg idx NoArg)))
   = mkStore ctx (untypedVar arr) (untypedVar idx) (untypedVar val)
@@ -193,6 +206,14 @@ toZ3App ctx carr@ConstArray (Arg arg NoArg) = case carr of
          Arg idx NoArg -> do
            srt <- typeToZ3 ctx idx
            mkConstArray ctx srt (untypedVar arg)
+toZ3App ctx (ArithInt Plus) args = mkAdd ctx $ argsToList untypedVar args
+toZ3App ctx ITE (Arg cond (Arg ifT (Arg ifF NoArg))) = mkIte ctx (untypedVar cond) (untypedVar ifT) (untypedVar ifF)
+toZ3App ctx (OrdInt op) (Arg lhs (Arg rhs NoArg))
+  = (case op of
+       Ge -> mkGe
+       Gt -> mkGt
+       Le -> mkLe
+       Lt -> mkLt) ctx (untypedVar lhs) (untypedVar rhs)
 toZ3App ctx f _ = error $ "toZ3App: "++show f
 
 toZ3Const :: Context -> Value Z3Con t -> IO AST

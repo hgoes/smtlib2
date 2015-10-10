@@ -240,7 +240,7 @@ data SMTFunction arg res where
   SMTFun :: (Args arg,SMTType res) => Integer -> SMTAnnotation res -> SMTFunction arg res
   SMTBuiltIn :: (Liftable arg,SMTType res) => String -> SMTAnnotation res -> SMTFunction arg res
   SMTOrd :: (SMTType a) => SMTOrdOp -> SMTFunction (SMTExpr a,SMTExpr a) Bool
-  SMTArith :: (SMTType a,Num a) => SMTArithOp -> SMTFunction [SMTExpr a] a
+  SMTArith :: (SMTType a,Num a,SMTAnnotation a ~ ()) => SMTArithOp -> SMTFunction [SMTExpr a] a
   SMTMinus :: (SMTType a,Num a) => SMTFunction (SMTExpr a,SMTExpr a) a
   SMTIntArith :: SMTIntArithOp -> SMTFunction (SMTExpr Integer,SMTExpr Integer) Integer
   SMTDivide :: SMTFunction (SMTExpr Rational,SMTExpr Rational) Rational

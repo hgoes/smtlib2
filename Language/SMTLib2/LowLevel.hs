@@ -2,7 +2,7 @@
 module Language.SMTLib2.LowLevel (
   -- * SMT Monad
   Backend(Expr,Var,QVar,Fun,Constr,Field,FunArg,ClauseId),
-  SMT(),withBackend,withBackendExitCleanly,
+  SMT(..),SMTState(..),withBackend,withBackendExitCleanly,updateBackend,updateBackend',toBackend,
   SMTOption(..),setOption,
   SMTInfo(..),getInfo,
   comment,
@@ -20,7 +20,7 @@ module Language.SMTLib2.LowLevel (
   -- * Types
   Type(..),Nat(..),GetType(..),GetTypes(..),AllEq(SameType),Fst,Snd,
   -- * Expressions
-  SMTExpr(..),SMTExpr'(..),FromSMT(..),ToSMT(..),DatatypeInfo(),Embed(..),Expression(..),Function(..),
+  FromSMT(..),ToSMT(..),DatatypeInfo,emptyDatatypeInfo,Embed(..),Expression(..),Function(..),mapSubExpressions,
   Args(..),
   -- ** Operators
   LogicOp(..),OrdOp(..),ArithOp(..),ArithOpInt(..),BVCompOp(..),BVBinOp(..),BVUnOp(..),
@@ -48,11 +48,13 @@ module Language.SMTLib2.LowLevel (
 import Language.SMTLib2.Internals.Expression
 import Language.SMTLib2.Internals.Backend hiding (setOption,getInfo,comment,assert,
                                                   checkSat,getValue,push,pop,assertId,
-                                                  getUnsatCore,interpolate,assertPartition,
+                                                  getUnsatCore,interpolate,assertPartition,toBackend,
                                                   Constr,Field)
 import qualified Language.SMTLib2.Internals.Backend as B
 import Language.SMTLib2.Internals.Type hiding (Field)
 import Language.SMTLib2.Internals.Type.Nat
+import Language.SMTLib2.Internals.Embed
+import Language.SMTLib2.Internals.Monad
 
 import Data.Typeable
 import Data.Type.Equality
@@ -64,499 +66,6 @@ import Data.GADT.Compare
 import Data.GADT.Show
 import Control.Exception (bracket)
 import Data.Constraint
-
-newtype Backend b => SMT b a = SMT (StateT (SMTState b) (SMTMonad b) a)
-
-data SMTState b = SMTState { backend :: !b
-                           , datatypes :: !(DatatypeInfo (B.Constr b) (B.Field b)) }
-
-instance Backend b => Functor (SMT b) where
-  fmap f (SMT act) = SMT (fmap f act)
-
-instance Backend b => Applicative (SMT b) where
-  pure x = SMT (pure x)
-  (<*>) (SMT fun) (SMT arg) = SMT (fun <*> arg)
-
-instance Backend b => Monad (SMT b) where
-  (>>=) (SMT act) app = SMT (act >>= (\res -> case app res of
-                                                  SMT p -> p))
-
-instance Backend b => MonadState (SMTState b) (SMT b) where
-  get = SMT get
-  put x = SMT (put x)
-  state act = SMT (state act)
-
-liftSMT :: Backend b => SMTMonad b a -> SMT b a
-liftSMT act = SMT (lift act)
-
-class (GetType repr,ToSMT (ValueType repr),ValueRepr (ValueType repr) ~ repr) => FromSMT repr where
-  type ValueType repr :: *
-  fromValue :: (Typeable con,GCompare con,Typeable field)
-            => DatatypeInfo con field -> Value con repr -> ValueType repr
-
-class (Typeable tp,Show tp,Ord tp) => ToSMT tp where
-  type ValueRepr tp :: Type
-  toValue :: (Typeable con,Typeable field)
-          => DatatypeInfo con field -> tp -> Value con (ValueRepr tp)
-  toSMTCtx :: Proxy tp -> Dict (FromSMT (ValueRepr tp),ValueType (ValueRepr tp) ~ tp)
-
-instance FromSMT BoolType where
-  type ValueType BoolType = Bool
-  fromValue _ (BoolValue b) = b
-
-instance ToSMT Bool where
-  type ValueRepr Bool = BoolType
-  toValue _ b = BoolValue b
-  toSMTCtx _ = Dict
-
-instance FromSMT IntType where
-  type ValueType IntType = Integer
-  fromValue _ (IntValue i) = i
-
-instance ToSMT Integer where
-  type ValueRepr Integer = IntType
-  toValue _ i = IntValue i
-  toSMTCtx _ = Dict
-
-instance FromSMT RealType where
-  type ValueType RealType = Rational
-  fromValue _ (RealValue v) = v
-
-instance ToSMT Rational where
-  type ValueRepr Rational = RealType
-  toValue _ v = RealValue v
-  toSMTCtx _ = Dict
-
-newtype SMTBV (bw::Nat) = SMTBV Integer deriving (Show,Eq,Ord)
-
-instance KnownNat n => FromSMT (BitVecType n) where
-  type ValueType (BitVecType n) = SMTBV n
-  fromValue _ (BitVecValue v) = SMTBV v
-
-instance KnownNat n => ToSMT (SMTBV n) where
-  type ValueRepr (SMTBV n) = BitVecType n
-  toValue _ (SMTBV v) = BitVecValue v
-  toSMTCtx _ = Dict
-
-data DT dt = DT dt deriving (Show,Eq,Ord)
-
-instance (IsDatatype dt) => FromSMT (DataType dt) where
-  type ValueType (DataType dt) = (DT dt)
-  fromValue info (ConstrValue con args :: Value con (DataType dt))
-    = case Map.lookup (typeOf (Proxy::Proxy dt)) info of
-        Just (RegisteredDT rdt) -> case castReg rdt of
-          Just (rdt'::B.BackendDatatype con field '(DatatypeSig dt,dt))
-            -> findConstr info con args (bconstructors rdt')
-    where
-      castReg :: (Typeable con,Typeable field,
-                  Typeable dt,Typeable dt',
-                  Typeable (DatatypeSig dt),Typeable (DatatypeSig dt'))
-              => B.BackendDatatype con field '(DatatypeSig dt',dt')
-              -> Maybe (B.BackendDatatype con field '(DatatypeSig dt,dt))
-      castReg = cast
-
-      findConstr :: (Typeable con,GEq con,Typeable field,GetTypes arg)
-                 => DatatypeInfo con field
-                 -> con '(arg,dt) -> Args (Value con) arg
-                 -> Constrs (B.BackendConstr con field) sig dt
-                 -> DT dt
-      findConstr info con args (ConsCon con' cons)
-        = case geq con (bconRepr con') of
-            Just Refl -> DT (bconstruct con' (transArgs info args))
-            Nothing -> findConstr info con args cons
-
-      castCon :: (Typeable con,Typeable field,Typeable arg,Typeable arg',Typeable dt)
-              => B.BackendConstr con field '(arg,dt)
-              -> Maybe (B.BackendConstr con field '(arg',dt))
-      castCon = cast
-
-      transArgs :: Typeable field => DatatypeInfo con field
-                -> Args (Value con) arg -> Args ConcreteValue arg
-      transArgs info NoArg = NoArg
-      transArgs info (Arg v vs) = Arg (transArg info v) (transArgs info vs)
-
-      transArg :: Typeable field => DatatypeInfo con field -> Value con t -> ConcreteValue t
-      transArg info (BoolValue b) = BoolValueC b
-      transArg info (IntValue v) = IntValueC v
-      transArg info (RealValue v) = RealValueC v
-      transArg info (BitVecValue v) = BitVecValueC v
-      transArg info val@(ConstrValue con args) = let DT v = fromValue info val
-                                                 in ConstrValueC v
-
-instance IsDatatype dt => ToSMT (DT dt) where
-  type ValueRepr (DT dt) = DataType dt
-  toValue info (DT (dt::dt)) = case Map.lookup (typeOf (Proxy::Proxy dt)) info of
-    Just (RegisteredDT rdt) -> case castReg rdt of
-      Just (rdt'::B.BackendDatatype con field '(DatatypeSig dt,dt))
-        -> findConstr info dt (bconstructors rdt')
-    where
-      findConstr :: (Typeable con,Typeable field)
-                 => DatatypeInfo con field
-                 -> dt -> Constrs (B.BackendConstr con field) sig dt
-                 -> Value con (DataType dt)
-      findConstr info dt (ConsCon con cons)
-        = if bconTest con dt
-          then ConstrValue (bconRepr con) (extractVal info dt (bconFields con))
-          else findConstr info dt cons
-
-      castReg :: (Typeable con,Typeable field,
-                  Typeable dt,Typeable dt',
-                  Typeable (DatatypeSig dt),Typeable (DatatypeSig dt'))
-              => B.BackendDatatype con field '(DatatypeSig dt',dt')
-              -> Maybe (B.BackendDatatype con field '(DatatypeSig dt,dt))
-      castReg = cast
-
-      extractVal :: (Typeable con,Typeable field)
-                 => DatatypeInfo con field
-                 -> dt -> Args (B.BackendField field dt) arg
-                 -> Args (Value con) arg
-      extractVal info dt NoArg = NoArg
-      extractVal info dt (Arg f fs) = Arg (transVal info $ bfieldGet f dt)
-                                          (extractVal info dt fs)
-
-      transVal :: (Typeable con,Typeable field)
-               => DatatypeInfo con field
-               -> ConcreteValue t
-               -> Value con t
-      transVal _ (BoolValueC b) = BoolValue b
-      transVal _ (IntValueC v) = IntValue v
-      transVal _ (RealValueC v) = RealValue v
-      transVal _ (BitVecValueC v) = BitVecValue v
-      transVal info (ConstrValueC v)
-        = toValue info (DT v)
-  toSMTCtx _ = Dict
-
-data AnyQVar b = forall t. GetType t => AnyQVar (QVar b t)
-
-data SMTExpr b t where
-  SMTExpr :: Expression (Var b)
-                        (QVar b)
-                        (Fun b)
-                        (B.Constr b)
-                        (B.Field b)
-                        (FunArg b)
-                        (SMTExpr b) t
-          -> SMTExpr b t
-  SpecialExpr :: SMTExpr' b t -> SMTExpr b t
-
-data SMTExpr' b t where
-  QVar' :: GetType t => Int -> !Int -> SMTExpr' b t
-  Quantification' :: GetTypes arg => Quantifier -> Int -> Args Proxy arg
-                  -> SMTExpr b BoolType
-                  -> SMTExpr' b BoolType
-  TestConstr :: IsDatatype dt => String -> Proxy (dt:: *) -> SMTExpr b (DataType dt) -> SMTExpr' b BoolType
-  GetField :: (IsDatatype dt,GetType tp) => String -> String -> Proxy (dt :: *) -> Proxy tp -> SMTExpr b (DataType dt) -> SMTExpr' b tp
-  Const' :: (ToSMT tp,FromSMT (ValueRepr tp),ValueType (ValueRepr tp) ~ tp) => tp -> SMTExpr' b (ValueRepr tp)
-
-instance Backend b => Show (SMTExpr' b t) where
-  showsPrec p (QVar' lvl n) = showParen (p>10) $
-                              showString "QVar' " .
-                              showsPrec 11 lvl .
-                              showChar ' ' .
-                              showsPrec 11 n
-  showsPrec p (Quantification' q lvl args body)
-    = showParen (p>10) $
-      showString "Quantification' " .
-      showsPrec 11 q . showChar ' ' .
-      showsPrec 11 lvl . showChar ' ' .
-      showsPrec 11 (length (argsToList (const ()) args)) . showChar ' ' .
-      showsPrec 11 body
-  showsPrec p (Const' c) = showParen (p>10) $
-                           showString "Const' " .
-                           showsPrec 11 c
-
-instance Backend b => GShow (SMTExpr' b) where
-  gshowsPrec = showsPrec
-
-instance Backend b => GEq (SMTExpr b) where
-  geq (SMTExpr x) (SMTExpr y) = geq x y
-  geq (SpecialExpr x) (SpecialExpr y) = geq x y
-  geq _ _ = Nothing
-
-instance Backend b => GEq (SMTExpr' b) where
-  geq v1@(QVar' lvl1 nr1) v2@(QVar' lvl2 nr2)
-    = if (lvl1,nr1) == (lvl2,nr2)
-      then case v1 of
-             (_::SMTExpr' b t1) -> case v2 of
-               (_::SMTExpr' b t2) -> do
-                 Refl <- eqT :: Maybe (t1 :~: t2)
-                 return Refl
-      else Nothing
-  geq (Quantification' q1 lvl1 (_::Args Proxy args1) body1)
-      (Quantification' q2 lvl2 (_::Args Proxy args2) body2)
-    | (q1,lvl1) == (q2,lvl2) = do
-        Refl <- geq (getTypes::Args Repr args1)
-                    (getTypes::Args Repr args2)
-        Refl <- geq body1 body2
-        return Refl
-    | otherwise = Nothing
-  geq (TestConstr name1 _ body1) (TestConstr name2 _ body2)
-    | name1==name2 = do
-      Refl <- geq body1 body2
-      return Refl
-    | otherwise = Nothing
-  geq (GetField cname1 fname1 _ (_::Proxy t1) body1)
-      (GetField cname2 fname2 _ (_::Proxy t2) body2)
-    | (cname1,fname1) == (cname2,fname2) = do
-        Refl <- eqT :: Maybe (t1 :~: t2)
-        Refl <- geq body1 body2
-        return Refl
-    | otherwise = Nothing
-  geq (Const' c1 :: SMTExpr' b t1) (Const' c2 :: SMTExpr' b t2) = do
-    Refl <- eqT :: Maybe (t1 :~: t2)
-    if c1 == castWith Refl c2
-      then Just Refl
-      else Nothing
-  geq _ _ = Nothing
-
-instance Backend b => GCompare (SMTExpr b) where
-  gcompare (SMTExpr x) (SMTExpr y) = gcompare x y
-  gcompare (SMTExpr _) _ = GLT
-  gcompare _ (SMTExpr _) = GGT
-  gcompare (SpecialExpr e1) (SpecialExpr e2) = gcompare e1 e2
-
-instance Backend b => GCompare (SMTExpr' b) where
-  gcompare q1@(QVar' lvl1 nr1) q2@(QVar' lvl2 nr2)
-    = case compare (lvl1,nr1) (lvl2,nr2) of
-        EQ -> case q1 of
-          (_::SMTExpr' b t1) -> case q2 of
-            (_::SMTExpr' b t2) -> gcompare (getType::Repr t1)
-                                           (getType::Repr t2)
-        LT -> GLT
-        GT -> GGT
-  gcompare (QVar' _ _) _ = GLT
-  gcompare _ (QVar' _ _) = GGT
-  gcompare e1@(Quantification' q1 lvl1 args1 body1) e2@(Quantification' q2 lvl2 args2 body2)
-    = case compare (q1,lvl1) (q2,lvl2) of
-        EQ -> case e1 of
-          (_::SMTExpr' b t1) -> case e2 of
-            (_::SMTExpr' b t2) -> gcompare (getType::Repr t1)
-                                           (getType::Repr t2)
-        GT -> GGT
-        LT -> GLT
-  gcompare (Quantification' _ _ _ _) _ = GLT
-  gcompare _ (Quantification' _ _ _ _) = GGT
-  gcompare (TestConstr name1 _ body1) (TestConstr name2 _ body2) = case compare name1 name2 of
-    EQ -> case gcompare body1 body2 of
-      GEQ -> GEQ
-      GLT -> GLT
-      GGT -> GGT
-    LT -> GLT
-    GT -> GGT
-  gcompare (TestConstr _ _ _) _ = GLT
-  gcompare _ (TestConstr _ _ _) = GGT
-  gcompare (GetField cname1 fname1 _ (Proxy::Proxy t1) body1)
-           (GetField cname2 fname2 _ (Proxy::Proxy t2) body2)
-    = case compare (cname1,fname1) (cname2,fname2) of
-        EQ -> case gcompare body1 body2 of
-          GEQ -> case eqT :: Maybe (t1 :~: t2) of
-            Just Refl -> GEQ
-          GLT -> GLT
-          GGT -> GGT
-        LT -> GLT
-        GT -> GGT
-  gcompare (GetField _ _ _ _ _) _ = GLT
-  gcompare _ (GetField _ _ _ _ _) = GGT
-  gcompare (Const' c1 :: SMTExpr' b t1) (Const' c2 :: SMTExpr' b t2)
-    = case eqT :: Maybe (t1 :~: t2) of
-      Just Refl -> case compare c1 (castWith Refl c2) of
-        EQ -> GEQ
-        LT -> GLT
-        GT -> GGT
-      Nothing -> case compare (typeOf c1) (typeOf c2) of
-        LT -> GLT
-        GT -> GGT
-
-instance Backend b => Show (SMTExpr b t) where
-  showsPrec p (SMTExpr e) = showsPrec p e
-  showsPrec p (SpecialExpr e) = showsPrec p e
-
-instance Backend b => GShow (SMTExpr b) where
-  gshowsPrec = showsPrec
-
-instance Backend b => Embed (SMTExpr b) where
-  type EmbedBackend (SMTExpr b) = b
-  type EmbedSub (SMTExpr b) = SMTExpr' b
-  embed = SMTExpr
-  embedQuantifier q (f::Args (SMTExpr b) arg -> SMTExpr b BoolType)
-    = SpecialExpr (Quantification' q level qargs body)
-    where
-      body = f args
-      level = getLevel body
-      --level = 0
-      args = mkArg 0 (getTypes::Args Repr arg)
-      qargs = runIdentity $ mapArgs (\_ -> return Proxy) args
-
-      mkArg :: Int -> Args Repr arg' -> Args (SMTExpr b) arg'
-      mkArg n NoArg = NoArg
-      mkArg n (Arg _ xs) = Arg (SpecialExpr $ QVar' level n) (mkArg (n+1) xs)
-
-      getLevel :: SMTExpr b t -> Int
-      getLevel (SMTExpr (App _ args)) = maximum $ argsToList getLevel args
-      getLevel (SMTExpr (Let bind body))
-        = maximum $ (getLevel body):(argsToList (getLevel . letExpr) bind)
-      getLevel (SpecialExpr e) = case e of
-        Quantification' _ lvl _ _ -> lvl+1
-        TestConstr _ _ dt -> getLevel dt
-        GetField _ _ _ _ dt -> getLevel dt
-        _ -> 0
-      getLevel _ = 0
-  embedConstant = SpecialExpr . Const'
-  extract (SMTExpr e) = Left e
-  extract (SpecialExpr e) = Right e
-
-  encodeSub pr e = encode' pr IMap.empty (SpecialExpr e)
-    where
-      encode' :: (Embed e,GetType tp)
-              => Proxy e
-              -> IMap.IntMap [AnyQVar (EmbedBackend e)]
-              -> SMTExpr (EmbedBackend e) tp
-              -> SMT (EmbedBackend e) (Expr (EmbedBackend e) tp)
-      encode' pr mp (SpecialExpr (Quantification' q lvl vars body)) = do
-        (lst,qarg) <- declareQVars pr vars
-        let nmp = IMap.insert lvl lst mp
-        body' <- encode' pr nmp body
-        updateBackend $ \b -> B.toBackend b (Quantification q qarg body')
-      encode' _ mp (SpecialExpr (QVar' lvl nr)) = case IMap.lookup lvl mp of
-        Just vars -> case vars!!nr of
-          AnyQVar qv -> case gcast qv of
-            Just qv' -> updateBackend $ \b -> B.toBackend b (QVar qv')
-      encode' pr mp (SpecialExpr (TestConstr con dt expr)) = do
-        st <- get
-        lookupDatatypeCon dt con (datatypes st) $
-          \rcon -> do
-               expr' <- encode' pr mp expr
-               let res = App (Test $ bconRepr rcon) (Arg expr' NoArg)
-               updateBackend $ \b -> B.toBackend b res
-      encode' pr mp (SpecialExpr (GetField field con dt (_::Proxy tp) expr)) = do
-        st <- get
-        lookupDatatypeField dt con field (datatypes st) $
-          \rfield -> case gcast rfield of
-             Just rfield' -> do
-               expr' <- encode' pr mp expr
-               let res = App (Field $ bfieldRepr rfield') (Arg expr' NoArg)
-               updateBackend $ \b -> B.toBackend b res
-      encode' pr mp (SpecialExpr (Const' c)) = do
-        st <- get
-        updateBackend $ \b -> B.toBackend b (Const $ toValue (datatypes st) c)
-      encode' pr mp (SMTExpr e) = do
-        e' <- mapSubExpressions (encode' pr mp) e
-        updateBackend $ \b -> B.toBackend b e'
-
-      declareQVars :: Embed e => Proxy e -> Args Proxy arg
-                   -> SMT (EmbedBackend e) ([AnyQVar (EmbedBackend e)],
-                                            Args (QVar (EmbedBackend e)) arg)
-      declareQVars _ NoArg = return ([],NoArg)
-      declareQVars pr (Arg _ args) = do
-        qvar <- updateBackend (\b -> createQVar b Nothing)
-        (lst,args') <- declareQVars pr args
-        return ((AnyQVar qvar):lst,Arg qvar args')
-
-  extractSub _ = return Nothing
-
-class (Backend (EmbedBackend e),GShow e) => Embed e where
-  type EmbedBackend e :: *
-  type EmbedSub e :: Type -> *
-  embed :: GetType tp
-        => Expression (Var (EmbedBackend e))
-                      (QVar (EmbedBackend e))
-                      (Fun (EmbedBackend e))
-                      (B.Constr (EmbedBackend e))
-                      (B.Field (EmbedBackend e))
-                      (FunArg (EmbedBackend e)) e tp
-        -> e tp
-  embedQuantifier :: GetTypes arg => Quantifier
-                  -> (Args e arg -> e BoolType)
-                  -> e BoolType
-  embedConstant :: (ToSMT c,FromSMT (ValueRepr c),ValueType (ValueRepr c) ~ c)
-                => c -> e (ValueRepr c)
-  extract :: GetType tp
-          => e tp
-          -> Either (Expression (Var (EmbedBackend e))
-                                (QVar (EmbedBackend e))
-                                (Fun (EmbedBackend e))
-                                (B.Constr (EmbedBackend e))
-                                (B.Field (EmbedBackend e))
-                                (FunArg (EmbedBackend e)) e tp)
-                    (EmbedSub e tp)
-  encodeSub :: GetType tp => Proxy e -> EmbedSub e tp
-            -> SMT (EmbedBackend e) (Expr (EmbedBackend e) tp)
-  extractSub :: Expr (EmbedBackend e) tp -> SMT (EmbedBackend e) (Maybe (e tp))
-
-type DatatypeInfo con field = Map.Map TypeRep (RegisteredDT con field)
-
-data RegisteredDT con field
-  = forall dt. IsDatatype dt => RegisteredDT (B.BackendDatatype con field '(DatatypeSig dt,dt))
-  deriving (Typeable)
-
-registerDatatype :: (Backend b,IsDatatype dt) => Proxy dt -> SMT b ()
-registerDatatype pr = do
-  let repr = typeOf pr
-  st <- get
-  if Map.member repr (datatypes st)
-    then return ()
-    else do
-      (dts,nb) <- liftSMT $ B.declareDatatypes (backend st) (getTypeCollection pr)
-      put $ st { backend = nb
-               , datatypes = insertTypes dts (datatypes st) }
-  where
-    insertTypes :: B.BackendTypeCollection con field sigs -> DatatypeInfo con field -> DatatypeInfo con field
-    insertTypes NoDts mp = mp
-    insertTypes (ConsDts (dt::B.BackendDatatype con field '(DatatypeSig dt,dt)) dts) mp
-      = let repr = typeOf (Proxy::Proxy dt)
-            nmp =  Map.insert repr (RegisteredDT dt) mp
-         in insertTypes dts nmp
-
-lookupDatatype :: TypeRep -> DatatypeInfo con field
-               -> (forall dt. IsDatatype dt => B.BackendDatatype con field '(DatatypeSig dt,dt) -> a)
-               -> a
-lookupDatatype rep dts f = case Map.lookup rep dts of
-  Just (RegisteredDT dt) -> f dt
-  Nothing -> error $ "smtlib2: Datatype "++show rep++" is not registered."
-
-lookupConstructor :: String -> B.BackendDatatype con field '(DatatypeSig dt,dt)
-                  -> (forall arg. GetTypes arg => B.BackendConstr con field '(arg,dt) -> a)
-                  -> a
-lookupConstructor name dt f = lookup (bconstructors dt) f
-  where
-    lookup :: Constrs (B.BackendConstr con field) sigs dt
-           -> (forall arg. GetTypes arg => B.BackendConstr con field '(arg,dt) -> a)
-           -> a
-    lookup NoCon _ = error $ "smtlib2: "++name++" is not a constructor."
-    lookup (ConsCon con cons) f = if bconName con==name
-                                  then f con
-                                  else lookup cons f
-
-
-lookupField :: String -> B.BackendConstr con field '(arg,dt)
-            -> (forall tp. GetType tp => B.BackendField field dt tp -> a)
-            -> a
-lookupField name con f = lookup (bconFields con) f
-  where
-    lookup :: Args (B.BackendField field dt) arg
-           -> (forall tp. GetType tp => B.BackendField field dt tp -> a)
-           -> a
-    lookup NoArg _ = error $ "smtlib2: "++name++" is not a field."
-    lookup (Arg x xs) f = if bfieldName x==name
-                          then f x
-                          else lookup xs f
-
-lookupDatatypeCon :: (IsDatatype dt,Typeable con,Typeable field)
-                  => Proxy dt -> String -> DatatypeInfo con field
-                  -> (forall arg. GetTypes arg => B.BackendConstr con field '(arg,dt) -> a)
-                  -> a
-lookupDatatypeCon pr name info f
-  = lookupDatatype (typeOf pr) info $
-    \dt -> case cast dt of
-       Just dt' -> lookupConstructor name dt' f
-
-lookupDatatypeField :: (IsDatatype dt,Typeable con,Typeable field)
-                  => Proxy dt -> String -> String -> DatatypeInfo con field
-                  -> (forall tp. GetType tp => B.BackendField field dt tp -> a)
-                  -> a
-lookupDatatypeField pr con field info f
-  = lookupDatatypeCon pr con info $
-    \con' -> lookupField field con' f
 
 withBackend :: Backend b => b -> SMT b a -> SMTMonad b a
 withBackend b (SMT act) = do
@@ -572,7 +81,6 @@ withBackendExitCleanly b (SMT act)
     (\b -> do
         (res,nb) <- runStateT act (SMTState b Map.empty)
         return res)
-
 
 app :: (Embed e,GetType tp,GetTypes arg)
     => Function (Fun (EmbedBackend e)) (B.Constr (EmbedBackend e)) (B.Field (EmbedBackend e)) '(arg,tp)
@@ -696,6 +204,11 @@ fromBackendExpr e = do
       e'' <- mapSubExpressions fromBackendExpr e'
       return $ embed e''
 
+toBackend :: (Backend b,GetType tp)
+          => Expression (B.Var b) (B.QVar b) (B.Fun b) (B.Constr b) (B.Field b) (B.FunArg b) (B.Expr b) tp
+          -> SMT b (B.Expr b tp)
+toBackend e = updateBackend $ \b -> B.toBackend b e
+
 assert :: (Embed e) => e BoolType -> SMT (EmbedBackend e) ()
 assert e = do
   e' <- toBackendExpr e
@@ -796,13 +309,22 @@ instance GetType t => MkApp '[t] e res (e t -> res) where
   --type AppSig' (e t -> res) = '[t]
   toApp f x = f (Arg x NoArg)
 
-instance (GetType x1,MkApp (x2 ': xs) e res fun)
+instance (GetType x1,GetTypes xs,GetType x2,MkApp (x2 ': xs) e res fun)
          => MkApp (x1 ': x2 ': xs) e res (e x1 -> fun) where
   type AppFun' (x1 ': x2 ': xs) e res = e x1 -> AppFun' (x2 ': xs) e res
   type AppExpr' (e x1 -> fun) = e
   type AppRet' (x1 ': x2 ': xs) (e x1 -> fun) = AppRet' (x2 ': xs) fun
   --type AppSig' (e x1 -> fun) = x1 ': AppSig' fun
   toApp f p = toApp (\arg -> f (Arg p arg))
+
+newtype SMTAction b t = SMTAction (SMT b (Expr b t))
+
+instance (GShow (SMTAction b),Backend b) => Embed (SMTAction b) where
+  type EmbedBackend (SMTAction b) = b
+  type EmbedSub (SMTAction b) = NoVar
+  embed e = SMTAction $ do
+    rexpr <- mapExpr return return return return return return (\(SMTAction act) -> act) e
+    updateBackend $ \b -> B.toBackend b rexpr
 
 app' :: (Embed e,GetTypes sig,MkApp sig e (e ret) rfun,GetType ret)
     => Function (Fun (EmbedBackend e)) (B.Constr (EmbedBackend e)) (B.Field (EmbedBackend e)) '(sig,ret)

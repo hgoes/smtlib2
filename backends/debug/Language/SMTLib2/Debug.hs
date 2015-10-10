@@ -199,6 +199,26 @@ instance (Backend b) => Backend (DebugBackend b) where
       with :: (Proxy (t::Type) -> SMTMonad b (QVar (DebugBackend b) t,DebugBackend b))
            -> SMTMonad b (QVar (DebugBackend b) t,DebugBackend b)
       with f = f Proxy
+  exit b = do
+    b1 <- outputLisp b (L.List [L.Symbol "exit"])
+    exit (debugBackend' b1)
+  push b = do
+    b1 <- outputLisp b (L.List [L.Symbol "push"])
+    nb <- push (debugBackend' b1)
+    return (b1 { debugBackend' = nb })
+  pop b = do
+    b1 <- outputLisp b (L.List [L.Symbol "pop"])
+    nb <- pop (debugBackend' b1)
+    return (b1 { debugBackend' = nb })
+  defineVar b name (expr::Expr b t) = do
+    (l,b1) <- renderExpr b expr
+    let (sym,req,nnames) = renderDefineVar (debugNames b) (Proxy::Proxy t) name l
+        b2 = b1 { debugNames = nnames }
+    b3 <- outputLisp b2 req
+    (res,nb) <- defineVar (debugBackend' b3) name expr
+    return (res,b3 { debugBackend' = nb
+                   , debugVars = DMap.insert (res::Var b t) (UntypedVar sym::UntypedVar T.Text t)
+                                 (debugVars b3) })
 
 renderExpr :: (Backend b,GetType tp) => DebugBackend b -> Expr b tp
            -> SMTMonad b (L.Lisp,DebugBackend b)

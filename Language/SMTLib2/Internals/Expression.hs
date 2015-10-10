@@ -141,14 +141,14 @@ functionType :: (GetTypes arg,GetType res) => Function fun con field '(arg,res) 
 functionType (_::Function fun con field '(arg,res)) = (getTypes::Args Repr arg,getType::Repr res)
 
 mapExpr :: (Functor m,Monad m,GetType r,Typeable con2)
-        => (forall t. GetType t => v1 t -> m (v2 t))
-        -> (forall t. GetType t => qv1 t -> m (qv2 t))
-        -> (forall arg t. (GetTypes arg,GetType t) => fun1 '(arg,t) -> m (fun2 '(arg,t)))
-        -> (forall arg t. (GetTypes arg) => con1 '(arg,t) -> m (con2 '(arg,t)))
-        -> (forall t res. GetType res => field1 '(t,res) -> m (field2 '(t,res)))
-        -> (forall t. GetType t => fv1 t -> m (fv2 t))
-        -> (forall t. GetType t => e1 t -> m (e2 t))
-        -> Expression v1 qv1 fun1 con1 field1 fv1 e1 r
+        => (forall t. GetType t => v1 t -> m (v2 t)) -- ^ How to translate variables
+        -> (forall t. GetType t => qv1 t -> m (qv2 t)) -- ^ How to translate quantified variables
+        -> (forall arg t. (GetTypes arg,GetType t) => fun1 '(arg,t) -> m (fun2 '(arg,t))) -- ^ How to translate functions
+        -> (forall arg t. (GetTypes arg) => con1 '(arg,t) -> m (con2 '(arg,t))) -- ^ How to translate constructrs
+        -> (forall t res. GetType res => field1 '(t,res) -> m (field2 '(t,res))) -- ^ How to translate field accessors
+        -> (forall t. GetType t => fv1 t -> m (fv2 t)) -- ^ How to translate function variables
+        -> (forall t. GetType t => e1 t -> m (e2 t)) -- ^ How to translate sub-expressions
+        -> Expression v1 qv1 fun1 con1 field1 fv1 e1 r -- ^ The expression to translate
         -> m (Expression v2 qv2 fun2 con2 field2 fv2 e2 r)
 mapExpr f _ _ _ _ _ _ (Var v) = fmap Var (f v)
 mapExpr _ f _ _ _ _ _ (QVar v) = fmap QVar (f v)
@@ -355,6 +355,10 @@ instance (GEq v,GEq qv,GEq fun,GEq con,GEq field,GEq fv,GEq e)
     geq body1 body2
   geq _ _ = Nothing
 
+instance (GEq v,GEq qv,GEq fun,GEq con,GEq field,GEq fv,GEq e)
+         => Eq (Expression v qv fun con field fv e t) where
+  (==) = defaultEq
+
 instance (GCompare v,GCompare qv,GCompare fun,GCompare con,
           GCompare field,GCompare fv,GCompare e)
          => GCompare (Expression v qv fun con field fv e) where
@@ -398,6 +402,11 @@ instance (GCompare v,GCompare qv,GCompare fun,GCompare con,
     GEQ -> gcompare body1 body2
     GLT -> GLT
     GGT -> GGT
+
+instance (GCompare v,GCompare qv,GCompare fun,GCompare con,
+          GCompare field,GCompare fv,GCompare e)
+         => Ord (Expression v qv fun con field fv e t) where
+  compare = defaultCompare
 
 instance (GEq fun,GEq con,GEq field) => GEq (Function fun con field) where
   geq (Fun f1) (Fun f2) = geq f1 f2
@@ -790,21 +799,55 @@ compareNat (prA::Proxy a) (prB::Proxy b) = case eqT::Maybe (a :~: b) of
     LT -> GLT
     GT -> GGT
 
-{-compareSig :: (GetTypes arg1,GetTypes arg2,
-               GetType ret1,GetType ret2)
-           => Function fun con field sig1
-           -> Function fun con field arg2 ret2
-           -> GOrdering arg1 arg2 ret1 ret2
-compareSig (_::Function fun con field arg1 ret1) (_::Function fun con field arg2 ret2)
-  = case eqT :: Maybe (arg1 :~: arg2) of
-      Just Refl -> case eqT :: Maybe (ret1 :~: ret2) of
-                     Just Refl -> GEQ2
-                     Nothing -> case gcompare (getType (Proxy::Proxy ret1))
-                                              (getType (Proxy::Proxy ret2)) of
-                                  GEQ -> GEQ2
-                                  GLT -> GLT2
-                                  GGT -> GGT2
-      Nothing -> case gcompare (getTypes (Proxy::Proxy arg1))
-                               (getTypes (Proxy::Proxy arg2)) of
-        GLT -> GLT2
-        GGT -> GGT2-}
+data NoVar (t::Type)
+data NoFun (sig::([Type],Type))
+data NoCon (sig::([Type],*))
+data NoField (sig::(*,Type))
+
+instance GEq NoVar where
+  geq _ _ = error "geq for NoVar"
+
+instance GEq NoFun where
+  geq _ _ = error "geq for NoFun"
+
+instance GEq NoCon where
+  geq _ _ = error "geq for NoCon"
+
+instance GEq NoField where
+  geq _ _ = error "geq for NoField"
+
+instance GCompare NoVar where
+  gcompare _ _ = error "gcompare for NoVar"
+
+instance GCompare NoFun where
+  gcompare _ _ = error "gcompare for NoFun"
+
+instance GCompare NoCon where
+  gcompare _ _ = error "gcompare for NoCon"
+
+instance GCompare NoField where
+  gcompare _ _ = error "gcompare for NoField"
+
+instance Eq (NoVar t) where
+  (==) _ _ = error "== for NoVar"
+
+instance Eq (NoFun t) where
+  (==) _ _ = error "== for NoFun"
+
+instance Eq (NoCon t) where
+  (==) _ _ = error "== for NoCon"
+
+instance Eq (NoField t) where
+  (==) _ _ = error "== for NoField"
+
+instance Ord (NoVar t) where
+  compare _ _ = error "compare for NoVar"
+
+instance Ord (NoFun t) where
+  compare _ _ = error "compare for NoFun"
+
+instance Ord (NoCon t) where
+  compare _ _ = error "compare for NoCon"
+
+instance Ord (NoField t) where
+  compare _ _ = error "compare for NoField"

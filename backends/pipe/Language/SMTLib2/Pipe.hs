@@ -114,10 +114,13 @@ instance Backend SMTPipe where
     where
       with :: (Proxy t -> IO (PipeVar t,SMTPipe)) -> IO (PipeVar t,SMTPipe)
       with f = f Proxy
-  defineVar b name expr = do
-    let (var,req,nb) = renderDefineVar b name expr
+  defineVar b name (PipeExpr expr::PipeExpr t) = do
+    let pr = Proxy::Proxy t
+        (sym,req,nnames) = renderDefineVar (names b) pr name (exprToLisp expr)
+        nb = b { names = nnames
+               , vars = Map.insert sym (Var pr) (vars b) }
     putRequest nb req
-    return (var,nb)
+    return (UntypedVar sym,nb)
   declareFun b name = withProxy $ \parg pr -> do
     let (sym,req,nnames) = renderDeclareFun (names b) parg pr name
         nb = b { names = nnames
@@ -390,21 +393,21 @@ renderDeclareVar names (_::Proxy tp) name
               Nothing -> "var"
     (name'',nnames) = genName' names name'
 
-renderDefineVar :: GetType t => SMTPipe -> Maybe String -> PipeExpr t
-                -> (PipeVar t,L.Lisp,SMTPipe)
-renderDefineVar b name (PipeExpr def :: PipeExpr t)
-  = (UntypedVar name'',
+renderDefineVar :: GetType t => Map String Int -> Proxy t -> Maybe String -> L.Lisp
+                -> (T.Text,L.Lisp,Map String Int)
+renderDefineVar names (_::Proxy t) name lexpr
+  = (name'',
      L.List [L.Symbol "define-fun"
             ,L.Symbol name''
             ,L.Symbol "()"
             ,typeSymbol (getType::Repr t)
-            ,exprToLisp def],
-     nb { vars = Map.insert name'' (Var (Proxy::Proxy t)) (vars nb) })
+            ,lexpr],
+     nnames)
   where
     name' = case name of
               Just n -> n
               Nothing -> "var"
-    (name'',nb) = genName b name'
+    (name'',nnames) = genName' names name'
 
 renderGetValue :: GetType t => SMTPipe -> PipeExpr t -> L.Lisp
 renderGetValue b (PipeExpr e) = L.List [L.Symbol "get-value"
@@ -1342,6 +1345,7 @@ ordSymbol Lt = L.Symbol "<"
 arithSymbol :: ArithOp -> L.Lisp
 arithSymbol Plus = L.Symbol "+"
 arithSymbol Mult = L.Symbol "*"
+arithSymbol Minus = L.Symbol "-"
 
 numToLisp :: Integer -> L.Lisp
 numToLisp n = if n>=0

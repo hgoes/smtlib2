@@ -64,7 +64,10 @@ parseSingleExpr str = do
     else Nothing
 
 args :: QuasiQuoter
-args = QuasiQuoter { quoteExp = quoteExpr }
+args = QuasiQuoter { quoteExp = quoteExpr
+                   , quotePat = \_ -> error "smtlib2: No support for argument patterns."
+                   , quoteType = \_ -> error "smtlib2: No support for argument types."
+                   , quoteDec = \_ -> error "smtlb2: No support for argument declarations." }
   where
     quoteExpr :: String -> TH.ExpQ
     quoteExpr s = case parseArgs s of
@@ -131,15 +134,15 @@ toExpr bind (List [Atom "forall",List vars,body])
 toExpr bind (List [Atom "exists",List vars,body])
   = toQuantifier Exists bind vars body
 toExpr bind (List [List [Atom "is",Atom dt,Atom con],expr])
-  = [| SpecialExpr $ TestConstr $(TH.litE $ TH.stringL con)
-                                (Proxy::Proxy $(TH.conT $ TH.mkName dt))
-                                $(toExpr bind expr) |]
+  = [| embedConstrTest $(TH.litE $ TH.stringL con)
+                       (Proxy:: Proxy $(TH.conT $ TH.mkName dt))
+                       $(toExpr bind expr) |]
 toExpr bind (List [List [Atom "get",Atom dt,Atom con,Atom field],expr])
-  = [| SpecialExpr $ GetField $(TH.litE $ TH.stringL field)
-                              $(TH.litE $ TH.stringL con)
-                              (Proxy::Proxy $(TH.conT $ TH.mkName dt))
-                              (fieldProxy $(TH.varE $ TH.mkName field))
-                              $(toExpr bind expr) |]
+  = [| embedGetField $(TH.litE $ TH.stringL field)
+                     $(TH.litE $ TH.stringL con)
+                     (Proxy:: Proxy $(TH.conT $ TH.mkName dt))
+                     (fieldProxy $(TH.varE $ TH.mkName field))
+                     $(toExpr bind expr) |]
 toExpr bind (List [name,Atom "#",Atom arg]) = [| appLst $(toFun name) $(TH.varE $ TH.mkName arg) |]
 toExpr bind (List (name:args)) = [| app $(toFun name) $(mkArgs bind args) |]
 
@@ -150,7 +153,7 @@ toQuantifier q bind vars body = do
   [| embedQuantifier $(case q of
                          Forall -> [| Forall |]
                          Exists -> [| Exists |])
-      (asSig (Proxy::Proxy $(quantSig sig)) $(TH.lamE [return pat] (toExpr bind' body))) |]
+      (asSig (Proxy:: Proxy $(quantSig sig)) $(TH.lamE [return pat] (toExpr bind' body))) |]
 
 toVarSig :: [BasicExpr] -> TH.Q [(String,TH.Type)]
 toVarSig = mapM (\(List [Atom name,tp]) -> do

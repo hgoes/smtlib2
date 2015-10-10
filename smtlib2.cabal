@@ -23,17 +23,19 @@ Flag WithDataKinds
 
 Library
   Build-Depends: base >=4 && <5, constraints, mtl, containers, template-haskell, dependent-sum, dependent-map
-  Extensions: GADTs,FlexibleContexts,FlexibleInstances,ExistentialQuantification,KindSignatures,DataKinds,TypeFamilies,AllowAmbiguousTypes,TypeOperators,MultiParamTypeClasses,ScopedTypeVariables,RankNTypes,UndecidableInstances,GeneralizedNewtypeDeriving,DeriveDataTypeable,CPP,PolyKinds,StandaloneDeriving
+  Extensions: GADTs,FlexibleContexts,FlexibleInstances,ExistentialQuantification,KindSignatures,DataKinds,TypeFamilies,AllowAmbiguousTypes,TypeOperators,MultiParamTypeClasses,ScopedTypeVariables,RankNTypes,UndecidableInstances,GeneralizedNewtypeDeriving,DeriveDataTypeable,CPP,PolyKinds,StandaloneDeriving,EmptyDataDecls
   if impl(ghc < 7.10) {
     Extensions: PolyKinds,StandaloneDeriving
   }
   GHC-Options: -fwarn-unused-imports
   Exposed-Modules:
-    Language.SMTLib2.Internals.Backend
-    Language.SMTLib2.Internals.Expression
-    Language.SMTLib2.Internals.Type
-    Language.SMTLib2.Internals.Type.Nat
-    Language.SMTLib2.Internals.TH
-    Language.SMTLib2.Strategy
-    Language.SMTLib2
-    Language.SMTLib2.LowLevel
+                  Language.SMTLib2.Internals.Backend
+                  Language.SMTLib2.Internals.Embed
+                  Language.SMTLib2.Internals.Expression
+                  Language.SMTLib2.Internals.Monad
+                  Language.SMTLib2.Internals.Type
+                  Language.SMTLib2.Internals.Type.Nat
+                  Language.SMTLib2.Internals.TH
+                  Language.SMTLib2.Strategy
+                  Language.SMTLib2
+                  Language.SMTLib2.LowLevel
