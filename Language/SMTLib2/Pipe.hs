@@ -1305,9 +1305,9 @@ ordOpParser = FunctionParser $ \sym _ dts -> case sym of
   where
     p :: L.Lisp -> SMTOrdOp -> DataTypeInfo -> Maybe FunctionParser'
     p sym op dts = Just $ OverloadedParser allEqConstraint (const $ Just $ getSort (undefined::Bool) ()) $
-                   \sort_arg _ f -> withFirstArgSort dts sym sort_arg $
-                                    \(_::t) _
-                                    -> Just $ f (SMTOrd op :: SMTFunction (SMTExpr t,SMTExpr t) Bool)
+                   \[sort_arg,_] _ f -> withNumSort dts sort_arg $
+                                        \(_::t) _
+                                         -> f (SMTOrd op :: SMTFunction (SMTExpr t,SMTExpr t) Bool)
 
 arithOpParser = FunctionParser $ \sym _ dts -> case sym of
   L.Symbol "+" -> Just $ OverloadedParser allEqConstraint (\sorts -> Just (head sorts)) $

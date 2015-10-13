@@ -110,7 +110,7 @@ class (SMTType t,Show t) => SMTValue t where
   mangle :: Mangling t
 
 -- | A type class for all types which support arithmetic operations in SMT
-class (SMTValue t,Num t) => SMTArith t
+class (SMTValue t,Num t,SMTAnnotation t ~ ()) => SMTArith t
 
 -- | Lifts the 'Ord' class into SMT
 class (SMTType t) => SMTOrd t where
@@ -239,9 +239,9 @@ data SMTFunction arg res where
   SMTMap :: (Liftable arg,SMTType res,Args i) => SMTFunction arg res -> SMTFunction (Lifted arg i) (SMTArray i res)
   SMTFun :: (Args arg,SMTType res) => Integer -> SMTAnnotation res -> SMTFunction arg res
   SMTBuiltIn :: (Liftable arg,SMTType res) => String -> SMTAnnotation res -> SMTFunction arg res
-  SMTOrd :: (SMTType a) => SMTOrdOp -> SMTFunction (SMTExpr a,SMTExpr a) Bool
-  SMTArith :: (SMTType a,Num a) => SMTArithOp -> SMTFunction [SMTExpr a] a
-  SMTMinus :: (SMTType a,Num a) => SMTFunction (SMTExpr a,SMTExpr a) a
+  SMTOrd :: (SMTArith a) => SMTOrdOp -> SMTFunction (SMTExpr a,SMTExpr a) Bool
+  SMTArith :: (SMTArith a) => SMTArithOp -> SMTFunction [SMTExpr a] a
+  SMTMinus :: (SMTArith a) => SMTFunction (SMTExpr a,SMTExpr a) a
   SMTIntArith :: SMTIntArithOp -> SMTFunction (SMTExpr Integer,SMTExpr Integer) Integer
   SMTDivide :: SMTFunction (SMTExpr Rational,SMTExpr Rational) Rational
   SMTNeg :: (SMTType a,Num a) => SMTFunction (SMTExpr a) a
