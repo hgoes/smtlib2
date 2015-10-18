@@ -1,6 +1,6 @@
 language: haskell
 ghc: 7.10
 script:
-  - cabal install -v1 --build-log=/dev/stderr
-  - cabal install -v1 --build-log=/dev/stderr ./backends/pipe
+  - cabal install -v1
+  - cabal install -v1 ./backends/pipe
 sudo: false
