@@ -1,6 +1,5 @@
 language: haskell
-ghc:
-  - 7.8
+ghc: 7.10
 script:
   - cabal install -v1 --build-log=/dev/stderr
   - cabal install -v1 --build-log=/dev/stderr ./backends/pipe
