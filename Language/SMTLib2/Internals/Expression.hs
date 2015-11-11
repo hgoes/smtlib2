@@ -127,6 +127,45 @@ instance (GEq fun,GEq con,GEq field)
          => Eq (Function fun con field sig) where
   (==) = defaultEq
 
+class GetType t => SMTOrd (t :: Type) where
+  lt :: Function fun con field '( '[t,t],BoolType)
+  le :: Function fun con field '( '[t,t],BoolType)
+  gt :: Function fun con field '( '[t,t],BoolType)
+  ge :: Function fun con field '( '[t,t],BoolType)
+
+instance SMTOrd IntType where
+  lt = OrdInt Lt
+  le = OrdInt Le
+  gt = OrdInt Gt
+  ge = OrdInt Ge
+
+instance SMTOrd RealType where
+  lt = OrdReal Lt
+  le = OrdReal Le
+  gt = OrdReal Gt
+  ge = OrdReal Ge
+
+class GetType t => SMTArith t where
+  plus :: (AllEq arg, SameType arg ~ t)
+       => Function fun con field '(arg,t)
+  minus :: (AllEq arg,SameType arg ~ t)
+        => Function fun con field '(arg,t)
+  mult :: (AllEq arg, SameType arg ~ t)
+       => Function fun con field '(arg,t)
+  abs' :: Function fun con field '( '[t],t)
+
+instance SMTArith IntType where
+  plus = ArithInt Plus
+  minus = ArithInt Minus
+  mult = ArithInt Mult
+  abs' = AbsInt
+
+instance SMTArith RealType where
+  plus = ArithReal Plus
+  minus = ArithReal Minus
+  mult = ArithReal Mult
+  abs' = AbsReal
+
 allEqOfList :: GetType t => Proxy t
             -> Integer
             -> (forall arg. (AllEq (t ': arg),SameType (t ': arg) ~ t)
@@ -298,6 +337,9 @@ instance (GShow fun,GShow con,GShow field)
   showsPrec p (BVBin op) = showParen (p>10) $
                            showString "BVBin " .
                            showsPrec 11 op
+  showsPrec p (BVUn op) = showParen (p>10) $
+                          showString "BVUn " .
+                          showsPrec 11 op
   showsPrec _ Select = showString "Select"
   showsPrec _ Store = showString "Store"
   showsPrec _ ConstArray = showString "ConstArray"

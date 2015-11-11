@@ -101,24 +101,6 @@ map' :: (GetTypes arg,GetTypes idx,GetType res)
      -> Function fun con field '(Lifted arg idx,ArrayType idx res)
 map' = Map
 
-class GetType t => SMTOrd (t :: Type) where
-  lt :: Function fun con field '( '[t,t],BoolType)
-  le :: Function fun con field '( '[t,t],BoolType)
-  gt :: Function fun con field '( '[t,t],BoolType)
-  ge :: Function fun con field '( '[t,t],BoolType)
-
-instance SMTOrd IntType where
-  lt = OrdInt Lt
-  le = OrdInt Le
-  gt = OrdInt Gt
-  ge = OrdInt Ge
-
-instance SMTOrd RealType where
-  lt = OrdReal Lt
-  le = OrdReal Le
-  gt = OrdReal Gt
-  ge = OrdReal Ge
-
 mapSubExpressions :: (Monad m,GetType tp)
                   => (forall t. GetType t => e t -> m (e' t))
                   -> Expression v qv fun con field fv e tp
@@ -268,27 +250,6 @@ defFun (f :: Args e arg -> e res) = do
   body <- toBackendExpr (f fargs)
   fun <- updateBackend $ \b -> B.defineFun b Nothing args body
   return (Fun fun)
-
-class GetType t => SMTArith t where
-  plus :: (AllEq arg, SameType arg ~ t)
-       => Function fun con field '(arg,t)
-  minus :: (AllEq arg,SameType arg ~ t)
-        => Function fun con field '(arg,t)
-  mult :: (AllEq arg, SameType arg ~ t)
-       => Function fun con field '(arg,t)
-  abs' :: Function fun con field '( '[t],t)
-
-instance SMTArith IntType where
-  plus = ArithInt Plus
-  minus = ArithInt Minus
-  mult = ArithInt Mult
-  abs' = AbsInt
-
-instance SMTArith RealType where
-  plus = ArithReal Plus
-  minus = ArithReal Minus
-  mult = ArithReal Mult
-  abs' = AbsReal
 
 class (AppExpr' fun ~ e,
        AppRet' sig fun ~ res,

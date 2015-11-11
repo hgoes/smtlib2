@@ -130,23 +130,12 @@ instance Backend SMTPipe where
     where
       withProxy :: (Proxy arg -> Proxy t -> IO (PipeFun '(arg,t),SMTPipe)) -> IO (PipeFun '(arg,t),SMTPipe)
       withProxy f = f Proxy Proxy
-  defineFun b name (arg :: Args PipeVar arg) (PipeExpr body :: PipeExpr r) = do
-    let name' = case name of
-          Just n -> n
-          Nothing -> "fun"
-        (name'',b1) = genName b name'
-    putRequest b1 (L.List [L.Symbol "define-fun"
-                          ,L.Symbol name''
-                          ,L.List $ mkArgs arg
-                          ,typeSymbol (getType::Repr r)
-                          ,exprToLisp body])
-    return (UntypedFun name'',b1)
-    where
-      mkArgs :: Args PipeVar ts -> [L.Lisp]
-      mkArgs NoArg = []
-      mkArgs (Arg (UntypedVar name::PipeVar t) xs)
-        = (L.List [L.Symbol name,typeSymbol (getType::Repr t)]):
-          mkArgs xs
+  defineFun b name arg body = do
+    let (name',req,nnames) = renderDefineFun (\(UntypedVar n) -> L.Symbol n)
+                             (\(PipeExpr e) -> exprToLisp e) (names b) name arg body
+        nb = b { names = nnames }
+    putRequest nb req
+    return (UntypedFun name',nb)
   assert b (PipeExpr expr) = do
     putRequest b (L.List [L.Symbol "assert"
                          ,exprToLisp expr])
@@ -229,7 +218,7 @@ instance Backend SMTPipe where
       Right res -> return (res,b)
       Left err -> error $ "smtlib2: Unknown simplify response: "++show resp++" ["++err++"]"
   toBackend b expr = return (PipeExpr expr,b)
-  fromBackend b (PipeExpr expr) = return (expr,b)
+  fromBackend b (PipeExpr expr) = expr
   interpolate b = do
     case interpolationMode b of
       Z3Interpolation grpA grpB -> do
@@ -308,6 +297,30 @@ renderDeclareFun names (_::Proxy arg) (_::Proxy ret) name
               Just n -> n
               Nothing -> "fun"
     (name'',nnames) = genName' names name'
+
+renderDefineFun :: (GetTypes arg,GetType ret)
+                => (forall t. GetType t => fv t -> L.Lisp)
+                -> (forall t. GetType t => e t -> L.Lisp)
+                -> Map String Int -> Maybe String
+                -> Args fv arg
+                -> e ret
+                -> (T.Text,L.Lisp,Map String Int)
+renderDefineFun renderFV renderE names name args (body :: e r)
+  = (name'',L.List [L.Symbol "define-fun"
+                   ,L.Symbol name''
+                   ,L.List $ mkArgs renderFV args
+                   ,typeSymbol (getType::Repr r)
+                   ,renderE body],nnames)
+  where
+    name' = case name of
+              Just n -> n
+              Nothing -> "fun"
+    (name'',nnames) = genName' names name'
+    mkArgs :: (forall t. GetType t => fv t -> L.Lisp) -> Args fv ts -> [L.Lisp]
+    mkArgs _ NoArg = []
+    mkArgs renderFV (Arg (v::fv t) xs)
+      = (L.List [renderFV v,typeSymbol (getType::Repr t)]):
+        mkArgs renderFV xs
 
 renderCheckSat :: Maybe Tactic -> CheckSatLimits -> L.Lisp
 renderCheckSat tactic limits
@@ -1041,8 +1054,7 @@ lispToConstant :: L.Lisp -> LispParse (AnyValue con)
 lispToConstant (L.Symbol "true") = return (AnyValue (BoolValue True))
 lispToConstant (L.Symbol "false") = return (AnyValue (BoolValue False))
 lispToConstant (lispToNumber -> Just n) = return (AnyValue (IntValue n))
-lispToConstant (L.List [L.Symbol "/",lispToNumber -> Just d,lispToNumber -> Just n])
-  = return (AnyValue (RealValue (d % n)))
+lispToConstant (lispToReal -> Just n) = return (AnyValue (RealValue n))
 lispToConstant (lispToBitVec -> Just (val,sz))
   = reifyNat sz $ \(_::Proxy tsz) -> return (AnyValue (BitVecValue val::Value con (BitVecType tsz)))
 lispToConstant l = throwE $ "Invalid constant "++show l
@@ -1081,6 +1093,15 @@ lispToNumber (L.List [L.Symbol "-",n]) = do
   n' <- lispToNumber n
   return (negate n')
 lispToNumber _ = Nothing
+
+lispToReal :: L.Lisp -> Maybe Rational
+lispToReal (L.Number (L.D n)) = Just $ toRational n
+lispToReal (L.Number (L.I n)) = Just $ fromInteger n
+lispToReal (L.List [L.Symbol "/",v1,v2]) = do
+  r1 <- lispToReal v1
+  r2 <- lispToReal v2
+  return $ r1 / r2
+lispToReal _ = Nothing
 
 lispToBitVec :: L.Lisp -> Maybe (Integer,Integer)
 lispToBitVec (L.List [L.Symbol "_",L.Symbol (T.stripPrefix "bv" -> Just val),L.Number (L.I sz)])
@@ -1248,8 +1269,8 @@ functionSymbol _ _ _ _ (Logic And) = return $ L.Symbol "and"
 functionSymbol _ _ _ _ (Logic Or) = return $ L.Symbol "or"
 functionSymbol _ _ _ _ (Logic XOr) = return $ L.Symbol "xor"
 functionSymbol _ _ _ _ (Logic Implies) = return $ L.Symbol "=>"
-functionSymbol _ _ _ _ ToReal = return $ L.Symbol "to-real"
-functionSymbol _ _ _ _ ToInt = return $ L.Symbol "to-int"
+functionSymbol _ _ _ _ ToReal = return $ L.Symbol "to_real"
+functionSymbol _ _ _ _ ToInt = return $ L.Symbol "to_int"
 functionSymbol _ _ _ _ ITE = return $ L.Symbol "ite"
 functionSymbol _ _ _ _ (BVComp op) = return $ L.Symbol $ case op of
   BVULE -> "bvule"

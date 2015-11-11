@@ -4,9 +4,11 @@ import Language.SMTLib2.Internals.Backend as B
 import Language.SMTLib2.Internals.Type
 
 import Control.Monad.State.Strict
-import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
 import Data.Typeable
+import Data.GADT.Compare
+import Data.GADT.Show
+import Data.Dependent.Map (DMap)
+import qualified Data.Dependent.Map as Map
 
 newtype Backend b => SMT b a = SMT (StateT (SMTState b) (SMTMonad b) a)
 
@@ -32,23 +34,62 @@ instance Backend b => MonadState (SMTState b) (SMT b) where
 instance (Backend b,MonadIO (SMTMonad b)) => MonadIO (SMT b) where
   liftIO act = SMT (liftIO act)
 
+withBackend :: Backend b => SMTMonad b b -> SMT b a -> SMTMonad b a
+withBackend constr (SMT act) = do
+  b <- constr
+  evalStateT act (SMTState b emptyDatatypeInfo)
+
 liftSMT :: Backend b => SMTMonad b a -> SMT b a
 liftSMT act = SMT (lift act)
 
-type DatatypeInfo con field = Map TypeRep (RegisteredDT con field)
+embedSMT :: Backend b => (b -> SMTMonad b (a,b)) -> SMT b a
+embedSMT act = SMT $ do
+  b <- get
+  (res,nb) <- lift $ act (backend b)
+  put (b { backend = nb })
+  return res
 
-data RegisteredDT con field
-  = forall dt. IsDatatype dt => RegisteredDT (B.BackendDatatype con field '(DatatypeSig dt,dt))
+embedSMT' :: Backend b => (b -> SMTMonad b b) -> SMT b ()
+embedSMT' act = SMT $ do
+  b <- get
+  nb <- lift $ act (backend b)
+  put (b { backend = nb })
+
+data DTProxy dt where
+  DTProxy :: IsDatatype dt => DTProxy dt
+
+instance GEq DTProxy where
+  geq DTProxy DTProxy = eqT
+
+instance GCompare DTProxy where
+  gcompare x@(DTProxy::DTProxy a) y@(DTProxy::DTProxy b) = case (eqT :: Maybe (a :~: b)) of
+    Just Refl -> GEQ
+    Nothing -> case compare (typeRep x) (typeRep y) of
+      LT -> GLT
+      GT -> GGT
+
+instance GShow DTProxy where
+  gshowsPrec p pr@DTProxy = showsPrec p (typeRep pr)
+
+instance Show (DTProxy dt) where
+  showsPrec = gshowsPrec
+
+type DatatypeInfo con field = DMap DTProxy (RegisteredDT con field)
+
+newtype RegisteredDT con field dt
+  = RegisteredDT (B.BackendDatatype con field '(DatatypeSig dt,dt))
   deriving (Typeable)
 
 emptyDatatypeInfo :: DatatypeInfo con field
 emptyDatatypeInfo = Map.empty
 
+reproxyDT :: IsDatatype dt => Proxy dt -> DTProxy dt
+reproxyDT _ = DTProxy
+
 registerDatatype :: (Backend b,IsDatatype dt) => Proxy dt -> SMT b ()
 registerDatatype pr = do
-  let repr = typeOf pr
   st <- get
-  if Map.member repr (datatypes st)
+  if Map.member (reproxyDT pr) (datatypes st)
     then return ()
     else do
       (dts,nb) <- liftSMT $ B.declareDatatypes (backend st) (getTypeCollection pr)
@@ -58,16 +99,14 @@ registerDatatype pr = do
     insertTypes :: B.BackendTypeCollection con field sigs -> DatatypeInfo con field -> DatatypeInfo con field
     insertTypes NoDts mp = mp
     insertTypes (ConsDts (dt::B.BackendDatatype con field '(DatatypeSig dt,dt)) dts) mp
-      = let repr = typeOf (Proxy::Proxy dt)
-            nmp =  Map.insert repr (RegisteredDT dt) mp
+      = let nmp =  Map.insert (DTProxy::DTProxy dt) (RegisteredDT dt) mp
          in insertTypes dts nmp
 
-lookupDatatype :: TypeRep -> DatatypeInfo con field
-               -> (forall dt. IsDatatype dt => B.BackendDatatype con field '(DatatypeSig dt,dt) -> a)
-               -> a
-lookupDatatype rep dts f = case Map.lookup rep dts of
-  Just (RegisteredDT dt) -> f dt
-  Nothing -> error $ "smtlib2: Datatype "++show rep++" is not registered."
+lookupDatatype :: DTProxy dt -> DatatypeInfo con field
+               -> B.BackendDatatype con field '(DatatypeSig dt,dt)
+lookupDatatype pr dts = case Map.lookup pr dts of
+  Just (RegisteredDT dt) -> dt
+  Nothing -> error $ "smtlib2: Datatype "++show pr++" is not registered."
 
 lookupConstructor :: String -> B.BackendDatatype con field '(DatatypeSig dt,dt)
                   -> (forall arg. GetTypes arg => B.BackendConstr con field '(arg,dt) -> a)
@@ -82,6 +121,18 @@ lookupConstructor name dt f = lookup (bconstructors dt) f
                                   then f con
                                   else lookup cons f
 
+constructDatatype :: GEq con => con '(arg,ret)
+                  -> Args ConcreteValue arg
+                  -> B.BackendDatatype con field '(cons,ret)
+                  -> ret
+constructDatatype con args dt = get con args (bconstructors dt)
+  where
+    get :: GEq con => con '(arg,ret) -> Args ConcreteValue arg
+        -> Constrs (BackendConstr con field) sigs ret -> ret
+    get con args (ConsCon x xs)
+      = case geq con (bconRepr x) of
+      Just Refl -> bconstruct x args
+      Nothing -> get con args xs
 
 lookupField :: String -> B.BackendConstr con field '(arg,dt)
             -> (forall tp. GetType tp => B.BackendField field dt tp -> a)
@@ -97,16 +148,14 @@ lookupField name con f = lookup (bconFields con) f
                           else lookup xs f
 
 lookupDatatypeCon :: (IsDatatype dt,Typeable con,Typeable field)
-                  => Proxy dt -> String -> DatatypeInfo con field
+                  => DTProxy dt -> String -> DatatypeInfo con field
                   -> (forall arg. GetTypes arg => B.BackendConstr con field '(arg,dt) -> a)
                   -> a
 lookupDatatypeCon pr name info f
-  = lookupDatatype (typeOf pr) info $
-    \dt -> case cast dt of
-       Just dt' -> lookupConstructor name dt' f
+  = lookupConstructor name (lookupDatatype pr info) f
 
 lookupDatatypeField :: (IsDatatype dt,Typeable con,Typeable field)
-                  => Proxy dt -> String -> String -> DatatypeInfo con field
+                  => DTProxy dt -> String -> String -> DatatypeInfo con field
                   -> (forall tp. GetType tp => B.BackendField field dt tp -> a)
                   -> a
 lookupDatatypeField pr con field info f

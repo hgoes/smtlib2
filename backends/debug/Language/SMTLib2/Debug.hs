@@ -15,8 +15,8 @@ import Data.Foldable
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Proxy
-import Data.Typeable
 import qualified Data.Text as T
+import Data.Functor.Identity
 
 import Data.Dependent.Map (DMap)
 import qualified Data.Dependent.Map as DMap
@@ -113,14 +113,36 @@ instance (Backend b) => Backend (DebugBackend b) where
       with :: (Proxy (t::Type) -> SMTMonad b (Var (DebugBackend b) t,DebugBackend b))
            -> SMTMonad b (Var (DebugBackend b) t,DebugBackend b)
       with f = f Proxy
+  defineFun b name args body = do
+    let (sym,req,nnames) = renderDefineFun
+                           (\fv -> case DMap.lookup fv (debugFVars b) of
+                             Just (UntypedVar n) -> L.Symbol n)
+                           (renderExpr b)
+                           (debugNames b) name args body
+        b1 = b { debugNames = nnames }
+    b2 <- outputLisp b1 req
+    (rvar,nb) <- defineFun (debugBackend' b2) name args body
+    return (rvar,b2 { debugBackend' = nb
+                    , debugFuns = DMap.insertWith const rvar
+                                  (UntypedFun sym) (debugFuns b2) }) 
+  createFunArg b name = do
+    let name' = case name of
+          Just n -> n
+          Nothing -> "fv"
+        (name'',nnames) = genName' (debugNames b) name'
+    (fv,nb) <- createFunArg (debugBackend' b) name
+    return (fv,b { debugBackend' = nb
+                 , debugNames = nnames
+                 , debugFVars = DMap.insert fv (UntypedVar name'') (debugFVars b) })
   toBackend b expr = do
     (expr',nb) <- toBackend (debugBackend' b) expr
     return (expr',b { debugBackend' = nb })
+  fromBackend b = fromBackend (debugBackend' b)
   assert b expr = do
-    (l,b1) <- renderExpr b expr
-    b2 <- outputLisp b1 (L.List [L.Symbol "assert",l])
-    nb <- assert (debugBackend' b2) expr
-    return (b2 { debugBackend' = nb })
+    let l = renderExpr b expr
+    b1 <- outputLisp b (L.List [L.Symbol "assert",l])
+    nb <- assert (debugBackend' b1) expr
+    return (b1 { debugBackend' = nb })
   checkSat b tactic limits = do
     b1 <- outputLisp b (renderCheckSat tactic limits)
     (res,nb) <- checkSat (debugBackend' b) tactic limits
@@ -130,15 +152,15 @@ instance (Backend b) => Backend (DebugBackend b) where
       Unknown -> "unknown"
     return (res,b1 { debugBackend' = nb })
   getValue b expr = do
-    (l,b1) <- renderExpr b expr
-    b2 <- outputLisp b1 (L.List [L.Symbol "get-value"
-                                ,L.List [l]])
-    (res,nb) <- getValue (debugBackend' b2) expr
-    str <- valueToLisp (\con -> case DMap.lookup con (debugCons b2) of
+    let l = renderExpr b expr
+    b1 <- outputLisp b (L.List [L.Symbol "get-value"
+                               ,L.List [l]])
+    (res,nb) <- getValue (debugBackend' b1) expr
+    str <- valueToLisp (\con -> case DMap.lookup con (debugCons b1) of
                                   Just (UntypedCon name) -> return (L.Symbol name)
                        ) res
-    outputResponse b2 (show str)
-    return (res,b2 { debugBackend' = nb })
+    outputResponse b1 (show str)
+    return (res,b1 { debugBackend' = nb })
   declareFun b name = with $ \parg pr -> do
     let (sym,req,nnames) = renderDeclareFun (debugNames b) parg pr name
         b1 = b { debugNames = nnames }
@@ -211,37 +233,36 @@ instance (Backend b) => Backend (DebugBackend b) where
     nb <- pop (debugBackend' b1)
     return (b1 { debugBackend' = nb })
   defineVar b name (expr::Expr b t) = do
-    (l,b1) <- renderExpr b expr
-    let (sym,req,nnames) = renderDefineVar (debugNames b) (Proxy::Proxy t) name l
-        b2 = b1 { debugNames = nnames }
-    b3 <- outputLisp b2 req
-    (res,nb) <- defineVar (debugBackend' b3) name expr
-    return (res,b3 { debugBackend' = nb
+    let l = renderExpr b expr
+        (sym,req,nnames) = renderDefineVar (debugNames b) (Proxy::Proxy t) name l
+        b1 = b { debugNames = nnames }
+    b2 <- outputLisp b1 req
+    (res,nb) <- defineVar (debugBackend' b2) name expr
+    return (res,b2 { debugBackend' = nb
                    , debugVars = DMap.insert (res::Var b t) (UntypedVar sym::UntypedVar T.Text t)
-                                 (debugVars b3) })
+                                 (debugVars b2) })
 
 renderExpr :: (Backend b,GetType tp) => DebugBackend b -> Expr b tp
-           -> SMTMonad b (L.Lisp,DebugBackend b)
-renderExpr b expr = do
-  (e',nb) <- fromBackend (debugBackend' b) expr
-  -- TODO: To be correct, this must be a state monad
-  l <- exprToLispWith
-       (\v -> case DMap.lookup v (debugVars b) of
-                Just (UntypedVar r) -> return $ L.Symbol r)
-       (\v -> case DMap.lookup v (debugQVars b) of
-                Just (UntypedVar r) -> return $ L.Symbol r)
-       (\v -> case DMap.lookup v (debugFuns b) of
-                Just (UntypedFun r) -> return $ L.Symbol r)
-       (\v -> case DMap.lookup v (debugCons b) of
-                Just (UntypedCon r) -> return $ L.Symbol r)
-       (\v -> case DMap.lookup v (debugCons b) of
-                Just (UntypedCon r) -> return $ L.Symbol $ T.append "is-" r)
-       (\v -> case DMap.lookup v (debugFields b) of
-                Just (UntypedField r) -> return $ L.Symbol r)
-       (\v -> case DMap.lookup v (debugFVars b) of
-                Just (UntypedVar r) -> return $ L.Symbol r)
-       (fmap fst . renderExpr b) e'
-  return (l,b { debugBackend' = nb })
+           -> L.Lisp
+renderExpr b expr
+  = runIdentity $ exprToLispWith
+    (\v -> case DMap.lookup v (debugVars b) of
+             Just (UntypedVar r) -> return $ L.Symbol r)
+    (\v -> case DMap.lookup v (debugQVars b) of
+             Just (UntypedVar r) -> return $ L.Symbol r)
+    (\v -> case DMap.lookup v (debugFuns b) of
+             Just (UntypedFun r) -> return $ L.Symbol r)
+    (\v -> case DMap.lookup v (debugCons b) of
+             Just (UntypedCon r) -> return $ L.Symbol r)
+    (\v -> case DMap.lookup v (debugCons b) of
+             Just (UntypedCon r) -> return $ L.Symbol $ T.append "is-" r)
+    (\v -> case DMap.lookup v (debugFields b) of
+             Just (UntypedField r) -> return $ L.Symbol r)
+    (\v -> case DMap.lookup v (debugFVars b) of
+             Just (UntypedVar r) -> return $ L.Symbol r)
+    (return . renderExpr b) expr'
+  where
+    expr' = fromBackend (debugBackend' b) expr
 
 {-
 instance (SMTBackend b m,MonadIO m) => SMTBackend (DebugBackend b) m where

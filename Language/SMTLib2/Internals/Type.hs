@@ -163,6 +163,27 @@ instance GEq con => GEq (Value con) where
     return Refl
   geq _ _ = Nothing
 
+instance GEq ConcreteValue where
+  geq (BoolValueC v1) (BoolValueC v2) = if v1==v2 then Just Refl else Nothing
+  geq (IntValueC v1) (IntValueC v2) = if v1==v2 then Just Refl else Nothing
+  geq (RealValueC v1) (RealValueC v2) = if v1==v2 then Just Refl else Nothing
+  geq v1@(BitVecValueC _) v2@(BitVecValueC _) = do
+    Refl <- cmp v1 v2
+    return Refl
+    where
+      cmp :: ConcreteValue (BitVecType bw1) -> ConcreteValue (BitVecType bw2)
+          -> Maybe (ConcreteValue (BitVecType bw1) :~: ConcreteValue (BitVecType bw2))
+      cmp (BitVecValueC v1 :: ConcreteValue (BitVecType bw1))
+          (BitVecValueC v2 :: ConcreteValue (BitVecType bw2)) = do
+        Refl <- eqT :: Maybe (bw1 :~: bw2)
+        if v1==v2 then Just Refl else Nothing
+  geq (ConstrValueC (v1::a)) (ConstrValueC (v2::b)) = case (eqT :: Maybe (a :~: b)) of
+    Just Refl -> if v1==v2
+                 then Just Refl
+                 else Nothing
+    Nothing -> Nothing
+  geq _ _ = Nothing
+
 instance GCompare con => GCompare (Value con) where
   gcompare (BoolValue v1) (BoolValue v2) = case compare v1 v2 of
     EQ -> GEQ
@@ -198,6 +219,53 @@ instance GCompare con => GCompare (Value con) where
     GLT -> GLT
     GGT -> GGT
     GEQ -> GEQ
+
+instance GCompare ConcreteValue where
+  gcompare (BoolValueC v1) (BoolValueC v2) = case compare v1 v2 of
+    EQ -> GEQ
+    LT -> GLT
+    GT -> GGT
+  gcompare (BoolValueC _) _ = GLT
+  gcompare _ (BoolValueC _) = GGT
+  gcompare (IntValueC v1) (IntValueC v2) = case compare v1 v2 of
+    EQ -> GEQ
+    LT -> GLT
+    GT -> GGT
+  gcompare (IntValueC _) _ = GLT
+  gcompare _ (IntValueC _) = GGT
+  gcompare (RealValueC v1) (RealValueC v2) = case compare v1 v2 of
+    EQ -> GEQ
+    LT -> GLT
+    GT -> GGT
+  gcompare (RealValueC _) _ = GLT
+  gcompare _ (RealValueC _) = GGT
+  gcompare v1@(BitVecValueC v1') v2@(BitVecValueC v2') = case v1 of
+    (_::ConcreteValue (BitVecType bw1)) -> case v2 of
+      (_::ConcreteValue (BitVecType bw2)) -> case eqT :: Maybe (bw1 :~: bw2) of
+        Nothing -> if natVal (Proxy::Proxy bw1) < natVal (Proxy::Proxy bw2)
+                   then GLT
+                   else GGT
+        Just Refl -> case compare v1' v2' of
+          EQ -> GEQ
+          LT -> GLT
+          GT -> GGT
+  gcompare (BitVecValueC _) _ = GLT
+  gcompare _ (BitVecValueC _) = GGT
+  gcompare (ConstrValueC (v1::a)) (ConstrValueC (v2::b)) = case (eqT :: Maybe (a :~: b)) of
+    Just Refl -> case compare v1 v2 of
+      EQ -> GEQ
+      LT -> GLT
+      GT -> GGT
+    Nothing -> case compare (typeOf v1) (typeOf v2) of
+      LT -> GLT
+      GT -> GGT
+
+instance GShow ConcreteValue where
+  gshowsPrec p (BoolValueC v) = showsPrec p v
+  gshowsPrec p (IntValueC v) = showsPrec p v
+  gshowsPrec p (RealValueC v) = showsPrec p v
+  gshowsPrec p (BitVecValueC v) = showsPrec p v
+  gshowsPrec p (ConstrValueC v) = showsPrec p v
 
 instance GEq e => GEq (Args e) where
   geq NoArg NoArg = Just Refl
@@ -335,6 +403,9 @@ mapArgs f (Arg x xs) = do
   x' <- f x
   xs' <- mapArgs f xs
   return (Arg x' xs')
+
+withArgs :: (Monad m,GetTypes tps) => (forall t. GetType t => m (e t)) -> m (Args e tps)
+withArgs f = mapArgs (const f) getTypes
 
 argsToList :: (forall (t :: Type). GetType t => e t -> a) -> Args e arg -> [a]
 argsToList _ NoArg = []

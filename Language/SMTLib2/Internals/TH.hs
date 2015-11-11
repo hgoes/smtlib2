@@ -5,7 +5,8 @@ import Language.SMTLib2.Internals.Type
 import Language.SMTLib2.Internals.Type.Nat
 import Language.SMTLib2.Internals.Expression
 import qualified Language.SMTLib2.Internals.Backend as B
-import Language.SMTLib2.LowLevel
+import Language.SMTLib2.Internals.Monad
+--import Language.SMTLib2.LowLevel
 
 import Data.Char
 import Numeric
@@ -15,6 +16,8 @@ import Language.Haskell.TH.Quote
 import Data.Proxy
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Control.Monad (liftM2)
+import Data.Proxy
 
 data BasicExpr = Atom String
                | List [BasicExpr]
@@ -65,14 +68,22 @@ parseSingleExpr str = do
 
 args :: QuasiQuoter
 args = QuasiQuoter { quoteExp = quoteExpr
-                   , quotePat = \_ -> error "smtlib2: No support for argument patterns."
-                   , quoteType = \_ -> error "smtlib2: No support for argument types."
+                   , quotePat = quotePattern
+                   , quoteType = quoteTp
                    , quoteDec = \_ -> error "smtlb2: No support for argument declarations." }
   where
     quoteExpr :: String -> TH.ExpQ
     quoteExpr s = case parseArgs s of
       Nothing -> fail $ "Failed to parse arguments: "++s
       Just exprs -> toArgs exprs
+    quotePattern :: String -> TH.PatQ
+    quotePattern s = case parseArgs s of
+      Nothing -> fail $ "Failed to parse argument pattern: "++s
+      Just exprs -> mkArgsPat exprs
+    quoteTp :: String -> TH.TypeQ
+    quoteTp s = case parseArgs s of
+      Nothing -> fail $ "Failed to parse argument type: "++s
+      Just tps -> toTypes tps
 
 expr :: QuasiQuoter
 expr = QuasiQuoter { quoteExp = quoteExpr
@@ -89,51 +100,84 @@ expr = QuasiQuoter { quoteExp = quoteExpr
       Just expr -> toPat expr
 
 declare :: QuasiQuoter
-declare = declare' Nothing
-
-declare' :: Maybe (TH.TypeQ -> TH.TypeQ) -> QuasiQuoter
-declare' expr = QuasiQuoter { quoteExp = quoteExpr }
+declare = QuasiQuoter { quoteExp = quoteExpr }
   where
     quoteExpr :: String -> TH.ExpQ
-    quoteExpr s = do
-      b <- TH.newName "b"
-      case parseArgs s of
-        Nothing -> fail $ "Failed to parse type: "++s
-        Just [tp] -> case expr of
-          Nothing -> do
-            e <- TH.newName "e"
-            TH.sigE [| var |] [t| forall e. Embed e => SMT (EmbedBackend e) (e $(toType tp)) |]
-          Just exprName -> do
-            TH.sigE [| var |] (exprName (toType tp))
-        Just [List sig,tp] -> do
-          TH.sigE [| fun |] [t| forall b con field. Backend b => SMT b (Function (B.Fun b) con field '( $(toTypes sig),$(toType tp))) |]
+    quoteExpr s = case parseArgs s of
+      Nothing -> fail $ "Failed to parse type: "++s
+      Just [tp] -> TH.sigE [| embedSMT (flip B.declareVar Nothing) >>=
+                              embedSMT . flip B.toBackend . Var |]
+                           [t| forall b. B.Backend b => SMT b (B.Expr b $(toType tp)) |]
+      Just [List sig,tp] -> TH.sigE [| fmap Fun (embedSMT $ flip B.declareFun Nothing) |]
+                                    [t| forall b con field. B.Backend b => SMT b (Function (B.Fun b) con field '( $(toTypes sig),$(toType tp))) |]
+
+define :: QuasiQuoter
+define = QuasiQuoter { quoteExp = quoteExpr }
+  where
+    quoteExpr :: String -> TH.ExpQ
+    quoteExpr s = case parseArgs s of
+      Just [body] -> [| $(toExpr Map.empty body) >>=
+                        embedSMT . (\e b -> B.defineVar b Nothing e) >>=
+                        embedSMT . flip B.toBackend . Var |]
+      Just [List args,body] -> do
+        sig <- toVarSig args
+        toFunDef sig body Map.empty []
+
+toFunDef :: [(String,TH.Type)] -> BasicExpr
+         -> Map String TH.Exp
+         -> [TH.ExpQ]
+         -> TH.ExpQ
+toFunDef ((name,tp):args) body mp vec = do
+  fv <- TH.newName "fv"
+  fve <- TH.newName "fve"
+  expr <- TH.varE fve
+  TH.appE [| fmap Fun |] $
+    TH.appE [| (>>=) (embedSMT (flip B.createFunArg (Just $(TH.litE $ TH.stringL name)))) |]
+            (TH.lamE [TH.varP fv]
+             (TH.appE [| (>>=) (embedSMT (flip B.toBackend (FVar $(TH.varE fv)))) |]
+              (TH.lamE [TH.varP fve]
+                (toFunDef args body
+                  (Map.insert name expr mp)
+                  (TH.appsE [[| entypeExpr |]
+                            ,TH.sigE [| Proxy |] (TH.appT [t| Proxy |] (return tp))
+                            ,TH.varE fv]:vec)))))
+toFunDef [] body mp vec = do
+  let args = foldl (\args e -> [| Arg $(e) $(args) |]) [| NoArg |] vec
+  [| $(toExpr mp body) >>= embedSMT . \body' -> \b -> B.defineFun b Nothing $(args) body' |]
+
+entypeExpr :: Proxy (t::Type) -> e t -> e t
+entypeExpr _ = id
 
 toArgs :: [BasicExpr] -> TH.ExpQ
 toArgs [] = [| NoArg |]
 toArgs (x:xs) = [| Arg $(toExpr Map.empty x) $(toArgs xs) |]
 
 toExpr :: Map String TH.Exp -> BasicExpr -> TH.ExpQ
-toExpr _ (Atom "false") = [| embed (Const (BoolValue False)) |]
-toExpr _ (Atom "true") = [| embed (Const (BoolValue True)) |]
+toExpr _ (Atom "false") = [| embedSMT $ flip B.toBackend (Const (BoolValue False)) |]
+toExpr _ (Atom "true") = [| embedSMT $ flip B.toBackend (Const (BoolValue True)) |]
 toExpr _ (Atom ('#':'x':rest)) = case [ num | (num,"") <- readHex rest ] of
   [n] -> let bw = genericLength rest*4
-         in [| embed (Const (BitVecValue $(TH.litE $ TH.integerL n) :: Value con (BitVecType $(mkNum bw)))) |]
+         in [| embedSMT $ flip B.toBackend (Const (BitVecValue $(TH.litE $ TH.integerL n) :: Value con (BitVecType $(mkNum bw)))) |]
 toExpr _ (List [Atom "_",Atom ('b':'v':val),Atom bw])
   = let num = read val
         rbw = read bw
-    in [| embed (Const (BitVecValue $(TH.litE $ TH.integerL num) :: Value con (BitVecType $(mkNum rbw)))) |]
-toExpr _ (List [Atom "_",Atom "as-array",fun]) = [| embed (AsArray $(toFun fun)) |]
+    in [| embedSMT $ flip B.toBackend (Const (BitVecValue $(TH.litE $ TH.integerL num) :: Value con (BitVecType $(mkNum rbw)))) |]
+toExpr _ (List [Atom "_",Atom "as-array",fun]) = [| embedSMT $ flip B.toBackend (AsArray $(toFun fun)) |]
 toExpr bind (Atom name)
-  | isDigit (head name) = let num = read name
-                           in [| embed (Const (IntValue $(TH.litE $ TH.integerL num))) |]
+  | isDigit (head name)
+    = if '.' `elem` name
+      then case [ res | (res,"") <- readFloat name ] of
+        [r] -> [| embedSMT $ flip B.toBackend (Const (RealValue $(TH.litE $ TH.rationalL r))) |]
+      else let num = read name
+           in [| embedSMT $ flip B.toBackend (Const (IntValue $(TH.litE $ TH.integerL num))) |]
   | otherwise = case Map.lookup name bind of
-      Just res -> return res
-      Nothing -> TH.varE (TH.mkName name)
+      Just res -> [| return $(return res) |]
+      Nothing -> [| return $(TH.varE (TH.mkName name)) |]
 toExpr bind (List [Atom "forall",List vars,body])
   = toQuantifier Forall bind vars body
 toExpr bind (List [Atom "exists",List vars,body])
   = toQuantifier Exists bind vars body
-toExpr bind (List [List [Atom "is",Atom dt,Atom con],expr])
+{-toExpr bind (List [List [Atom "is",Atom dt,Atom con],expr])
   = [| embedConstrTest $(TH.litE $ TH.stringL con)
                        (Proxy:: Proxy $(TH.conT $ TH.mkName dt))
                        $(toExpr bind expr) |]
@@ -142,18 +186,27 @@ toExpr bind (List [List [Atom "get",Atom dt,Atom con,Atom field],expr])
                      $(TH.litE $ TH.stringL con)
                      (Proxy:: Proxy $(TH.conT $ TH.mkName dt))
                      (fieldProxy $(TH.varE $ TH.mkName field))
-                     $(toExpr bind expr) |]
-toExpr bind (List [name,Atom "#",Atom arg]) = [| appLst $(toFun name) $(TH.varE $ TH.mkName arg) |]
-toExpr bind (List (name:args)) = [| app $(toFun name) $(mkArgs bind args) |]
+                     $(toExpr bind expr) |]-}
+toExpr bind (List [name,Atom "#",Atom arg]) = case funAllEqName name of
+  Just name' -> TH.appE [| embedSMT |]
+                        (TH.appE (TH.varE name') (TH.varE (TH.mkName arg)))
+  Nothing -> error $ "Cannot apply list to "++show name++" function."
+toExpr bind (List (name:args)) = [| $(mkArgs bind args) >>=
+                                    embedSMT . flip B.toBackend . App $(toFun name) |]
+
 
 toQuantifier :: Quantifier -> Map String TH.Exp -> [BasicExpr] -> BasicExpr -> TH.ExpQ
 toQuantifier q bind vars body = do
   sig <- toVarSig vars
-  (pat,bind') <- toQuant sig bind
-  [| embedQuantifier $(case q of
-                         Forall -> [| Forall |]
-                         Exists -> [| Exists |])
-      (asSig (Proxy:: Proxy $(quantSig sig)) $(TH.lamE [return pat] (toExpr bind' body))) |]
+  (args,bind') <- toQuant sig bind
+  [| do
+      args' <- $(return args)
+      body' <- $(toExpr bind' body)
+      embedSMT $ flip B.toBackend (Quantification
+                                   $(case q of
+                                      Forall -> [| Forall |]
+                                      Exists -> [| Exists |])
+                                   args' body') |]
 
 toVarSig :: [BasicExpr] -> TH.Q [(String,TH.Type)]
 toVarSig = mapM (\(List [Atom name,tp]) -> do
@@ -161,16 +214,19 @@ toVarSig = mapM (\(List [Atom name,tp]) -> do
                    return (name,tp')
                 )
 
-toQuant :: [(String,TH.Type)] -> Map String TH.Exp -> TH.Q (TH.Pat,Map String TH.Exp)
+toQuant :: [(String,TH.Type)] -> Map String TH.Exp -> TH.Q (TH.Exp,Map String TH.Exp)
 toQuant [] mp = do
-  pat <- [p| NoArg |]
-  return (pat,mp)
+  expr <- [| return NoArg |]
+  return (expr,mp)
 toQuant ((name,tp):args) mp = do
   q <- TH.newName "q"
-  (pat,nmp) <- toQuant args mp
+  (rest,nmp) <- toQuant args mp
   expr <- TH.varE q
-  pat' <- [p| Arg $(TH.varP q) $(return pat) |]
-  return (pat',Map.insert name expr nmp)
+  exp' <- [| do
+               v <- embedSMT $ flip B.createQVar (Just name)
+               vs <- $(return rest)
+               return (Arg (v :: $(return tp)) vs) |]
+  return (exp',Map.insert name expr nmp)
 
 quantSig :: [(String,TH.Type)] -> TH.TypeQ
 quantSig [] = TH.promotedNilT
@@ -179,8 +235,8 @@ quantSig ((_,tp):tps) = [t| $(return tp) ': $(quantSig tps) |]
 asSig :: Proxy sig -> (Args e sig -> a) -> (Args e sig -> a)
 asSig _ = id
 
-fieldProxy :: FromSMT repr => (dt -> ValueType repr) -> Proxy repr
-fieldProxy _ = Proxy
+--fieldProxy :: FromSMT repr => (dt -> ValueType repr) -> Proxy repr
+--fieldProxy _ = Proxy
 
 toPat :: BasicExpr -> TH.PatQ
 toPat (Atom "false") = [p| Const (BoolValue False) |]
@@ -238,6 +294,42 @@ funIsAllEq (Atom "-") = True
 funIsAllEq (Atom "*") = True
 funIsAllEq _ = False
 
+funAllEqName :: BasicExpr -> Maybe TH.Name
+funAllEqName (Atom "=") = Just 'eq'
+funAllEqName (Atom "distinct") = Just 'distinct'
+funAllEqName (Atom "and") = Just 'and'
+funAllEqName (Atom "or") = Just 'or'
+funAllEqName (Atom "xor") = Just 'xor'
+funAllEqName (Atom "=>") = Just 'implies'
+funAllEqName _ = Nothing
+
+appLst :: (B.Backend b,GetType tp,GetType t)
+       => (forall arg. (AllEq arg,SameType arg ~ t)
+           => Function (B.Fun b) (B.Constr b) (B.Field b) '(arg,tp))
+       -> [B.Expr b t]
+       -> b
+       -> B.SMTMonad b (B.Expr b tp,b)
+appLst fun args b = allEqFromList args $
+                    \args' -> B.toBackend b (App fun args')
+
+eq' :: (GetType t,B.Backend b) => [B.Expr b t] -> b -> B.SMTMonad b (B.Expr b BoolType,b)
+eq' = appLst Eq
+
+distinct' :: (GetType t,B.Backend b) => [B.Expr b t] -> b -> B.SMTMonad b (B.Expr b BoolType,b)
+distinct' = appLst Distinct
+
+and' :: B.Backend b => [B.Expr b BoolType] -> b -> B.SMTMonad b (B.Expr b BoolType,b)
+and' = appLst (Logic And)
+
+or' :: B.Backend b => [B.Expr b BoolType] -> b -> B.SMTMonad b (B.Expr b BoolType,b)
+or' = appLst (Logic Or)
+
+xor' :: B.Backend b => [B.Expr b BoolType] -> b -> B.SMTMonad b (B.Expr b BoolType,b)
+xor' = appLst (Logic XOr)
+
+implies' :: B.Backend b => [B.Expr b BoolType] -> b -> B.SMTMonad b (B.Expr b BoolType,b)
+implies' = appLst (Logic Implies)
+
 funName :: BasicExpr -> Maybe FunName
 funName (List [name,List sig,tp]) = do
   f <- funName name
@@ -264,8 +356,8 @@ funName (Atom "and") = Just $ FunCon 'Logic [FunCon 'And []]
 funName (Atom "or") = Just $ FunCon 'Logic [FunCon 'Or []]
 funName (Atom "xor") = Just $ FunCon 'Logic [FunCon 'XOr []]
 funName (Atom "=>") = Just $ FunCon 'Logic [FunCon 'Implies []]
-funName (Atom "to-real") = Just $ FunCon 'ToReal []
-funName (Atom "to-int") = Just $ FunCon 'ToInt []
+funName (Atom "to_real") = Just $ FunCon 'ToReal []
+funName (Atom "to_int") = Just $ FunCon 'ToInt []
 funName (Atom "ite") = Just $ FunCon 'ITE []
 funName (Atom "bvule") = Just $ FunCon 'BVComp [FunCon 'BVULE []]
 funName (Atom "bvult") = Just $ FunCon 'BVComp [FunCon 'BVULT []]
@@ -313,6 +405,7 @@ toFun expr = case funName expr of
   Just name -> funNameToExpr name
   Nothing -> case expr of
     Atom name -> TH.varE (TH.mkName name)
+    _ -> error $ "Unknown function: "++show expr
 
 toFunPat :: BasicExpr -> TH.PatQ
 toFunPat expr = case funName expr of
@@ -331,8 +424,8 @@ toTypes [] = [t| '[] |]
 toTypes (x:xs) = [t| $(toType x) ': $(toTypes xs) |]
 
 mkArgs :: Map String TH.Exp -> [BasicExpr] -> TH.ExpQ
-mkArgs _ [] = [| NoArg |]
-mkArgs bind (x:xs) = [| Arg $(toExpr bind x) $(mkArgs bind xs) |]
+mkArgs _ [] = [| return NoArg |]
+mkArgs bind (x:xs) = [| liftM2 Arg $(toExpr bind x) $(mkArgs bind xs) |]
 
 mkArgsPat :: [BasicExpr] -> TH.PatQ
 mkArgsPat [] = [p| NoArg |]

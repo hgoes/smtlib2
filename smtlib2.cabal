@@ -30,7 +30,7 @@ Library
   GHC-Options: -fwarn-unused-imports
   Exposed-Modules:
                   Language.SMTLib2.Internals.Backend
-                  Language.SMTLib2.Internals.Embed
+                  --Language.SMTLib2.Internals.Embed
                   Language.SMTLib2.Internals.Expression
                   Language.SMTLib2.Internals.Monad
                   Language.SMTLib2.Internals.Type
@@ -38,4 +38,4 @@ Library
                   Language.SMTLib2.Internals.TH
                   Language.SMTLib2.Strategy
                   Language.SMTLib2
-                  Language.SMTLib2.LowLevel
+                  --Language.SMTLib2.LowLevel

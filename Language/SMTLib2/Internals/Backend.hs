@@ -7,6 +7,7 @@ import Language.SMTLib2.Strategy
 import Data.Typeable
 import Data.GADT.Compare
 import Data.GADT.Show
+import Data.Functor.Identity
 
 class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
        Typeable (Expr b),
@@ -57,7 +58,7 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
   simplify :: GetType t => b -> Expr b t -> SMTMonad b (Expr b t,b)
   toBackend :: GetType t => b -> Expression (Var b) (QVar b) (Fun b) (Constr b) (Field b) (FunArg b) (Expr b) t -> SMTMonad b (Expr b t,b)
   fromBackend :: GetType t => b -> Expr b t
-              -> SMTMonad b (Expression (Var b) (QVar b) (Fun b) (Constr b) (Field b) (FunArg b) (Expr b) t,b)
+              -> Expression (Var b) (QVar b) (Fun b) (Constr b) (Field b) (FunArg b) (Expr b) t
   declareDatatypes :: b -> TypeCollection sigs
                    -> SMTMonad b (BackendTypeCollection (Constr b) (Field b) sigs,b)
   interpolate :: b -> SMTMonad b (Expr b BoolType,b)
@@ -131,6 +132,18 @@ data UntypedCon v (sig::([Type],*)) where
 
 data UntypedField v (sig::(*,Type)) where
   UntypedField :: (IsDatatype dt,GetType t) => v -> UntypedField v '(dt,t)
+
+data RenderedSubExpr t = RenderedSubExpr (Int -> ShowS)
+
+instance GShow RenderedSubExpr where
+  gshowsPrec p (RenderedSubExpr f) = f p
+
+showsBackendExpr :: (Backend b,GetType t) => b -> Int -> Expr b t -> ShowS
+showsBackendExpr b p expr = showsPrec p recE
+  where
+    recE = runIdentity $ mapExpr return return return return return return
+           (\e -> return $ RenderedSubExpr (\p -> showsBackendExpr b p e)) load
+    load = fromBackend b expr
 
 instance Eq v => Eq (UntypedVar v t) where
   (==) (UntypedVar x) (UntypedVar y) = x==y
