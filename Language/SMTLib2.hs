@@ -44,14 +44,14 @@ import Language.SMTLib2.Internals.TH
 import Control.Monad.State.Strict
 
 assert :: B.Backend b => B.Expr b BoolType -> SMT b ()
-assert = embedSMT' . flip B.assert
+assert = embedSMT . B.assert
 
 checkSat :: B.Backend b => SMT b B.CheckSatResult
-checkSat = embedSMT (\b -> B.checkSat b Nothing (B.CheckSatLimits Nothing Nothing))
+checkSat = embedSMT (B.checkSat Nothing (B.CheckSatLimits Nothing Nothing))
 
 getValue :: (B.Backend b,GetType t) => B.Expr b t -> SMT b (ConcreteValue t)
 getValue e = do
-  res <- embedSMT $ flip B.getValue e
+  res <- embedSMT $ B.getValue e
   mkConcr res
   where
     mkConcr :: B.Backend b => Value (B.Constr b) t -> SMT b (ConcreteValue t)
@@ -67,8 +67,8 @@ getValue e = do
         lookupDatatype DTProxy (datatypes st)
 
 push,pop :: B.Backend b => SMT b ()
-push = embedSMT' B.push
-pop = embedSMT' B.pop
+push = embedSMT B.push
+pop = embedSMT B.pop
 
 stack :: B.Backend b => SMT b a -> SMT b a
 stack act = do
@@ -79,10 +79,10 @@ stack act = do
 
 defConst :: (B.Backend b,GetType t) => B.Expr b t -> SMT b (B.Expr b t)
 defConst e = do
-  v <- embedSMT $ \b -> B.defineVar b Nothing e
-  embedSMT $ flip B.toBackend (Var v)
+  v <- embedSMT $ B.defineVar Nothing e
+  embedSMT $ B.toBackend (Var v)
 
 declareVar :: (B.Backend b,GetType t) => SMT b (B.Expr b t)
 declareVar = do
-  v <- embedSMT $ flip B.declareVar Nothing
-  embedSMT $ flip B.toBackend (Var v)
+  v <- embedSMT $ B.declareVar Nothing
+  embedSMT $ B.toBackend (Var v)

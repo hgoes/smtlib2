@@ -84,10 +84,10 @@ instance Backend SMTPipe where
   type Field SMTPipe = PipeField
   type FunArg SMTPipe = PipeVar
   type ClauseId SMTPipe = PipeClauseId
-  setOption b opt = do
+  setOption opt b = do
     putRequest b $ renderSetOption opt
-    return b
-  declareVar b name = with $ \pr -> do
+    return ((),b)
+  declareVar name b = with $ \pr -> do
     let (sym,req,nnames) = renderDeclareVar (names b) pr name
         nb = b { names = nnames
                , vars = Map.insert sym (Var pr) (vars b) }
@@ -96,7 +96,7 @@ instance Backend SMTPipe where
     where
       with :: (Proxy t -> IO (PipeVar t,SMTPipe)) -> IO (PipeVar t,SMTPipe)
       with f = f Proxy
-  createQVar b name = with $ \pr -> do
+  createQVar name b = with $ \pr -> do
     let name' = case name of
           Just n -> n
           Nothing -> "qv"
@@ -105,7 +105,7 @@ instance Backend SMTPipe where
     where
       with :: (Proxy t -> IO (PipeVar t,SMTPipe)) -> IO (PipeVar t,SMTPipe)
       with f = f Proxy
-  createFunArg b name = with $ \pr -> do
+  createFunArg name b = with $ \pr -> do
     let name' = case name of
           Just n -> n
           Nothing -> "fv"
@@ -114,14 +114,14 @@ instance Backend SMTPipe where
     where
       with :: (Proxy t -> IO (PipeVar t,SMTPipe)) -> IO (PipeVar t,SMTPipe)
       with f = f Proxy
-  defineVar b name (PipeExpr expr::PipeExpr t) = do
+  defineVar name (PipeExpr expr::PipeExpr t) b = do
     let pr = Proxy::Proxy t
         (sym,req,nnames) = renderDefineVar (names b) pr name (exprToLisp expr)
         nb = b { names = nnames
                , vars = Map.insert sym (Var pr) (vars b) }
     putRequest nb req
     return (UntypedVar sym,nb)
-  declareFun b name = withProxy $ \parg pr -> do
+  declareFun name b = withProxy $ \parg pr -> do
     let (sym,req,nnames) = renderDeclareFun (names b) parg pr name
         nb = b { names = nnames
                , vars = Map.insert sym (Fun parg pr) (vars b) }
@@ -130,17 +130,17 @@ instance Backend SMTPipe where
     where
       withProxy :: (Proxy arg -> Proxy t -> IO (PipeFun '(arg,t),SMTPipe)) -> IO (PipeFun '(arg,t),SMTPipe)
       withProxy f = f Proxy Proxy
-  defineFun b name arg body = do
+  defineFun name arg body b = do
     let (name',req,nnames) = renderDefineFun (\(UntypedVar n) -> L.Symbol n)
                              (\(PipeExpr e) -> exprToLisp e) (names b) name arg body
         nb = b { names = nnames }
     putRequest nb req
     return (UntypedFun name',nb)
-  assert b (PipeExpr expr) = do
+  assert (PipeExpr expr) b = do
     putRequest b (L.List [L.Symbol "assert"
                          ,exprToLisp expr])
-    return b
-  assertId b (PipeExpr expr) = do
+    return ((),b)
+  assertId (PipeExpr expr) b = do
     let (name,b1) = genName b "cl"
     putRequest b1 (L.List [L.Symbol "assert"
                           ,L.List [L.Symbol "!"
@@ -148,7 +148,7 @@ instance Backend SMTPipe where
                                   ,L.Symbol ":named"
                                   ,L.Symbol name]])
     return (PipeClauseId name,b1)
-  assertPartition b (PipeExpr expr) part = case interpolationMode b of
+  assertPartition (PipeExpr expr) part b = case interpolationMode b of
     Z3Interpolation grpA grpB -> do
       let (name,b1) = genName b "grp"
       putRequest b1 (L.List [L.Symbol "assert"
@@ -156,9 +156,9 @@ instance Backend SMTPipe where
                                   ,exprToLisp expr
                                   ,L.Symbol ":named"
                                   ,L.Symbol name]])
-      return (b1 { interpolationMode = case part of
-                     PartitionA -> Z3Interpolation (name:grpA) grpB
-                     PartitionB -> Z3Interpolation grpA (name:grpB) })
+      return ((),b1 { interpolationMode = case part of
+                      PartitionA -> Z3Interpolation (name:grpA) grpB
+                      PartitionB -> Z3Interpolation grpA (name:grpB) })
     MathSATInterpolation -> do
       putRequest b (L.List [L.Symbol "assert"
                            ,L.List [L.Symbol "!"
@@ -167,7 +167,7 @@ instance Backend SMTPipe where
                                   ,L.Symbol (case part of
                                                PartitionA -> "partA"
                                                PartitionB -> "partB")]])
-      return b
+      return ((),b)
   getUnsatCore b = do
     putRequest b (L.List [L.Symbol "get-unsat-core"])
     resp <- parseResponse b
@@ -179,7 +179,7 @@ instance Backend SMTPipe where
                      ) names
         return (cids,b)
       _ -> error $ "smtlib2: Invalid response to query for unsatisfiable core: "++show resp
-  checkSat b tactic limits = do
+  checkSat tactic limits b = do
     putRequest b $ renderCheckSat tactic limits
     res <- BS.hGetLine (channelOut b)
     return (case res of
@@ -190,7 +190,7 @@ instance Backend SMTPipe where
               "unknown" -> Unknown
               "unknown\r" -> Unknown
               _ -> error $ "smtlib2: unknown check-sat response: "++show res,b)
-  getValue b expr = do
+  getValue expr b = do
     putRequest b (renderGetValue b expr)
     l <- parseResponse b
     return (parseGetValue b l,b)
@@ -200,24 +200,24 @@ instance Backend SMTPipe where
     return (parseGetProof b l,b)
   push b = do
     putRequest b (L.List [L.Symbol "push",L.Number $ L.I 1])
-    return b
+    return ((),b)
   pop b = do
     putRequest b (L.List [L.Symbol "pop",L.Number $ L.I 1])
-    return b
+    return ((),b)
   getModel b = do
     putRequest b (L.List [L.Symbol "get-model"])
     mdl <- parseResponse b
     case runExcept $ parseGetModel b mdl of
       Right mdl' -> return (mdl',b)
       Left err -> error $ "smtlib2: Unknown get-model response: "++err
-  simplify b (PipeExpr expr) = do
+  simplify (PipeExpr expr) b = do
     putRequest b (L.List [L.Symbol "simplify"
                          ,exprToLisp expr])
     resp <- parseResponse b
     case runExcept $ lispToExprTyped b resp of
       Right res -> return (res,b)
       Left err -> error $ "smtlib2: Unknown simplify response: "++show resp++" ["++err++"]"
-  toBackend b expr = return (PipeExpr expr,b)
+  toBackend expr b = return (PipeExpr expr,b)
   fromBackend b (PipeExpr expr) = expr
   interpolate b = do
     case interpolationMode b of
@@ -233,7 +233,7 @@ instance Backend SMTPipe where
       getAnd [] = L.Symbol "true"
       getAnd [x] = L.Symbol x
       getAnd xs = L.List $ (L.Symbol "and"):fmap L.Symbol xs
-  declareDatatypes b coll = do
+  declareDatatypes coll b = do
     putRequest b (renderDeclareDatatype coll)
     return (mkTypes b coll)
     where
@@ -282,7 +282,7 @@ instance Backend SMTPipe where
     hClose (channelOut b)
     terminateProcess (processHandle b)
     _ <- waitForProcess (processHandle b)
-    return ()
+    return ((),b)
 
 renderDeclareFun :: (GetTypes arg,GetType ret)
                  => Map String Int -> Proxy arg -> Proxy ret -> Maybe String

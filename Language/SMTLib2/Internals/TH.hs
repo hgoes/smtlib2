@@ -105,10 +105,10 @@ declare = QuasiQuoter { quoteExp = quoteExpr }
     quoteExpr :: String -> TH.ExpQ
     quoteExpr s = case parseArgs s of
       Nothing -> fail $ "Failed to parse type: "++s
-      Just [tp] -> TH.sigE [| embedSMT (flip B.declareVar Nothing) >>=
-                              embedSMT . flip B.toBackend . Var |]
+      Just [tp] -> TH.sigE [| embedSMT (B.declareVar Nothing) >>=
+                              embedSMT . B.toBackend . Var |]
                            [t| forall b. B.Backend b => SMT b (B.Expr b $(toType tp)) |]
-      Just [List sig,tp] -> TH.sigE [| fmap Fun (embedSMT $ flip B.declareFun Nothing) |]
+      Just [List sig,tp] -> TH.sigE [| fmap Fun (embedSMT $ B.declareFun Nothing) |]
                                     [t| forall b con field. B.Backend b => SMT b (Function (B.Fun b) con field '( $(toTypes sig),$(toType tp))) |]
 
 define :: QuasiQuoter
@@ -117,8 +117,8 @@ define = QuasiQuoter { quoteExp = quoteExpr }
     quoteExpr :: String -> TH.ExpQ
     quoteExpr s = case parseArgs s of
       Just [body] -> [| $(toExpr Map.empty body) >>=
-                        embedSMT . (\e b -> B.defineVar b Nothing e) >>=
-                        embedSMT . flip B.toBackend . Var |]
+                        embedSMT . (B.defineVar Nothing) >>=
+                        embedSMT . B.toBackend . Var |]
       Just [List args,body] -> do
         sig <- toVarSig args
         toFunDef sig body Map.empty []
@@ -132,9 +132,9 @@ toFunDef ((name,tp):args) body mp vec = do
   fve <- TH.newName "fve"
   expr <- TH.varE fve
   TH.appE [| fmap Fun |] $
-    TH.appE [| (>>=) (embedSMT (flip B.createFunArg (Just $(TH.litE $ TH.stringL name)))) |]
+    TH.appE [| (>>=) (embedSMT (B.createFunArg (Just $(TH.litE $ TH.stringL name)))) |]
             (TH.lamE [TH.varP fv]
-             (TH.appE [| (>>=) (embedSMT (flip B.toBackend (FVar $(TH.varE fv)))) |]
+             (TH.appE [| (>>=) (embedSMT (B.toBackend (FVar $(TH.varE fv)))) |]
               (TH.lamE [TH.varP fve]
                 (toFunDef args body
                   (Map.insert name expr mp)
@@ -143,7 +143,7 @@ toFunDef ((name,tp):args) body mp vec = do
                             ,TH.varE fv]:vec)))))
 toFunDef [] body mp vec = do
   let args = foldl (\args e -> [| Arg $(e) $(args) |]) [| NoArg |] vec
-  [| $(toExpr mp body) >>= embedSMT . \body' -> \b -> B.defineFun b Nothing $(args) body' |]
+  [| $(toExpr mp body) >>= embedSMT . B.defineFun Nothing $(args) |]
 
 entypeExpr :: Proxy (t::Type) -> e t -> e t
 entypeExpr _ = id
@@ -153,23 +153,23 @@ toArgs [] = [| NoArg |]
 toArgs (x:xs) = [| Arg $(toExpr Map.empty x) $(toArgs xs) |]
 
 toExpr :: Map String TH.Exp -> BasicExpr -> TH.ExpQ
-toExpr _ (Atom "false") = [| embedSMT $ flip B.toBackend (Const (BoolValue False)) |]
-toExpr _ (Atom "true") = [| embedSMT $ flip B.toBackend (Const (BoolValue True)) |]
+toExpr _ (Atom "false") = [| embedSMT $ B.toBackend (Const (BoolValue False)) |]
+toExpr _ (Atom "true") = [| embedSMT $ B.toBackend (Const (BoolValue True)) |]
 toExpr _ (Atom ('#':'x':rest)) = case [ num | (num,"") <- readHex rest ] of
   [n] -> let bw = genericLength rest*4
-         in [| embedSMT $ flip B.toBackend (Const (BitVecValue $(TH.litE $ TH.integerL n) :: Value con (BitVecType $(mkNum bw)))) |]
+         in [| embedSMT $ B.toBackend (Const (BitVecValue $(TH.litE $ TH.integerL n) :: Value con (BitVecType $(mkNum bw)))) |]
 toExpr _ (List [Atom "_",Atom ('b':'v':val),Atom bw])
   = let num = read val
         rbw = read bw
-    in [| embedSMT $ flip B.toBackend (Const (BitVecValue $(TH.litE $ TH.integerL num) :: Value con (BitVecType $(mkNum rbw)))) |]
-toExpr _ (List [Atom "_",Atom "as-array",fun]) = [| embedSMT $ flip B.toBackend (AsArray $(toFun fun)) |]
+    in [| embedSMT $ B.toBackend (Const (BitVecValue $(TH.litE $ TH.integerL num) :: Value con (BitVecType $(mkNum rbw)))) |]
+toExpr _ (List [Atom "_",Atom "as-array",fun]) = [| embedSMT $ B.toBackend (AsArray $(toFun fun)) |]
 toExpr bind (Atom name)
   | isDigit (head name)
     = if '.' `elem` name
       then case [ res | (res,"") <- readFloat name ] of
-        [r] -> [| embedSMT $ flip B.toBackend (Const (RealValue $(TH.litE $ TH.rationalL r))) |]
+        [r] -> [| embedSMT $ B.toBackend (Const (RealValue $(TH.litE $ TH.rationalL r))) |]
       else let num = read name
-           in [| embedSMT $ flip B.toBackend (Const (IntValue $(TH.litE $ TH.integerL num))) |]
+           in [| embedSMT $ B.toBackend (Const (IntValue $(TH.litE $ TH.integerL num))) |]
   | otherwise = case Map.lookup name bind of
       Just res -> [| return $(return res) |]
       Nothing -> [| return $(TH.varE (TH.mkName name)) |]
@@ -192,7 +192,7 @@ toExpr bind (List [name,Atom "#",Atom arg]) = case funAllEqName name of
                         (TH.appE (TH.varE name') (TH.varE (TH.mkName arg)))
   Nothing -> error $ "Cannot apply list to "++show name++" function."
 toExpr bind (List (name:args)) = [| $(mkArgs bind args) >>=
-                                    embedSMT . flip B.toBackend . App $(toFun name) |]
+                                    embedSMT . B.toBackend . App $(toFun name) |]
 
 
 toQuantifier :: Quantifier -> Map String TH.Exp -> [BasicExpr] -> BasicExpr -> TH.ExpQ
@@ -202,11 +202,11 @@ toQuantifier q bind vars body = do
   [| do
       args' <- $(return args)
       body' <- $(toExpr bind' body)
-      embedSMT $ flip B.toBackend (Quantification
-                                   $(case q of
-                                      Forall -> [| Forall |]
-                                      Exists -> [| Exists |])
-                                   args' body') |]
+      embedSMT $ B.toBackend (Quantification
+                              $(case q of
+                                 Forall -> [| Forall |]
+                                 Exists -> [| Exists |])
+                              args' body') |]
 
 toVarSig :: [BasicExpr] -> TH.Q [(String,TH.Type)]
 toVarSig = mapM (\(List [Atom name,tp]) -> do
@@ -223,7 +223,7 @@ toQuant ((name,tp):args) mp = do
   (rest,nmp) <- toQuant args mp
   expr <- TH.varE q
   exp' <- [| do
-               v <- embedSMT $ flip B.createQVar (Just name)
+               v <- embedSMT $ B.createQVar (Just name)
                vs <- $(return rest)
                return (Arg (v :: $(return tp)) vs) |]
   return (exp',Map.insert name expr nmp)
@@ -310,7 +310,7 @@ appLst :: (B.Backend b,GetType tp,GetType t)
        -> b
        -> B.SMTMonad b (B.Expr b tp,b)
 appLst fun args b = allEqFromList args $
-                    \args' -> B.toBackend b (App fun args')
+                    \args' -> B.toBackend (App fun args') b
 
 eq' :: (GetType t,B.Backend b) => [B.Expr b t] -> b -> B.SMTMonad b (B.Expr b BoolType,b)
 eq' = appLst Eq

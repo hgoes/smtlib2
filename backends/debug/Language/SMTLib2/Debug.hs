@@ -1,8 +1,10 @@
 {-# LANGUAGE PolyKinds,DataKinds,ScopedTypeVariables #-}
-module Language.SMTLib2.Debug where
+module Language.SMTLib2.Debug
+       (DebugBackend(),
+        debugBackend,
+        namedDebugBackend) where
 
 import Language.SMTLib2.Internals.Backend
-import Language.SMTLib2.Internals.Expression
 import Language.SMTLib2.Internals.Type hiding (Constr,Field)
 import Language.SMTLib2.Pipe
 
@@ -97,15 +99,15 @@ instance (Backend b) => Backend (DebugBackend b) where
   type Field (DebugBackend b) = Field b
   type FunArg (DebugBackend b) = FunArg b
   type ClauseId (DebugBackend b) = ClauseId b
-  setOption b opt = do
+  setOption opt b = do
     b1 <- outputLisp b (renderSetOption opt)
-    nb <- setOption (debugBackend' b1) opt
-    return (b1 { debugBackend' = nb })
-  declareVar b name = with $ \(pr::Proxy t) -> do
+    ((),nb) <- setOption opt (debugBackend' b1)
+    return ((),b1 { debugBackend' = nb })
+  declareVar name b = with $ \(pr::Proxy t) -> do
     let (sym,req,nnames) = renderDeclareVar (debugNames b) pr name
         b1 = b { debugNames = nnames }
     b2 <- outputLisp b1 req
-    (rvar,nb) <- declareVar (debugBackend' b2) name
+    (rvar,nb) <- declareVar name (debugBackend' b2)
     return (rvar,b2 { debugBackend' = nb
                     , debugVars = DMap.insertWith const (rvar::Var b t)
                                               (UntypedVar sym::UntypedVar T.Text t) (debugVars b2) })
@@ -113,7 +115,7 @@ instance (Backend b) => Backend (DebugBackend b) where
       with :: (Proxy (t::Type) -> SMTMonad b (Var (DebugBackend b) t,DebugBackend b))
            -> SMTMonad b (Var (DebugBackend b) t,DebugBackend b)
       with f = f Proxy
-  defineFun b name args body = do
+  defineFun name args body b = do
     let (sym,req,nnames) = renderDefineFun
                            (\fv -> case DMap.lookup fv (debugFVars b) of
                              Just (UntypedVar n) -> L.Symbol n)
@@ -121,61 +123,60 @@ instance (Backend b) => Backend (DebugBackend b) where
                            (debugNames b) name args body
         b1 = b { debugNames = nnames }
     b2 <- outputLisp b1 req
-    (rvar,nb) <- defineFun (debugBackend' b2) name args body
+    (rvar,nb) <- defineFun name args body (debugBackend' b2)
     return (rvar,b2 { debugBackend' = nb
                     , debugFuns = DMap.insertWith const rvar
                                   (UntypedFun sym) (debugFuns b2) }) 
-  createFunArg b name = do
+  createFunArg name b = do
     let name' = case name of
           Just n -> n
           Nothing -> "fv"
         (name'',nnames) = genName' (debugNames b) name'
-    (fv,nb) <- createFunArg (debugBackend' b) name
+    (fv,nb) <- createFunArg name (debugBackend' b)
     return (fv,b { debugBackend' = nb
                  , debugNames = nnames
                  , debugFVars = DMap.insert fv (UntypedVar name'') (debugFVars b) })
-  toBackend b expr = do
-    (expr',nb) <- toBackend (debugBackend' b) expr
+  toBackend expr b = do
+    (expr',nb) <- toBackend expr (debugBackend' b)
     return (expr',b { debugBackend' = nb })
   fromBackend b = fromBackend (debugBackend' b)
-  assert b expr = do
+  assert expr b = do
     let l = renderExpr b expr
     b1 <- outputLisp b (L.List [L.Symbol "assert",l])
-    nb <- assert (debugBackend' b1) expr
-    return (b1 { debugBackend' = nb })
-  checkSat b tactic limits = do
+    ((),nb) <- assert expr (debugBackend' b1)
+    return ((),b1 { debugBackend' = nb })
+  checkSat tactic limits b = do
     b1 <- outputLisp b (renderCheckSat tactic limits)
-    (res,nb) <- checkSat (debugBackend' b) tactic limits
+    (res,nb) <- checkSat tactic limits (debugBackend' b)
     outputResponse b1 $ case res of
       Sat -> "sat"
       Unsat -> "unsat"
       Unknown -> "unknown"
     return (res,b1 { debugBackend' = nb })
-  getValue b expr = do
+  getValue expr b = do
     let l = renderExpr b expr
     b1 <- outputLisp b (L.List [L.Symbol "get-value"
                                ,L.List [l]])
-    (res,nb) <- getValue (debugBackend' b1) expr
+    (res,nb) <- getValue expr (debugBackend' b1)
     str <- valueToLisp (\con -> case DMap.lookup con (debugCons b1) of
                                   Just (UntypedCon name) -> return (L.Symbol name)
                        ) res
     outputResponse b1 (show str)
     return (res,b1 { debugBackend' = nb })
-  declareFun b name = with $ \parg pr -> do
+  declareFun name b = with $ \parg pr -> do
     let (sym,req,nnames) = renderDeclareFun (debugNames b) parg pr name
         b1 = b { debugNames = nnames }
     b2 <- outputLisp b1 req
-    (rvar,nb) <- declareFun (debugBackend' b2) name
+    (rvar,nb) <- declareFun name (debugBackend' b2)
     return (rvar,b2 { debugBackend' = nb
                     , debugFuns = DMap.insert rvar (UntypedFun sym) (debugFuns b2) })
-        
     where
       with :: (Proxy arg -> Proxy t -> SMTMonad b (Fun b '(arg,t),DebugBackend b))
            -> SMTMonad b (Fun b '(arg,t),DebugBackend b)
       with f = f Proxy Proxy
-  declareDatatypes b coll = do
+  declareDatatypes coll b = do
     b1 <- outputLisp b (renderDeclareDatatype coll)
-    (res,nb) <- declareDatatypes (debugBackend' b1) coll
+    (res,nb) <- declareDatatypes coll (debugBackend' b1)
     return (res,getVars res (b1 { debugBackend' = nb }))
     where
       getVars :: Datatypes (BackendDatatype (Constr b) (Field b)) sigs
@@ -206,12 +207,12 @@ instance (Backend b) => Backend (DebugBackend b) where
           b { debugFields = DMap.insert (bfieldRepr f)
                                         (UntypedField $ T.pack $ bfieldName f)
                                         (debugFields b) }
-  createQVar b name = with $ \(pr::Proxy t) -> do
+  createQVar name b = with $ \(pr::Proxy t) -> do
     let name' = case name of
           Just n -> n
           Nothing -> "qv"
         (name'',nnames) = genName' (debugNames b) name'
-    (rvar,nb) <- createQVar (debugBackend' b) name
+    (rvar,nb) <- createQVar name (debugBackend' b)
     return (rvar,b { debugBackend' = nb
                    , debugNames = nnames
                    , debugQVars = DMap.insert rvar
@@ -223,21 +224,22 @@ instance (Backend b) => Backend (DebugBackend b) where
       with f = f Proxy
   exit b = do
     b1 <- outputLisp b (L.List [L.Symbol "exit"])
-    exit (debugBackend' b1)
+    ((),nb) <- exit (debugBackend' b1)
+    return ((),b1 { debugBackend' = nb })
   push b = do
     b1 <- outputLisp b (L.List [L.Symbol "push"])
-    nb <- push (debugBackend' b1)
-    return (b1 { debugBackend' = nb })
+    ((),nb) <- push (debugBackend' b1)
+    return ((),b1 { debugBackend' = nb })
   pop b = do
     b1 <- outputLisp b (L.List [L.Symbol "pop"])
-    nb <- pop (debugBackend' b1)
-    return (b1 { debugBackend' = nb })
-  defineVar b name (expr::Expr b t) = do
+    ((),nb) <- pop (debugBackend' b1)
+    return ((),b1 { debugBackend' = nb })
+  defineVar name (expr::Expr b t) b = do
     let l = renderExpr b expr
         (sym,req,nnames) = renderDefineVar (debugNames b) (Proxy::Proxy t) name l
         b1 = b { debugNames = nnames }
     b2 <- outputLisp b1 req
-    (res,nb) <- defineVar (debugBackend' b2) name expr
+    (res,nb) <- defineVar name expr (debugBackend' b2)
     return (res,b2 { debugBackend' = nb
                    , debugVars = DMap.insert (res::Var b t) (UntypedVar sym::UntypedVar T.Text t)
                                  (debugVars b2) })

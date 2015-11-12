@@ -92,7 +92,7 @@ registerDatatype pr = do
   if Map.member (reproxyDT pr) (datatypes st)
     then return ()
     else do
-      (dts,nb) <- liftSMT $ B.declareDatatypes (backend st) (getTypeCollection pr)
+      (dts,nb) <- liftSMT $ B.declareDatatypes (getTypeCollection pr) (backend st)
       put $ st { backend = nb
                , datatypes = insertTypes dts (datatypes st) }
   where

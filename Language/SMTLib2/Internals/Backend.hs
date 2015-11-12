@@ -9,6 +9,8 @@ import Data.GADT.Compare
 import Data.GADT.Show
 import Data.Functor.Identity
 
+type SMTAction b r = b -> SMTMonad b (r,b)
+
 class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
        Typeable (Expr b),
        Typeable (Var b),
@@ -35,34 +37,34 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
   type Field b :: (*,Type) -> *
   type FunArg b :: Type -> *
   type ClauseId b :: *
-  setOption :: b -> SMTOption -> SMTMonad b b
-  getInfo :: b -> SMTInfo i -> SMTMonad b (i,b)
-  comment :: b -> String -> SMTMonad b b
-  push :: b -> SMTMonad b b
-  pop :: b -> SMTMonad b b
-  declareVar :: GetType t => b -> Maybe String -> SMTMonad b (Var b t,b)
-  createQVar :: GetType t => b -> Maybe String -> SMTMonad b (QVar b t,b)
-  createFunArg :: GetType t => b -> Maybe String -> SMTMonad b (FunArg b t,b)
-  defineVar :: GetType t => b -> Maybe String -> Expr b t -> SMTMonad b (Var b t,b)
-  declareFun :: (GetTypes arg,GetType t) => b -> Maybe String -> SMTMonad b (Fun b '(arg,t),b)
-  defineFun :: (GetTypes arg,GetType r) => b -> Maybe String
-            -> Args (FunArg b) arg -> Expr b r -> SMTMonad b (Fun b '(arg,r),b)
-  assert :: b -> Expr b BoolType -> SMTMonad b b
-  assertId :: b -> Expr b BoolType -> SMTMonad b (ClauseId b,b)
-  assertPartition :: b -> Expr b BoolType -> Partition -> SMTMonad b b
-  checkSat :: b -> Maybe Tactic -> CheckSatLimits -> SMTMonad b (CheckSatResult,b)
-  getUnsatCore :: b -> SMTMonad b ([ClauseId b],b)
-  getValue :: GetType t => b -> Expr b t -> SMTMonad b (Value (Constr b) t,b)
-  getModel :: b -> SMTMonad b (Model b,b)
-  getProof :: b -> SMTMonad b (Expr b BoolType,b)
-  simplify :: GetType t => b -> Expr b t -> SMTMonad b (Expr b t,b)
-  toBackend :: GetType t => b -> Expression (Var b) (QVar b) (Fun b) (Constr b) (Field b) (FunArg b) (Expr b) t -> SMTMonad b (Expr b t,b)
+  setOption :: SMTOption -> SMTAction b ()
+  getInfo :: SMTInfo i -> SMTAction b i
+  comment :: String -> SMTAction b ()
+  push :: SMTAction b ()
+  pop :: SMTAction b ()
+  declareVar :: GetType t => Maybe String -> SMTAction b (Var b t)
+  createQVar :: GetType t => Maybe String -> SMTAction b (QVar b t)
+  createFunArg :: GetType t => Maybe String -> SMTAction b (FunArg b t)
+  defineVar :: GetType t => Maybe String -> Expr b t -> SMTAction b (Var b t)
+  declareFun :: (GetTypes arg,GetType t) => Maybe String -> SMTAction b (Fun b '(arg,t))
+  defineFun :: (GetTypes arg,GetType r) => Maybe String
+            -> Args (FunArg b) arg -> Expr b r -> SMTAction b (Fun b '(arg,r))
+  assert :: Expr b BoolType -> SMTAction b ()
+  assertId :: Expr b BoolType -> SMTAction b (ClauseId b)
+  assertPartition :: Expr b BoolType -> Partition -> SMTAction b ()
+  checkSat :: Maybe Tactic -> CheckSatLimits -> SMTAction b CheckSatResult
+  getUnsatCore :: SMTAction b [ClauseId b]
+  getValue :: GetType t => Expr b t -> SMTAction b (Value (Constr b) t)
+  getModel :: SMTAction b (Model b)
+  getProof :: SMTAction b (Expr b BoolType)
+  simplify :: GetType t => Expr b t -> SMTAction b (Expr b t)
+  toBackend :: GetType t => Expression (Var b) (QVar b) (Fun b) (Constr b) (Field b) (FunArg b) (Expr b) t -> SMTAction b (Expr b t)
   fromBackend :: GetType t => b -> Expr b t
               -> Expression (Var b) (QVar b) (Fun b) (Constr b) (Field b) (FunArg b) (Expr b) t
-  declareDatatypes :: b -> TypeCollection sigs
-                   -> SMTMonad b (BackendTypeCollection (Constr b) (Field b) sigs,b)
-  interpolate :: b -> SMTMonad b (Expr b BoolType,b)
-  exit :: b -> SMTMonad b ()
+  declareDatatypes :: TypeCollection sigs
+                   -> SMTAction b (BackendTypeCollection (Constr b) (Field b) sigs)
+  interpolate :: SMTAction b (Expr b BoolType)
+  exit :: SMTAction b ()
 
 type BackendTypeCollection con field sigs
   = Datatypes (BackendDatatype con field) sigs
