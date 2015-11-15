@@ -66,7 +66,7 @@ instance Backend Z3Solver where
   type Field Z3Solver = Z3Field
   type FunArg Z3Solver = Z3Var
   type ClauseId Z3Solver = AST
-  setOption solv (SMTLogic log) = do
+  setOption (SMTLogic log) solv = do
     (ctx,nsolv) <- getContext solv
     let logic = case log of
           "AUFLIA" -> AUFLIA
@@ -94,13 +94,13 @@ instance Backend Z3Solver where
           "UFNIA" -> UFNIA
           _ -> error $ "smtlib2-z3: Unknown logic "++show log++"."
     rsolv <- mkSolverForLogic ctx logic
-    return (nsolv { solverState = Spawned ctx rsolv })
-  setOption solv _ = return solv -- TODO
-  getInfo solv SMTSolverName = return ("Z3",solv)
-  getInfo solv SMTSolverVersion = do
+    return ((),nsolv { solverState = Spawned ctx rsolv })
+  setOption _ solv = return ((),solv) -- TODO
+  getInfo SMTSolverName solv = return ("Z3",solv)
+  getInfo SMTSolverVersion solv = do
     vers <- getVersion
     return (show vers,solv)
-  declareVar solv name = with $ \(_::Proxy tp) -> do
+  declareVar name solv = with $ \(_::Proxy tp) -> do
     (ctx,solv1) <- getContext solv
     tp <- typeToZ3 ctx (getType::Repr tp)
     (sym,solv2) <- nextSymbol solv1
@@ -110,16 +110,16 @@ instance Backend Z3Solver where
     where
       with :: (Proxy t -> IO (Z3Var t,Z3Solver)) -> IO (Z3Var t,Z3Solver)
       with f = f Proxy
-  defineVar solv name expr = return (expr,solv)
-  toBackend solv expr = do
+  defineVar name expr solv = return (expr,solv)
+  toBackend expr solv = do
     (ctx,solv1) <- getContext solv
     nd <- toZ3 ctx expr
     return (UntypedVar nd,solv1)
-  assert solv (UntypedVar nd) = do
+  assert (UntypedVar nd) solv = do
     (ctx,solver,solv1) <- getSolver solv
     solverAssertCnstr ctx solver nd
-    return solv1
-  checkSat solv _ _ = do
+    return ((),solv1)
+  checkSat _ _ solv = do
     (ctx,solver,solv1) <- getSolver solv
     res <- solverCheck ctx solver
     let res' = case res of
@@ -127,7 +127,7 @@ instance Backend Z3Solver where
           Unsat -> B.Unsat
           Undef -> B.Unknown
     return (res',solv1)
-  getValue solv (UntypedVar v) = do
+  getValue (UntypedVar v) solv = do
     (ctx,solver,solv1) <- getSolver solv
     mdl <- solverGetModel ctx solver
     res <- modelEval ctx mdl v True
@@ -138,12 +138,12 @@ instance Backend Z3Solver where
   push solv = do
     (ctx,solver,solv1) <- getSolver solv
     solverPush ctx solver
-    return solv1
+    return ((),solv1)
   pop solv = do
     (ctx,solver,solv1) <- getSolver solv
     solverPop ctx solver 1
-    return solv1
-  exit solv = return ()
+    return ((),solv1)
+  exit solv = return ((),solv)
 
 fromZ3Value :: GetType t => Context -> Z3Expr t -> IO (Value Z3Con t)
 fromZ3Value ctx (UntypedVar e::Z3Expr t) = case getType::Repr t of
