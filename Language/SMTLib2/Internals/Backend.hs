@@ -37,6 +37,7 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
   type Field b :: (*,Type) -> *
   type FunArg b :: Type -> *
   type ClauseId b :: *
+  type Model b
   setOption :: SMTOption -> SMTAction b ()
   getInfo :: SMTInfo i -> SMTAction b i
   comment :: String -> SMTAction b ()
@@ -56,6 +57,7 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
   getUnsatCore :: SMTAction b [ClauseId b]
   getValue :: GetType t => Expr b t -> SMTAction b (Value (Constr b) t)
   getModel :: SMTAction b (Model b)
+  modelEvaluate :: Model b -> Expr b t -> SMTAction b (Value (Constr b) t)
   getProof :: SMTAction b (Expr b BoolType)
   simplify :: GetType t => Expr b t -> SMTAction b (Expr b t)
   toBackend :: GetType t => Expression (Var b) (QVar b) (Fun b) (Constr b) (Field b) (FunArg b) (Expr b) t -> SMTAction b (Expr b t)
@@ -102,8 +104,8 @@ data CheckSatLimits = CheckSatLimits { limitTime :: Maybe Integer -- ^ A limit o
                                      , limitMemory :: Maybe Integer -- ^ A limit on the amount of memory the solver can use (in megabytes)
                                      } deriving (Show,Eq,Ord,Typeable)
 
-newtype Model b
-  = Model { assignments :: [Assignment b] }
+newtype AssignmentModel b
+  = AssignmentModel { assignments :: [Assignment b] }
 
 data Assignment b
   = forall (t :: Type). GetType t => VarAssignment (Var b t) (Expr b t)

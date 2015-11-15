@@ -163,6 +163,9 @@ instance GEq con => GEq (Value con) where
     return Refl
   geq _ _ = Nothing
 
+instance GEq con => Eq (Value con t) where
+  (==) = defaultEq
+
 instance GEq ConcreteValue where
   geq (BoolValueC v1) (BoolValueC v2) = if v1==v2 then Just Refl else Nothing
   geq (IntValueC v1) (IntValueC v2) = if v1==v2 then Just Refl else Nothing
@@ -418,6 +421,17 @@ argsToListM f (Arg x xs) = do
   x' <- f x
   xs' <- argsToListM f xs
   return (x':xs')
+
+argsEqM :: Monad m => (forall (t :: Type). GetType t => a t -> b t -> m Bool)
+        -> Args a tps
+        -> Args b tps
+        -> m Bool
+argsEqM _ NoArg NoArg = return True
+argsEqM eq (Arg x xs) (Arg y ys) = do
+  same <- eq x y
+  if same
+    then argsEqM eq xs ys
+    else return False
 
 mapValue :: (Monad m,Typeable con2)
          => (forall arg dt. GetTypes arg => con1 '(arg,dt) -> m (con2 '(arg,dt)))

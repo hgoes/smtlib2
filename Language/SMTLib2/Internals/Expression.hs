@@ -105,9 +105,9 @@ data LetBinding (v :: Type -> *) (e :: Type -> *) (t :: Type)
 data Quantifier = Forall | Exists deriving (Typeable,Eq,Ord,Show)
 
 data Expression (v :: Type -> *) (qv :: Type -> *) (fun :: ([Type],Type) -> *) (con :: ([Type],*) -> *) (field :: (*,Type) -> *) (fv :: Type -> *) (e :: Type -> *) (res :: Type) where
-  Var :: v res -> Expression v qv fun con field fv e res
-  QVar :: qv res -> Expression v qv fun con field fv e res
-  FVar :: fv res -> Expression v qv fun con field fv e res
+  Var :: GetType res => v res -> Expression v qv fun con field fv e res
+  QVar :: GetType res => qv res -> Expression v qv fun con field fv e res
+  FVar :: GetType res => fv res -> Expression v qv fun con field fv e res
   App :: (GetTypes arg,GetType res)
       => Function fun con field '(arg,res)
       -> Args e arg
@@ -118,7 +118,7 @@ data Expression (v :: Type -> *) (qv :: Type -> *) (fun :: ([Type],Type) -> *) (
           -> Expression v qv fun con field fv e (ArrayType arg res)
   Quantification :: GetTypes arg => Quantifier -> Args qv arg -> e BoolType
                  -> Expression v qv fun con field fv e BoolType
-  Let :: GetTypes arg
+  Let :: (GetTypes arg,GetType res)
       => Args (LetBinding v e) arg
       -> e res
       -> Expression v qv fun con field fv e res

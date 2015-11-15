@@ -84,6 +84,7 @@ instance Backend SMTPipe where
   type Field SMTPipe = PipeField
   type FunArg SMTPipe = PipeVar
   type ClauseId SMTPipe = PipeClauseId
+  type Model SMTPipe = AssignmentModel SMTPipe
   setOption opt b = do
     putRequest b $ renderSetOption opt
     return ((),b)
@@ -454,7 +455,7 @@ parseGetProof b resp = case runExcept $ lispToExprTyped b proof of
 parseGetModel :: SMTPipe -> L.Lisp -> LispParse (Model SMTPipe)
 parseGetModel b (L.List ((L.Symbol "model"):mdl)) = do
   assign <- mapM parseAssignment mdl
-  return $ Model assign
+  return $ AssignmentModel assign
   where
     parser = pipeParser b
     parseAssignment (L.List [L.Symbol "define-fun",L.Symbol fname,L.List args,rtp,body])

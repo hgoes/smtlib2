@@ -7,7 +7,7 @@ Cabal-Version:  >=1.2
 
 Library
   Build-Depends:        base >= 4,smtlib2 >= 0.1, time, mtl
-  Extensions:		FlexibleInstances,MultiParamTypeClasses
+  Extensions:		FlexibleInstances,MultiParamTypeClasses,FlexibleContexts,TypeFamilies,GADTs
   GHC-Options: -fwarn-unused-imports
   Exposed-Modules:
     Language.SMTLib2.Timing

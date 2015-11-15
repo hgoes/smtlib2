@@ -39,3 +39,4 @@ Library
                   Language.SMTLib2.Strategy
                   Language.SMTLib2
                   --Language.SMTLib2.LowLevel
+                  Language.SMTLib2.Internals.Evaluate
