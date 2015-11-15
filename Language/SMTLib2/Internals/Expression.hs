@@ -57,7 +57,7 @@ data Function (fun :: ([Type],Type) -> *) (con :: ([Type],*) -> *) (field :: (*,
           => Proxy start -> Function fun con field '( '[BitVecType a],BitVecType len)
   Constructor :: IsDatatype a => con '(arg,a) -> Function fun con field '(arg,DataType a)
   Test :: (GetTypes arg,IsDatatype a) => con '(arg,a) -> Function fun con field '( '[DataType a],BoolType)
-  Field :: IsDatatype a => field '(a,t) -> Function fun con field '( '[DataType a],t)
+  Field :: (IsDatatype a,GetType t) => field '(a,t) -> Function fun con field '( '[DataType a],t)
   Divisible :: Integer -> Function fun con field '( '[IntType],BoolType)
 
 data AnyFunction (fun :: ([Type],Type) -> *) (con :: ([Type],*) -> *) (field :: (*,Type) -> *) where
