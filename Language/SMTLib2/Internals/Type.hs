@@ -85,8 +85,6 @@ data Repr (t :: Type) where
   ArrayRepr :: (GetTypes idx,GetType val) => Args Repr idx -> Repr val -> Repr (ArrayType idx val)
   DataRepr :: IsDatatype dt => Datatype '(DatatypeSig dt,dt) -> Repr (DataType dt)
 
-data AnyRepr = forall (t :: Type). AnyRepr (Repr t)
-
 data Args (e :: Type -> *) (a :: [Type]) where
   NoArg :: Args e '[]
   Arg :: (GetType t,GetTypes ts) => e t -> Args e ts -> Args e (t ': ts)
@@ -106,6 +104,9 @@ data Datatypes (dts :: ([[Type]],*) -> *) (sigs :: [([[Type]],*)]) where
 
 class Typeable t => GetType (t :: Type) where
   getType :: Repr t
+
+data FunRepr (sig :: ([Type],Type)) where
+  FunRepr :: Args Repr arg -> Repr tp -> FunRepr '(arg,tp)
 
 instance GetType BoolType where
   getType = BoolRepr
@@ -310,6 +311,12 @@ instance GEq Repr where
         return Refl
   geq _ _ = Nothing
 
+instance GEq FunRepr where
+  geq (FunRepr a1 r1) (FunRepr a2 r2) = do
+    Refl <- geq a1 a2
+    Refl <- geq r1 r2
+    return Refl
+
 instance GCompare Repr where
   gcompare BoolRepr BoolRepr = GEQ
   gcompare BoolRepr _ = GLT
@@ -345,6 +352,15 @@ instance GCompare Repr where
         Nothing -> if datatypeName dt1 < datatypeName dt2
                    then GLT
                    else GGT
+
+instance GCompare FunRepr where
+  gcompare (FunRepr a1 r1) (FunRepr a2 r2) = case gcompare a1 a2 of
+    GEQ -> case gcompare r1 r2 of
+      GEQ -> GEQ
+      GLT -> GLT
+      GGT -> GGT
+    GLT -> GLT
+    GGT -> GGT
 
 instance GShow con => Show (Value con tp) where
   showsPrec p (BoolValue b) = showsPrec p b
@@ -406,6 +422,16 @@ mapArgs f (Arg x xs) = do
   x' <- f x
   xs' <- mapArgs f xs
   return (Arg x' xs')
+
+mapAccumArgs :: Monad m => (forall t. GetType t => a -> e1 t -> m (a,e2 t))
+             -> a
+             -> Args e1 arg
+             -> m (a,Args e2 arg)
+mapAccumArgs f x NoArg = return (x,NoArg)
+mapAccumArgs f x (Arg y ys) = do
+  (nx1,ny) <- f x y
+  (nx2,nys) <- mapAccumArgs f nx1 ys
+  return (nx2,Arg ny nys)
 
 withArgs :: (Monad m,GetTypes tps) => (forall t. GetType t => m (e t)) -> m (Args e tps)
 withArgs f = mapArgs (const f) getTypes

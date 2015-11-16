@@ -893,3 +893,27 @@ instance Ord (NoCon t) where
 
 instance Ord (NoField t) where
   compare _ _ = error "compare for NoField"
+
+instance Show (NoVar t) where
+  showsPrec _ _ = showString "NoVar"
+
+instance GShow NoVar where
+  gshowsPrec = showsPrec
+
+instance Show (NoFun t) where
+  showsPrec _ _ = showString "NoFun"
+
+instance GShow NoFun where
+  gshowsPrec = showsPrec
+
+instance Show (NoCon t) where
+  showsPrec _ _ = showString "NoCon"
+
+instance GShow NoCon where
+  gshowsPrec = showsPrec
+
+instance Show (NoField t) where
+  showsPrec _ _ = showString "NoVar"
+
+instance GShow NoField where
+  gshowsPrec = showsPrec
