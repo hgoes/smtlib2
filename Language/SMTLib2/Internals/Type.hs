@@ -42,6 +42,10 @@ class (Typeable t,Typeable (DatatypeSig t),Show t,Ord t) => IsDatatype t where
   type TypeCollectionSig t :: [([[Type]],*)]
   getDatatype :: e t -> Datatype '(DatatypeSig t,t)
   getTypeCollection :: e t -> TypeCollection (TypeCollectionSig t)
+  getConstructor :: t -> Constrs con (DatatypeSig t) t
+                 -> (forall arg. GetTypes arg
+                     => con '(arg,t) -> Args ConcreteValue arg -> a)
+                 -> a
 
 type TypeCollection sigs = Datatypes Datatype sigs
 
@@ -264,13 +268,6 @@ instance GCompare ConcreteValue where
       LT -> GLT
       GT -> GGT
 
-instance GShow ConcreteValue where
-  gshowsPrec p (BoolValueC v) = showsPrec p v
-  gshowsPrec p (IntValueC v) = showsPrec p v
-  gshowsPrec p (RealValueC v) = showsPrec p v
-  gshowsPrec p (BitVecValueC v) = showsPrec p v
-  gshowsPrec p (ConstrValueC v) = showsPrec p v
-
 instance GEq e => GEq (Args e) where
   geq NoArg NoArg = Just Refl
   geq (Arg x xs) (Arg y ys) = do
@@ -389,6 +386,31 @@ instance GShow con => Show (Value con tp) where
                                        showListWith id (argsToList (showsPrec 0) args)
 
 instance GShow con => GShow (Value con) where
+  gshowsPrec = showsPrec
+
+instance Show (ConcreteValue t) where
+  showsPrec p (BoolValueC b) = showsPrec p b
+  showsPrec p (IntValueC i) = showsPrec p i
+  showsPrec p (RealValueC i) = showsPrec p i
+  showsPrec p (BitVecValueC v :: ConcreteValue tp) = case getType :: Repr tp of
+    BitVecRepr bw
+      | bw `mod` 4 == 0 -> let str = showHex v ""
+                               exp_len = bw `div` 4
+                               len = genericLength str
+                           in showString "#x" .
+                              showString (genericReplicate (exp_len-len) '0') .
+                              showString str
+      | otherwise -> let str = showIntAtBase 2 (\x -> case x of
+                                                        0 -> '0'
+                                                        1 -> '1'
+                                               ) v ""
+                         len = genericLength str
+                     in showString "#b" .
+                        showString (genericReplicate (bw-len) '0') .
+                        showString str
+  showsPrec p (ConstrValueC val) = showsPrec p val
+
+instance GShow ConcreteValue where
   gshowsPrec = showsPrec
 
 instance GShow e => Show (Args e sig) where

@@ -6,7 +6,7 @@ import Language.SMTLib2.Internals.Type.Nat
 import Language.SMTLib2.Internals.Expression
 import qualified Language.SMTLib2.Internals.Backend as B
 import Language.SMTLib2.Internals.Monad
---import Language.SMTLib2.LowLevel
+import Language.SMTLib2.Internals.Embed
 
 import Data.Char
 import Numeric
@@ -153,60 +153,78 @@ toArgs [] = [| NoArg |]
 toArgs (x:xs) = [| Arg $(toExpr Map.empty x) $(toArgs xs) |]
 
 toExpr :: Map String TH.Exp -> BasicExpr -> TH.ExpQ
-toExpr _ (Atom "false") = [| embedSMT $ B.toBackend (Const (BoolValue False)) |]
-toExpr _ (Atom "true") = [| embedSMT $ B.toBackend (Const (BoolValue True)) |]
+toExpr _ (Atom "false") = [| embed (Const (BoolValue False)) |]
+toExpr _ (Atom "true") = [| embed (Const (BoolValue True)) |]
 toExpr _ (Atom ('#':'x':rest)) = case [ num | (num,"") <- readHex rest ] of
   [n] -> let bw = genericLength rest*4
-         in [| embedSMT $ B.toBackend (Const (BitVecValue $(TH.litE $ TH.integerL n) :: Value con (BitVecType $(mkNum bw)))) |]
+         in [| embed (Const (BitVecValue $(TH.litE $ TH.integerL n) :: Value con (BitVecType $(mkNum bw)))) |]
 toExpr _ (List [Atom "_",Atom ('b':'v':val),Atom bw])
   = let num = read val
         rbw = read bw
-    in [| embedSMT $ B.toBackend (Const (BitVecValue $(TH.litE $ TH.integerL num) :: Value con (BitVecType $(mkNum rbw)))) |]
+    in [| embed (Const (BitVecValue $(TH.litE $ TH.integerL num) :: Value con (BitVecType $(mkNum rbw)))) |]
 toExpr _ (List [Atom "_",Atom "as-array",fun]) = [| embedSMT $ B.toBackend (AsArray $(toFun fun)) |]
 toExpr bind (Atom name)
   | isDigit (head name)
     = if '.' `elem` name
       then case [ res | (res,"") <- readFloat name ] of
-        [r] -> [| embedSMT $ B.toBackend (Const (RealValue $(TH.litE $ TH.rationalL r))) |]
+        [r] -> [| embed (Const (RealValue $(TH.litE $ TH.rationalL r))) |]
       else let num = read name
-           in [| embedSMT $ B.toBackend (Const (IntValue $(TH.litE $ TH.integerL num))) |]
+           in [| embed (Const (IntValue $(TH.litE $ TH.integerL num))) |]
   | otherwise = case Map.lookup name bind of
-      Just res -> [| return $(return res) |]
+      Just res -> return res
       Nothing -> [| return $(TH.varE (TH.mkName name)) |]
 toExpr bind (List [Atom "forall",List vars,body])
   = toQuantifier Forall bind vars body
 toExpr bind (List [Atom "exists",List vars,body])
   = toQuantifier Exists bind vars body
-{-toExpr bind (List [List [Atom "is",Atom dt,Atom con],expr])
-  = [| embedConstrTest $(TH.litE $ TH.stringL con)
-                       (Proxy:: Proxy $(TH.conT $ TH.mkName dt))
-                       $(toExpr bind expr) |]
-toExpr bind (List [List [Atom "get",Atom dt,Atom con,Atom field],expr])
-  = [| embedGetField $(TH.litE $ TH.stringL field)
-                     $(TH.litE $ TH.stringL con)
-                     (Proxy:: Proxy $(TH.conT $ TH.mkName dt))
-                     (fieldProxy $(TH.varE $ TH.mkName field))
-                     $(toExpr bind expr) |]-}
+toExpr bind (List [List [Atom "is",Atom dt,Atom con],expr])
+  = TH.appsE [[| (>>=) |]
+             , toExpr bind expr
+             , [| embedConstrTest $(TH.litE $ TH.stringL con)
+                  (Proxy:: Proxy $(TH.conT $ TH.mkName dt)) |] ]
+toExpr bind (List [List [Atom "get",Atom dt,Atom con,Atom field,tp],expr])
+  = TH.appsE [[| (>>=) |]
+             ,toExpr bind expr
+             ,[| embedGetField $(TH.litE $ TH.stringL field)
+                 $(TH.litE $ TH.stringL con)
+                 (Proxy:: Proxy $(TH.conT $ TH.mkName dt))
+                 (Proxy:: Proxy $(toType tp)) |]]
 toExpr bind (List [name,Atom "#",Atom arg]) = case funAllEqName name of
-  Just name' -> TH.appE [| embedSMT |]
+  Just name' -> TH.appE [| embed |]
                         (TH.appE (TH.varE name') (TH.varE (TH.mkName arg)))
   Nothing -> error $ "Cannot apply list to "++show name++" function."
 toExpr bind (List (name:args)) = [| $(mkArgs bind args) >>=
-                                    embedSMT . B.toBackend . App $(toFun name) |]
+                                    embed . App $(toFun name) |]
 
 
 toQuantifier :: Quantifier -> Map String TH.Exp -> [BasicExpr] -> BasicExpr -> TH.ExpQ
 toQuantifier q bind vars body = do
   sig <- toVarSig vars
-  (args,bind') <- toQuant sig bind
-  [| do
-      args' <- $(return args)
-      body' <- $(toExpr bind' body)
-      embedSMT $ B.toBackend (Quantification
-                              $(case q of
-                                 Forall -> [| Forall |]
-                                 Exists -> [| Exists |])
-                              args' body') |]
+  (pat,nbind) <- mkPat bind sig
+  argTps <- mkTps sig
+  TH.appsE [ [| embedQuantifier |]
+           , case q of
+             Forall -> [| Forall |]
+             Exists -> [| Exists |]
+           , TH.appsE [ [| enforceTypes |]
+                      , TH.sigE [| Proxy |]
+                        [t| Proxy $(mkTps sig) |]
+                      , TH.lamE [pat] (toExpr nbind body)
+                      ]
+           ]
+  where
+    mkPat bind [] = return ([p| NoArg |],bind)
+    mkPat bind ((var,tp):vars) = do
+      qvar <- TH.newName "q"
+      qvarE <- [| embed (QVar $(TH.varE qvar)) |]
+      (pat,nbind) <- mkPat bind vars
+      return (TH.conP 'Arg [TH.varP qvar,pat],
+              Map.insert var qvarE nbind)
+    mkTps [] = [t| '[] |]
+    mkTps ((_,tp):tps) = [t| $(return tp) ': $(mkTps tps) |]
+
+enforceTypes :: Proxy tps -> (Args e tps -> a) -> (Args e tps -> a)
+enforceTypes _ = id
 
 toVarSig :: [BasicExpr] -> TH.Q [(String,TH.Type)]
 toVarSig = mapM (\(List [Atom name,tp]) -> do
@@ -235,8 +253,8 @@ quantSig ((_,tp):tps) = [t| $(return tp) ': $(quantSig tps) |]
 asSig :: Proxy sig -> (Args e sig -> a) -> (Args e sig -> a)
 asSig _ = id
 
---fieldProxy :: FromSMT repr => (dt -> ValueType repr) -> Proxy repr
---fieldProxy _ = Proxy
+-- fieldProxy :: FromSMT repr => (dt -> ValueType repr) -> Proxy repr
+-- fieldProxy _ = Proxy
 
 toPat :: BasicExpr -> TH.PatQ
 toPat (Atom "false") = [p| Const (BoolValue False) |]
@@ -301,34 +319,45 @@ funAllEqName (Atom "and") = Just 'and'
 funAllEqName (Atom "or") = Just 'or'
 funAllEqName (Atom "xor") = Just 'xor'
 funAllEqName (Atom "=>") = Just 'implies'
+funAllEqName (Atom "+") = Just 'plus'
+funAllEqName (Atom "-") = Just 'minus'
+funAllEqName (Atom "*") = Just 'mult'
 funAllEqName _ = Nothing
 
-appLst :: (B.Backend b,GetType tp,GetType t)
+appLst :: (Embed m e,GetType tp,GetType t)
        => (forall arg. (AllEq arg,SameType arg ~ t)
-           => Function (B.Fun b) (B.Constr b) (B.Field b) '(arg,tp))
-       -> [B.Expr b t]
-       -> b
-       -> B.SMTMonad b (B.Expr b tp,b)
-appLst fun args b = allEqFromList args $
-                    \args' -> B.toBackend (App fun args') b
+           => Function (EmFun m e) (EmConstr m e) (EmField m e) '(arg,tp))
+       -> [e t]
+       -> m (e tp)
+appLst fun args = allEqFromList args $
+                  \args' -> embed (App fun args')
 
-eq' :: (GetType t,B.Backend b) => [B.Expr b t] -> b -> B.SMTMonad b (B.Expr b BoolType,b)
+eq' :: (Embed m e,GetType t) => [e t] -> m (e BoolType)
 eq' = appLst Eq
 
-distinct' :: (GetType t,B.Backend b) => [B.Expr b t] -> b -> B.SMTMonad b (B.Expr b BoolType,b)
+distinct' :: (Embed m e,GetType t) => [e t] -> m (e BoolType)
 distinct' = appLst Distinct
 
-and' :: B.Backend b => [B.Expr b BoolType] -> b -> B.SMTMonad b (B.Expr b BoolType,b)
+and' :: Embed m e => [e BoolType] -> m (e BoolType)
 and' = appLst (Logic And)
 
-or' :: B.Backend b => [B.Expr b BoolType] -> b -> B.SMTMonad b (B.Expr b BoolType,b)
+or' :: Embed m e => [e BoolType] -> m (e BoolType)
 or' = appLst (Logic Or)
 
-xor' :: B.Backend b => [B.Expr b BoolType] -> b -> B.SMTMonad b (B.Expr b BoolType,b)
+xor' :: Embed m e => [e BoolType] -> m (e BoolType)
 xor' = appLst (Logic XOr)
 
-implies' :: B.Backend b => [B.Expr b BoolType] -> b -> B.SMTMonad b (B.Expr b BoolType,b)
+implies' :: Embed m e => [e BoolType] -> m (e BoolType)
 implies' = appLst (Logic Implies)
+
+plus' :: (Embed m e,SMTArith t) => [e t] -> m (e t)
+plus' = appLst plus
+
+minus' :: (Embed m e,SMTArith t) => [e t] -> m (e t)
+minus' = appLst minus
+
+mult' :: (Embed m e,SMTArith t) => [e t] -> m (e t)
+mult' = appLst mult
 
 funName :: BasicExpr -> Maybe FunName
 funName (List [name,List sig,tp]) = do

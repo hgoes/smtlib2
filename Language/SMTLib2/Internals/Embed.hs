@@ -1,5 +1,127 @@
 module Language.SMTLib2.Internals.Embed where
 
+import Language.SMTLib2.Internals.Expression
+import Language.SMTLib2.Internals.Type hiding (Constr,Field)
+import Language.SMTLib2.Internals.Monad
+import Language.SMTLib2.Internals.Backend
+
+import Data.Functor.Identity
+import Data.Proxy
+import Control.Monad.State
+import Data.Typeable
+
+class Embed m e where
+  type ExtractInfo m e
+  type EmVar m e :: Type -> *
+  type EmQVar m e :: Type -> *
+  type EmFun m e :: ([Type],Type) -> *
+  type EmConstr m e :: ([Type],*) -> *
+  type EmField m e :: (*,Type) -> *
+  type EmFunArg m e :: Type -> *
+  embed :: GetType tp => Expression (EmVar m e) (EmQVar m e) (EmFun m e) (EmConstr m e) (EmField m e) (EmFunArg m e) e tp
+        -> m (e tp)
+  embedQuantifier :: GetTypes arg => Quantifier
+                  -> (Args (EmQVar m e) arg -> m (e BoolType))
+                  -> m (e BoolType)
+  embedConstrTest :: IsDatatype dt => String -> Proxy dt -> e (DataType dt)
+                  -> m (e BoolType)
+  embedGetField :: (IsDatatype dt,GetType tp)
+                => String -> String -> Proxy dt -> Proxy tp
+                -> e (DataType dt)
+                -> m (e tp)
+  extract :: GetType tp => ExtractInfo m e -> e tp
+          -> Maybe (Expression (EmVar m e) (EmQVar m e) (EmFun m e) (EmConstr m e) (EmField m e) (EmFunArg m e) e tp)
+
+instance (Backend b,e ~ Expr b) => Embed (SMT b) e where
+  type ExtractInfo (SMT b) e = b
+  type EmVar (SMT b) e = Var b
+  type EmQVar (SMT b) e = QVar b
+  type EmFun (SMT b) e = Fun b
+  type EmConstr (SMT b) e = Constr b
+  type EmField (SMT b) e = Field b
+  type EmFunArg (SMT b) e = FunArg b
+  embed = embedSMT . toBackend
+  embedQuantifier quant f = do
+    args <- withArgs (embedSMT (createQVar Nothing))
+    body <- f args
+    embedSMT $ toBackend (Quantification quant args body)
+  embedConstrTest name (_::Proxy dt) e = do
+    st <- get
+    let bdt = lookupDatatype (DTProxy::DTProxy dt) (datatypes st)
+    lookupConstructor name bdt $
+      \bcon -> embedSMT $ toBackend (App (Test (bconRepr bcon)) (Arg e NoArg))
+  embedGetField name fname (_::Proxy dt) _ e = do
+    st <- get
+    lookupDatatypeField (DTProxy::DTProxy dt) fname name (datatypes st) $
+      \field -> case gcast (bfieldRepr field) of
+      Just field' -> embedSMT $ toBackend (App (Field field') (Arg e NoArg))
+  extract b e = Just (fromBackend b e)
+
+data SMTExpr var qvar fun con field farg tp where
+  SMTExpr :: Expression var qvar fun con field farg
+             (SMTExpr var qvar fun con field farg)
+             tp -> SMTExpr var qvar fun con field farg tp
+  SMTQuant :: GetTypes args
+           => Quantifier
+           -> (Args qvar args
+               -> SMTExpr var qvar fun con field farg BoolType)
+           -> SMTExpr var qvar fun con field farg BoolType
+  SMTTestCon :: IsDatatype dt => String -> Proxy dt
+             -> SMTExpr var qvar fun con field farg (DataType dt)
+             -> SMTExpr var qvar fun con field farg BoolType
+  SMTGetField :: (IsDatatype dt,GetType tp)
+              => String -> String -> Proxy dt -> Proxy tp
+              -> SMTExpr var qvar fun con field farg (DataType dt)
+              -> SMTExpr var qvar fun con field farg tp
+
+instance Embed Identity (SMTExpr var qvar fun con field farg) where
+  type ExtractInfo Identity (SMTExpr var qvar fun con field farg) = ()
+  type EmVar Identity (SMTExpr var qvar fun con field farg) = var
+  type EmQVar Identity (SMTExpr var qvar fun con field farg) = qvar
+  type EmFun Identity (SMTExpr var qvar fun con field farg) = fun
+  type EmConstr Identity (SMTExpr var qvar fun con field farg) = con
+  type EmField Identity (SMTExpr var qvar fun con field farg) = field
+  type EmFunArg Identity (SMTExpr var qvar fun con field farg) = farg
+  embed e = return (SMTExpr e)
+  embedQuantifier quant f = return $ SMTQuant quant (runIdentity . f)
+  embedConstrTest name pr e = return $ SMTTestCon name pr e
+  embedGetField name fname dt pr e = return $ SMTGetField name fname dt pr e
+  extract _ (SMTExpr e) = Just e
+  extract _ _ = Nothing
+
+encodeExpr :: (Backend b,GetType tp)
+           => SMTExpr (Var b) (QVar b) (Fun b) (Constr b) (Field b) (FunArg b) tp
+           -> SMT b (Expr b tp)
+encodeExpr (SMTExpr e) = do
+  e' <- mapExpr return return return return return return
+        encodeExpr e
+  embedSMT $ toBackend e'
+encodeExpr (SMTQuant q f) = do
+  args <- withArgs (embedSMT (createQVar Nothing))
+  body <- encodeExpr (f args)
+  embedSMT $ toBackend (Quantification q args body)
+encodeExpr (SMTTestCon name (_::Proxy dt) e) = do
+  e' <- encodeExpr e
+  st <- get
+  let bdt = lookupDatatype (DTProxy::DTProxy dt) (datatypes st)
+  lookupConstructor name bdt $
+    \bcon -> embedSMT $ toBackend (App (Test (bconRepr bcon)) (Arg e' NoArg))
+encodeExpr (SMTGetField name fname (_::Proxy dt) _ e) = do
+  e' <- encodeExpr e
+  st <- get
+  lookupDatatypeField (DTProxy::DTProxy dt) fname name (datatypes st) $
+    \field -> case gcast (bfieldRepr field) of
+    Just field' -> embedSMT $ toBackend (App (Field field') (Arg e' NoArg))
+
+decodeExpr :: (Backend b,GetType tp) => Expr b tp
+           -> SMT b (SMTExpr (Var b) (QVar b) (Fun b) (Constr b) (Field b) (FunArg b) tp)
+decodeExpr e = do
+  st <- get
+  let e' = fromBackend (backend st) e
+  e'' <- mapExpr return return return return return return decodeExpr e'
+  return (SMTExpr e'')
+
+{-
 import Language.SMTLib2.Internals.Backend as B
 import Language.SMTLib2.Internals.Type
 import Language.SMTLib2.Internals.Type.Nat
@@ -182,3 +304,4 @@ instance IsDatatype dt => ToSMT (DT dt) where
       transVal info (ConstrValueC v)
         = toValue info (DT v)
   toSMTCtx _ = Dict
+-}

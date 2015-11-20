@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskell,QuasiQuotes #-}
 {- | Example usage: This program tries to find two numbers greater than zero which sum up to 5.
 
      @
@@ -22,17 +22,23 @@ main = withZ3 program >>= print
 module Language.SMTLib2 (
   SMT(),
   B.Backend(),
-  withBackend,
-  declare,declareVar,define,
-  expr,
+  withBackend,withBackendExitCleanly,
+  setOption,B.SMTOption(..),
+  getInfo,B.SMTInfo(..),
+  registerDatatype,
+  declare,declareVar,define,defineVar,
+  expr,constant,
   B.Expr(),
-  assert,
+  Type(..),
+  assert,assertId,
   checkSat,
   B.CheckSatResult(..),
   getValue,
   ConcreteValue(..),
   push,pop,stack,
-  defConst
+  defConst,
+  getUnsatCore,B.ClauseId(),
+  (.==.),(.>=.),(.>.),(.<=.),(.<.)
   ) where
 
 import Language.SMTLib2.Internals.Type
@@ -43,8 +49,17 @@ import Language.SMTLib2.Internals.TH
 
 import Control.Monad.State.Strict
 
+setOption :: B.Backend b => B.SMTOption -> SMT b ()
+setOption opt = embedSMT $ B.setOption opt
+
+getInfo :: B.Backend b => B.SMTInfo i -> SMT b i
+getInfo info = embedSMT $ B.getInfo info
+
 assert :: B.Backend b => B.Expr b BoolType -> SMT b ()
 assert = embedSMT . B.assert
+
+assertId :: B.Backend b => B.Expr b BoolType -> SMT b (B.ClauseId b)
+assertId = embedSMT . B.assertId
 
 checkSat :: B.Backend b => SMT b B.CheckSatResult
 checkSat = embedSMT (B.checkSat Nothing (B.CheckSatLimits Nothing Nothing))
@@ -86,3 +101,38 @@ declareVar :: (B.Backend b,GetType t) => SMT b (B.Expr b t)
 declareVar = do
   v <- embedSMT $ B.declareVar Nothing
   embedSMT $ B.toBackend (Var v)
+
+defineVar :: (B.Backend b,GetType t) => B.Expr b t -> SMT b (B.Expr b t)
+defineVar e = do
+  re <- embedSMT $ B.defineVar Nothing e
+  embedSMT $ B.toBackend (Var re)
+
+constant :: (B.Backend b,GetType t) => ConcreteValue t -> SMT b (B.Expr b t)
+constant v = do
+  val <- mkAbstr v
+  embedSMT $ B.toBackend (Const val)
+  where
+    mkAbstr :: (B.Backend b,GetType tp) => ConcreteValue tp -> SMT b (Value (B.Constr b) tp)
+    mkAbstr (BoolValueC v) = return (BoolValue v)
+    mkAbstr (IntValueC v) = return (IntValue v)
+    mkAbstr (RealValueC v) = return (RealValue v)
+    mkAbstr (BitVecValueC v) = return (BitVecValue v)
+    mkAbstr (ConstrValueC (v::dt)) = do
+      st <- get
+      let bdt = lookupDatatype (DTProxy::DTProxy dt) (datatypes st)
+      getConstructor v (B.bconstructors bdt) $
+        \con args -> do
+          rargs <- mapArgs mkAbstr args
+          return $ ConstrValue (B.bconRepr con) rargs
+
+getUnsatCore :: B.Backend b => SMT b [B.ClauseId b]
+getUnsatCore = embedSMT B.getUnsatCore
+
+(.==.) :: (B.Backend b,GetType t) => B.Expr b t -> B.Expr b t -> SMT b (B.Expr b BoolType)
+(.==.) lhs rhs = [expr| (= lhs rhs) |]
+
+(.<=.),(.<.),(.>=.),(.>.) :: (B.Backend b,SMTOrd t) => B.Expr b t -> B.Expr b t -> SMT b (B.Expr b BoolType)
+(.<=.) lhs rhs = [expr| (<= lhs rhs) |]
+(.<.) lhs rhs = [expr| (< lhs rhs) |]
+(.>=.) lhs rhs = [expr| (>= lhs rhs) |]
+(.>.) lhs rhs = [expr| (> lhs rhs) |]

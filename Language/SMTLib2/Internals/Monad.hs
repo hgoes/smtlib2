@@ -9,6 +9,7 @@ import Data.GADT.Compare
 import Data.GADT.Show
 import Data.Dependent.Map (DMap)
 import qualified Data.Dependent.Map as Map
+import Control.Exception (onException)
 
 newtype Backend b => SMT b a = SMT (StateT (SMTState b) (SMTMonad b) a)
 
@@ -37,7 +38,17 @@ instance (Backend b,MonadIO (SMTMonad b)) => MonadIO (SMT b) where
 withBackend :: Backend b => SMTMonad b b -> SMT b a -> SMTMonad b a
 withBackend constr (SMT act) = do
   b <- constr
-  evalStateT act (SMTState b emptyDatatypeInfo)
+  (res,nb) <- runStateT act (SMTState b emptyDatatypeInfo)
+  exit (backend nb)
+  return res
+
+withBackendExitCleanly :: (Backend b,SMTMonad b ~ IO) => IO b -> SMT b a -> IO a
+withBackendExitCleanly constr (SMT act) = do
+  b <- constr
+  (do
+      (res,nb) <- runStateT act (SMTState b emptyDatatypeInfo)
+      exit (backend nb)
+      return res) `onException` (exit b)
 
 liftSMT :: Backend b => SMTMonad b a -> SMT b a
 liftSMT act = SMT (lift act)
