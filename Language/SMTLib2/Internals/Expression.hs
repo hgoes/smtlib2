@@ -841,10 +841,10 @@ compareNat (prA::Proxy a) (prB::Proxy b) = case eqT::Maybe (a :~: b) of
     LT -> GLT
     GT -> GGT
 
-data NoVar (t::Type)
-data NoFun (sig::([Type],Type))
-data NoCon (sig::([Type],*))
-data NoField (sig::(*,Type))
+data NoVar (t::Type) = NoVar'
+data NoFun (sig::([Type],Type)) = NoFun'
+data NoCon (sig::([Type],*)) = NoCon'
+data NoField (sig::(*,Type)) = NoField'
 
 instance GEq NoVar where
   geq _ _ = error "geq for NoVar"

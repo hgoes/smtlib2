@@ -445,6 +445,15 @@ mapArgs f (Arg x xs) = do
   xs' <- mapArgs f xs
   return (Arg x' xs')
 
+foldArgs :: Monad m => (forall t. GetType t => s -> e t -> m s)
+         -> s
+         -> Args e arg
+         -> m s
+foldArgs _ s NoArg = return s
+foldArgs f s (Arg x xs) = do
+  ns <- f s x
+  foldArgs f ns xs
+
 mapAccumArgs :: Monad m => (forall t. GetType t => a -> e1 t -> m (a,e2 t))
              -> a
              -> Args e1 arg

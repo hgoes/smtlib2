@@ -28,11 +28,13 @@ module Language.SMTLib2 (
   registerDatatype,
   declare,declareVar,define,defineVar,
   expr,constant,
+  AnalyzedExpr(),analyze,
   B.Expr(),
   Type(..),
   assert,assertId,
-  checkSat,
+  checkSat,checkSatWith,
   B.CheckSatResult(..),
+  B.CheckSatLimits(..),noLimits,
   getValue,
   ConcreteValue(..),
   push,pop,stack,
@@ -44,8 +46,10 @@ module Language.SMTLib2 (
 import Language.SMTLib2.Internals.Type
 import Language.SMTLib2.Internals.Monad
 import Language.SMTLib2.Internals.Expression
+import Language.SMTLib2.Internals.Embed
 import qualified Language.SMTLib2.Internals.Backend as B
 import Language.SMTLib2.Internals.TH
+import Language.SMTLib2.Strategy
 
 import Control.Monad.State.Strict
 
@@ -62,24 +66,18 @@ assertId :: B.Backend b => B.Expr b BoolType -> SMT b (B.ClauseId b)
 assertId = embedSMT . B.assertId
 
 checkSat :: B.Backend b => SMT b B.CheckSatResult
-checkSat = embedSMT (B.checkSat Nothing (B.CheckSatLimits Nothing Nothing))
+checkSat = embedSMT (B.checkSat Nothing noLimits)
+
+checkSatWith :: B.Backend b => Maybe Tactic -> B.CheckSatLimits -> SMT b B.CheckSatResult
+checkSatWith tactic limits = embedSMT (B.checkSat tactic limits)
+
+noLimits :: B.CheckSatLimits
+noLimits = B.CheckSatLimits Nothing Nothing
 
 getValue :: (B.Backend b,GetType t) => B.Expr b t -> SMT b (ConcreteValue t)
 getValue e = do
   res <- embedSMT $ B.getValue e
   mkConcr res
-  where
-    mkConcr :: B.Backend b => Value (B.Constr b) t -> SMT b (ConcreteValue t)
-    mkConcr (BoolValue v) = return (BoolValueC v)
-    mkConcr (IntValue v) = return (IntValueC v)
-    mkConcr (RealValue v) = return (RealValueC v)
-    mkConcr (BitVecValue v) = return (BitVecValueC v)
-    mkConcr (ConstrValue con args) = do
-      args' <- mapArgs mkConcr args
-      st <- get
-      return $ ConstrValueC $
-        constructDatatype con args' $
-        lookupDatatype DTProxy (datatypes st)
 
 push,pop :: B.Backend b => SMT b ()
 push = embedSMT B.push

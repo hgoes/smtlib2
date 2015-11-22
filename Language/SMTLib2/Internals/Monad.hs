@@ -172,3 +172,27 @@ lookupDatatypeField :: (IsDatatype dt,Typeable con,Typeable field)
 lookupDatatypeField pr con field info f
   = lookupDatatypeCon pr con info $
     \con' -> lookupField field con' f
+
+mkConcr :: B.Backend b => Value (B.Constr b) t -> SMT b (ConcreteValue t)
+mkConcr (BoolValue v) = return (BoolValueC v)
+mkConcr (IntValue v) = return (IntValueC v)
+mkConcr (RealValue v) = return (RealValueC v)
+mkConcr (BitVecValue v) = return (BitVecValueC v)
+mkConcr (ConstrValue con args) = do
+  args' <- mapArgs mkConcr args
+  st <- get
+  return $ ConstrValueC $
+    constructDatatype con args' $
+    lookupDatatype DTProxy (datatypes st)
+
+mkAbstr :: (B.Backend b,GetType t) => ConcreteValue t -> SMT b (Value (B.Constr b) t)
+mkAbstr (BoolValueC v) = return (BoolValue v)
+mkAbstr (IntValueC v) = return (IntValue v)
+mkAbstr (RealValueC v) = return (RealValue v)
+mkAbstr (BitVecValueC v) = return (BitVecValue v)
+mkAbstr (ConstrValueC v) = do
+  st <- get
+  getConstructor v (bconstructors $ lookupDatatype DTProxy (datatypes st)) $
+    \con args -> do
+      rargs <- mapArgs mkAbstr args
+      return $ ConstrValue (bconRepr con) rargs

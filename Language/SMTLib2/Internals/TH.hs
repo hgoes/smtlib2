@@ -13,6 +13,7 @@ import Numeric
 import Data.List (genericLength)
 import qualified Language.Haskell.TH as TH
 import Language.Haskell.TH.Quote
+import qualified Language.Haskell.Meta as TH
 import Data.Proxy
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -21,6 +22,7 @@ import Data.Proxy
 
 data BasicExpr = Atom String
                | List [BasicExpr]
+               | HsExpr String
                deriving Show
 
 parseList :: String -> Maybe ([BasicExpr],String)
@@ -36,6 +38,9 @@ parseExpr ((isSpace -> True):rest) = parseExpr rest
 parseExpr ('(':rest) = do
   (exprs,rest1) <- parseList rest
   return (List exprs,rest1)
+parseExpr ('$':rest) = do
+  (str,rest1) <- parseHs rest
+  return (HsExpr str,rest1)
 parseExpr rest = do
   (name,rest1) <- parseName rest
   if name==""
@@ -50,6 +55,12 @@ parseName (x:xs) = do
   (name,xs') <- parseName xs
   return (x:name,xs')
 parseName "" = return ("","")
+
+parseHs :: String -> Maybe (String,String)
+parseHs ('{':rest) = case break (=='}') rest of
+  (expr,'}':rest1) -> return (expr,rest1)
+  _ -> Nothing
+parseHs rest = parseName rest
 
 parseArgs :: String -> Maybe [BasicExpr]
 parseArgs ((isSpace -> True):xs) = parseArgs xs
@@ -190,12 +201,10 @@ toExpr bind (List [List [Atom "get",Atom dt,Atom con,Atom field,tp],expr])
                  (Proxy:: Proxy $(TH.conT $ TH.mkName dt))
                  (Proxy:: Proxy $(toType tp)) |]]
 toExpr bind (List [name,Atom "#",Atom arg]) = case funAllEqName name of
-  Just name' -> TH.appE [| embed |]
-                        (TH.appE (TH.varE name') (TH.varE (TH.mkName arg)))
+  Just name' -> TH.appE (TH.varE name') (TH.varE (TH.mkName arg))
   Nothing -> error $ "Cannot apply list to "++show name++" function."
 toExpr bind (List (name:args)) = [| $(mkArgs bind args) >>=
                                     embed . App $(toFun name) |]
-
 
 toQuantifier :: Quantifier -> Map String TH.Exp -> [BasicExpr] -> BasicExpr -> TH.ExpQ
 toQuantifier q bind vars body = do
@@ -257,28 +266,36 @@ asSig _ = id
 -- fieldProxy _ = Proxy
 
 toPat :: BasicExpr -> TH.PatQ
-toPat (Atom "false") = [p| Const (BoolValue False) |]
-toPat (Atom "true") = [p| Const (BoolValue True) |]
+toPat (Atom "false") = [p| AnalyzedExpr (Just (Const (BoolValue False))) _ |]
+toPat (Atom "true") = [p| AnalyzedExpr (Just (Const (BoolValue True))) _|]
+toPat (List [Atom "var",HsExpr bind]) = case TH.parsePat bind of
+  Right pat -> [p| AnalyzedExpr (Just (Var $(return pat))) _ |]
+  Left err -> error $ "While parsing pattern: "++show bind++": "++err
 toPat (Atom ('#':'x':rest)) = case [ num | (num,"") <- readHex rest ] of
   [n] -> let bw = genericLength rest*4
-         in TH.conP (TH.mkName "Const")
-                    [TH.sigP [p| BitVecValue $(TH.litP $ TH.integerL n) |]
-                             [t| forall con. Value con (BitVecType $(mkNum bw)) |]]
+         in [p| AnalyzedExpr
+                (Just (Const $(TH.sigP
+                               [p| BitVecValue $(TH.litP $ TH.integerL n) |]
+                               [t| forall con. Value con (BitVecType $(mkNum bw)) |]))) _ |]
 toPat (List [Atom "_",Atom ('b':'v':val),Atom bw])
   = let num = read val
         rbw = read bw
-    in TH.conP (TH.mkName "Const")
-               [TH.sigP [p| BitVecValue $(TH.litP $ TH.integerL num) |]
-                        [t| forall con. Value con (BitVecType $(mkNum rbw)) |]]
-toPat (List [Atom "_",Atom "as-array",fun]) = [p| AsArray $(toFunPat fun) |]
+    in [p| AnalyzedExpr
+           (Just (Const $(TH.sigP
+                          [p| BitVecValue $(TH.litP $ TH.integerL num) |]
+                          [t| forall con. Value con (BitVecType $(mkNum rbw)) |]))) _ |]
+toPat (List [Atom "_",Atom "as-array",fun]) = [p| AnalyzedExpr (Just (AsArray $(toFunPat fun))) _ |]
 toPat (Atom name)
   | isDigit (head name) = let num = read name
-                           in [p| Const (IntValue $(TH.litP $ TH.integerL num)) |]
-  | otherwise = TH.varP (TH.mkName name)
+                           in [p| AnalyzedExpr (Just (Const (IntValue $(TH.litP $ TH.integerL num)))) _ |]
+  | otherwise = [p| AnalyzedExpr _ $(TH.varP (TH.mkName name)) |]
 toPat (List (name:args))
   = if funIsAllEq name
-    then [p| App $(toFunPat name) $(mkAllEqPat args) |]
-    else [p| App $(toFunPat name) $(mkArgsPat args) |]
+    then [p| AnalyzedExpr (Just (App $(toFunPat name) $(mkAllEqPat args))) _ |]
+    else [p| AnalyzedExpr (Just (App $(toFunPat name) $(mkArgsPat args))) _ |]
+toPat (HsExpr e) = case TH.parsePat e of
+  Left err -> error $ "While parsing pattern: "++show e++": "++err
+  Right pat -> [p| AnalyzedExpr _ $(return pat) |]
 
 data FunName = FunCon TH.Name [FunName]
              | FunVar TH.Name
@@ -369,9 +386,17 @@ funName (List [Atom "_",Atom "map",f]) = do
   f' <- funName f
   return (FunCon 'Map [f'])
 funName (Atom "<") = Just $ FunVar 'lt
+funName (Atom "<.int") = Just $ FunCon 'OrdInt [FunCon 'Lt []]
+funName (Atom "<.real") = Just $ FunCon 'OrdReal [FunCon 'Lt []]
 funName (Atom "<=") = Just $ FunVar 'le
+funName (Atom "<=.int") = Just $ FunCon 'OrdInt [FunCon 'Le []]
+funName (Atom "<=.real") = Just $ FunCon 'OrdReal [FunCon 'Le []]
 funName (Atom ">") = Just $ FunVar 'gt
+funName (Atom ">.int") = Just $ FunCon 'OrdInt [FunCon 'Gt []]
+funName (Atom ">.real") = Just $ FunCon 'OrdReal [FunCon 'Gt []]
 funName (Atom ">=") = Just $ FunVar 'ge
+funName (Atom ">=.int") = Just $ FunCon 'OrdInt [FunCon 'Ge []]
+funName (Atom ">=.real") = Just $ FunCon 'OrdReal [FunCon 'Ge []]
 funName (Atom "+") = Just $ FunVar 'plus
 funName (Atom "-") = Just $ FunVar 'minus
 funName (Atom "*") = Just $ FunVar 'mult
