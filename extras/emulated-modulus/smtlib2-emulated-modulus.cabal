@@ -6,7 +6,7 @@ Build-Type:     Simple
 Cabal-Version:  >=1.2
 
 Library
-  Build-Depends:	base,smtlib2 >= 0.1,mtl,data-fix,containers,tagged
-  Extensions:		ScopedTypeVariables,FlexibleInstances,MultiParamTypeClasses,GADTs
+  Build-Depends:	base,smtlib2 >= 0.3,mtl,containers,dependent-sum
+  Extensions:		ScopedTypeVariables,FlexibleInstances,MultiParamTypeClasses,GADTs,DataKinds,FlexibleContexts,TypeFamilies
   Exposed-Modules:
     Language.SMTLib2.ModulusEmulator
