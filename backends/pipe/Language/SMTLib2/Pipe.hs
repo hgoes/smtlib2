@@ -88,6 +88,16 @@ instance Backend SMTPipe where
   setOption opt b = do
     putRequest b $ renderSetOption opt
     return ((),b)
+  getInfo info b = do
+    putRequest b (renderGetInfo info)
+    resp <- parseResponse b
+    case info of
+      SMTSolverName -> case resp of
+        L.List [L.Symbol ":name",L.String name] -> return (T.unpack name,b)
+        _ -> error $ "Invalid response to 'get-info' query: "++show resp
+      SMTSolverVersion -> case resp of
+        L.List [L.Symbol ":version",L.String name] -> return (T.unpack name,b)
+        _ -> error $ "Invalid response to 'get-info' query: "++show resp
   declareVar name b = with $ \pr -> do
     let (sym,req,nnames) = renderDeclareVar (names b) pr name
         nb = b { names = nnames
@@ -379,6 +389,7 @@ renderDeclareDatatype coll
                                           ,typeSymbol (getType::Repr t)]
       
 renderSetOption :: SMTOption -> L.Lisp
+renderSetOption (SMTLogic name) = L.List [L.Symbol "set-logic",L.Symbol $ T.pack name]
 renderSetOption opt
   = L.List $ [L.Symbol "set-option"]++
     (case opt of
@@ -392,6 +403,14 @@ renderSetOption opt
                                  ,L.Symbol $ if v then "true" else "false"]
         ProduceInterpolants v -> [L.Symbol ":produce-interpolants"
                                  ,L.Symbol $ if v then "true" else "false"])
+
+renderGetInfo :: SMTInfo i -> L.Lisp
+renderGetInfo SMTSolverName
+  = L.List [L.Symbol "get-info"
+           ,L.Symbol ":name"]
+renderGetInfo SMTSolverVersion
+  = L.List [L.Symbol "get-info"
+           ,L.Symbol ":version"]
 
 renderDeclareVar :: GetType tp => Map String Int -> Proxy tp -> Maybe String
                  -> (T.Text,L.Lisp,Map String Int)

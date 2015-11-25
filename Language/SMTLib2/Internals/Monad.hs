@@ -11,7 +11,7 @@ import Data.Dependent.Map (DMap)
 import qualified Data.Dependent.Map as Map
 import Control.Exception (onException)
 
-newtype Backend b => SMT b a = SMT (StateT (SMTState b) (SMTMonad b) a)
+newtype Backend b => SMT b a = SMT { runSMT :: StateT (SMTState b) (SMTMonad b) a }
 
 data SMTState b = SMTState { backend :: !b
                            , datatypes :: !(DatatypeInfo (B.Constr b) (B.Field b)) }
@@ -35,10 +35,12 @@ instance Backend b => MonadState (SMTState b) (SMT b) where
 instance (Backend b,MonadIO (SMTMonad b)) => MonadIO (SMT b) where
   liftIO act = SMT (liftIO act)
 
-withBackend :: Backend b => SMTMonad b b -> SMT b a -> SMTMonad b a
-withBackend constr (SMT act) = do
+withBackend :: Backend b => SMTMonad b b
+            -> (forall b'. Backend b' => SMT b' a)
+            -> SMTMonad b a
+withBackend constr act = do
   b <- constr
-  (res,nb) <- runStateT act (SMTState b emptyDatatypeInfo)
+  (res,nb) <- runStateT (runSMT act) (SMTState b emptyDatatypeInfo)
   exit (backend nb)
   return res
 

@@ -12,14 +12,23 @@ import Data.GADT.Show
 class (GetTypes arg,GetType (SameType arg)) => AllEq (arg::[Type]) where
   type SameType arg :: Type
   allEqToList :: Args e arg -> [e (SameType arg)]
-
+  mapAllEq :: Monad m => (e (SameType arg) -> m (e' (SameType arg)))
+           -> Args e arg -> m (Args e' arg)
+    
 instance GetType t => AllEq '[t] where
   type SameType '[t] = t
   allEqToList (Arg e NoArg) = [e]
+  mapAllEq f (Arg e NoArg) = do
+    ne <- f e
+    return (Arg ne NoArg)
 instance (GetType a,AllEq (a ': b),SameType (a ': b) ~ a) => AllEq (a ': a ': b) where
   type SameType (a ': a ': b) = a
   allEqToList (Arg e1 rest)
     = e1:allEqToList rest
+  mapAllEq f (Arg e es) = do
+    ne <- f e
+    nes <- mapAllEq f es
+    return (Arg ne nes)
 
 data Function (fun :: ([Type],Type) -> *) (con :: ([Type],*) -> *) (field :: (*,Type) -> *) (sig :: ([Type],Type)) where
   Fun :: (GetTypes arg,GetType res) => fun '(arg,res) -> Function fun con field '(arg,res)
@@ -146,6 +155,7 @@ instance SMTOrd RealType where
   ge = OrdReal Ge
 
 class GetType t => SMTArith t where
+  arithFromInteger :: Integer -> ConcreteValue t
   plus :: (AllEq arg, SameType arg ~ t)
        => Function fun con field '(arg,t)
   minus :: (AllEq arg,SameType arg ~ t)
@@ -155,12 +165,14 @@ class GetType t => SMTArith t where
   abs' :: Function fun con field '( '[t],t)
 
 instance SMTArith IntType where
+  arithFromInteger n = IntValueC n
   plus = ArithInt Plus
   minus = ArithInt Minus
   mult = ArithInt Mult
   abs' = AbsInt
 
 instance SMTArith RealType where
+  arithFromInteger n = RealValueC (fromInteger n)
   plus = ArithReal Plus
   minus = ArithReal Minus
   mult = ArithReal Mult

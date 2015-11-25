@@ -200,11 +200,16 @@ toExpr bind (List [List [Atom "get",Atom dt,Atom con,Atom field,tp],expr])
                  $(TH.litE $ TH.stringL con)
                  (Proxy:: Proxy $(TH.conT $ TH.mkName dt))
                  (Proxy:: Proxy $(toType tp)) |]]
+toExpr bind (List [Atom "const",c])
+  = TH.appE [| embedConst |] (toExpr bind c)
 toExpr bind (List [name,Atom "#",Atom arg]) = case funAllEqName name of
   Just name' -> TH.appE (TH.varE name') (TH.varE (TH.mkName arg))
   Nothing -> error $ "Cannot apply list to "++show name++" function."
 toExpr bind (List (name:args)) = [| $(mkArgs bind args) >>=
                                     embed . App $(toFun name) |]
+toExpr bind (HsExpr expr) = case TH.parseExp expr of
+  Left err -> error $ "Failed to parse haskell expression: "++show expr
+  Right expr' -> return expr'
 
 toQuantifier :: Quantifier -> Map String TH.Exp -> [BasicExpr] -> BasicExpr -> TH.ExpQ
 toQuantifier q bind vars body = do
@@ -356,10 +361,14 @@ distinct' :: (Embed m e,GetType t) => [e t] -> m (e BoolType)
 distinct' = appLst Distinct
 
 and' :: Embed m e => [e BoolType] -> m (e BoolType)
-and' = appLst (Logic And)
+and' [] = embedConst (BoolValueC True)
+and' [x] = return x
+and' xs = appLst (Logic And) xs
 
 or' :: Embed m e => [e BoolType] -> m (e BoolType)
-or' = appLst (Logic Or)
+or' [] = embedConst (BoolValueC False)
+or' [x] = return x
+or' xs = appLst (Logic Or) xs
 
 xor' :: Embed m e => [e BoolType] -> m (e BoolType)
 xor' = appLst (Logic XOr)
@@ -368,13 +377,18 @@ implies' :: Embed m e => [e BoolType] -> m (e BoolType)
 implies' = appLst (Logic Implies)
 
 plus' :: (Embed m e,SMTArith t) => [e t] -> m (e t)
-plus' = appLst plus
+plus' [] = embedConst (arithFromInteger 0)
+plus' [x] = return x
+plus' xs = appLst plus xs
 
 minus' :: (Embed m e,SMTArith t) => [e t] -> m (e t)
-minus' = appLst minus
+minus' [] = embedConst (arithFromInteger 0)
+minus' xs = appLst minus xs
 
 mult' :: (Embed m e,SMTArith t) => [e t] -> m (e t)
-mult' = appLst mult
+mult' [] = embedConst (arithFromInteger 1)
+mult' [x] = return x
+mult' xs = appLst mult xs
 
 funName :: BasicExpr -> Maybe FunName
 funName (List [name,List sig,tp]) = do

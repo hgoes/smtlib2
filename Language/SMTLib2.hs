@@ -28,10 +28,10 @@ module Language.SMTLib2 (
   registerDatatype,
   declare,declareVar,define,defineVar,
   expr,constant,
-  AnalyzedExpr(),analyze,
+  AnalyzedExpr(),analyze,getExpr,
   B.Expr(),
   Type(..),
-  assert,assertId,
+  assert,assertId,assertPartition,B.Partition(..),
   checkSat,checkSatWith,
   B.CheckSatResult(..),
   B.CheckSatLimits(..),noLimits,
@@ -40,6 +40,7 @@ module Language.SMTLib2 (
   push,pop,stack,
   defConst,
   getUnsatCore,B.ClauseId(),
+  getInterpolant,
   (.==.),(.>=.),(.>.),(.<=.),(.<.)
   ) where
 
@@ -64,6 +65,9 @@ assert = embedSMT . B.assert
 
 assertId :: B.Backend b => B.Expr b BoolType -> SMT b (B.ClauseId b)
 assertId = embedSMT . B.assertId
+
+assertPartition :: B.Backend b => B.Expr b BoolType -> B.Partition -> SMT b ()
+assertPartition e p = embedSMT (B.assertPartition e p)
 
 checkSat :: B.Backend b => SMT b B.CheckSatResult
 checkSat = embedSMT (B.checkSat Nothing noLimits)
@@ -125,6 +129,22 @@ constant v = do
 
 getUnsatCore :: B.Backend b => SMT b [B.ClauseId b]
 getUnsatCore = embedSMT B.getUnsatCore
+
+getInterpolant :: B.Backend b => SMT b (B.Expr b BoolType)
+getInterpolant = embedSMT B.interpolate
+
+getExpr :: (B.Backend b,GetType tp) => B.Expr b tp
+        -> SMT b (Expression
+                  (B.Var b)
+                  (B.QVar b)
+                  (B.Fun b)
+                  (B.Constr b)
+                  (B.Field b)
+                  (B.FunArg b)
+                  (B.Expr b) tp)
+getExpr e = do
+  st <- get
+  return $ B.fromBackend (backend st) e
 
 (.==.) :: (B.Backend b,GetType t) => B.Expr b t -> B.Expr b t -> SMT b (B.Expr b BoolType)
 (.==.) lhs rhs = [expr| (= lhs rhs) |]

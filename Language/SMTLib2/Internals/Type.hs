@@ -519,3 +519,38 @@ findConstrByName' :: (Typeable arg,Typeable dt) => String -> Datatype '(cons,dt)
 findConstrByName' name dt = findConstrByName name dt
                             (\con -> case cast con of
                                Just con' -> con')
+
+valueToConcrete :: (GetType t,Monad m)
+                => (forall arg tp. (GetTypes arg,IsDatatype tp)
+                    => con '(arg,tp)
+                    -> Args ConcreteValue arg
+                    -> m tp)
+                -> Value con t -> m (ConcreteValue t)
+valueToConcrete _ (BoolValue v) = return (BoolValueC v)
+valueToConcrete _ (IntValue v) = return (IntValueC v)
+valueToConcrete _ (RealValue v) = return (RealValueC v)
+valueToConcrete _ (BitVecValue v) = return (BitVecValueC v)
+valueToConcrete f (ConstrValue con arg) = do
+  arg' <- mapArgs (valueToConcrete f) arg
+  res <- f con arg'
+  return (ConstrValueC res)
+
+valueFromConcrete :: (GetType t,Monad m,Typeable con)
+                  => (forall tp a. IsDatatype tp
+                      => tp
+                      -> (forall arg. GetTypes arg
+                          => con '(arg,tp)
+                          -> Args ConcreteValue arg
+                          -> m a)
+                      -> m a)
+                  -> ConcreteValue t
+                  -> m (Value con t)
+valueFromConcrete _ (BoolValueC v) = return (BoolValue v)
+valueFromConcrete _ (IntValueC v) = return (IntValue v)
+valueFromConcrete _ (RealValueC v) = return (RealValue v)
+valueFromConcrete _ (BitVecValueC v) = return (BitVecValue v)
+valueFromConcrete f (ConstrValueC v)
+  = f v (\con arg -> do
+            arg' <- mapArgs (valueFromConcrete f) arg
+            return (ConstrValue con arg'))
+                                  

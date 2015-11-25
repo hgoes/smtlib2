@@ -57,7 +57,7 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
   getUnsatCore :: SMTAction b [ClauseId b]
   getValue :: GetType t => Expr b t -> SMTAction b (Value (Constr b) t)
   getModel :: SMTAction b (Model b)
-  modelEvaluate :: Model b -> Expr b t -> SMTAction b (Value (Constr b) t)
+  modelEvaluate :: GetType t => Model b -> Expr b t -> SMTAction b (Value (Constr b) t)
   getProof :: SMTAction b (Expr b BoolType)
   simplify :: GetType t => Expr b t -> SMTAction b (Expr b t)
   toBackend :: GetType t => Expression (Var b) (QVar b) (Fun b) (Constr b) (Field b) (FunArg b) (Expr b) t -> SMTAction b (Expr b t)

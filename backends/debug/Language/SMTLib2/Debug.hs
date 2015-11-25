@@ -103,6 +103,13 @@ instance (Backend b) => Backend (DebugBackend b) where
     b1 <- outputLisp b (renderSetOption opt)
     ((),nb) <- setOption opt (debugBackend' b1)
     return ((),b1 { debugBackend' = nb })
+  getInfo info b = do
+    b1 <- outputLisp b (renderGetInfo info)
+    (res,nb) <- getInfo info (debugBackend' b1)
+    outputResponse b1 (case info of
+                        SMTSolverName -> res
+                        SMTSolverVersion -> res)
+    return (res,b1 { debugBackend' = nb })
   declareVar name b = with $ \(pr::Proxy t) -> do
     let (sym,req,nnames) = renderDeclareVar (debugNames b) pr name
         b1 = b { debugNames = nnames }
@@ -145,6 +152,22 @@ instance (Backend b) => Backend (DebugBackend b) where
     b1 <- outputLisp b (L.List [L.Symbol "assert",l])
     ((),nb) <- assert expr (debugBackend' b1)
     return ((),b1 { debugBackend' = nb })
+  assertPartition expr part b = do
+    let l = renderExpr b expr
+    b1 <- outputLisp b (L.List [L.Symbol "assert"
+                               ,L.List [L.Symbol "!"
+                                  ,l
+                                  ,L.Symbol ":interpolation-group"
+                                  ,L.Symbol (case part of
+                                               PartitionA -> "partA"
+                                               PartitionB -> "partB")]])
+    ((),nb) <- assertPartition expr part (debugBackend' b1)
+    return ((),b1 { debugBackend' = nb })
+  interpolate b = do
+    b1 <- outputLisp b (L.List [L.Symbol "get-interpolant",L.List [L.Symbol "partA"]])
+    (res,nb) <- interpolate (debugBackend' b)
+    outputResponse b1 (show $ renderExpr b1 res)
+    return (res,b1 { debugBackend' = nb })
   checkSat tactic limits b = do
     b1 <- outputLisp b (renderCheckSat tactic limits)
     (res,nb) <- checkSat tactic limits (debugBackend' b)
