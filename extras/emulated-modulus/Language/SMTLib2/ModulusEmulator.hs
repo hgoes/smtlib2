@@ -92,6 +92,7 @@ instance (Backend b) => Backend (ModulusEmulator b) where
   type Constr (ModulusEmulator b) = Constr b
   type Field (ModulusEmulator b) = Field b
   type FunArg (ModulusEmulator b) = FunArg b
+  type LVar (ModulusEmulator b) = LVar b
   type ClauseId (ModulusEmulator b) = ClauseId b
   type Model (ModulusEmulator b) = Model b
   setOption opt = liftSMT (setOption opt)

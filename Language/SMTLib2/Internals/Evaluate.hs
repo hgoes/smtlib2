@@ -10,6 +10,8 @@ import Data.Proxy
 import Data.Bits
 import Data.Constraint
 import Data.Typeable
+import Data.Dependent.Map (DMap)
+import qualified Data.Dependent.Map as DMap
 
 data EvalResult fun con field res where
   ValueResult :: Value con res -> EvalResult fun con field res
@@ -121,7 +123,7 @@ arrayModelEq ev evf (ArrayStore (idx::Args (EvalResult fun con field) idx) el md
         else isIgnored idx is
 arrayModelEq ev evf m1 m2 ign = arrayModelEq ev evf m2 m1 ign
 
-evaluateExpr :: (Monad m,Typeable con,GCompare con)
+evaluateExpr :: (Monad m,Typeable con,GCompare con,GCompare lv)
              => (forall t. GetType t => v t -> m (EvalResult fun con field t))
              -> (forall t. GetType t => qv t -> m (EvalResult fun con field t))
              -> (forall t. GetType t => fv t -> m (EvalResult fun con field t))
@@ -132,25 +134,28 @@ evaluateExpr :: (Monad m,Typeable con,GCompare con)
                  -> Args qv arg
                  -> e BoolType
                  -> m (EvalResult fun con field BoolType))
-             -> (forall arg res. (GetTypes arg,GetType res)
-                 => Args (LetBinding v e) arg
-                 -> e res
-                 -> m (EvalResult fun con field res))
-             -> (forall t. GetType t => e t -> m (EvalResult fun con field t))
-             -> Expression v qv fun con field fv e res
+             -> DMap lv (EvalResult fun con field)
+             -> (forall t. GetType t => DMap lv (EvalResult fun con field) -> e t -> m (EvalResult fun con field t))
+             -> Expression v qv fun con field fv lv e res
              -> m (EvalResult fun con field res)
 evaluateExpr fv _ _ _ _ _ _ _ (Var v) = fv v
 evaluateExpr _ fqv _ _ _ _ _ _ (QVar v) = fqv v
 evaluateExpr _ _ ffv _ _ _ _ _ (FVar v) = ffv v
+evaluateExpr _ _ _ _ _ _ binds _ (LVar v) = case DMap.lookup v binds of
+  Just r -> return r
 evaluateExpr _ _ _ _ _ _ _ _ (Const c) = return (ValueResult c)
 evaluateExpr _ _ _ _ _ _ _ _ (AsArray fun)
   = return (ArrayResult (ArrayFun fun))
 evaluateExpr _ _ _ _ _ evq _ _ (Quantification q arg body)
   = evq q arg body
-evaluateExpr _ _ _ _ _ _ evl _ (Let arg body)
-  = evl arg body
-evaluateExpr _ _ _ evf evr _ _ f (App fun args) = do
-  rargs <- mapArgs f args
+evaluateExpr _ _ _ _ _ _ binds f (Let arg body) = do
+  nbinds <- foldArgs (\cbinds x -> do
+                         rx <- f cbinds (letExpr x)
+                         return $ DMap.insert (letVar x) rx cbinds
+                     ) binds arg
+  f nbinds body
+evaluateExpr _ _ _ evf evr _ binds f (App fun args) = do
+  rargs <- mapArgs (f binds) args
   evaluateFun evf evr fun rargs
 
 evaluateFun :: (Monad m,GetTypes arg,Typeable con,GCompare con)

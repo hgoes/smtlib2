@@ -113,24 +113,25 @@ data LetBinding (v :: Type -> *) (e :: Type -> *) (t :: Type)
 
 data Quantifier = Forall | Exists deriving (Typeable,Eq,Ord,Show)
 
-data Expression (v :: Type -> *) (qv :: Type -> *) (fun :: ([Type],Type) -> *) (con :: ([Type],*) -> *) (field :: (*,Type) -> *) (fv :: Type -> *) (e :: Type -> *) (res :: Type) where
-  Var :: GetType res => v res -> Expression v qv fun con field fv e res
-  QVar :: GetType res => qv res -> Expression v qv fun con field fv e res
-  FVar :: GetType res => fv res -> Expression v qv fun con field fv e res
+data Expression (v :: Type -> *) (qv :: Type -> *) (fun :: ([Type],Type) -> *) (con :: ([Type],*) -> *) (field :: (*,Type) -> *) (fv :: Type -> *) (lv :: Type -> *) (e :: Type -> *) (res :: Type) where
+  Var :: GetType res => v res -> Expression v qv fun con field fv lv e res
+  QVar :: GetType res => qv res -> Expression v qv fun con field fv lv e res
+  FVar :: GetType res => fv res -> Expression v qv fun con field fv lv e res
+  LVar :: GetType res => lv res -> Expression v qv fun con field fv lv e res
   App :: (GetTypes arg,GetType res)
       => Function fun con field '(arg,res)
       -> Args e arg
-      -> Expression v qv fun con field fv e res
-  Const :: Value con a -> Expression v qv fun con field fv e a
+      -> Expression v qv fun con field fv lv e res
+  Const :: Value con a -> Expression v qv fun con field fv lv e a
   AsArray :: (GetTypes arg,GetType res)
           => Function fun con field '(arg,res)
-          -> Expression v qv fun con field fv e (ArrayType arg res)
+          -> Expression v qv fun con field fv lv e (ArrayType arg res)
   Quantification :: GetTypes arg => Quantifier -> Args qv arg -> e BoolType
-                 -> Expression v qv fun con field fv e BoolType
+                 -> Expression v qv fun con field fv lv e BoolType
   Let :: (GetTypes arg,GetType res)
-      => Args (LetBinding v e) arg
+      => Args (LetBinding lv e) arg
       -> e res
-      -> Expression v qv fun con field fv e res
+      -> Expression v qv fun con field fv lv e res
 
 instance (GEq fun,GEq con,GEq field)
          => Eq (Function fun con field sig) where
@@ -198,23 +199,25 @@ mapExpr :: (Functor m,Monad m,GetType r,Typeable con2)
         -> (forall arg t. (GetTypes arg) => con1 '(arg,t) -> m (con2 '(arg,t))) -- ^ How to translate constructrs
         -> (forall t res. GetType res => field1 '(t,res) -> m (field2 '(t,res))) -- ^ How to translate field accessors
         -> (forall t. GetType t => fv1 t -> m (fv2 t)) -- ^ How to translate function variables
+        -> (forall t. GetType t => lv1 t -> m (lv2 t)) -- ^ How to translate let variables
         -> (forall t. GetType t => e1 t -> m (e2 t)) -- ^ How to translate sub-expressions
-        -> Expression v1 qv1 fun1 con1 field1 fv1 e1 r -- ^ The expression to translate
-        -> m (Expression v2 qv2 fun2 con2 field2 fv2 e2 r)
-mapExpr f _ _ _ _ _ _ (Var v) = fmap Var (f v)
-mapExpr _ f _ _ _ _ _ (QVar v) = fmap QVar (f v)
-mapExpr _ _ _ _ _ f _ (FVar v) = fmap FVar (f v)
-mapExpr _ _ f g h _ i (App fun args) = do
+        -> Expression v1 qv1 fun1 con1 field1 fv1 lv1 e1 r -- ^ The expression to translate
+        -> m (Expression v2 qv2 fun2 con2 field2 fv2 lv2 e2 r)
+mapExpr f _ _ _ _ _ _ _ (Var v) = fmap Var (f v)
+mapExpr _ f _ _ _ _ _ _ (QVar v) = fmap QVar (f v)
+mapExpr _ _ _ _ _ f _ _ (FVar v) = fmap FVar (f v)
+mapExpr _ _ _ _ _ _ f _ (LVar v) = fmap LVar (f v)
+mapExpr _ _ f g h _ _ i (App fun args) = do
   fun' <- mapFunction f g h fun
   args' <- mapArgs i args
   return (App fun' args')
-mapExpr _ _ _ f _ _ _ (Const val) = fmap Const (mapValue f val)
-mapExpr _ _ f g h _ _ (AsArray fun) = fmap AsArray (mapFunction f g h fun)
-mapExpr _ f _ _ _ _ g (Quantification q args body) = do
+mapExpr _ _ _ f _ _ _ _ (Const val) = fmap Const (mapValue f val)
+mapExpr _ _ f g h _ _ _ (AsArray fun) = fmap AsArray (mapFunction f g h fun)
+mapExpr _ f _ _ _ _ _ g (Quantification q args body) = do
   args' <- mapArgs f args
   body' <- g body
   return (Quantification q args' body')
-mapExpr f _ _ _ _ _ g (Let args body) = do
+mapExpr _ _ _ _ _ _ f g (Let args body) = do
   args' <- mapArgs (\bind -> do
                       nv <- f (letVar bind)
                       nexpr <- g (letExpr bind)
@@ -268,8 +271,8 @@ allEqFromList [e] f = f (Arg e NoArg)
 allEqFromList (x:xs) f = allEqFromList xs $
                          \xs' -> f (Arg x xs')
 
-instance (GShow v,GShow qv,GShow fun,GShow con,GShow field,GShow fv,GShow e)
-         => Show (Expression v qv fun con field fv e r) where
+instance (GShow v,GShow qv,GShow fun,GShow con,GShow field,GShow fv,GShow lv,GShow e)
+         => Show (Expression v qv fun con field fv lv e r) where
   showsPrec p (Var v) = showParen (p>10) $
                         showString "Var " .
                         gshowsPrec 11 v
@@ -278,6 +281,9 @@ instance (GShow v,GShow qv,GShow fun,GShow con,GShow field,GShow fv,GShow e)
                          gshowsPrec 11 v
   showsPrec p (FVar v) = showParen (p>10) $
                          showString "FVar " .
+                         gshowsPrec 11 v
+  showsPrec p (LVar v) = showParen (p>10) $
+                         showString "LVar " .
                          gshowsPrec 11 v
   showsPrec p (App fun args)
     = showParen (p>10) $
@@ -306,8 +312,8 @@ instance (GShow v,GShow qv,GShow fun,GShow con,GShow field,GShow fv,GShow e)
       showChar ' ' .
       gshowsPrec 10 body
 
-instance (GShow v,GShow qv,GShow fun,GShow con,GShow field,GShow fv,GShow e)
-         => GShow (Expression v qv fun con field fv e) where
+instance (GShow v,GShow qv,GShow fun,GShow con,GShow field,GShow fv,GShow lv,GShow e)
+         => GShow (Expression v qv fun con field fv lv e) where
   gshowsPrec = showsPrec
 
 instance (GShow fun,GShow con,GShow field)
@@ -386,11 +392,12 @@ instance (GCompare v,GCompare e) => GCompare (LetBinding v e) where
     GEQ -> gcompare e1 e2
     r -> r
 
-instance (GEq v,GEq qv,GEq fun,GEq con,GEq field,GEq fv,GEq e)
-         => GEq (Expression v qv fun con field fv e) where
+instance (GEq v,GEq qv,GEq fun,GEq con,GEq field,GEq fv,GEq lv,GEq e)
+         => GEq (Expression v qv fun con field fv lv e) where
   geq (Var v1) (Var v2) = geq v1 v2
   geq (QVar v1) (QVar v2) = geq v1 v2
   geq (FVar v1) (FVar v2) = geq v1 v2
+  geq (LVar v1) (LVar v2) = geq v1 v2
   geq (App f1 arg1) (App f2 arg2) = do
     Refl <- geq f1 f2
     Refl <- geq arg1 arg2
@@ -409,13 +416,13 @@ instance (GEq v,GEq qv,GEq fun,GEq con,GEq field,GEq fv,GEq e)
     geq body1 body2
   geq _ _ = Nothing
 
-instance (GEq v,GEq qv,GEq fun,GEq con,GEq field,GEq fv,GEq e)
-         => Eq (Expression v qv fun con field fv e t) where
+instance (GEq v,GEq qv,GEq fun,GEq con,GEq field,GEq fv,GEq lv,GEq e)
+         => Eq (Expression v qv fun con field fv lv e t) where
   (==) = defaultEq
 
 instance (GCompare v,GCompare qv,GCompare fun,GCompare con,
-          GCompare field,GCompare fv,GCompare e)
-         => GCompare (Expression v qv fun con field fv e) where
+          GCompare field,GCompare fv,GCompare lv,GCompare e)
+         => GCompare (Expression v qv fun con field fv lv e) where
   gcompare (Var v1) (Var v2) = gcompare v1 v2
   gcompare (Var _) _ = GLT
   gcompare _ (Var _) = GGT
@@ -425,6 +432,9 @@ instance (GCompare v,GCompare qv,GCompare fun,GCompare con,
   gcompare (FVar v1) (FVar v2) = gcompare v1 v2
   gcompare (FVar _) _ = GLT
   gcompare _ (FVar _) = GGT
+  gcompare (LVar v1) (LVar v2) = gcompare v1 v2
+  gcompare (LVar _) _ = GLT
+  gcompare _ (LVar _) = GGT
   gcompare (App f1 arg1) (App f2 arg2) = case gcompare f1 f2 of
     GEQ -> case gcompare arg1 arg2 of
       GEQ -> GEQ
@@ -458,8 +468,8 @@ instance (GCompare v,GCompare qv,GCompare fun,GCompare con,
     GGT -> GGT
 
 instance (GCompare v,GCompare qv,GCompare fun,GCompare con,
-          GCompare field,GCompare fv,GCompare e)
-         => Ord (Expression v qv fun con field fv e t) where
+          GCompare field,GCompare fv,GCompare lv,GCompare e)
+         => Ord (Expression v qv fun con field fv lv e t) where
   compare = defaultCompare
 
 instance (GEq fun,GEq con,GEq field) => GEq (Function fun con field) where

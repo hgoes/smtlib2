@@ -26,7 +26,7 @@ module Language.SMTLib2 (
   setOption,B.SMTOption(..),
   getInfo,B.SMTInfo(..),
   registerDatatype,
-  declare,declareVar,define,defineVar,
+  declare,declareVar,declareVarNamed,define,defineVar,defineVarNamed,
   expr,constant,
   AnalyzedExpr(),analyze,getExpr,
   B.Expr(),
@@ -104,9 +104,19 @@ declareVar = do
   v <- embedSMT $ B.declareVar Nothing
   embedSMT $ B.toBackend (Var v)
 
+declareVarNamed :: (B.Backend b,GetType t) => String -> SMT b (B.Expr b t)
+declareVarNamed name = do
+  v <- embedSMT $ B.declareVar (Just name)
+  embedSMT $ B.toBackend (Var v)
+
 defineVar :: (B.Backend b,GetType t) => B.Expr b t -> SMT b (B.Expr b t)
 defineVar e = do
   re <- embedSMT $ B.defineVar Nothing e
+  embedSMT $ B.toBackend (Var re)
+
+defineVarNamed :: (B.Backend b,GetType t) => String -> B.Expr b t -> SMT b (B.Expr b t)
+defineVarNamed name e = do
+  re <- embedSMT $ B.defineVar (Just name) e
   embedSMT $ B.toBackend (Var re)
 
 constant :: (B.Backend b,GetType t) => ConcreteValue t -> SMT b (B.Expr b t)
@@ -141,6 +151,7 @@ getExpr :: (B.Backend b,GetType tp) => B.Expr b tp
                   (B.Constr b)
                   (B.Field b)
                   (B.FunArg b)
+                  (B.LVar b)
                   (B.Expr b) tp)
 getExpr e = do
   st <- get

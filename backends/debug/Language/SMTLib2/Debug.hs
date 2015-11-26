@@ -6,6 +6,7 @@ module Language.SMTLib2.Debug
 
 import Language.SMTLib2.Internals.Backend
 import Language.SMTLib2.Internals.Type hiding (Constr,Field)
+import Language.SMTLib2.Internals.Expression (Expression(Let),LetBinding(..))
 import Language.SMTLib2.Pipe
 
 import qualified Data.AttoLisp as L
@@ -25,11 +26,15 @@ import qualified Data.Dependent.Map as DMap
 
 debugBackend :: (Backend b,MonadIO (SMTMonad b)) => b -> DebugBackend b
 debugBackend b = DebugBackend b stderr (Just 0) Nothing True
-                 Map.empty DMap.empty DMap.empty DMap.empty DMap.empty DMap.empty DMap.empty
+                 Map.empty DMap.empty DMap.empty DMap.empty
+                 DMap.empty DMap.empty DMap.empty DMap.empty
+                 Map.empty
 
 namedDebugBackend :: (Backend b,MonadIO (SMTMonad b)) => String -> b -> DebugBackend b
 namedDebugBackend name b = DebugBackend b stderr (Just 0) (Just name) True
-                           Map.empty DMap.empty DMap.empty DMap.empty DMap.empty DMap.empty DMap.empty
+                           Map.empty DMap.empty DMap.empty DMap.empty
+                           DMap.empty DMap.empty DMap.empty DMap.empty
+                           Map.empty
 
 data DebugBackend (b :: *)
   = (Backend b,MonadIO (SMTMonad b))
@@ -45,6 +50,8 @@ data DebugBackend (b :: *)
                     , debugCons :: DMap (Constr b) (UntypedCon T.Text)
                     , debugFields :: DMap (Field b) (UntypedField T.Text)
                     , debugFVars :: DMap (FunArg b) (UntypedVar T.Text)
+                    , debugLVars :: DMap (LVar b) (UntypedVar T.Text)
+                    , debugCIds :: Map (ClauseId b) T.Text
                     }
 
 outputLisp :: DebugBackend (b:: *) -> L.Lisp -> SMTMonad b (DebugBackend b)
@@ -98,6 +105,7 @@ instance (Backend b) => Backend (DebugBackend b) where
   type Constr (DebugBackend b) = Constr b
   type Field (DebugBackend b) = Field b
   type FunArg (DebugBackend b) = FunArg b
+  type LVar (DebugBackend b) = LVar b
   type ClauseId (DebugBackend b) = ClauseId b
   setOption opt b = do
     b1 <- outputLisp b (renderSetOption opt)
@@ -163,6 +171,17 @@ instance (Backend b) => Backend (DebugBackend b) where
                                                PartitionB -> "partB")]])
     ((),nb) <- assertPartition expr part (debugBackend' b1)
     return ((),b1 { debugBackend' = nb })
+  assertId expr b = do
+    let l = renderExpr b expr
+        (name,nnames) = genName' (debugNames b) "cid"
+        b1 = b { debugNames = nnames }
+    b2 <- outputLisp b1 (L.List [L.Symbol "assert"
+                                ,L.List [L.Symbol "!",l
+                                        ,L.Symbol ":named"
+                                        ,L.Symbol name]])
+    (cid,nb) <- assertId expr (debugBackend' b2)
+    return (cid,b2 { debugBackend' = nb
+                   , debugCIds = Map.insert cid name (debugCIds b2) })
   interpolate b = do
     b1 <- outputLisp b (L.List [L.Symbol "get-interpolant",L.List [L.Symbol "partA"]])
     (res,nb) <- interpolate (debugBackend' b)
@@ -266,72 +285,44 @@ instance (Backend b) => Backend (DebugBackend b) where
     return (res,b2 { debugBackend' = nb
                    , debugVars = DMap.insert (res::Var b t) (UntypedVar sym::UntypedVar T.Text t)
                                  (debugVars b2) })
+  getUnsatCore b = do
+    b1 <- outputLisp b (L.List [L.Symbol "get-unsat-core"])
+    (res,nb) <- getUnsatCore (debugBackend' b1)
+    let b2 = b1 { debugBackend' = nb }
+    outputResponse b2 (show $ L.List [ L.Symbol ((debugCIds b2) Map.! cid)
+                                     | cid <- res ])
+    return (res,b2)
 
 renderExpr :: (Backend b,GetType tp) => DebugBackend b -> Expr b tp
            -> L.Lisp
 renderExpr b expr
   = runIdentity $ exprToLispWith
-    (\v -> case DMap.lookup v (debugVars b) of
+    (\v -> case DMap.lookup v (debugVars nb) of
              Just (UntypedVar r) -> return $ L.Symbol r)
-    (\v -> case DMap.lookup v (debugQVars b) of
+    (\v -> case DMap.lookup v (debugQVars nb) of
              Just (UntypedVar r) -> return $ L.Symbol r)
-    (\v -> case DMap.lookup v (debugFuns b) of
+    (\v -> case DMap.lookup v (debugFuns nb) of
              Just (UntypedFun r) -> return $ L.Symbol r)
-    (\v -> case DMap.lookup v (debugCons b) of
+    (\v -> case DMap.lookup v (debugCons nb) of
              Just (UntypedCon r) -> return $ L.Symbol r)
-    (\v -> case DMap.lookup v (debugCons b) of
+    (\v -> case DMap.lookup v (debugCons nb) of
              Just (UntypedCon r) -> return $ L.Symbol $ T.append "is-" r)
-    (\v -> case DMap.lookup v (debugFields b) of
+    (\v -> case DMap.lookup v (debugFields nb) of
              Just (UntypedField r) -> return $ L.Symbol r)
-    (\v -> case DMap.lookup v (debugFVars b) of
+    (\v -> case DMap.lookup v (debugFVars nb) of
              Just (UntypedVar r) -> return $ L.Symbol r)
-    (return . renderExpr b) expr'
+    (\v -> case DMap.lookup v (debugLVars nb) of
+             Just (UntypedVar r) -> return $ L.Symbol r)
+    (return . renderExpr nb) expr'
   where
     expr' = fromBackend (debugBackend' b) expr
-
-{-
-instance (SMTBackend b m,MonadIO m) => SMTBackend (DebugBackend b) m where
-  smtGetNames b = smtGetNames (debugBackend' b)
-  smtNextName b = smtNextName (debugBackend' b)
-  smtHandle b req = do
-    getName <- smtGetNames (debugBackend' b)
-    nxtName <- smtNextName (debugBackend' b)
-    (dts,b1) <- smtHandle (debugBackend' b) SMTDeclaredDataTypes
-    let rendering = renderSMTRequest nxtName getName dts req
-    case debugPrefix b of
-      Nothing -> return ()
-      Just prf -> case rendering of
-        Right "" -> return ()
-        _ -> do
-          when (debugUseColor b) $ liftIO $ hSetSGR (debugHandle b) [Reset,SetColor Foreground Dull Cyan]
-          liftIO $ hPutStr (debugHandle b) prf
-    nline <- case rendering of
-     Right "" -> return (debugLines b)
-     _ -> do
-       nline <- case debugLines b of
-         Nothing -> return Nothing
-         Just line -> do
-           when (debugUseColor b) $ liftIO $ hSetSGR (debugHandle b) [Reset,SetColor Foreground Dull Red]
-           let line_str = show line
-               line_str_len = length line_str
-               line_str' = replicate (4-line_str_len) ' '++line_str++" "
-           liftIO $ hPutStr (debugHandle b) line_str'
-           return (Just (line+1))
-       case rendering of
-        Left l -> do
-          when (debugUseColor b) $ liftIO $ hSetSGR (debugHandle b) [Reset,SetColor Foreground Dull Green]
-          liftIO $ hPutStrLn (debugHandle b) (show l)
-        Right msg -> do
-          when (debugUseColor b) $ liftIO $ hSetSGR (debugHandle b) [Reset,SetColor Foreground Dull White]
-          liftIO $ hPutStr (debugHandle b) $ unlines $ fmap (\xs -> ';':xs) (lines msg)
-       return nline
-    (resp,b2) <- smtHandle b1 req
-    case renderSMTResponse getName dts req resp of
-      Nothing -> return ()
-      Just str -> do
-        when (debugUseColor b) $ liftIO $ hSetSGR (debugHandle b) [Reset,SetColor Foreground Dull Blue]
-        liftIO $ hPutStrLn (debugHandle b) str
-    when (debugUseColor b) $ liftIO $ hSetSGR (debugHandle b) [Reset]
-    return (resp,b { debugBackend' = b2
-                   , debugLines = nline })
--}
+    nb = case expr' of
+      Let args _ -> runIdentity $ foldArgs (\cb var -> do
+                                               let (name,nnames) = genName' (debugNames cb) "var"
+                                               return cb { debugNames = nnames
+                                                         , debugLVars = DMap.insert (letVar var)
+                                                                        (UntypedVar name)
+                                                                        (debugLVars cb)
+                                                         }
+                                           ) b args
+      _ -> b

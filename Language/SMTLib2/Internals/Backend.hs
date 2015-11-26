@@ -19,6 +19,7 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
        Typeable (Constr b),
        Typeable (Field b),
        Typeable (FunArg b),
+       Typeable (LVar b),
        Typeable (ClauseId b),
        GCompare (Expr b),GShow (Expr b),
        GCompare (Var b),GShow (Var b),
@@ -27,6 +28,7 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
        GCompare (Constr b),GShow (Constr b),
        GCompare (Field b),GShow (Field b),
        GCompare (FunArg b),GShow (FunArg b),
+       GCompare (LVar b),GShow (LVar b),
        Ord (ClauseId b),Show (ClauseId b)) => Backend b where
   type SMTMonad b :: * -> *
   type Expr b :: Type -> *
@@ -36,6 +38,7 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
   type Constr b :: ([Type],*) -> *
   type Field b :: (*,Type) -> *
   type FunArg b :: Type -> *
+  type LVar b :: Type -> *
   type ClauseId b :: *
   type Model b
   setOption :: SMTOption -> SMTAction b ()
@@ -60,9 +63,9 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
   modelEvaluate :: GetType t => Model b -> Expr b t -> SMTAction b (Value (Constr b) t)
   getProof :: SMTAction b (Expr b BoolType)
   simplify :: GetType t => Expr b t -> SMTAction b (Expr b t)
-  toBackend :: GetType t => Expression (Var b) (QVar b) (Fun b) (Constr b) (Field b) (FunArg b) (Expr b) t -> SMTAction b (Expr b t)
+  toBackend :: GetType t => Expression (Var b) (QVar b) (Fun b) (Constr b) (Field b) (FunArg b) (LVar b) (Expr b) t -> SMTAction b (Expr b t)
   fromBackend :: GetType t => b -> Expr b t
-              -> Expression (Var b) (QVar b) (Fun b) (Constr b) (Field b) (FunArg b) (Expr b) t
+              -> Expression (Var b) (QVar b) (Fun b) (Constr b) (Field b) (FunArg b) (LVar b) (Expr b) t
   declareDatatypes :: TypeCollection sigs
                    -> SMTAction b (BackendTypeCollection (Constr b) (Field b) sigs)
   interpolate :: SMTAction b (Expr b BoolType)
@@ -145,7 +148,7 @@ instance GShow RenderedSubExpr where
 showsBackendExpr :: (Backend b,GetType t) => b -> Int -> Expr b t -> ShowS
 showsBackendExpr b p expr = showsPrec p recE
   where
-    recE = runIdentity $ mapExpr return return return return return return
+    recE = runIdentity $ mapExpr return return return return return return return
            (\e -> return $ RenderedSubExpr (\p -> showsBackendExpr b p e)) load
     load = fromBackend b expr
 

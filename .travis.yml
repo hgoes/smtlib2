@@ -1,6 +1,8 @@
 language: haskell
-ghc: 7.10
+ghc: "7.10"
 script:
   - cabal install -v1
   - cabal install -v1 ./backends/pipe
+  - cabal install -v1 ./backends/debug
+  - cabal install -v1 ./backends/timing
 sudo: false

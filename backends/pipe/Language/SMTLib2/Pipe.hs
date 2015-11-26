@@ -4,7 +4,7 @@ import Language.SMTLib2.Internals.Backend as B
 import Language.SMTLib2.Internals.Type hiding (Constr,Field,Datatype)
 import qualified Language.SMTLib2.Internals.Type as Type
 import Language.SMTLib2.Internals.Type.Nat as Type
-import Language.SMTLib2.Internals.Expression hiding (Fun,Field,Var,QVar)
+import Language.SMTLib2.Internals.Expression hiding (Fun,Field,Var,QVar,LVar)
 import qualified Language.SMTLib2.Internals.Expression as Expr
 import Language.SMTLib2.Strategy as Strat
 
@@ -52,12 +52,13 @@ data RevVar = forall (t::Type). GetType t => Var !(Proxy t)
             | forall (arg::[Type]) (t :: *). (GetTypes arg,IsDatatype t) => Constr !(Proxy arg) !(Proxy t)
             | forall (t :: *) (res :: Type). (IsDatatype t,GetType res) => Field !(Proxy t) !(Proxy res)
             | forall (t::Type). GetType t => FunArg !(Proxy t)
+            | forall (t::Type). GetType t => LVar !(Proxy t)
             | forall (t :: *). IsDatatype t => Datatype !(Proxy t)
 
 data InterpolationMode = Z3Interpolation [T.Text] [T.Text]
                        | MathSATInterpolation
 
-newtype PipeExpr (t :: Type) = PipeExpr (Expression PipeVar PipeVar PipeFun PipeConstr PipeField PipeVar PipeExpr t) deriving Show
+newtype PipeExpr (t :: Type) = PipeExpr (Expression PipeVar PipeVar PipeFun PipeConstr PipeField PipeVar PipeVar PipeExpr t) deriving Show
 type PipeVar = UntypedVar T.Text
 type PipeFun = UntypedFun T.Text
 type PipeConstr = UntypedCon T.Text
@@ -83,6 +84,7 @@ instance Backend SMTPipe where
   type Constr SMTPipe = PipeConstr
   type Field SMTPipe = PipeField
   type FunArg SMTPipe = PipeVar
+  type LVar SMTPipe = PipeVar
   type ClauseId SMTPipe = PipeClauseId
   type Model SMTPipe = AssignmentModel SMTPipe
   setOption opt b = do
@@ -511,7 +513,7 @@ data AnyExpr e = forall (t :: Type). GetType t => AnyExpr (e t)
 instance GShow e => Show (AnyExpr e) where
   showsPrec p (AnyExpr x) = gshowsPrec p x
 
-data LispParser (v :: Type -> *) (qv :: Type -> *) (fun :: ([Type],Type) -> *) (con :: ([Type],*) -> *) (field :: (*,Type) -> *) (fv :: Type -> *) (e :: Type -> *)
+data LispParser (v :: Type -> *) (qv :: Type -> *) (fun :: ([Type],Type) -> *) (con :: ([Type],*) -> *) (field :: (*,Type) -> *) (fv :: Type -> *) (lv :: Type -> *) (e :: Type -> *)
   = LispParser { parseFunction :: forall a. Maybe Sort -> T.Text
                                -> (forall args res. (GetTypes args,GetType res) => fun '(args,res) -> a)
                                -> (forall args res. (GetTypes args,IsDatatype res) => con '(args,res) -> a) -- constructor
@@ -525,14 +527,15 @@ data LispParser (v :: Type -> *) (qv :: Type -> *) (fun :: ([Type],Type) -> *) (
                           -> (forall t. GetType t => v t -> LispParse a)
                           -> (forall t. GetType t => qv t -> LispParse a)
                           -> (forall t. GetType t => fv t -> LispParse a)
+                          -> (forall t. GetType t => lv t -> LispParse a)
                           -> LispParse a
                , parseRecursive :: forall a. Maybe Sort -> L.Lisp
                                 -> (forall t. GetType t => e t -> LispParse a)
                                 -> LispParse a
                , registerQVar :: forall (t :: Type). GetType t => T.Text -> Proxy t
-                              -> (qv t,LispParser v qv fun con field fv e)
+                              -> (qv t,LispParser v qv fun con field fv lv e)
                , registerLetVar :: forall (t :: Type). GetType t => T.Text -> Proxy t
-                                -> (v t,LispParser v qv fun con field fv e)
+                                -> (lv t,LispParser v qv fun con field fv lv e)
                }
 
 type LispParse = Except String
@@ -587,7 +590,8 @@ lispToExprTyped st l = withProxy $
     withProxy :: (Proxy t -> LispParse (PipeExpr t)) -> LispParse (PipeExpr t)
     withProxy f = f Proxy
 
-pipeParser :: SMTPipe -> LispParser PipeVar PipeVar PipeFun PipeConstr PipeField PipeVar PipeExpr
+pipeParser :: SMTPipe
+           -> LispParser PipeVar PipeVar PipeFun PipeConstr PipeField PipeVar PipeVar PipeExpr
 pipeParser st = parse
   where
   parse = LispParser { parseFunction = \srt name fun con test field
@@ -607,13 +611,15 @@ pipeParser st = parse
                      , parseDatatype = \name res -> case Map.lookup name (datatypes st) of
                                          Just (PipeDatatype p) -> return $ res p
                                          _ -> throwE $ "Unknown datatype "++show name
-                     , parseVar = \srt name v qv fv -> case Map.lookup name (vars st) of
+                     , parseVar = \srt name v qv fv lv -> case Map.lookup name (vars st) of
                                     Just (Var (_::Proxy t))
                                       -> v (UntypedVar name :: PipeVar t)
                                     Just (QVar (_::Proxy t))
                                       -> qv (UntypedVar name :: PipeVar t)
                                     Just (FunArg (_::Proxy t))
                                       -> fv (UntypedVar name :: PipeVar t)
+                                    Just (LVar (_::Proxy t))
+                                      -> lv (UntypedVar name :: PipeVar t)
                                     _ -> throwE $ "Unknown variable "++show name
                      , parseRecursive = \srt l res -> lispToExprWith parse srt l $
                                                       \e -> res (PipeExpr e)
@@ -623,22 +629,22 @@ pipeParser st = parse
                                                                   (vars st) }))
                      , registerLetVar = \name pr
                                         -> (UntypedVar name,
-                                            pipeParser (st { vars = Map.insert name (Var pr)
+                                            pipeParser (st { vars = Map.insert name (LVar pr)
                                                                     (vars st) }))
                      }
 
 lispToExprWith :: (GShow fun,GShow con,GShow field,GShow e)
-               => LispParser v qv fun con field fv e
+               => LispParser v qv fun con field fv lv e
                -> Maybe Sort
                -> L.Lisp
                -> (forall (t :: Type). GetType t
-                   => Expression v qv fun con field fv e t
+                   => Expression v qv fun con field fv lv e t
                    -> LispParse a)
                -> LispParse a
 lispToExprWith p hint (runExcept . lispToConstant -> Right (AnyValue val)) res
   = res (Const val)
 lispToExprWith p hint (L.Symbol sym) res
-  = parseVar p hint sym (res . Expr.Var) (res . Expr.QVar) (res . Expr.FVar)
+  = parseVar p hint sym (res . Expr.Var) (res . Expr.QVar) (res . Expr.FVar) (res . Expr.LVar)
 lispToExprWith p hint (L.List [L.Symbol "_",L.Symbol "as-array",fsym]) res = do
   parsed <- lispToFunction p el_hint fsym
   AnyFunction fun <- getParsedFunction parsed idx_hint
@@ -687,7 +693,7 @@ lispToExprWith p hint (L.List (fun:args)) res = do
                            else do
                              rest <- matchArgs f (i+1) es
                              return $ (Left e):rest
-    makeArgs :: GShow e => LispParser v qv fun con field fv e
+    makeArgs :: GShow e => LispParser v qv fun con field fv lv e
              -> Args Repr arg -> [Either L.Lisp (AnyExpr e)] -> LispParse (Args e arg)
     makeArgs _ NoArg [] = return NoArg
     makeArgs _ NoArg _  = throwE $ "Too many arguments to function."
@@ -708,8 +714,8 @@ lispToExprWith p hint (L.List (fun:args)) res = do
     makeArgs _ (Arg _ _) [] = throwE $ "Not enough arguments to function."
 lispToExprWith _ _ lsp _ = throwE $ "Invalid SMT expression: "++show lsp
 
-mkQuant :: LispParser v qv fun con field fv e -> [L.Lisp]
-        -> (forall arg. GetTypes arg => LispParser v qv fun con field fv e -> Args qv arg -> LispParse a)
+mkQuant :: LispParser v qv fun con field fv lv e -> [L.Lisp]
+        -> (forall arg. GetTypes arg => LispParser v qv fun con field fv lv e -> Args qv arg -> LispParse a)
         -> LispParse a
 mkQuant p [] f = f p NoArg
 mkQuant p ((L.List [L.Symbol name,sort]):args) f = do
@@ -718,9 +724,9 @@ mkQuant p ((L.List [L.Symbol name,sort]):args) f = do
   mkQuant np args $ \p args -> f p (Arg qvar args)
 mkQuant _ lsp _ = throwE $ "Invalid forall/exists parameter: "++show lsp
 
-mkLet :: LispParser v qv fun con field fv e -> [L.Lisp]
-         -> (forall arg. GetTypes arg => LispParser v qv fun con field fv e
-             -> Args (LetBinding v e) arg -> LispParse a)
+mkLet :: LispParser v qv fun con field fv lv e -> [L.Lisp]
+         -> (forall arg. GetTypes arg => LispParser v qv fun con field fv lv e
+             -> Args (LetBinding lv e) arg -> LispParse a)
          -> LispParse a
 mkLet p [] f = f p NoArg
 mkLet p ((L.List [L.Symbol name,expr]):args) f
@@ -738,7 +744,7 @@ withEq (_::Proxy t) [_] f = f (Proxy::Proxy '[t])
 withEq p@(_::Proxy t) (_:xs) f = withEq p xs $
                                  \(_::Proxy (t ': arg)) -> f (Proxy :: Proxy (t ': t ': arg))
                                              
-lispToFunction :: LispParser v qv fun con field fv e
+lispToFunction :: LispParser v qv fun con field fv lv e
                -> Maybe Sort -> L.Lisp -> LispParse (ParsedFunction fun con field)
 lispToFunction _ _ (L.Symbol "=")
   = return $ ParsedFunction (==0)
@@ -1038,7 +1044,7 @@ lispToList (L.Symbol "()") = Just []
 lispToList (L.List lst) = Just lst
 lispToList _ = Nothing
 
-lispToSort :: LispParser v qv fun con field fv e -> L.Lisp -> LispParse Sort
+lispToSort :: LispParser v qv fun con field fv lv e -> L.Lisp -> LispParse Sort
 lispToSort _ (L.Symbol "Bool") = return (Sort (Proxy::Proxy BoolType))
 lispToSort _ (L.Symbol "Int") = return (Sort (Proxy::Proxy IntType))
 lispToSort _ (L.Symbol "Real") = return (Sort (Proxy::Proxy RealType))
@@ -1056,7 +1062,7 @@ lispToSort r (L.Symbol name) = parseDatatype r name $
                                \(_::Proxy t) -> Sort (Proxy::Proxy (DataType t))
 lispToSort _ lsp = throwE $ "Invalid SMT type: "++show lsp
 
-lispToSorts :: LispParser v qv fun con field fv e -> [L.Lisp]
+lispToSorts :: LispParser v qv fun con field fv lv e -> [L.Lisp]
             -> (forall (arg :: [Type]). GetTypes arg => Proxy arg -> a)
             -> LispParse a
 lispToSorts _ [] f = return (f (Proxy::Proxy ('[]::[Type])))
@@ -1140,7 +1146,7 @@ lispToBitVec (L.Symbol (T.stripPrefix "#b" -> Just bv))
 lispToBitVec _ = Nothing
 
 exprToLisp :: GetType t
-           => Expression PipeVar PipeVar PipeFun PipeConstr PipeField PipeVar PipeExpr t
+           => Expression PipeVar PipeVar PipeFun PipeConstr PipeField PipeVar PipeVar PipeExpr t
            -> L.Lisp
 exprToLisp = runIdentity . exprToLispWith
              (\(UntypedVar v) -> return $ L.Symbol v)
@@ -1149,6 +1155,7 @@ exprToLisp = runIdentity . exprToLispWith
              (\(UntypedCon v) -> return $ L.Symbol v)
              (\(UntypedCon v) -> return $ L.Symbol $ T.append "is-" v)
              (\(UntypedField v) -> return $ L.Symbol v)
+             (\(UntypedVar v) -> return $ L.Symbol v)
              (\(UntypedVar v) -> return $ L.Symbol v)
              (\(PipeExpr v) -> return $ exprToLisp v)
 
@@ -1165,33 +1172,37 @@ exprToLispWith :: (Monad m,GetType t)
                    GetTypes arg => con '(arg,res) -> m L.Lisp)    -- ^ constructor tests
                -> (forall (t' :: *) (res :: Type).
                    GetType res => field '(t',res) -> m L.Lisp)      -- ^ field accesses
-               -> (fv t -> m L.Lisp)                                              -- ^ function variables
+               -> (forall t.
+                   GetType t => fv t -> m L.Lisp)                                              -- ^ function variables
+               -> (forall t.
+                   GetType t => lv t -> m L.Lisp)                                              -- ^ let variables
                -> (forall (t' :: Type).
                    GetType t' => e t' -> m L.Lisp)                         -- ^ sub expressions
-               -> Expression v qv fun con field fv e t
+               -> Expression v qv fun con field fv lv e t
                -> m L.Lisp
-exprToLispWith f _ _ _ _ _ _ _ (Expr.Var v) = f v
-exprToLispWith _ f _ _ _ _ _ _ (Expr.QVar v) = f v
-exprToLispWith _ _ _ _ _ _ f _ (Expr.FVar v) = f v
+exprToLispWith f _ _ _ _ _ _ _ _ (Expr.Var v) = f v
+exprToLispWith _ f _ _ _ _ _ _ _ (Expr.QVar v) = f v
+exprToLispWith _ _ _ _ _ _ f _ _ (Expr.FVar v) = f v
+exprToLispWith _ _ _ _ _ _ _ f _ (Expr.LVar v) = f v
 -- This is a special case because the argument order is different
-exprToLispWith _ _ f g h i _ j (Expr.App Store (Arg arr (Arg val idx))) = do
+exprToLispWith _ _ f g h i _ _ j (Expr.App Store (Arg arr (Arg val idx))) = do
   arr' <- j arr
   idx' <- argsToListM j idx
   val' <- j val
   return $ L.List ((L.Symbol "store"):arr':idx'++[val'])
-exprToLispWith _ _ f g h i _ j (Expr.App fun args) = do
+exprToLispWith _ _ f g h i _ _ j (Expr.App fun args) = do
   args' <- argsToListM j args
   sym <- functionSymbol f g h i fun
   case args' of
     [] -> return sym
     _ -> return $ L.List $ sym:args'
-exprToLispWith _ _ _ f _ _ _ _ (Expr.Const val) = valueToLisp f val
-exprToLispWith _ _ f g h i _ _ (Expr.AsArray fun) = do
+exprToLispWith _ _ _ f _ _ _ _ _ (Expr.Const val) = valueToLisp f val
+exprToLispWith _ _ f g h i _ _ _ (Expr.AsArray fun) = do
   sym <- functionSymbolWithSig f g h i fun
   return $  L.List [L.Symbol "_"
                    ,L.Symbol "as-array"
                    ,sym]
-exprToLispWith _ f _ _ _ _ _ g (Expr.Quantification q args body) = do
+exprToLispWith _ f _ _ _ _ _ _ g (Expr.Quantification q args body) = do
   bind <- argsToListM (\arg -> do
                           sym <- f arg
                           return $ L.List [sym,typeSymbol $ getTypeOf arg]
@@ -1202,7 +1213,7 @@ exprToLispWith _ f _ _ _ _ _ g (Expr.Quantification q args body) = do
                                Expr.Exists -> "exists")
                   ,L.List bind
                   ,body']
-exprToLispWith f _ _ _ _ _ _ g (Expr.Let args body) = do
+exprToLispWith _ _ _ _ _ _ _ f g (Expr.Let args body) = do
   binds <- argsToListM (\bind -> do
                           sym <- f (letVar bind)
                           expr <- g (letExpr bind)

@@ -65,6 +65,7 @@ instance Backend Z3Solver where
   type Constr Z3Solver = Z3Con
   type Field Z3Solver = Z3Field
   type FunArg Z3Solver = Z3Var
+  type LVar Z3Solver = Z3Var
   type ClauseId Z3Solver = AST
   setOption (SMTLogic log) solv = do
     (ctx,nsolv) <- getContext solv
@@ -171,7 +172,7 @@ typeToZ3 ctx (ArrayRepr (Arg idx NoArg) el) = do
   mkArraySort ctx idx' el'
 
 toZ3 :: GetType t => Context
-     -> Expression Z3Var Z3Var Z3Fun Z3Con Z3Field Z3Var (UntypedVar AST) t
+     -> Expression Z3Var Z3Var Z3Fun Z3Con Z3Field Z3Var Z3Var (UntypedVar AST) t
      -> IO AST
 toZ3 ctx (Var (UntypedVar var)) = return var
 toZ3 ctx (Const val) = toZ3Const ctx val
