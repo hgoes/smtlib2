@@ -37,10 +37,10 @@ getSolver :: Z3Solver -> IO (Context,Solver,Z3Solver)
 getSolver solv = case solverState solv of
   Unconfigured -> do
     ctx <- withConfig mkContext
-    solver <- mkSimpleSolver ctx
+    solver <- mkSolver ctx
     return (ctx,solver,solv { solverState = Spawned ctx solver })
   Configured ctx -> do
-    solver <- mkSimpleSolver ctx
+    solver <- mkSolver ctx
     return (ctx,solver,solv { solverState = Spawned ctx solver })
   Spawned ctx solver -> return (ctx,solver,solv)
 
@@ -120,6 +120,11 @@ instance Backend Z3Solver where
     (ctx,solver,solv1) <- getSolver solv
     solverAssertCnstr ctx solver nd
     return ((),solv1)
+  assertId (UntypedVar nd) solv = do
+    (ctx,solver,solv1) <- getSolver solv
+    cid <- mkFreshBoolVar ctx "cid"
+    solverAssertAndTrack ctx solver nd cid
+    return (cid,solv1)
   checkSat _ _ solv = do
     (ctx,solver,solv1) <- getSolver solv
     res <- solverCheck ctx solver
@@ -128,6 +133,10 @@ instance Backend Z3Solver where
           Unsat -> B.Unsat
           Undef -> B.Unknown
     return (res',solv1)
+  getUnsatCore solv = do
+    (ctx,solver,solv1) <- getSolver solv
+    core <- solverGetUnsatCore ctx solver
+    return (core,solv1)
   getValue (UntypedVar v) solv = do
     (ctx,solver,solv1) <- getSolver solv
     mdl <- solverGetModel ctx solver
@@ -208,6 +217,11 @@ toZ3App ctx carr@ConstArray (Arg arg NoArg) = case carr of
            srt <- typeToZ3 ctx idx
            mkConstArray ctx srt (untypedVar arg)
 toZ3App ctx (ArithInt Plus) args = mkAdd ctx $ argsToList untypedVar args
+toZ3App ctx (ArithInt Minus) args = mkSub ctx $ argsToList untypedVar args
+toZ3App ctx (ArithInt Mult) args = mkMul ctx $ argsToList untypedVar args
+toZ3App ctx (ArithIntBin Div) (Arg x (Arg y NoArg)) = mkDiv ctx (untypedVar x) (untypedVar y)
+toZ3App ctx (ArithIntBin Mod) (Arg x (Arg y NoArg)) = mkMod ctx (untypedVar x) (untypedVar y)
+toZ3App ctx (ArithIntBin Rem) (Arg x (Arg y NoArg)) = mkRem ctx (untypedVar x) (untypedVar y)
 toZ3App ctx ITE (Arg cond (Arg ifT (Arg ifF NoArg))) = mkIte ctx (untypedVar cond) (untypedVar ifT) (untypedVar ifF)
 toZ3App ctx (OrdInt op) (Arg lhs (Arg rhs NoArg))
   = (case op of
