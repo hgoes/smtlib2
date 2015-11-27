@@ -800,6 +800,14 @@ lispToFunction _ _ (L.Symbol "<") = lispToOrdFunction Lt
 lispToFunction _ sort (L.Symbol "+") = lispToArithFunction sort Plus
 lispToFunction _ sort (L.Symbol "*") = lispToArithFunction sort Mult
 lispToFunction _ sort (L.Symbol "-") = lispToArithFunction sort Minus
+lispToFunction _ _ (L.Symbol "div") = return $ ParsedFunction (const False)
+                                      (\_ -> return $ AnyFunction (ArithIntBin Div))
+lispToFunction _ _ (L.Symbol "mod") = return $ ParsedFunction (const False)
+                                      (\_ -> return $ AnyFunction (ArithIntBin Mod))
+lispToFunction _ _ (L.Symbol "rem") = return $ ParsedFunction (const False)
+                                      (\_ -> return $ AnyFunction (ArithIntBin Rem))
+lispToFunction _ _ (L.Symbol "/") = return $ ParsedFunction (const False)
+                                    (\_ -> return $ AnyFunction Divide)
 lispToFunction _ sort (L.Symbol "abs") = case sort of
   Just (Sort (_::Proxy srt)) -> case getType::Repr srt of
     IntRepr -> return $ ParsedFunction (const False) (\_ -> return $ AnyFunction AbsInt)
