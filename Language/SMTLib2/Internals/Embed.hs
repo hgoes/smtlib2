@@ -8,6 +8,7 @@ import Language.SMTLib2.Internals.Backend
 import Data.Functor.Identity
 import Data.Proxy
 import Control.Monad.State
+import qualified Control.Monad.State.Strict as S
 import Control.Monad.Trans
 import Data.Typeable
 import Data.GADT.Compare
@@ -192,14 +193,28 @@ decodeExpr e = do
   e'' <- mapExpr return return return return return return return decodeExpr e'
   return (SMTExpr e'')
 
-instance (MonadTrans t,Monad (t m),Embed m e) => Embed (t m) e where
-  type EmVar (t m) e = EmVar m e
-  type EmQVar (t m) e = EmQVar m e
-  type EmFun (t m) e = EmFun m e
-  type EmConstr (t m) e = EmConstr m e
-  type EmField (t m) e = EmField m e
-  type EmFunArg (t m) e = EmFunArg m e
-  type EmLVar (t m) e = EmLVar m e
+instance Embed m e => Embed (StateT s m) e where
+  type EmVar (StateT s m) e = EmVar m e
+  type EmQVar (StateT s m) e = EmQVar m e
+  type EmFun (StateT s m) e = EmFun m e
+  type EmConstr (StateT s m) e = EmConstr m e
+  type EmField (StateT s m) e = EmField m e
+  type EmFunArg (StateT s m) e = EmFunArg m e
+  type EmLVar (StateT s m) e = EmLVar m e
+  embed = lift . embed
+  embedQuantifier q f = lift (embedQuantifier q f)
+  embedConstrTest name dt e = lift (embedConstrTest name dt e)
+  embedGetField name fname dt pr e = lift (embedGetField name fname dt pr e)
+  embedConst = lift . embedConst
+
+instance Embed m e => Embed (S.StateT s m) e where
+  type EmVar (S.StateT s m) e = EmVar m e
+  type EmQVar (S.StateT s m) e = EmQVar m e
+  type EmFun (S.StateT s m) e = EmFun m e
+  type EmConstr (S.StateT s m) e = EmConstr m e
+  type EmField (S.StateT s m) e = EmField m e
+  type EmFunArg (S.StateT s m) e = EmFunArg m e
+  type EmLVar (S.StateT s m) e = EmLVar m e
   embed = lift . embed
   embedQuantifier q f = lift (embedQuantifier q f)
   embedConstrTest name dt e = lift (embedConstrTest name dt e)
