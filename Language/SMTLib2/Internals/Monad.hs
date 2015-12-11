@@ -36,7 +36,7 @@ instance (Backend b,MonadIO (SMTMonad b)) => MonadIO (SMT b) where
   liftIO act = SMT (liftIO act)
 
 withBackend :: Backend b => SMTMonad b b
-            -> (forall b'. Backend b' => SMT b' a)
+            -> SMT b a
             -> SMTMonad b a
 withBackend constr act = do
   b <- constr
@@ -122,12 +122,12 @@ lookupDatatype pr dts = case Map.lookup pr dts of
   Nothing -> error $ "smtlib2: Datatype "++show pr++" is not registered."
 
 lookupConstructor :: String -> B.BackendDatatype con field '(DatatypeSig dt,dt)
-                  -> (forall arg. GetTypes arg => B.BackendConstr con field '(arg,dt) -> a)
+                  -> (forall arg. B.BackendConstr con field '(arg,dt) -> a)
                   -> a
 lookupConstructor name dt f = lookup (bconstructors dt) f
   where
     lookup :: Constrs (B.BackendConstr con field) sigs dt
-           -> (forall arg. GetTypes arg => B.BackendConstr con field '(arg,dt) -> a)
+           -> (forall arg. B.BackendConstr con field '(arg,dt) -> a)
            -> a
     lookup NoCon _ = error $ "smtlib2: "++name++" is not a constructor."
     lookup (ConsCon con cons) f = if bconName con==name
@@ -148,12 +148,12 @@ constructDatatype con args dt = get con args (bconstructors dt)
       Nothing -> get con args xs
 
 lookupField :: String -> B.BackendConstr con field '(arg,dt)
-            -> (forall tp. GetType tp => B.BackendField field dt tp -> a)
+            -> (forall tp. B.BackendField field dt tp -> a)
             -> a
 lookupField name con f = lookup (bconFields con) f
   where
     lookup :: Args (B.BackendField field dt) arg
-           -> (forall tp. GetType tp => B.BackendField field dt tp -> a)
+           -> (forall tp. B.BackendField field dt tp -> a)
            -> a
     lookup NoArg _ = error $ "smtlib2: "++name++" is not a field."
     lookup (Arg x xs) f = if bfieldName x==name
@@ -162,14 +162,14 @@ lookupField name con f = lookup (bconFields con) f
 
 lookupDatatypeCon :: (IsDatatype dt,Typeable con,Typeable field)
                   => DTProxy dt -> String -> DatatypeInfo con field
-                  -> (forall arg. GetTypes arg => B.BackendConstr con field '(arg,dt) -> a)
+                  -> (forall arg. B.BackendConstr con field '(arg,dt) -> a)
                   -> a
 lookupDatatypeCon pr name info f
   = lookupConstructor name (lookupDatatype pr info) f
 
 lookupDatatypeField :: (IsDatatype dt,Typeable con,Typeable field)
                   => DTProxy dt -> String -> String -> DatatypeInfo con field
-                  -> (forall tp. GetType tp => B.BackendField field dt tp -> a)
+                  -> (forall tp. B.BackendField field dt tp -> a)
                   -> a
 lookupDatatypeField pr con field info f
   = lookupDatatypeCon pr con info $
@@ -179,7 +179,7 @@ mkConcr :: B.Backend b => Value (B.Constr b) t -> SMT b (ConcreteValue t)
 mkConcr (BoolValue v) = return (BoolValueC v)
 mkConcr (IntValue v) = return (IntValueC v)
 mkConcr (RealValue v) = return (RealValueC v)
-mkConcr (BitVecValue v) = return (BitVecValueC v)
+mkConcr (BitVecValue v bw) = return (BitVecValueC v bw)
 mkConcr (ConstrValue con args) = do
   args' <- mapArgs mkConcr args
   st <- get
@@ -187,11 +187,11 @@ mkConcr (ConstrValue con args) = do
     constructDatatype con args' $
     lookupDatatype DTProxy (datatypes st)
 
-mkAbstr :: (B.Backend b,GetType t) => ConcreteValue t -> SMT b (Value (B.Constr b) t)
+mkAbstr :: (B.Backend b) => ConcreteValue t -> SMT b (Value (B.Constr b) t)
 mkAbstr (BoolValueC v) = return (BoolValue v)
 mkAbstr (IntValueC v) = return (IntValue v)
 mkAbstr (RealValueC v) = return (RealValue v)
-mkAbstr (BitVecValueC v) = return (BitVecValue v)
+mkAbstr (BitVecValueC v bw) = return (BitVecValue v bw)
 mkAbstr (ConstrValueC v) = do
   st <- get
   getConstructor v (bconstructors $ lookupDatatype DTProxy (datatypes st)) $

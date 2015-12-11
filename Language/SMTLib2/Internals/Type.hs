@@ -4,7 +4,6 @@ import Language.SMTLib2.Internals.Type.Nat
 
 import Data.Proxy
 import Data.Typeable
-import Data.Constraint
 import Numeric
 import Text.Show
 import Data.List (genericLength,genericReplicate)
@@ -31,6 +30,10 @@ deriving instance Typeable ('[])
 deriving instance Typeable (':)
 #endif
 
+type family Lifted (tps :: [Type]) (idx :: [Type]) :: [Type] where
+  Lifted '[] idx = '[]
+  Lifted (tp ': tps) idx = (ArrayType idx tp) ': Lifted tps idx
+
 type family Fst (a :: (p,q)) :: p where
   Fst '(x,y) = x
 
@@ -43,8 +46,7 @@ class (Typeable t,Typeable (DatatypeSig t),Show t,Ord t) => IsDatatype t where
   getDatatype :: e t -> Datatype '(DatatypeSig t,t)
   getTypeCollection :: e t -> TypeCollection (TypeCollectionSig t)
   getConstructor :: t -> Constrs con (DatatypeSig t) t
-                 -> (forall arg. GetTypes arg
-                     => con '(arg,t) -> Args ConcreteValue arg -> a)
+                 -> (forall arg. con '(arg,t) -> Args ConcreteValue arg -> a)
                  -> a
 
 type TypeCollection sigs = Datatypes Datatype sigs
@@ -60,14 +62,15 @@ data Constr (sig :: ([Type],*))
            , conTest :: Snd sig -> Bool }
 
 data Field a (t :: Type) = Field { fieldName :: String
+                                 , fieldType :: Repr t
                                  , fieldGet :: a -> ConcreteValue t }
 
 data Value (con :: ([Type],*) -> *) (a :: Type) where
   BoolValue :: Bool -> Value con BoolType
   IntValue :: Integer -> Value con IntType
   RealValue :: Rational -> Value con RealType
-  BitVecValue :: KnownNat n => Integer -> Value con (BitVecType n)
-  ConstrValue :: (Typeable con,GetTypes arg,IsDatatype t)
+  BitVecValue :: Integer -> Natural n -> Value con (BitVecType n)
+  ConstrValue :: (Typeable con,IsDatatype t)
               => con '(arg,t)
               -> Args (Value con) arg
               -> Value con (DataType t)
@@ -76,27 +79,31 @@ data ConcreteValue (a :: Type) where
   BoolValueC :: Bool -> ConcreteValue BoolType
   IntValueC :: Integer -> ConcreteValue IntType
   RealValueC :: Rational -> ConcreteValue RealType
-  BitVecValueC :: KnownNat n => Integer -> ConcreteValue (BitVecType n)
+  BitVecValueC :: Integer -> Natural n -> ConcreteValue (BitVecType n)
   ConstrValueC :: IsDatatype t => t -> ConcreteValue (DataType t)
 
-data AnyValue (con :: ([Type],*) -> *) = forall (t :: Type). GetType t => AnyValue (Value con t)
+data AnyValue (con :: ([Type],*) -> *) = forall (t :: Type). AnyValue (Value con t)
 
 data Repr (t :: Type) where
   BoolRepr :: Repr BoolType
   IntRepr :: Repr IntType
   RealRepr :: Repr RealType
-  BitVecRepr :: KnownNat n => Integer -> Repr (BitVecType n)
-  ArrayRepr :: (GetTypes idx,GetType val) => Args Repr idx -> Repr val -> Repr (ArrayType idx val)
+  BitVecRepr :: Natural n -> Repr (BitVecType n)
+  ArrayRepr :: Args Repr idx -> Repr val -> Repr (ArrayType idx val)
   DataRepr :: IsDatatype dt => Datatype '(DatatypeSig dt,dt) -> Repr (DataType dt)
+
+data NumRepr (t :: Type) where
+  NumInt :: NumRepr IntType
+  NumReal :: NumRepr RealType
 
 data Args (e :: Type -> *) (a :: [Type]) where
   NoArg :: Args e '[]
-  Arg :: (GetType t,GetTypes ts) => e t -> Args e ts -> Args e (t ': ts)
+  Arg :: e t -> Args e ts -> Args e (t ': ts)
   deriving Typeable
 
 data Constrs (con :: ([Type],*) -> *) (a :: [[Type]]) t where
   NoCon :: Constrs con '[] t
-  ConsCon :: GetTypes arg => con '(arg,dt) -> Constrs con args dt
+  ConsCon :: con '(arg,dt) -> Constrs con args dt
           -> Constrs con (arg ': args) dt
 
 data Datatypes (dts :: ([[Type]],*) -> *) (sigs :: [([[Type]],*)]) where
@@ -106,62 +113,39 @@ data Datatypes (dts :: ([[Type]],*) -> *) (sigs :: [([[Type]],*)]) where
           -> Datatypes dts sigs
           -> Datatypes dts ('(DatatypeSig dt,dt) ': sigs)
 
-class Typeable t => GetType (t :: Type) where
-  getType :: Repr t
-
 data FunRepr (sig :: ([Type],Type)) where
   FunRepr :: Args Repr arg -> Repr tp -> FunRepr '(arg,tp)
 
-instance GetType BoolType where
-  getType = BoolRepr
-instance GetType IntType where
-  getType = IntRepr
-instance GetType RealType where
-  getType = RealRepr
-instance (KnownNat n,Typeable n) => GetType (BitVecType n) where
-  getType = BitVecRepr (natVal (Proxy::Proxy n)) ::Repr (BitVecType n)
-instance (GetTypes idx,GetType el) => GetType (ArrayType idx el) where
-  getType = ArrayRepr (getTypes ::Args Repr idx)
-            (getType::Repr el) :: Repr (ArrayType idx el)
-instance IsDatatype t => GetType (DataType t) where
-  getType = DataRepr (getDatatype (Proxy::Proxy t)) :: Repr (DataType t)
+class GetType v where
+  getType :: v tp -> Repr tp
 
-getTypeOf :: GetType t => p t -> Repr t
-getTypeOf _ = getType
+class GetFunType fun where
+  getFunType :: fun '(arg,res) -> (Args Repr arg,Repr res)
 
-class Typeable t => GetTypes (t :: [Type]) where
-  type Lifted t (idx :: [Type]) :: [Type]
-  getTypes :: Args Repr t
-  getTypeConstr :: GetTypes idx => p t -> q idx -> Dict (GetTypes (Lifted t idx))
+class GetConType con where
+  getConType :: IsDatatype dt => con '(arg,dt) -> (Args Repr arg,Datatype '(DatatypeSig dt,dt))
 
-instance GetTypes '[] where
-  type Lifted '[] idx = '[]
-  getTypes = NoArg
-  getTypeConstr _ _ = Dict
+class GetFieldType field where
+  getFieldType :: IsDatatype dt => field '(dt,tp) -> (Datatype '(DatatypeSig dt,dt),Repr tp)
 
-instance (GetType t,GetTypes ts) => GetTypes (t ': ts) where
-  type Lifted (a ': b) idx = (ArrayType idx a) ': (Lifted b idx)
-  getTypes = Arg (getType :: Repr t) (getTypes :: Args Repr ts) :: Args Repr (t ': ts)
-  getTypeConstr (_::p (a ': b)) pidx = case getTypeConstr (Proxy::Proxy b) pidx of
-    Dict -> Dict
+instance GetType Repr where
+  getType = id
 
-getTypesOf :: GetTypes t => p t -> Args Repr t
-getTypesOf _ = getTypes
+instance GetType (Value con) where
+  getType = valueType
+
+instance GetType ConcreteValue where
+  getType = valueTypeC
 
 instance GEq con => GEq (Value con) where
   geq (BoolValue v1) (BoolValue v2) = if v1==v2 then Just Refl else Nothing
   geq (IntValue v1) (IntValue v2) = if v1==v2 then Just Refl else Nothing
   geq (RealValue v1) (RealValue v2) = if v1==v2 then Just Refl else Nothing
-  geq v1@(BitVecValue _) v2@(BitVecValue _) = do
-    Refl <- cmp v1 v2
-    return Refl
-    where
-      cmp :: Value con (BitVecType bw1) -> Value con (BitVecType bw2)
-          -> Maybe (Value con (BitVecType bw1) :~: Value con (BitVecType bw2))
-      cmp (BitVecValue v1 :: Value con (BitVecType bw1))
-          (BitVecValue v2 :: Value con (BitVecType bw2)) = do
-        Refl <- eqT :: Maybe (bw1 :~: bw2)
-        if v1==v2 then Just Refl else Nothing
+  geq (BitVecValue v1 bw1) (BitVecValue v2 bw2) = do
+    Refl <- geq bw1 bw2
+    if v1==v2
+      then return Refl
+      else Nothing
   geq (ConstrValue c1 arg1) (ConstrValue c2 arg2) = do
     Refl <- geq c1 c2
     Refl <- geq arg1 arg2
@@ -175,16 +159,11 @@ instance GEq ConcreteValue where
   geq (BoolValueC v1) (BoolValueC v2) = if v1==v2 then Just Refl else Nothing
   geq (IntValueC v1) (IntValueC v2) = if v1==v2 then Just Refl else Nothing
   geq (RealValueC v1) (RealValueC v2) = if v1==v2 then Just Refl else Nothing
-  geq v1@(BitVecValueC _) v2@(BitVecValueC _) = do
-    Refl <- cmp v1 v2
-    return Refl
-    where
-      cmp :: ConcreteValue (BitVecType bw1) -> ConcreteValue (BitVecType bw2)
-          -> Maybe (ConcreteValue (BitVecType bw1) :~: ConcreteValue (BitVecType bw2))
-      cmp (BitVecValueC v1 :: ConcreteValue (BitVecType bw1))
-          (BitVecValueC v2 :: ConcreteValue (BitVecType bw2)) = do
-        Refl <- eqT :: Maybe (bw1 :~: bw2)
-        if v1==v2 then Just Refl else Nothing
+  geq (BitVecValueC v1 bw1) (BitVecValueC v2 bw2) = do
+    Refl <- geq bw1 bw2
+    if v1==v2
+      then return Refl
+      else Nothing
   geq (ConstrValueC (v1::a)) (ConstrValueC (v2::b)) = case (eqT :: Maybe (a :~: b)) of
     Just Refl -> if v1==v2
                  then Just Refl
@@ -211,18 +190,16 @@ instance GCompare con => GCompare (Value con) where
     GT -> GGT
   gcompare (RealValue _) _ = GLT
   gcompare _ (RealValue _) = GGT
-  gcompare v1@(BitVecValue v1') v2@(BitVecValue v2') = case v1 of
-    (_::Value con (BitVecType bw1)) -> case v2 of
-      (_::Value con (BitVecType bw2)) -> case eqT :: Maybe (bw1 :~: bw2) of
-        Nothing -> if natVal (Proxy::Proxy bw1) < natVal (Proxy::Proxy bw2)
-                   then GLT
-                   else GGT
-        Just Refl -> case compare v1' v2' of
-          EQ -> GEQ
-          LT -> GLT
-          GT -> GGT
-  gcompare (BitVecValue _) _ = GLT
-  gcompare _ (BitVecValue _) = GGT
+  gcompare (BitVecValue v1 bw1) (BitVecValue v2 bw2)
+    = case gcompare bw1 bw2 of
+    GEQ -> case compare v1 v2 of
+      EQ -> GEQ
+      LT -> GLT
+      GT -> GGT
+    GLT -> GLT
+    GGT -> GGT
+  gcompare (BitVecValue _ _) _ = GLT
+  gcompare _ (BitVecValue _ _) = GGT
   gcompare (ConstrValue c1 arg1) (ConstrValue c2 arg2) = case gcompare c1 c2 of
     GLT -> GLT
     GGT -> GGT
@@ -247,18 +224,15 @@ instance GCompare ConcreteValue where
     GT -> GGT
   gcompare (RealValueC _) _ = GLT
   gcompare _ (RealValueC _) = GGT
-  gcompare v1@(BitVecValueC v1') v2@(BitVecValueC v2') = case v1 of
-    (_::ConcreteValue (BitVecType bw1)) -> case v2 of
-      (_::ConcreteValue (BitVecType bw2)) -> case eqT :: Maybe (bw1 :~: bw2) of
-        Nothing -> if natVal (Proxy::Proxy bw1) < natVal (Proxy::Proxy bw2)
-                   then GLT
-                   else GGT
-        Just Refl -> case compare v1' v2' of
-          EQ -> GEQ
-          LT -> GLT
-          GT -> GGT
-  gcompare (BitVecValueC _) _ = GLT
-  gcompare _ (BitVecValueC _) = GGT
+  gcompare (BitVecValueC v1 bw1) (BitVecValueC v2 bw2) = case gcompare bw1 bw2 of
+    GEQ -> case compare v1 v2 of
+      EQ -> GEQ
+      LT -> GLT
+      GT -> GGT
+    GLT -> GLT
+    GGT -> GGT
+  gcompare (BitVecValueC _ _) _ = GLT
+  gcompare _ (BitVecValueC _ _) = GGT
   gcompare (ConstrValueC (v1::a)) (ConstrValueC (v2::b)) = case (eqT :: Maybe (a :~: b)) of
     Just Refl -> case compare v1 v2 of
       EQ -> GEQ
@@ -292,11 +266,9 @@ instance GEq Repr where
   geq BoolRepr BoolRepr = Just Refl
   geq IntRepr IntRepr = Just Refl
   geq RealRepr RealRepr = Just Refl
-  geq b1@(BitVecRepr _) b2@(BitVecRepr _) = case b1 of
-    (_::Repr (BitVecType n1)) -> case b2 of
-      (_::Repr (BitVecType n2)) -> do
-        Refl <- eqT :: Maybe (n1 :~: n2)
-        return Refl
+  geq (BitVecRepr bw1) (BitVecRepr bw2) = do
+    Refl <- geq bw1 bw2
+    return Refl
   geq (ArrayRepr idx1 val1) (ArrayRepr idx2 val2) = do
     Refl <- geq idx1 idx2
     Refl <- geq val1 val2
@@ -306,6 +278,11 @@ instance GEq Repr where
       (_::Repr (DataType dt2)) -> do
         Refl <- eqT :: Maybe (dt1 :~: dt2)
         return Refl
+  geq _ _ = Nothing
+
+instance GEq NumRepr where
+  geq NumInt NumInt = Just Refl
+  geq NumReal NumReal = Just Refl
   geq _ _ = Nothing
 
 instance GEq FunRepr where
@@ -324,13 +301,10 @@ instance GCompare Repr where
   gcompare RealRepr RealRepr = GEQ
   gcompare RealRepr _ = GLT
   gcompare _ RealRepr = GGT
-  gcompare b1@(BitVecRepr _) b2@(BitVecRepr _) = case b1 of
-    (_::Repr (BitVecType n1)) -> case b2 of
-      (_::Repr (BitVecType n2)) -> case eqT :: Maybe (n1 :~: n2) of
-        Just Refl -> GEQ
-        Nothing -> if natVal (Proxy::Proxy n1) < natVal (Proxy::Proxy n2)
-                   then GLT
-                   else GGT
+  gcompare (BitVecRepr bw1) (BitVecRepr bw2) = case gcompare bw1 bw2 of
+    GEQ -> GEQ
+    GLT -> GLT
+    GGT -> GGT
   gcompare (BitVecRepr _) _ = GLT
   gcompare _ (BitVecRepr _) = GGT
   gcompare (ArrayRepr idx1 val1) (ArrayRepr idx2 val2) = case gcompare idx1 idx2 of
@@ -350,6 +324,12 @@ instance GCompare Repr where
                    then GLT
                    else GGT
 
+instance GCompare NumRepr where
+  gcompare NumInt NumInt = GEQ
+  gcompare NumInt _ = GLT
+  gcompare _ NumInt = GGT
+  gcompare NumReal NumReal = GEQ
+
 instance GCompare FunRepr where
   gcompare (FunRepr a1 r1) (FunRepr a2 r2) = case gcompare a1 a2 of
     GEQ -> case gcompare r1 r2 of
@@ -363,22 +343,24 @@ instance GShow con => Show (Value con tp) where
   showsPrec p (BoolValue b) = showsPrec p b
   showsPrec p (IntValue i) = showsPrec p i
   showsPrec p (RealValue i) = showsPrec p i
-  showsPrec p (BitVecValue v :: Value con tp) = case getType :: Repr tp of
-    BitVecRepr bw
-      | bw `mod` 4 == 0 -> let str = showHex v ""
-                               exp_len = bw `div` 4
-                               len = genericLength str
-                           in showString "#x" .
-                              showString (genericReplicate (exp_len-len) '0') .
-                              showString str
-      | otherwise -> let str = showIntAtBase 2 (\x -> case x of
-                                                        0 -> '0'
-                                                        1 -> '1'
-                                               ) v ""
-                         len = genericLength str
-                     in showString "#b" .
-                        showString (genericReplicate (bw-len) '0') .
-                        showString str
+  showsPrec p (BitVecValue v n)
+    | bw `mod` 4 == 0 = let str = showHex v ""
+                            exp_len = bw `div` 4
+                            len = genericLength str
+                        in showString "#x" .
+                           showString (genericReplicate (exp_len-len) '0') .
+                           showString str
+    | otherwise = let str = showIntAtBase 2 (\x -> case x of
+                                              0 -> '0'
+                                              1 -> '1'
+                                            ) v ""
+                      len = genericLength str
+                  in showString "#b" .
+                     showString (genericReplicate (bw-len) '0') .
+                     showString str
+
+    where
+      bw = naturalToInteger n
   showsPrec p (ConstrValue con args) = showParen (p>10) $
                                        showString "ConstrValue " .
                                        gshowsPrec 11 con.
@@ -392,22 +374,23 @@ instance Show (ConcreteValue t) where
   showsPrec p (BoolValueC b) = showsPrec p b
   showsPrec p (IntValueC i) = showsPrec p i
   showsPrec p (RealValueC i) = showsPrec p i
-  showsPrec p (BitVecValueC v :: ConcreteValue tp) = case getType :: Repr tp of
-    BitVecRepr bw
-      | bw `mod` 4 == 0 -> let str = showHex v ""
-                               exp_len = bw `div` 4
-                               len = genericLength str
-                           in showString "#x" .
-                              showString (genericReplicate (exp_len-len) '0') .
-                              showString str
-      | otherwise -> let str = showIntAtBase 2 (\x -> case x of
-                                                        0 -> '0'
-                                                        1 -> '1'
-                                               ) v ""
-                         len = genericLength str
-                     in showString "#b" .
-                        showString (genericReplicate (bw-len) '0') .
-                        showString str
+  showsPrec p (BitVecValueC v n)
+    | bw `mod` 4 == 0 = let str = showHex v ""
+                            exp_len = bw `div` 4
+                            len = genericLength str
+                        in showString "#x" .
+                           showString (genericReplicate (exp_len-len) '0') .
+                           showString str
+    | otherwise = let str = showIntAtBase 2 (\x -> case x of
+                                              0 -> '0'
+                                              1 -> '1'
+                                            ) v ""
+                      len = genericLength str
+                  in showString "#b" .
+                     showString (genericReplicate (bw-len) '0') .
+                     showString str
+    where
+      bw = naturalToInteger n
   showsPrec p (ConstrValueC val) = showsPrec p val
 
 instance GShow ConcreteValue where
@@ -436,7 +419,12 @@ deriving instance Show (Repr t)
 instance GShow Repr where
   gshowsPrec = showsPrec
 
-mapArgs :: Monad m => (forall t. GetType t => e1 t -> m (e2 t))
+deriving instance Show (NumRepr t)
+
+instance GShow NumRepr where
+  gshowsPrec = showsPrec
+
+mapArgs :: Monad m => (forall t. e1 t -> m (e2 t))
         -> Args e1 arg
         -> m (Args e2 arg)
 mapArgs f NoArg = return NoArg
@@ -445,7 +433,7 @@ mapArgs f (Arg x xs) = do
   xs' <- mapArgs f xs
   return (Arg x' xs')
 
-foldArgs :: Monad m => (forall t. GetType t => s -> e t -> m s)
+foldArgs :: Monad m => (forall t. s -> e t -> m s)
          -> s
          -> Args e arg
          -> m s
@@ -454,7 +442,7 @@ foldArgs f s (Arg x xs) = do
   ns <- f s x
   foldArgs f ns xs
 
-mapAccumArgs :: Monad m => (forall t. GetType t => a -> e1 t -> m (a,e2 t))
+mapAccumArgs :: Monad m => (forall t. a -> e1 t -> m (a,e2 t))
              -> a
              -> Args e1 arg
              -> m (a,Args e2 arg)
@@ -464,14 +452,14 @@ mapAccumArgs f x (Arg y ys) = do
   (nx2,nys) <- mapAccumArgs f nx1 ys
   return (nx2,Arg ny nys)
 
-withArgs :: (Monad m,GetTypes tps) => (forall t. GetType t => m (e t)) -> m (Args e tps)
-withArgs f = mapArgs (const f) getTypes
+--withArgs :: (Monad m) => (forall t. m (e t)) -> m (Args e tps)
+--withArgs f = mapArgs (const f) getTypes
 
-argsToList :: (forall (t :: Type). GetType t => e t -> a) -> Args e arg -> [a]
+argsToList :: (forall (t :: Type). e t -> a) -> Args e arg -> [a]
 argsToList _ NoArg = []
 argsToList f (Arg x xs) = f x:argsToList f xs
 
-argsToListM :: Monad m => (forall (t :: Type). GetType t => e t -> m a)
+argsToListM :: Monad m => (forall (t :: Type). e t -> m a)
             -> Args e arg -> m [a]
 argsToListM _ NoArg = return []
 argsToListM f (Arg x xs) = do
@@ -479,7 +467,7 @@ argsToListM f (Arg x xs) = do
   xs' <- argsToListM f xs
   return (x':xs')
 
-argsEqM :: Monad m => (forall (t :: Type). GetType t => a t -> b t -> m Bool)
+argsEqM :: Monad m => (forall (t :: Type). a t -> b t -> m Bool)
         -> Args a tps
         -> Args b tps
         -> m Bool
@@ -491,37 +479,37 @@ argsEqM eq (Arg x xs) (Arg y ys) = do
     else return False
 
 mapValue :: (Monad m,Typeable con2)
-         => (forall arg dt. GetTypes arg => con1 '(arg,dt) -> m (con2 '(arg,dt)))
+         => (forall arg dt. con1 '(arg,dt) -> m (con2 '(arg,dt)))
          -> Value con1 a
          -> m (Value con2 a)
 mapValue _ (BoolValue b) = return (BoolValue b)
 mapValue _ (IntValue i) = return (IntValue i)
 mapValue _ (RealValue r) = return (RealValue r)
-mapValue _ (BitVecValue b) = return (BitVecValue b)
+mapValue _ (BitVecValue b bw) = return (BitVecValue b bw)
 mapValue f (ConstrValue con args) = do
   con' <- f con
   args' <- mapArgs (mapValue f) args
   return (ConstrValue con' args')
 
 findConstrByName :: String -> Datatype '(cons,dt)
-                 -> (forall arg. GetTypes arg => Constr '(arg,dt) -> a) -> a
+                 -> (forall arg. Constr '(arg,dt) -> a) -> a
 findConstrByName name dt f = find f (constructors dt)
   where
-    find :: (forall arg. GetTypes arg => Constr '(arg,dt) -> a) -> Constrs Constr sigs dt -> a
+    find :: (forall arg. Constr '(arg,dt) -> a) -> Constrs Constr sigs dt -> a
     find f NoCon = error $ "smtlib2: Cannot find constructor "++name++" of "++datatypeName dt
     find f (ConsCon con cons)
       = if conName con == name
         then f con
         else find f cons
 
-findConstrByName' :: (Typeable arg,Typeable dt) => String -> Datatype '(cons,dt)
+{-findConstrByName' :: (Typeable arg,Typeable dt) => String -> Datatype '(cons,dt)
                   -> Constr '(arg,dt)
 findConstrByName' name dt = findConstrByName name dt
                             (\con -> case cast con of
-                               Just con' -> con')
+                               Just con' -> con')-}
 
-valueToConcrete :: (GetType t,Monad m)
-                => (forall arg tp. (GetTypes arg,IsDatatype tp)
+valueToConcrete :: (Monad m)
+                => (forall arg tp. (IsDatatype tp)
                     => con '(arg,tp)
                     -> Args ConcreteValue arg
                     -> m tp)
@@ -529,17 +517,17 @@ valueToConcrete :: (GetType t,Monad m)
 valueToConcrete _ (BoolValue v) = return (BoolValueC v)
 valueToConcrete _ (IntValue v) = return (IntValueC v)
 valueToConcrete _ (RealValue v) = return (RealValueC v)
-valueToConcrete _ (BitVecValue v) = return (BitVecValueC v)
+valueToConcrete _ (BitVecValue v bw) = return (BitVecValueC v bw)
 valueToConcrete f (ConstrValue con arg) = do
   arg' <- mapArgs (valueToConcrete f) arg
   res <- f con arg'
   return (ConstrValueC res)
 
-valueFromConcrete :: (GetType t,Monad m,Typeable con)
+valueFromConcrete :: (Monad m,Typeable con)
                   => (forall tp a. IsDatatype tp
                       => tp
-                      -> (forall arg. GetTypes arg
-                          => con '(arg,tp)
+                      -> (forall arg.
+                          con '(arg,tp)
                           -> Args ConcreteValue arg
                           -> m a)
                       -> m a)
@@ -548,9 +536,38 @@ valueFromConcrete :: (GetType t,Monad m,Typeable con)
 valueFromConcrete _ (BoolValueC v) = return (BoolValue v)
 valueFromConcrete _ (IntValueC v) = return (IntValue v)
 valueFromConcrete _ (RealValueC v) = return (RealValue v)
-valueFromConcrete _ (BitVecValueC v) = return (BitVecValue v)
+valueFromConcrete _ (BitVecValueC v bw) = return (BitVecValue v bw)
 valueFromConcrete f (ConstrValueC v)
   = f v (\con arg -> do
             arg' <- mapArgs (valueFromConcrete f) arg
             return (ConstrValue con arg'))
                                   
+valueType :: Value con tp -> Repr tp
+valueType (BoolValue _) = BoolRepr
+valueType (IntValue _) = IntRepr
+valueType (RealValue _) = RealRepr
+valueType (BitVecValue _ bw) = BitVecRepr bw
+valueType (ConstrValue (_::con '(arg,t)) _) = DataRepr (getDatatype (Proxy::Proxy t))
+
+valueTypeC :: ConcreteValue tp -> Repr tp
+valueTypeC (BoolValueC _) = BoolRepr
+valueTypeC (IntValueC _) = IntRepr
+valueTypeC (RealValueC _) = RealRepr
+valueTypeC (BitVecValueC _ bw) = BitVecRepr bw
+valueTypeC (ConstrValueC _) = DataRepr (getDatatype Proxy)
+
+liftType :: Args Repr tps -> Args Repr idx -> Args Repr (Lifted tps idx)
+liftType NoArg _ = NoArg
+liftType (Arg tp tps) idx = Arg (ArrayRepr idx tp) (liftType tps idx)
+
+numRepr :: NumRepr tp -> Repr tp
+numRepr NumInt = IntRepr
+numRepr NumReal = RealRepr
+
+asNumRepr :: Repr tp -> Maybe (NumRepr tp)
+asNumRepr IntRepr = Just NumInt
+asNumRepr RealRepr = Just NumReal
+asNumRepr _ = Nothing
+
+--isOfType :: Typeable tp' => Repr tp -> p tp' -> Maybe (tp' :~: tp)
+--isOfType BoolRepr (_::p tp') = eqT :: Maybe (tp' :~: BoolType)

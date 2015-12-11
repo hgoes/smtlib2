@@ -14,16 +14,9 @@ Source-Repository head
   Type:         git
   Location:     https://github.com/hguenther/smtlib2.git
 
-Flag WithConstraints
-  Description: Enables the use of the constraint-kind extension which is needed to parse 'map'-expressions.
-  Default: True
-Flag WithDataKinds
-  Description: Enables the use of the data-kinds extension which is needed for typed bitvectors.
-  Default: False
-
 Library
   Build-Depends: base >=4 && <5, constraints, mtl, containers, template-haskell, haskell-src-meta, dependent-sum, dependent-map
-  Extensions: GADTs,FlexibleContexts,FlexibleInstances,ExistentialQuantification,KindSignatures,DataKinds,TypeFamilies,AllowAmbiguousTypes,TypeOperators,MultiParamTypeClasses,ScopedTypeVariables,RankNTypes,UndecidableInstances,GeneralizedNewtypeDeriving,DeriveDataTypeable,CPP,PolyKinds,StandaloneDeriving,EmptyDataDecls
+  Extensions: GADTs,FlexibleContexts,FlexibleInstances,ExistentialQuantification,KindSignatures,DataKinds,TypeFamilies,AllowAmbiguousTypes,TypeOperators,MultiParamTypeClasses,ScopedTypeVariables,RankNTypes,UndecidableInstances,GeneralizedNewtypeDeriving,DeriveDataTypeable,CPP,PolyKinds,StandaloneDeriving,EmptyDataDecls,PatternSynonyms,ViewPatterns
   if impl(ghc < 7.10) {
     Extensions: PolyKinds,StandaloneDeriving
   }

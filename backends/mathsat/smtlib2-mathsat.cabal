@@ -5,7 +5,7 @@ Build-Type:     Simple
 Cabal-Version:  >=1.2
 
 Library
-  Build-Depends:        base >= 4,smtlib2 >= 0.3,containers,constraints
+  Build-Depends:        base >= 4,smtlib2 >= 0.3,containers,constraints,dependent-sum
   Extensions: 		ForeignFunctionInterface,CApiFFI,CPP,
                         GeneralizedNewtypeDeriving,MultiParamTypeClasses,
                         GADTs,ScopedTypeVariables,FlexibleInstances,TypeFamilies,

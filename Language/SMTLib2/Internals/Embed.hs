@@ -9,7 +9,6 @@ import Data.Functor.Identity
 import Data.Proxy
 import Control.Monad.State
 import qualified Control.Monad.State.Strict as S
-import Control.Monad.Trans
 import Data.Typeable
 import Data.GADT.Compare
 
@@ -30,18 +29,20 @@ class (Monad m,
   type EmField m e :: (*,Type) -> *
   type EmFunArg m e :: Type -> *
   type EmLVar m e :: Type -> *
-  embed :: GetType tp => Expression (EmVar m e) (EmQVar m e) (EmFun m e) (EmConstr m e) (EmField m e) (EmFunArg m e) (EmLVar m e) e tp
+  embed :: Expression (EmVar m e) (EmQVar m e) (EmFun m e) (EmConstr m e) (EmField m e) (EmFunArg m e) (EmLVar m e) e tp
         -> m (e tp)
-  embedQuantifier :: GetTypes arg => Quantifier
+  embedQuantifier :: Quantifier
+                  -> Args Repr arg
                   -> (forall m e. Embed m e => Args (EmQVar m e) arg -> m (e BoolType))
                   -> m (e BoolType)
   embedConstrTest :: IsDatatype dt => String -> Proxy dt -> e (DataType dt)
                   -> m (e BoolType)
-  embedGetField :: (IsDatatype dt,GetType tp)
-                => String -> String -> Proxy dt -> Proxy tp
+  embedGetField :: (IsDatatype dt)
+                => String -> String -> Proxy dt -> Repr tp
                 -> e (DataType dt)
                 -> m (e tp)
-  embedConst :: GetType tp => ConcreteValue tp -> m (e tp)
+  embedConst :: ConcreteValue tp -> m (e tp)
+  embedTypeOf :: e tp -> m (Repr tp)
 
 class (GCompare (ExVar i e),
        GCompare (ExQVar i e),
@@ -58,7 +59,7 @@ class (GCompare (ExVar i e),
   type ExField i e :: (*,Type) -> *
   type ExFunArg i e :: Type -> *
   type ExLVar i e :: Type -> *
-  extract :: GetType tp => i -> e tp
+  extract :: i -> e tp
           -> Maybe (Expression (ExVar i e) (ExQVar i e) (ExFun i e) (ExConstr i e) (ExField i e) (ExFunArg i e) (ExLVar i e) e tp)
 
 instance (Backend b,e ~ Expr b) => Embed (SMT b) e where
@@ -70,8 +71,8 @@ instance (Backend b,e ~ Expr b) => Embed (SMT b) e where
   type EmFunArg (SMT b) e = FunArg b
   type EmLVar (SMT b) e = LVar b
   embed = embedSMT . toBackend
-  embedQuantifier quant f = do
-    args <- withArgs (embedSMT (createQVar Nothing))
+  embedQuantifier quant tps f = do
+    args <- mapArgs (\tp -> embedSMT (createQVar tp Nothing)) tps
     body <- f args
     embedSMT $ toBackend (Quantification quant args body)
   embedConstrTest name (_::Proxy dt) e = do
@@ -79,14 +80,15 @@ instance (Backend b,e ~ Expr b) => Embed (SMT b) e where
     let bdt = lookupDatatype (DTProxy::DTProxy dt) (datatypes st)
     lookupConstructor name bdt $
       \bcon -> embedSMT $ toBackend (App (Test (bconRepr bcon)) (Arg e NoArg))
-  embedGetField name fname (_::Proxy dt) _ e = do
+  embedGetField name fname (_::Proxy dt) tp e = do
     st <- get
     lookupDatatypeField (DTProxy::DTProxy dt) fname name (datatypes st) $
-      \field -> case gcast (bfieldRepr field) of
-      Just field' -> embedSMT $ toBackend (App (Field field') (Arg e NoArg))
+      \field -> case geq tp (bfieldType field) of
+      Just Refl -> embedSMT $ toBackend (App (Field (bfieldRepr field)) (Arg e NoArg))
   embedConst v = do
     rv <- mkAbstr v
     embedSMT $ toBackend (Const rv)
+  embedTypeOf e = return $ getType e
 
 newtype BackendInfo b = BackendInfo b
 
@@ -104,27 +106,27 @@ data SMTExpr var qvar fun con field farg lvar tp where
   SMTExpr :: Expression var qvar fun con field farg lvar
              (SMTExpr var qvar fun con field farg lvar)
              tp -> SMTExpr var qvar fun con field farg lvar tp
-  SMTQuant :: GetTypes args
-           => Quantifier
+  SMTQuant :: Quantifier
+           -> Args Repr args
            -> (Args qvar args
                -> SMTExpr var qvar fun con field farg lvar BoolType)
            -> SMTExpr var qvar fun con field farg lvar BoolType
   SMTTestCon :: IsDatatype dt => String -> Proxy dt
              -> SMTExpr var qvar fun con field farg lvar (DataType dt)
              -> SMTExpr var qvar fun con field farg lvar BoolType
-  SMTGetField :: (IsDatatype dt,GetType tp)
-              => String -> String -> Proxy dt -> Proxy tp
+  SMTGetField :: (IsDatatype dt)
+              => String -> String -> Proxy dt -> Repr tp
               -> SMTExpr var qvar fun con field farg lvar (DataType dt)
               -> SMTExpr var qvar fun con field farg lvar tp
   SMTConst :: ConcreteValue tp -> SMTExpr var qvar fun con field farg lvar tp
 
-instance (GCompare var,
-          GCompare qvar,
-          GCompare fun,
-          GCompare con,
-          GCompare field,
-          GCompare farg,
-          GCompare lvar,
+instance (GCompare var,GetType var,
+          GCompare qvar,GetType qvar,
+          GCompare fun,GetFunType fun,
+          GCompare con,GetConType con,
+          GCompare field,GetFieldType field,
+          GCompare farg,GetType farg,
+          GCompare lvar,GetType lvar,
           Typeable con
          ) => Embed Identity (SMTExpr var qvar fun con field farg lvar) where
   type EmVar Identity (SMTExpr var qvar fun con field farg lvar) = var
@@ -135,10 +137,20 @@ instance (GCompare var,
   type EmFunArg Identity (SMTExpr var qvar fun con field farg lvar) = farg
   type EmLVar Identity (SMTExpr var qvar fun con field farg lvar) = lvar
   embed e = return (SMTExpr e)
-  embedQuantifier quant f = return $ SMTQuant quant (runIdentity . f)
+  embedQuantifier quant tps f = return $ SMTQuant quant tps (runIdentity . f)
   embedConstrTest name pr e = return $ SMTTestCon name pr e
   embedGetField name fname dt pr e = return $ SMTGetField name fname dt pr e
   embedConst = return . SMTConst
+  embedTypeOf = return . getType
+
+instance (GetType var,GetType qvar,GetFunType fun,GetConType con,
+          GetFieldType field,GetType farg,GetType lvar)
+         => GetType (SMTExpr var qvar fun con field farg lvar) where
+  getType (SMTExpr e) = expressionType e
+  getType (SMTQuant _ _ _) = BoolRepr
+  getType (SMTTestCon _ _ _) = BoolRepr
+  getType (SMTGetField _ _ _ tp _) = tp
+  getType (SMTConst c) = valueTypeC c
 
 instance (GCompare var,
           GCompare qvar,
@@ -158,15 +170,15 @@ instance (GCompare var,
   extract _ (SMTExpr e) = Just e
   extract _ _ = Nothing
 
-encodeExpr :: (Backend b,GetType tp)
+encodeExpr :: (Backend b)
            => SMTExpr (Var b) (QVar b) (Fun b) (Constr b) (Field b) (FunArg b) (LVar b) tp
            -> SMT b (Expr b tp)
 encodeExpr (SMTExpr e) = do
   e' <- mapExpr return return return return return return return
         encodeExpr e
   embedSMT $ toBackend e'
-encodeExpr (SMTQuant q f) = do
-  args <- withArgs (embedSMT (createQVar Nothing))
+encodeExpr (SMTQuant q tps f) = do
+  args <- mapArgs (\tp -> embedSMT (createQVar tp Nothing)) tps
   body <- encodeExpr (f args)
   embedSMT $ toBackend (Quantification q args body)
 encodeExpr (SMTTestCon name (_::Proxy dt) e) = do
@@ -175,17 +187,17 @@ encodeExpr (SMTTestCon name (_::Proxy dt) e) = do
   let bdt = lookupDatatype (DTProxy::DTProxy dt) (datatypes st)
   lookupConstructor name bdt $
     \bcon -> embedSMT $ toBackend (App (Test (bconRepr bcon)) (Arg e' NoArg))
-encodeExpr (SMTGetField name fname (_::Proxy dt) _ e) = do
+encodeExpr (SMTGetField name fname (_::Proxy dt) tp e) = do
   e' <- encodeExpr e
   st <- get
   lookupDatatypeField (DTProxy::DTProxy dt) fname name (datatypes st) $
-    \field -> case gcast (bfieldRepr field) of
-    Just field' -> embedSMT $ toBackend (App (Field field') (Arg e' NoArg))
+    \field -> case geq tp (bfieldType field) of
+    Just Refl -> embedSMT $ toBackend (App (Field $ bfieldRepr field) (Arg e' NoArg))
 encodeExpr (SMTConst c) = do
   rc <- mkAbstr c
   embedSMT $ toBackend (Const rc)
 
-decodeExpr :: (Backend b,GetType tp) => Expr b tp
+decodeExpr :: (Backend b) => Expr b tp
            -> SMT b (SMTExpr (Var b) (QVar b) (Fun b) (Constr b) (Field b) (FunArg b) (LVar b) tp)
 decodeExpr e = do
   st <- get
@@ -202,10 +214,11 @@ instance Embed m e => Embed (StateT s m) e where
   type EmFunArg (StateT s m) e = EmFunArg m e
   type EmLVar (StateT s m) e = EmLVar m e
   embed = lift . embed
-  embedQuantifier q f = lift (embedQuantifier q f)
+  embedQuantifier q tps f = lift (embedQuantifier q tps f)
   embedConstrTest name dt e = lift (embedConstrTest name dt e)
   embedGetField name fname dt pr e = lift (embedGetField name fname dt pr e)
   embedConst = lift . embedConst
+  embedTypeOf = lift . embedTypeOf
 
 instance Embed m e => Embed (S.StateT s m) e where
   type EmVar (S.StateT s m) e = EmVar m e
@@ -216,10 +229,11 @@ instance Embed m e => Embed (S.StateT s m) e where
   type EmFunArg (S.StateT s m) e = EmFunArg m e
   type EmLVar (S.StateT s m) e = EmLVar m e
   embed = lift . embed
-  embedQuantifier q f = lift (embedQuantifier q f)
+  embedQuantifier q tps f = lift (embedQuantifier q tps f)
   embedConstrTest name dt e = lift (embedConstrTest name dt e)
   embedGetField name fname dt pr e = lift (embedGetField name fname dt pr e)
   embedConst = lift . embedConst
+  embedTypeOf = lift . embedTypeOf
 
 data AnalyzedExpr i e tp
   = AnalyzedExpr (Maybe (Expression
@@ -233,7 +247,7 @@ data AnalyzedExpr i e tp
                          (AnalyzedExpr i e)
                          tp)) (e tp)
 
-analyze' :: (Extract i e,GetType tp) => i -> e tp -> AnalyzedExpr i e tp
+analyze' :: (Extract i e) => i -> e tp -> AnalyzedExpr i e tp
 analyze' i expr
   = AnalyzedExpr expr' expr
   where
@@ -242,7 +256,7 @@ analyze' i expr
       return $ runIdentity (mapExpr return return return return return return return
                             (return . analyze' i) e)
 
-analyze :: (Backend b,GetType tp) => Expr b tp -> SMT b (AnalyzedExpr (BackendInfo b) (Expr b) tp)
+analyze :: (Backend b) => Expr b tp -> SMT b (AnalyzedExpr (BackendInfo b) (Expr b) tp)
 analyze e = do
   st <- get
   return (analyze' (BackendInfo (backend st)) e)

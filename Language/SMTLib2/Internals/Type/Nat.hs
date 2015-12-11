@@ -16,17 +16,24 @@ deriving instance Typeable 'S
 class Typeable n => KnownNat (n :: Nat) where
   natVal :: p n -> Integer
   natPred :: p n -> Pred n
+  natural :: Natural n
 
 data Pred (n::Nat) where
    NoPred :: Pred Z
    Pred :: KnownNat n => Proxy n -> Pred (S n)
 
+data Natural (n::Nat) where
+  Zero :: Natural Z
+  Succ :: Natural n -> Natural (S n)
+
 instance KnownNat Z where
   natVal _ = 0
   natPred _ = NoPred
+  natural = Zero
 instance KnownNat n => KnownNat (S n) where
   natVal (_::p (S n)) = succ (natVal (Proxy::Proxy n))
   natPred _ = Pred Proxy
+  natural = Succ natural
 
 type family (+) (n :: Nat) (m :: Nat) :: Nat where
   (+) Z n = n
@@ -40,6 +47,42 @@ type family (<=) (n :: Nat) (m :: Nat) :: Bool where
 type family Sum (n :: [Nat]) :: Nat where
   Sum '[] = Z
   Sum (a ': b) = a + (Sum b)
+
+naturalToInteger :: Natural n -> Integer
+naturalToInteger = conv 0
+  where
+    conv :: Integer -> Natural m -> Integer
+    conv n Zero = n
+    conv n (Succ x) = conv (n+1) x
+
+naturalAdd :: Natural n -> Natural m -> Natural (n + m)
+naturalAdd Zero n = n
+naturalAdd (Succ x) y = Succ (naturalAdd x y)
+
+naturalLEQ :: Natural n -> Natural m -> Maybe (Dict ((n <= m) ~ True))
+naturalLEQ Zero _ = Just Dict
+naturalLEQ (Succ n) (Succ m) = case naturalLEQ n m of
+  Just Dict -> Just Dict
+  Nothing -> Nothing
+naturalLEQ _ _ = Nothing
+
+instance Show (Natural n) where
+  showsPrec p = showsPrec p . naturalToInteger
+
+instance Eq (Natural n) where
+  (==) _ _ = True
+
+instance Ord (Natural n) where
+  compare _ _ = EQ
+
+reifyNatural :: (Num a,Ord a) => a -> (forall n. Natural n -> r) -> r
+reifyNatural n f
+  | n < 0 = error "reifyNatural: Can only reify numbers >= 0."
+  | otherwise = reify' n f
+  where
+    reify' :: (Num a,Eq a) => a -> (forall n. Natural n -> r) -> r
+    reify' 0 f = f Zero
+    reify' n f = reify' (n-1) $ f.Succ
 
 sameNat :: (KnownNat a,KnownNat b) => Proxy a -> Proxy b
         -> Maybe (a :~: b)
@@ -182,3 +225,18 @@ type N62 = S N61
 type N63 = S N62
 type N64 = S N63
 
+instance GEq Natural where
+  geq Zero Zero = Just Refl
+  geq (Succ x) (Succ y) = do
+    Refl <- geq x y
+    return Refl
+  geq _ _ = Nothing
+
+instance GCompare Natural where
+  gcompare Zero Zero = GEQ
+  gcompare Zero _ = GLT
+  gcompare _ Zero = GGT
+  gcompare (Succ x) (Succ y) = case gcompare x y of
+    GEQ -> GEQ
+    GLT -> GLT
+    GGT -> GGT

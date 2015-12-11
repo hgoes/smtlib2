@@ -6,6 +6,7 @@ module Language.SMTLib2.ModulusEmulator
 import Language.SMTLib2.Internals.Backend
 import Language.SMTLib2.Internals.Expression
 import Language.SMTLib2.Internals.Type hiding (Constr,Field)
+import Language.SMTLib2.Internals.Type.Nat
 
 import Data.Foldable
 import Data.Typeable (gcast)
@@ -43,21 +44,21 @@ emulationAssertions me = toAsserts (emulations me)
 
 toAssert :: Backend b => Emulation b -> SMTAction b [Expr b BoolType]
 toAssert (EmulatedMod res resVar mod modE expr) b = do
-  (diff,b1) <- toBackend (App (ArithInt Minus) (Arg expr (Arg resVar NoArg))) b
+  (diff,b1) <- toBackend (App (Arith NumInt Minus (Succ (Succ Zero))) (Arg expr (Arg resVar NoArg))) b
   (div,b2) <- toBackend (App (Divisible mod) (Arg diff NoArg)) b1
   (c0,b3) <- toBackend (Const (IntValue 0)) b2
-  (lt,b4) <- toBackend (App (OrdInt Lt) (Arg resVar (Arg modE NoArg))) b3
-  (ge,b5) <- toBackend (App (OrdInt Ge) (Arg resVar (Arg c0 NoArg))) b4
+  (lt,b4) <- toBackend (App (Ord NumInt Lt) (Arg resVar (Arg modE NoArg))) b3
+  (ge,b5) <- toBackend (App (Ord NumInt Ge) (Arg resVar (Arg c0 NoArg))) b4
   return ([div,lt,ge],b5)
 toAssert (EmulatedDiv res expr div diff) b = do
   (resVar,b1) <- toBackend (Var res) b
   (diffVar,b2) <- toBackend (Var diff) b1
-  (prod,b3) <- toBackend (App (ArithInt Mult) (Arg resVar (Arg div NoArg))) b2
-  (diff',b4) <- toBackend (App (ArithInt Minus) (Arg expr (Arg diffVar NoArg))) b3
-  (eq,b5) <- toBackend (App Eq (Arg prod (Arg diff' NoArg))) b4
+  (prod,b3) <- toBackend (App (Arith NumInt Mult (Succ (Succ Zero))) (Arg resVar (Arg div NoArg))) b2
+  (diff',b4) <- toBackend (App (Arith NumInt Minus (Succ (Succ Zero))) (Arg expr (Arg diffVar NoArg))) b3
+  (eq,b5) <- toBackend (App (Eq IntRepr (Succ (Succ Zero))) (Arg prod (Arg diff' NoArg))) b4
   (c0,b6) <- toBackend (Const (IntValue 0)) b5
-  (ge,b7) <- toBackend (App (OrdInt Ge) (Arg diffVar (Arg c0 NoArg))) b6
-  (lt,b8) <- toBackend (App (OrdInt Lt) (Arg diffVar (Arg div NoArg))) b7
+  (ge,b7) <- toBackend (App (Ord NumInt Ge) (Arg diffVar (Arg c0 NoArg))) b6
+  (lt,b8) <- toBackend (App (Ord NumInt Lt) (Arg diffVar (Arg div NoArg))) b7
   return ([eq,ge,lt],b8)
 
 addEmulation :: Emulation b -> ModulusEmulator b -> ModulusEmulator b
@@ -100,11 +101,11 @@ instance (Backend b) => Backend (ModulusEmulator b) where
   comment str = liftSMT (comment str)
   push = liftSMT push
   pop = liftSMT pop
-  declareVar name = liftSMT (declareVar name)
-  createQVar name = liftSMT (createQVar name)
-  createFunArg name = liftSMT (createFunArg name)
+  declareVar tp name = liftSMT (declareVar tp name)
+  createQVar tp name = liftSMT (createQVar tp name)
+  createFunArg tp name = liftSMT (createFunArg tp name)
   defineVar name body = liftSMT (defineVar name body)
-  declareFun name = liftSMT (declareFun name)
+  declareFun arg tp name = liftSMT (declareFun arg tp name)
   defineFun name args body = liftSMT (defineFun name args body)
   assert expr me = do
     ((),me1) <- liftSMT (assert expr) me
@@ -128,23 +129,23 @@ instance (Backend b) => Backend (ModulusEmulator b) where
   toBackend (App (ArithIntBin Mod) (Arg x (Arg y NoArg))) me
     = case fromBackend (emulatedBackend me) y of
     Const (IntValue y') -> do
-      (resVar,b1) <- declareVar Nothing (emulatedBackend me)
+      (resVar,b1) <- declareVar IntRepr Nothing (emulatedBackend me)
       (resE,b2) <- toBackend (Var resVar) b1
       (res,b3) <- if y'>=0
                   then return (resE,b2)
-                  else toBackend (App (ArithInt Minus) (Arg resE NoArg)) b2
+                  else toBackend (App (Arith NumInt Minus (Succ Zero)) (Arg resE NoArg)) b2
       return (res,addEmulation (EmulatedMod resVar resE y' y x)
                   (me { emulatedBackend = b3 }))
   toBackend (App (ArithIntBin Rem) (Arg x (Arg y NoArg))) me
     = case fromBackend (emulatedBackend me) y of
     Const (IntValue y') -> do
-      (resVar,b1) <- declareVar Nothing (emulatedBackend me)
+      (resVar,b1) <- declareVar IntRepr Nothing (emulatedBackend me)
       (resE,b2) <- toBackend (Var resVar) b1
       return (resE,addEmulation (EmulatedMod resVar resE y' y x)
                    (me { emulatedBackend = b2 }))
   toBackend (App (ArithIntBin Div) (Arg x (Arg y NoArg))) me = do
-    (resVar,b1) <- declareVar Nothing (emulatedBackend me)
-    (diffVar,b2) <- declareVar Nothing b1
+    (resVar,b1) <- declareVar IntRepr Nothing (emulatedBackend me)
+    (diffVar,b2) <- declareVar IntRepr Nothing b1
     (resE,b3) <- toBackend (Var resVar) b2
     return (resE,addEmulation (EmulatedDiv resVar x y diffVar)
                  (me { emulatedBackend = b3 }))

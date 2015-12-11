@@ -26,7 +26,7 @@ module Language.SMTLib2 (
   setOption,B.SMTOption(..),
   getInfo,B.SMTInfo(..),
   registerDatatype,
-  declare,declareVar,declareVarNamed,define,defineVar,defineVarNamed,
+  declare,declareVar,declareVar',declareVarNamed,declareVarNamed',define,defineVar,defineVarNamed,
   expr,constant,
   AnalyzedExpr(),analyze,getExpr,
   B.Expr(),
@@ -45,6 +45,7 @@ module Language.SMTLib2 (
   ) where
 
 import Language.SMTLib2.Internals.Type
+import Language.SMTLib2.Internals.Type.Nat
 import Language.SMTLib2.Internals.Monad
 import Language.SMTLib2.Internals.Expression
 import Language.SMTLib2.Internals.Embed
@@ -52,6 +53,7 @@ import qualified Language.SMTLib2.Internals.Backend as B
 import Language.SMTLib2.Internals.TH
 import Language.SMTLib2.Strategy
 
+import Data.Proxy
 import Control.Monad.State.Strict
 
 setOption :: B.Backend b => B.SMTOption -> SMT b ()
@@ -78,7 +80,7 @@ checkSatWith tactic limits = embedSMT (B.checkSat tactic limits)
 noLimits :: B.CheckSatLimits
 noLimits = B.CheckSatLimits Nothing Nothing
 
-getValue :: (B.Backend b,GetType t) => B.Expr b t -> SMT b (ConcreteValue t)
+getValue :: (B.Backend b) => B.Expr b t -> SMT b (ConcreteValue t)
 getValue e = do
   res <- embedSMT $ B.getValue e
   mkConcr res
@@ -94,41 +96,47 @@ stack act = do
   pop
   return res
 
-defConst :: (B.Backend b,GetType t) => B.Expr b t -> SMT b (B.Expr b t)
+defConst :: B.Backend b => B.Expr b t -> SMT b (B.Expr b t)
 defConst e = do
   v <- embedSMT $ B.defineVar Nothing e
   embedSMT $ B.toBackend (Var v)
 
-declareVar :: (B.Backend b,GetType t) => SMT b (B.Expr b t)
-declareVar = do
-  v <- embedSMT $ B.declareVar Nothing
+declareVar :: (B.Backend b,SMTType t) => SMT b (B.Expr b t)
+declareVar = declareVar' getRepr
+
+declareVar' :: B.Backend b => Repr t -> SMT b (B.Expr b t)
+declareVar' tp = do
+  v <- embedSMT $ B.declareVar tp Nothing
   embedSMT $ B.toBackend (Var v)
 
-declareVarNamed :: (B.Backend b,GetType t) => String -> SMT b (B.Expr b t)
-declareVarNamed name = do
-  v <- embedSMT $ B.declareVar (Just name)
+declareVarNamed :: (B.Backend b,SMTType t) => String -> SMT b (B.Expr b t)
+declareVarNamed = declareVarNamed' getRepr
+
+declareVarNamed' :: B.Backend b => Repr t -> String -> SMT b (B.Expr b t)
+declareVarNamed' tp name = do
+  v <- embedSMT $ B.declareVar tp (Just name)
   embedSMT $ B.toBackend (Var v)
 
-defineVar :: (B.Backend b,GetType t) => B.Expr b t -> SMT b (B.Expr b t)
+defineVar :: (B.Backend b) => B.Expr b t -> SMT b (B.Expr b t)
 defineVar e = do
   re <- embedSMT $ B.defineVar Nothing e
   embedSMT $ B.toBackend (Var re)
 
-defineVarNamed :: (B.Backend b,GetType t) => String -> B.Expr b t -> SMT b (B.Expr b t)
+defineVarNamed :: (B.Backend b) => String -> B.Expr b t -> SMT b (B.Expr b t)
 defineVarNamed name e = do
   re <- embedSMT $ B.defineVar (Just name) e
   embedSMT $ B.toBackend (Var re)
 
-constant :: (B.Backend b,GetType t) => ConcreteValue t -> SMT b (B.Expr b t)
+constant :: (B.Backend b) => ConcreteValue t -> SMT b (B.Expr b t)
 constant v = do
   val <- mkAbstr v
   embedSMT $ B.toBackend (Const val)
   where
-    mkAbstr :: (B.Backend b,GetType tp) => ConcreteValue tp -> SMT b (Value (B.Constr b) tp)
+    mkAbstr :: (B.Backend b) => ConcreteValue tp -> SMT b (Value (B.Constr b) tp)
     mkAbstr (BoolValueC v) = return (BoolValue v)
     mkAbstr (IntValueC v) = return (IntValue v)
     mkAbstr (RealValueC v) = return (RealValue v)
-    mkAbstr (BitVecValueC v) = return (BitVecValue v)
+    mkAbstr (BitVecValueC v bw) = return (BitVecValue v bw)
     mkAbstr (ConstrValueC (v::dt)) = do
       st <- get
       let bdt = lookupDatatype (DTProxy::DTProxy dt) (datatypes st)
@@ -143,7 +151,7 @@ getUnsatCore = embedSMT B.getUnsatCore
 getInterpolant :: B.Backend b => SMT b (B.Expr b BoolType)
 getInterpolant = embedSMT B.interpolate
 
-getExpr :: (B.Backend b,GetType tp) => B.Expr b tp
+getExpr :: (B.Backend b) => B.Expr b tp
         -> SMT b (Expression
                   (B.Var b)
                   (B.QVar b)
@@ -157,7 +165,7 @@ getExpr e = do
   st <- get
   return $ B.fromBackend (backend st) e
 
-(.==.) :: (B.Backend b,GetType t) => B.Expr b t -> B.Expr b t -> SMT b (B.Expr b BoolType)
+(.==.) :: (B.Backend b,SMTType t) => B.Expr b t -> B.Expr b t -> SMT b (B.Expr b BoolType)
 (.==.) lhs rhs = [expr| (= lhs rhs) |]
 
 (.<=.),(.<.),(.>=.),(.>.) :: (B.Backend b,SMTOrd t) => B.Expr b t -> B.Expr b t -> SMT b (B.Expr b BoolType)

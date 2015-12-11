@@ -18,12 +18,504 @@ import Data.Proxy
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Control.Monad (liftM2)
-import Data.Proxy
+import Data.Maybe (catMaybes)
 
 data BasicExpr = Atom String
                | List [BasicExpr]
                | HsExpr String
                deriving Show
+
+class SMTType tp where
+  getRepr :: Repr tp
+class SMTTypes tps where
+  getReprs :: Args Repr tps
+
+instance SMTType BoolType where
+  getRepr = BoolRepr
+instance SMTType IntType where
+  getRepr = IntRepr
+instance SMTType RealType where
+  getRepr = RealRepr
+instance KnownNat bw => SMTType (BitVecType bw) where
+  getRepr = BitVecRepr natural
+instance (SMTTypes idx,SMTType el) => SMTType (ArrayType idx el) where
+  getRepr = ArrayRepr getReprs getRepr
+instance IsDatatype dt => SMTType (DataType dt) where
+  getRepr = DataRepr (getDatatype Proxy)
+instance SMTTypes '[] where
+  getReprs = NoArg
+instance (SMTType tp,SMTTypes tps) => SMTTypes (tp ': tps) where
+  getReprs = Arg getRepr getReprs
+
+data THType = DeterminedType Type
+            | QueryType TH.ExpQ
+
+liftNat :: Nat -> TH.ExpQ
+liftNat Z = [| Zero |]
+liftNat (S n) = [| Succ $(liftNat n) |]
+
+liftTypeRepr :: Type -> TH.ExpQ
+liftTypeRepr BoolType = [| BoolRepr |]
+liftTypeRepr IntType = [| IntRepr |]
+liftTypeRepr RealType = [| RealRepr |]
+liftTypeRepr (BitVecType bw) = [| BitVecRepr $(liftNat bw) |]
+liftTypeRepr (ArrayType idx el)
+  = [| ArrayRepr $(toArgs $ fmap liftTypeRepr idx) $(liftTypeRepr el) |]
+  where
+    toArgs :: [TH.ExpQ] -> TH.ExpQ
+    toArgs [] = [| NoArg |]
+    toArgs (x:xs) = [| Arg $(x) $(toArgs xs) |]
+
+liftTHType :: THType -> TH.ExpQ
+liftTHType (DeterminedType tp) = liftTypeRepr tp
+liftTHType (QueryType q) = q
+
+liftTHTypes :: [THType] -> TH.ExpQ
+liftTHTypes [] = [| NoArg |]
+liftTHTypes (tp:tps) = [| Arg $(liftTHType tp) $(liftTHTypes tps) |]
+
+liftNumType :: Type -> TH.ExpQ
+liftNumType IntType = [| NumInt |]
+liftNumType RealType = [| NumReal |]
+
+natLength :: [a] -> Nat
+natLength [] = Z
+natLength (_:xs) = S (natLength xs)
+
+natInt :: Integer -> Nat
+natInt 0 = Z
+natInt n = S (natInt (n-1))
+
+data THFunction = THFun { deriveFunctionType :: (Maybe [Maybe THType],Maybe THType)
+                                             -> (Maybe [Maybe THType],Maybe THType)
+                        , getSymbol :: (Maybe [Maybe THType],Maybe THType) -> TH.ExpQ
+                        , allEqSymbol :: TH.ExpQ
+                        , match :: TH.PatQ }
+
+data THExpression = THExpr { deriveType :: THType
+                           , getExpr' :: TH.ExpQ }
+
+type THBind = Map String THExpression
+
+deriveAllEqType :: [THExpression] -> THType
+deriveAllEqType args = case [ tp | THExpr { deriveType = DeterminedType tp } <- args
+                                 ] of
+  x:xs -> DeterminedType x
+  [] -> case args of
+    e:_ -> deriveType e
+    [] -> error $ "Cannot use function with zero arguments."
+
+toFunction :: BasicExpr -> THFunction
+toFunction (Atom "=")
+  = THFun { deriveFunctionType = \(args,_)
+                                 -> (case args of
+                                      Nothing -> Nothing
+                                      Just tps -> Just $ case [ tp | Just tp <- tps ] of
+                                        [] -> tps
+                                        tps' -> case [ tp | DeterminedType tp <- tps' ] of
+                                          [] -> fmap (const (Just (head tps'))) tps
+                                          tp:_ -> fmap (const (Just (DeterminedType tp))) tps,
+                                     Just (DeterminedType BoolType))
+          , getSymbol = \(args,_) -> case args of
+            Just xs@((Just (DeterminedType tp)):_)
+              -> [| Eq $(liftTypeRepr tp) $(liftNat $ natLength xs) |]
+            Just xs@((Just (QueryType q)):_)
+              -> [| Eq $(q) $(liftNat $ natLength xs) |]
+          , allEqSymbol = [| eq' |]
+          , match = [p| Eq _ _ |] }
+toFunction (Atom "distinct")
+  = THFun { deriveFunctionType = \(args,_)
+                                 -> (case args of
+                                      Nothing -> Nothing
+                                      Just tps -> Just $ case [ tp | Just tp <- tps ] of
+                                        [] -> tps
+                                        tps' -> case [ tp | DeterminedType tp <- tps' ] of
+                                          [] -> fmap (const (Just (head tps'))) tps
+                                          tp:_ -> fmap (const (Just (DeterminedType tp))) tps,
+                                     Just (DeterminedType BoolType))
+          , getSymbol = \(args,_) -> case args of
+            Just xs@((Just (DeterminedType tp)):_)
+              -> [| Eq $(liftTypeRepr tp) $(liftNat $ natLength xs) |]
+            Just xs@((Just (QueryType q)):_)
+              -> [| Eq $(q) $(liftNat $ natLength xs) |]
+          , allEqSymbol = [| distinct' |]
+          , match = [p| Distinct _ _ |] }
+toFunction (List [Atom "map",fun])
+  = THFun { deriveFunctionType = deriv
+          , getSymbol = sym
+          , allEqSymbol = error "map function cannot be applied to list."
+          , match = [p| Map _ $(match rfun) |]
+          }
+  where
+    rfun = toFunction fun
+    deriv (args,tp) = let nargs = case args of
+                            Nothing -> Nothing
+                            Just tps -> Just $ fmap (fmap thElementType) tps
+                          ntp = fmap thElementType tp
+                          all_tps = (case args of
+                                      Nothing -> []
+                                      Just tps -> catMaybes tps)++
+                                    (case tp of
+                                      Nothing -> []
+                                      Just rtp -> [rtp])
+                          all_idx = fmap thIndexType all_tps
+                          idx = case [ tps | Left tps <- all_idx ] of
+                            idx':_ -> Left idx'
+                            [] -> case [ q | Right q <- all_idx ] of
+                              idx':_ -> Right idx'
+                              [] -> error "Cannot infer index type for map function."
+                          (fargs,ftp) = deriveFunctionType rfun (nargs,ntp)
+                      in (case fargs of
+                           Nothing -> Nothing
+                           Just tps -> Just $ fmap (fmap (thMakeArray idx)) tps,
+                          case ftp of
+                          Nothing -> Nothing
+                          Just tp -> Just $ thMakeArray idx tp)
+    sym :: (Maybe [Maybe THType],Maybe THType) -> TH.ExpQ
+    sym (args,tp) = let all_tps = (case args of
+                                    Nothing -> []
+                                    Just tps -> catMaybes tps)++
+                                  (case tp of
+                                    Nothing -> []
+                                    Just tp -> [tp])
+                        all_idx = fmap thIndexType all_tps
+                        idx = case [ tps | Left tps <- all_idx ] of
+                            idx':_ -> Left idx'
+                            [] -> case [ q | Right q <- all_idx ] of
+                              idx':_ -> Right idx'
+                              [] -> error "Cannot infer index type for map function."
+                        fargs = case args of
+                          Nothing -> Nothing
+                          Just args' -> Just $ fmap (fmap thElementType) args'
+                        ftp = case tp of
+                          Nothing -> Nothing
+                          Just tp' -> Just $ thElementType tp'
+                    in [| Map $(case idx of
+                                 Left idx' -> liftTHTypes (fmap DeterminedType idx')
+                                 Right q -> q)
+                          $(getSymbol rfun (fargs,ftp)) |]
+toFunction (Atom "<=") = toOrd 'Le
+toFunction (Atom "<") = toOrd 'Lt
+toFunction (Atom ">=") = toOrd 'Ge
+toFunction (Atom ">") = toOrd 'Gt
+toFunction (Atom "+") = toArith 'Plus
+toFunction (Atom "-") = toArith 'Minus
+toFunction (Atom "*") = toArith 'Mult
+toFunction (Atom "div") = toArithBin 'Div
+toFunction (Atom "mod") = toArithBin 'Mod
+toFunction (Atom "rem") = toArithBin 'Rem
+toFunction (Atom "/") = THFun { deriveFunctionType = const (Just [Just (DeterminedType RealType)
+                                                                 ,Just (DeterminedType RealType)],
+                                                            Just (DeterminedType RealType))
+                              , getSymbol = const [| Divide |]
+                              , allEqSymbol = error "Cannot apply / function to list."
+                              , match = [p| Divide |] }
+toFunction (Atom "abs")
+  = THFun { deriveFunctionType = \(args,rtp) -> case args of
+            Just [Just tp] -> case tp of
+              DeterminedType _ -> (Just [Just tp],Just tp)
+              _ -> case rtp of
+                Just (DeterminedType tp) -> (Just [rtp],rtp)
+                _ -> (Just [Just tp],Just tp)
+            _ -> case rtp of
+              Just tp -> (Just [Just tp],Just tp)
+              Nothing -> (Just [Nothing],Nothing)
+          , getSymbol = \(_,rtp) -> case rtp of
+            Just (DeterminedType IntType) -> [| Abs NumInt |]
+            Just (DeterminedType RealType) -> [| Abs NumReal |]
+            Just (QueryType q) -> [| Abs (case asNumRepr $(q) of
+                                           Just r -> r) |]
+          , allEqSymbol = error "Cannot apply abs function to list."
+          , match = [p| Abs _ |] }
+toFunction (Atom "not")
+  = THFun { deriveFunctionType = \_ -> (Just [Just $ DeterminedType BoolType],
+                                        Just (DeterminedType BoolType))
+          , getSymbol = const [| Not |]
+          , allEqSymbol = error "Cannot apply not function to list."
+          , match = [p| Not |] }
+toFunction (Atom "and") = toLogic 'And
+toFunction (Atom "or") = toLogic 'Or
+toFunction (Atom "xor") = toLogic 'XOr
+toFunction (Atom "=>") = toLogic 'Implies
+toFunction (Atom "to_real")
+  = THFun { deriveFunctionType = \_ -> (Just [Just $ DeterminedType IntType],
+                                        Just (DeterminedType RealType))
+          , getSymbol = const [| ToReal |]
+          , allEqSymbol = error "Cannot apply to-real function to list."
+          , match = [p| ToReal |] }
+toFunction (Atom "to_int")
+  = THFun { deriveFunctionType = \_ -> (Just [Just $ DeterminedType RealType],
+                                        Just (DeterminedType IntType))
+          , getSymbol = const [| ToInt |]
+          , allEqSymbol = error "Cannot apply to-int function to list."
+          , match = [p| ToInt |] }
+toFunction (Atom "ite")
+  = THFun { deriveFunctionType = deriv
+          , getSymbol = sym
+          , allEqSymbol = error "Cannot apply ite function to list."
+          , match = [p| ITE _ |] }
+  where
+    deriv (args,rtp) = let all_tps = (case args of
+                                       Just [_,tp1,tp2] -> catMaybes [tp1,tp2]
+                                       Nothing -> [])++
+                                     (case rtp of
+                                       Just tp -> [tp]
+                                       Nothing -> [])
+                           res = case [ tp | DeterminedType tp <- all_tps ] of
+                             tp:_ -> Just (DeterminedType tp)
+                             [] -> case [ tp | QueryType tp <- all_tps ] of
+                               tp:_ -> Just (QueryType tp)
+                               [] -> rtp
+                       in (Just [Just $ DeterminedType BoolType
+                                ,res,res],res)
+    sym (_,Just rtp) = [| ITE $(liftTHType rtp) |]
+toFunction (Atom "select")
+  = THFun { deriveFunctionType = deriv
+          , getSymbol = sym
+          , allEqSymbol = error "Cannot apply select function to list."
+          , match = [p| Select _ _ |] }
+  where
+    deriv (args,rtp) = case args of
+      Just (arr:idx) -> case arr of
+        Just (DeterminedType (ArrayType idx' el))
+          -> (Just (arr:fmap (Just . DeterminedType) idx'),
+              Just (DeterminedType el))
+        _ -> (args,rtp)
+      _ -> (args,rtp)
+    sym (Just (Just arr:_),_)
+      = [| Select $(case thIndexType arr of
+                     Left tps -> liftTHTypes (fmap DeterminedType tps)
+                     Right q -> q)
+           $(liftTHType $ thElementType arr) |]
+toFunction (Atom "store")
+  = THFun { deriveFunctionType = deriv
+          , getSymbol = sym
+          , allEqSymbol = error "Cannot apply store function to list."
+          , match = [p| Store _ _ |] }
+  where
+    deriv (args,rtp) = case args of
+      Just (arr:idx) -> case arr of
+        Just (DeterminedType (ArrayType idx' el))
+          -> (Just (arr:(fmap (Just . DeterminedType) idx')++[Just $ DeterminedType el]),
+              Just (DeterminedType el))
+        _ -> (args,rtp)
+      _ -> (args,rtp)
+    sym (Just (Just arr:_),_)
+      = [| Store $(case thIndexType arr of
+                    Left tps -> liftTHTypes (fmap DeterminedType tps)
+                    Right q -> q)
+           $(liftTHType $ thElementType arr) |]
+
+
+toOrd :: TH.Name -> THFunction
+toOrd name = THFun { deriveFunctionType = \(args,_)
+                                          -> (case args of
+                                               Nothing -> Nothing
+                                               Just [t1,t2] -> Just $ case t1 of
+                                                 Just (DeterminedType tp)
+                                                   -> [Just (DeterminedType tp)
+                                                      ,Just (DeterminedType tp)]
+                                                 Just (QueryType q)
+                                                   -> case t2 of
+                                                   Just (DeterminedType tp)
+                                                     -> [Just (DeterminedType tp)
+                                                        ,Just (DeterminedType tp)]
+                                                   _ -> [Just (QueryType q)
+                                                        ,Just (QueryType q)]
+                                                 Nothing -> [t2,t2],
+                                              Just (DeterminedType BoolType))
+                   , getSymbol = getSym
+                   , allEqSymbol = error $ "Cannot dynamically apply comparison function."
+                   , match = [p| Ord _ $(TH.conP name []) |] }
+  where
+    getSym (Just [Just tp,_],_)
+      = case tp of
+      DeterminedType tp' -> [| Ord $(liftNumType tp') $(TH.conE name) |]
+      QueryType q -> [| Ord (case asNumRepr $(q) of
+                              Just rtp -> rtp) $(TH.conE name) |]
+
+toArith :: TH.Name -> THFunction
+toArith name = THFun { deriveFunctionType = deriv
+                     , getSymbol = sym
+                     , allEqSymbol = [| arith' $(TH.conE name) |]
+                     , match = [p| Arith _ $(TH.conP name []) _ |]
+                     }
+  where
+    deriv :: (Maybe [Maybe THType],Maybe THType) -> (Maybe [Maybe THType],Maybe THType)
+    deriv (args,rtp) = let all_tps = (case args of
+                                       Just tps -> catMaybes tps
+                                       Nothing -> [])++
+                                     (case rtp of
+                                       Just tp -> [tp]
+                                       Nothing -> [])
+                       in case [ tp | DeterminedType tp <- all_tps ] of
+                       tp:_ -> (case args of
+                                 Just args' -> Just $ fmap (const $ Just (DeterminedType tp)) args'
+                                 Nothing -> Nothing,
+                                Just $ DeterminedType tp)
+                       [] -> case [ tp | QueryType tp <- all_tps ] of
+                         tp:_ -> (case args of
+                                   Just args' -> Just $ fmap (const $ Just (QueryType tp)) args'
+                                   Nothing -> Nothing,
+                                  Just $ QueryType tp)
+                         [] -> (args,rtp)
+    sym (Just args,Just (DeterminedType tp)) = [| Arith $(case tp of
+                                                           IntType -> [| NumInt |]
+                                                           RealType -> [| NumReal |])
+                                                  $(TH.conE name)
+                                                  $(liftNat $ natLength args)
+                                                |]
+    sym (Just args,Just (QueryType q)) = [| Arith (case asNumRepr $(q) of
+                                                    Just r -> r) $(TH.conE name)
+                                            $(liftNat $ natLength args)
+                                          |]
+
+toArithBin :: TH.Name -> THFunction
+toArithBin name = THFun { deriveFunctionType = \_ -> (Just [Just (DeterminedType IntType)
+                                                           ,Just (DeterminedType IntType)],
+                                                      Just (DeterminedType IntType))
+                        , getSymbol = \_ -> [| ArithIntBin $(TH.conE name) |]
+                        , allEqSymbol = error $ "Cannot apply binary function to list."
+                        , match = [p| ArithIntBin $(TH.conP name []) |] }
+
+toLogic :: TH.Name -> THFunction
+toLogic name = THFun { deriveFunctionType = \(args,_)
+                                            -> (fmap (fmap (const
+                                                            (Just $ DeterminedType BoolType))) args,
+                                                Just (DeterminedType BoolType))
+                     , getSymbol = \(args,_) -> case args of
+                       Just args' -> [| Logic $(TH.conE name)
+                                        $(liftNat $ natLength args') |]
+                     , allEqSymbol = [| logic' $(TH.conE name) |]
+                     , match = [p| Logic $(TH.conP name []) _ |] }
+
+toExpression :: THBind -> BasicExpr -> THExpression
+toExpression _ (Atom "false")
+  = THExpr { deriveType = DeterminedType BoolType
+           , getExpr' = [| embed (Const (BoolValue False)) |] }
+toExpression _ (Atom "true")
+  = THExpr { deriveType = DeterminedType BoolType
+           , getExpr' = [| embed (Const (BoolValue True)) |] }
+toExpression _ (Atom ('#':'x':rest)) = case [ num | (num,"") <- readHex rest ] of
+  [n] -> let bw = genericLength rest*4
+             natBW = natInt bw
+         in THExpr { deriveType = DeterminedType (BitVecType natBW)
+                   , getExpr' = [| embed (Const (BitVecValue $(TH.litE $ TH.integerL n)
+                                                 $(liftNat natBW)
+                                                )) |] }
+toExpression _ (List [Atom "_",Atom ('b':'v':val),Atom bw])
+  = let num = read val
+        rbw = read bw
+        natBW = natInt rbw
+    in THExpr { deriveType = DeterminedType (BitVecType natBW)
+              , getExpr' = [| embed (Const (BitVecValue $(TH.litE $ TH.integerL num)
+                                            $(liftNat natBW))) |] }
+toExpression _ (List [Atom "_",Atom "as-array",fun])
+  = THExpr { deriveType = case funType of
+             (Just (sequence -> Just tps),Just tp)
+               -> case mapM (\tp -> case tp of
+                              DeterminedType t -> Just t
+                              _ -> Nothing
+                            ) tps of
+                  Just det -> case tp of
+                    DeterminedType rdet -> DeterminedType (ArrayType det rdet)
+           , getExpr' = [| embedSMT $ B.toBackend (AsArray $(getSymbol rfun funType)) |] }
+  where
+    rfun = toFunction fun
+    funType = deriveFunctionType rfun (Nothing,Nothing)
+toExpression bind (List [Atom "forall",List vars,body])
+  = toQuantifier Forall bind vars body
+toExpression bind (List [Atom "exists",List vars,body])
+  = toQuantifier Exists bind vars body
+toExpression bind (Atom name)
+  | isDigit (head name)
+    = if '.' `elem` name
+      then case [ res | (res,"") <- readFloat name ] of
+        [r] -> THExpr { deriveType = DeterminedType RealType
+                      , getExpr' = [| embed (Const (RealValue $(TH.litE $ TH.rationalL r))) |] }
+      else let num = read name
+           in THExpr { deriveType = DeterminedType IntType
+                     , getExpr' = [| embed (Const (IntValue $(TH.litE $ TH.integerL num))) |] }
+  | otherwise = case Map.lookup name bind of
+      Just res -> res
+      Nothing -> THExpr { deriveType = QueryType [| getType $(TH.varE (TH.mkName name)) |]
+                        , getExpr' = [| return $(TH.varE (TH.mkName name)) |] }
+toExpression bind (List [List [Atom "is",Atom dt,Atom con],expr])
+  = THExpr { deriveType = DeterminedType BoolType
+           , getExpr' = TH.appsE [[| (>>=) |]
+                                 , toExpr bind expr
+                                 , [| embedConstrTest $(TH.litE $ TH.stringL con)
+                                      (Proxy:: Proxy $(TH.conT $ TH.mkName dt)) |] ] }
+toExpression bind (List [List [Atom "get",Atom dt,Atom con,Atom field,tp],expr])
+  = THExpr { deriveType = toType tp
+           , getExpr' = TH.appsE [[| (>>=) |]
+                                 ,getExpr' $ toExpression bind expr
+                                 ,[| embedGetField $(TH.litE $ TH.stringL field)
+                                     $(TH.litE $ TH.stringL con)
+                                     (Proxy:: Proxy $(TH.conT $ TH.mkName dt))
+                                     $(liftTHType $ toType tp) |]] }
+toExpression bind (List [Atom "const",HsExpr c])
+  = THExpr { deriveType = QueryType $ TH.appE [| valueTypeC |] e
+           , getExpr' = TH.appE [| embedConst |] e }
+  where
+    e = case TH.parseExp c of
+      Left err -> error $ "Failed to parse haskell expression: "++show c
+      Right e' -> return e'
+toExpression bind (List [fun,Atom "#",HsExpr e])
+  = THExpr { deriveType = case deriveFunctionType rfun (Nothing,Nothing) of
+             (_,Just rtp) -> rtp
+           , getExpr' = case TH.parseExp e of
+             Left err -> error $ "Failed to parse haskell expression: "++show e
+             Right e' -> TH.appE (allEqSymbol rfun) (return e') }
+  where
+    rfun = toFunction fun
+toExpression bind (List (fun:args))
+  = THExpr { deriveType = case funType of
+             (_,Just rtp) -> rtp
+           , getExpr' = [| $(toArgs rargs) >>=
+                           embed . (App
+                                    $(getSymbol rfun funType)
+                                   ) |] }
+  where
+    rfun = toFunction fun
+    rargs = fmap (toExpression bind) args
+    funType = deriveFunctionType rfun (Just (fmap (Just . deriveType) rargs),Nothing)
+    toArgs :: [THExpression] -> TH.ExpQ
+    toArgs [] = [| return NoArg |]
+    toArgs (e:es) = [| liftM2 Arg $(getExpr' e) $(toArgs es) |]
+toExpression bind (HsExpr expr) = case TH.parseExp expr of
+  Left err -> error $ "Failed to parse haskell expression: "++show expr
+  Right expr' -> THExpr { deriveType = QueryType [| getType $(return expr') |]
+                        , getExpr' = [| return $(return expr') |] }
+  
+toQuantifier :: Quantifier -> THBind -> [BasicExpr] -> BasicExpr -> THExpression
+toQuantifier q bind vars body
+  = THExpr { deriveType = DeterminedType BoolType
+           , getExpr' = do
+               let sig = toVarSig vars
+               (pat,nbind) <- mkPat bind sig
+               argTps <- mkTps sig
+               TH.appsE [ [| embedQuantifier |]
+                        , case q of
+                          Forall -> [| Forall |]
+                          Exists -> [| Exists |]
+                        , mkTps sig
+                        , TH.lamE [pat] (getExpr' $ toExpression nbind body)
+                        ] }
+  where
+    mkPat bind [] = return ([p| NoArg |],bind)
+    mkPat bind ((var,tp):vars) = do
+      qvar <- TH.newName "q"
+      (pat,nbind) <- mkPat bind vars
+      return (TH.conP 'Arg [TH.varP qvar,pat],
+              Map.insert var (THExpr { deriveType = tp
+                                     , getExpr' = [| embed (QVar $(TH.varE qvar)) |]
+                                     }) nbind)
+    mkTps [] = [| NoArg |]
+    mkTps ((_,tp):tps) = [| Arg $(case tp of
+                                   DeterminedType t -> liftTypeRepr t
+                                   QueryType q -> q)
+                            $(mkTps tps) |]
 
 parseList :: String -> Maybe ([BasicExpr],String)
 parseList ((isSpace -> True):rest) = parseList rest
@@ -77,7 +569,7 @@ parseSingleExpr str = do
     then return expr
     else Nothing
 
-args :: QuasiQuoter
+{-args :: QuasiQuoter
 args = QuasiQuoter { quoteExp = quoteExpr
                    , quotePat = quotePattern
                    , quoteType = quoteTp
@@ -94,7 +586,7 @@ args = QuasiQuoter { quoteExp = quoteExpr
     quoteTp :: String -> TH.TypeQ
     quoteTp s = case parseArgs s of
       Nothing -> fail $ "Failed to parse argument type: "++s
-      Just tps -> toTypes tps
+      Just tps -> toTypes tps-}
 
 expr :: QuasiQuoter
 expr = QuasiQuoter { quoteExp = quoteExpr
@@ -116,11 +608,13 @@ declare = QuasiQuoter { quoteExp = quoteExpr }
     quoteExpr :: String -> TH.ExpQ
     quoteExpr s = case parseArgs s of
       Nothing -> fail $ "Failed to parse type: "++s
-      Just [tp] -> TH.sigE [| embedSMT (B.declareVar Nothing) >>=
-                              embedSMT . B.toBackend . Var |]
-                           [t| forall b. B.Backend b => SMT b (B.Expr b $(toType tp)) |]
-      Just [List sig,tp] -> TH.sigE [| fmap Fun (embedSMT $ B.declareFun Nothing) |]
-                                    [t| forall b con field. B.Backend b => SMT b (Function (B.Fun b) con field '( $(toTypes sig),$(toType tp))) |]
+      Just [tp] -> [| embedSMT (B.declareVar $(liftTHType $ toType tp) Nothing) >>=
+                      embedSMT . B.toBackend . Var |]
+      Just [List sig,tp]
+        -> [| fmap Fun (embedSMT $ B.declareFun $(liftTHTypes rsig) $(liftTHType rtp) Nothing) |]
+        where
+          rtp = toType tp
+          rsig = fmap toType sig
 
 define :: QuasiQuoter
 define = QuasiQuoter { quoteExp = quoteExpr }
@@ -131,11 +625,11 @@ define = QuasiQuoter { quoteExp = quoteExpr }
                         embedSMT . (B.defineVar Nothing) >>=
                         embedSMT . B.toBackend . Var |]
       Just [List args,body] -> do
-        sig <- toVarSig args
+        let sig = toVarSig args
         toFunDef sig body Map.empty []
 
-toFunDef :: [(String,TH.Type)] -> BasicExpr
-         -> Map String TH.Exp
+toFunDef :: [(String,THType)] -> BasicExpr
+         -> THBind
          -> [TH.ExpQ]
          -> TH.ExpQ
 toFunDef ((name,tp):args) body mp vec = do
@@ -143,15 +637,14 @@ toFunDef ((name,tp):args) body mp vec = do
   fve <- TH.newName "fve"
   expr <- TH.varE fve
   TH.appE [| fmap Fun |] $
-    TH.appE [| (>>=) (embedSMT (B.createFunArg (Just $(TH.litE $ TH.stringL name)))) |]
+    TH.appE [| (>>=) (embedSMT (B.createFunArg $(liftTHType tp)
+                                (Just $(TH.litE $ TH.stringL name)))) |]
             (TH.lamE [TH.varP fv]
              (TH.appE [| (>>=) (embedSMT (B.toBackend (FVar $(TH.varE fv)))) |]
               (TH.lamE [TH.varP fve]
                 (toFunDef args body
-                  (Map.insert name expr mp)
-                  (TH.appsE [[| entypeExpr |]
-                            ,TH.sigE [| Proxy |] (TH.appT [t| Proxy |] (return tp))
-                            ,TH.varE fv]:vec)))))
+                  (Map.insert name (THExpr tp (return expr)) mp)
+                  (TH.varE fv:vec)))))
 toFunDef [] body mp vec = do
   let args = foldl (\args e -> [| Arg $(e) $(args) |]) [| NoArg |] vec
   [| $(toExpr mp body) >>= embedSMT . B.defineFun Nothing $(args) |]
@@ -159,92 +652,14 @@ toFunDef [] body mp vec = do
 entypeExpr :: Proxy (t::Type) -> e t -> e t
 entypeExpr _ = id
 
-toArgs :: [BasicExpr] -> TH.ExpQ
-toArgs [] = [| NoArg |]
-toArgs (x:xs) = [| Arg $(toExpr Map.empty x) $(toArgs xs) |]
-
-toExpr :: Map String TH.Exp -> BasicExpr -> TH.ExpQ
-toExpr _ (Atom "false") = [| embed (Const (BoolValue False)) |]
-toExpr _ (Atom "true") = [| embed (Const (BoolValue True)) |]
-toExpr _ (Atom ('#':'x':rest)) = case [ num | (num,"") <- readHex rest ] of
-  [n] -> let bw = genericLength rest*4
-         in [| embed (Const (BitVecValue $(TH.litE $ TH.integerL n) :: Value con (BitVecType $(mkNum bw)))) |]
-toExpr _ (List [Atom "_",Atom ('b':'v':val),Atom bw])
-  = let num = read val
-        rbw = read bw
-    in [| embed (Const (BitVecValue $(TH.litE $ TH.integerL num) :: Value con (BitVecType $(mkNum rbw)))) |]
-toExpr _ (List [Atom "_",Atom "as-array",fun]) = [| embedSMT $ B.toBackend (AsArray $(toFun fun)) |]
-toExpr bind (Atom name)
-  | isDigit (head name)
-    = if '.' `elem` name
-      then case [ res | (res,"") <- readFloat name ] of
-        [r] -> [| embed (Const (RealValue $(TH.litE $ TH.rationalL r))) |]
-      else let num = read name
-           in [| embed (Const (IntValue $(TH.litE $ TH.integerL num))) |]
-  | otherwise = case Map.lookup name bind of
-      Just res -> return res
-      Nothing -> [| return $(TH.varE (TH.mkName name)) |]
-toExpr bind (List [Atom "forall",List vars,body])
-  = toQuantifier Forall bind vars body
-toExpr bind (List [Atom "exists",List vars,body])
-  = toQuantifier Exists bind vars body
-toExpr bind (List [List [Atom "is",Atom dt,Atom con],expr])
-  = TH.appsE [[| (>>=) |]
-             , toExpr bind expr
-             , [| embedConstrTest $(TH.litE $ TH.stringL con)
-                  (Proxy:: Proxy $(TH.conT $ TH.mkName dt)) |] ]
-toExpr bind (List [List [Atom "get",Atom dt,Atom con,Atom field,tp],expr])
-  = TH.appsE [[| (>>=) |]
-             ,toExpr bind expr
-             ,[| embedGetField $(TH.litE $ TH.stringL field)
-                 $(TH.litE $ TH.stringL con)
-                 (Proxy:: Proxy $(TH.conT $ TH.mkName dt))
-                 (Proxy:: Proxy $(toType tp)) |]]
-toExpr bind (List [Atom "const",c])
-  = TH.appE [| embedConst |] (toExpr bind c)
-toExpr bind (List [name,Atom "#",Atom arg]) = case funAllEqName name of
-  Just name' -> TH.appE (TH.varE name') (TH.varE (TH.mkName arg))
-  Nothing -> error $ "Cannot apply list to "++show name++" function."
-toExpr bind (List (name:args)) = [| $(mkArgs bind args) >>=
-                                    embed . App $(toFun name) |]
-toExpr bind (HsExpr expr) = case TH.parseExp expr of
-  Left err -> error $ "Failed to parse haskell expression: "++show expr
-  Right expr' -> return expr'
-
-toQuantifier :: Quantifier -> Map String TH.Exp -> [BasicExpr] -> BasicExpr -> TH.ExpQ
-toQuantifier q bind vars body = do
-  sig <- toVarSig vars
-  (pat,nbind) <- mkPat bind sig
-  argTps <- mkTps sig
-  TH.appsE [ [| embedQuantifier |]
-           , case q of
-             Forall -> [| Forall |]
-             Exists -> [| Exists |]
-           , TH.appsE [ [| enforceTypes |]
-                      , TH.sigE [| Proxy |]
-                        [t| Proxy $(mkTps sig) |]
-                      , TH.lamE [pat] (toExpr nbind body)
-                      ]
-           ]
-  where
-    mkPat bind [] = return ([p| NoArg |],bind)
-    mkPat bind ((var,tp):vars) = do
-      qvar <- TH.newName "q"
-      qvarE <- [| embed (QVar $(TH.varE qvar)) |]
-      (pat,nbind) <- mkPat bind vars
-      return (TH.conP 'Arg [TH.varP qvar,pat],
-              Map.insert var qvarE nbind)
-    mkTps [] = [t| '[] |]
-    mkTps ((_,tp):tps) = [t| $(return tp) ': $(mkTps tps) |]
+toExpr :: THBind -> BasicExpr -> TH.ExpQ
+toExpr bind e = getExpr' (toExpression bind e)
 
 enforceTypes :: Proxy tps -> (Args e tps -> a) -> (Args e tps -> a)
 enforceTypes _ = id
 
-toVarSig :: [BasicExpr] -> TH.Q [(String,TH.Type)]
-toVarSig = mapM (\(List [Atom name,tp]) -> do
-                   tp' <- toType tp
-                   return (name,tp')
-                )
+toVarSig :: [BasicExpr] -> [(String,THType)]
+toVarSig = fmap (\(List [Atom name,tp]) -> (name,toType tp))
 
 toQuant :: [(String,TH.Type)] -> Map String TH.Exp -> TH.Q (TH.Exp,Map String TH.Exp)
 toQuant [] mp = do
@@ -289,211 +704,137 @@ toPat (List [Atom "_",Atom ('b':'v':val),Atom bw])
            (Just (Const $(TH.sigP
                           [p| BitVecValue $(TH.litP $ TH.integerL num) |]
                           [t| forall con. Value con (BitVecType $(mkNum rbw)) |]))) _ |]
-toPat (List [Atom "_",Atom "as-array",fun]) = [p| AnalyzedExpr (Just (AsArray $(toFunPat fun))) _ |]
+toPat (List [Atom "_",Atom "as-array",fun])
+  = [p| AnalyzedExpr (Just (AsArray $(match rfun))) _ |]
+  where
+    rfun = toFunction fun
 toPat (Atom name)
   | isDigit (head name) = let num = read name
                            in [p| AnalyzedExpr (Just (Const (IntValue $(TH.litP $ TH.integerL num)))) _ |]
   | otherwise = [p| AnalyzedExpr _ $(TH.varP (TH.mkName name)) |]
-toPat (List (name:args))
-  = if funIsAllEq name
-    then [p| AnalyzedExpr (Just (App $(toFunPat name) $(mkAllEqPat args))) _ |]
-    else [p| AnalyzedExpr (Just (App $(toFunPat name) $(mkArgsPat args))) _ |]
+toPat (List (fun:args))
+  = [p| AnalyzedExpr (Just (App $(match rfun) $(mkArgsPat args))) _ |]
+  where
+    rfun = toFunction fun
 toPat (HsExpr e) = case TH.parsePat e of
   Left err -> error $ "While parsing pattern: "++show e++": "++err
   Right pat -> [p| AnalyzedExpr _ $(return pat) |]
 
-data FunName = FunCon TH.Name [FunName]
-             | FunVar TH.Name
-             | FunSig FunName TH.TypeQ
-             | FunInt Integer
+eq' :: Embed m e => [e t] -> m (e BoolType)
+eq' (x:xs) = do
+  tp <- embedTypeOf x
+  allEqFromList (x:xs) $
+    \n args -> embed (App (Eq tp n) args)
 
-funNameToExpr :: FunName -> TH.ExpQ
-funNameToExpr (FunCon name xs) = mk (TH.conE name) xs
-  where
-    mk c [] = c
-    mk c (x:xs) = mk (TH.appE c (funNameToExpr x)) xs
-funNameToExpr (FunVar name) = TH.varE name
-funNameToExpr (FunSig f sig) = TH.sigE (funNameToExpr f) sig
-funNameToExpr (FunInt n) = TH.litE $ TH.integerL n
+distinct' :: Embed m e => [e t] -> m (e BoolType)
+distinct' (x:xs) = do
+  tp <- embedTypeOf x
+  allEqFromList (x:xs) $
+    \n args -> embed (App (Distinct tp n) args)
 
-funNameToPattern :: FunName -> TH.PatQ
-funNameToPattern (FunCon name xs) = TH.conP name (fmap funNameToPattern xs)
-funNameToPattern (FunVar _) = fail "smtlib2: Cannot use overloaded functions in patterns."
-funNameToPattern (FunSig f sig) = TH.sigP (funNameToPattern f) sig
-funNameToPattern (FunInt n) = TH.litP $ TH.integerL n
+arith' :: (Embed m e,SMTArith t) => ArithOp -> [e t] -> m (e t)
+arith' Plus [] = embedConst (arithFromInteger 0)
+arith' Plus [x] = return x
+arith' Minus [] = embedConst (arithFromInteger 0)
+arith' Mult [] = embedConst (arithFromInteger 1)
+arith' Mult [x] = return x
+arith' op xs = allEqFromList xs $
+               \n args -> embed (App (arith op n) args) 
 
-funIsAllEq :: BasicExpr -> Bool
-funIsAllEq (Atom "=") = True
-funIsAllEq (Atom "distinct") = True
-funIsAllEq (Atom "and") = True
-funIsAllEq (Atom "or") = True
-funIsAllEq (Atom "xor") = True
-funIsAllEq (Atom "=>") = True
-funIsAllEq (Atom "+") = True
-funIsAllEq (Atom "-") = True
-funIsAllEq (Atom "*") = True
-funIsAllEq _ = False
-
-funAllEqName :: BasicExpr -> Maybe TH.Name
-funAllEqName (Atom "=") = Just 'eq'
-funAllEqName (Atom "distinct") = Just 'distinct'
-funAllEqName (Atom "and") = Just 'and'
-funAllEqName (Atom "or") = Just 'or'
-funAllEqName (Atom "xor") = Just 'xor'
-funAllEqName (Atom "=>") = Just 'implies'
-funAllEqName (Atom "+") = Just 'plus'
-funAllEqName (Atom "-") = Just 'minus'
-funAllEqName (Atom "*") = Just 'mult'
-funAllEqName _ = Nothing
-
-appLst :: (Embed m e,GetType tp,GetType t)
-       => (forall arg. (AllEq arg,SameType arg ~ t)
-           => Function (EmFun m e) (EmConstr m e) (EmField m e) '(arg,tp))
-       -> [e t]
-       -> m (e tp)
-appLst fun args = allEqFromList args $
-                  \args' -> embed (App fun args')
-
-eq' :: (Embed m e,GetType t) => [e t] -> m (e BoolType)
-eq' = appLst Eq
-
-distinct' :: (Embed m e,GetType t) => [e t] -> m (e BoolType)
-distinct' = appLst Distinct
+logic' :: (Embed m e) => LogicOp -> [e BoolType] -> m (e BoolType)
+logic' And [] = embedConst (BoolValueC True)
+logic' And [x] = return x
+logic' Or [] = embedConst (BoolValueC False)
+logic' Or [x] = return x
+logic' op xs = allEqFromList xs $
+               \n args -> embed (App (Logic op n) args)
 
 and' :: Embed m e => [e BoolType] -> m (e BoolType)
 and' [] = embedConst (BoolValueC True)
 and' [x] = return x
-and' xs = appLst (Logic And) xs
+and' xs = allEqFromList xs $
+          \n args -> embed (App (Logic And n) args)
 
 or' :: Embed m e => [e BoolType] -> m (e BoolType)
 or' [] = embedConst (BoolValueC False)
 or' [x] = return x
-or' xs = appLst (Logic Or) xs
+or' xs = allEqFromList xs $
+         \n args -> embed (App (Logic Or n) args)
 
 xor' :: Embed m e => [e BoolType] -> m (e BoolType)
-xor' = appLst (Logic XOr)
+xor' xs = allEqFromList xs $
+          \n args -> embed (App (Logic XOr n) args)
 
 implies' :: Embed m e => [e BoolType] -> m (e BoolType)
-implies' = appLst (Logic Implies)
+implies' xs = allEqFromList xs $
+              \n args -> embed (App (Logic Implies n) args)
 
 plus' :: (Embed m e,SMTArith t) => [e t] -> m (e t)
 plus' [] = embedConst (arithFromInteger 0)
 plus' [x] = return x
-plus' xs = appLst plus xs
+plus' xs = allEqFromList xs $
+           \n args -> embed (App (plus n) args)
 
 minus' :: (Embed m e,SMTArith t) => [e t] -> m (e t)
 minus' [] = embedConst (arithFromInteger 0)
-minus' xs = appLst minus xs
+minus' xs = allEqFromList xs $
+            \n args -> embed (App (minus n) args)
 
 mult' :: (Embed m e,SMTArith t) => [e t] -> m (e t)
 mult' [] = embedConst (arithFromInteger 1)
 mult' [x] = return x
-mult' xs = appLst mult xs
+mult' xs = allEqFromList xs $
+           \n args -> embed (App (mult n) args)
 
-funName :: BasicExpr -> Maybe FunName
-funName (List [name,List sig,tp]) = do
-  f <- funName name
-  return $ FunSig f [t| forall fun con field. Function fun con field '( $(toTypes sig),$(toType tp)) |]
-funName (Atom "=") = Just $ FunCon 'Eq []
-funName (Atom "distinct") = Just $ FunCon 'Distinct []
-funName (List [Atom "_",Atom "map",f]) = do
-  f' <- funName f
-  return (FunCon 'Map [f'])
-funName (Atom "<") = Just $ FunVar 'lt
-funName (Atom "<.int") = Just $ FunCon 'OrdInt [FunCon 'Lt []]
-funName (Atom "<.real") = Just $ FunCon 'OrdReal [FunCon 'Lt []]
-funName (Atom "<=") = Just $ FunVar 'le
-funName (Atom "<=.int") = Just $ FunCon 'OrdInt [FunCon 'Le []]
-funName (Atom "<=.real") = Just $ FunCon 'OrdReal [FunCon 'Le []]
-funName (Atom ">") = Just $ FunVar 'gt
-funName (Atom ">.int") = Just $ FunCon 'OrdInt [FunCon 'Gt []]
-funName (Atom ">.real") = Just $ FunCon 'OrdReal [FunCon 'Gt []]
-funName (Atom ">=") = Just $ FunVar 'ge
-funName (Atom ">=.int") = Just $ FunCon 'OrdInt [FunCon 'Ge []]
-funName (Atom ">=.real") = Just $ FunCon 'OrdReal [FunCon 'Ge []]
-funName (Atom "+") = Just $ FunVar 'plus
-funName (Atom "-") = Just $ FunVar 'minus
-funName (Atom "*") = Just $ FunVar 'mult
-funName (Atom "div") = Just $ FunCon 'ArithIntBin [FunCon 'Div []]
-funName (Atom "mod") = Just $ FunCon 'ArithIntBin [FunCon 'Mod []]
-funName (Atom "rem") = Just $ FunCon 'ArithIntBin [FunCon 'Rem []]
-funName (Atom "/") = Just $ FunCon 'Divide []
-funName (Atom "abs") = Just $ FunVar 'abs'
-funName (Atom "not") = Just $ FunCon 'Not []
-funName (Atom "and") = Just $ FunCon 'Logic [FunCon 'And []]
-funName (Atom "or") = Just $ FunCon 'Logic [FunCon 'Or []]
-funName (Atom "xor") = Just $ FunCon 'Logic [FunCon 'XOr []]
-funName (Atom "=>") = Just $ FunCon 'Logic [FunCon 'Implies []]
-funName (Atom "to_real") = Just $ FunCon 'ToReal []
-funName (Atom "to_int") = Just $ FunCon 'ToInt []
-funName (Atom "ite") = Just $ FunCon 'ITE []
-funName (Atom "bvule") = Just $ FunCon 'BVComp [FunCon 'BVULE []]
-funName (Atom "bvult") = Just $ FunCon 'BVComp [FunCon 'BVULT []]
-funName (Atom "bvuge") = Just $ FunCon 'BVComp [FunCon 'BVUGE []]
-funName (Atom "bvugt") = Just $ FunCon 'BVComp [FunCon 'BVUGT []]
-funName (Atom "bvsle") = Just $ FunCon 'BVComp [FunCon 'BVSLE []]
-funName (Atom "bvslt") = Just $ FunCon 'BVComp [FunCon 'BVSLT []]
-funName (Atom "bvsge") = Just $ FunCon 'BVComp [FunCon 'BVSGE []]
-funName (Atom "bvsgt") = Just $ FunCon 'BVComp [FunCon 'BVSGT []]
-funName (Atom "bvadd") = Just $ FunCon 'BVBin [FunCon 'BVAdd []]
-funName (Atom "bvsub") = Just $ FunCon 'BVBin [FunCon 'BVSub []]
-funName (Atom "bvmul") = Just $ FunCon 'BVBin [FunCon 'BVMul []]
-funName (Atom "bvurem") = Just $ FunCon 'BVBin [FunCon 'BVURem []]
-funName (Atom "bvsrem") = Just $ FunCon 'BVBin [FunCon 'BVSRem []]
-funName (Atom "bvudiv") = Just $ FunCon 'BVBin [FunCon 'BVUDiv []]
-funName (Atom "bvsdiv") = Just $ FunCon 'BVBin [FunCon 'BVSDiv []]
-funName (Atom "bvshl") = Just $ FunCon 'BVBin [FunCon 'BVSHL []]
-funName (Atom "bvlshr") = Just $ FunCon 'BVBin [FunCon 'BVLSHR []]
-funName (Atom "bvashr") = Just $ FunCon 'BVBin [FunCon 'BVASHR []]
-funName (Atom "bvxor") = Just $ FunCon 'BVBin [FunCon 'BVXor []]
-funName (Atom "bvand") = Just $ FunCon 'BVBin [FunCon 'BVAnd []]
-funName (Atom "bvor") = Just $ FunCon 'BVBin [FunCon 'BVOr []]
-funName (Atom "bvnot") = Just $ FunCon 'BVUn [FunCon 'BVNot []]
-funName (Atom "bvneg") = Just $ FunCon 'BVUn [FunCon 'BVNeg []]
-funName (Atom "select") = Just $ FunCon 'Select []
-funName (Atom "store") = Just $ FunCon 'Store []
-funName (List [Atom "as",Atom "const",List [Atom "Array",List idx,el]])
-  = Just $ FunSig (FunCon 'ConstArray [])
-           [t| forall fun con field. Function fun con field '( '[$(toType el)],ArrayType $(toTypes idx) $(toType el)) |]
-funName (Atom "concat") = Just $ FunCon 'Concat []
-funName (List [Atom "_",Atom "extract",Atom end,Atom start])
-  = Just $ FunSig (FunCon 'Extract
-                          [FunSig (FunCon 'Proxy [])
-                                  [t| Proxy $(mkNum start') |]])
-                  [t| forall fun con field bv. Function fun con field '( '[BitVecType bv],BitVecType $(mkNum $ end'-start')) |]
+toType :: BasicExpr -> THType
+toType (Atom "Bool") = DeterminedType BoolType
+toType (Atom "Int") = DeterminedType IntType
+toType (Atom "Real") = DeterminedType RealType
+toType (List [Atom "_",Atom "BitVec",Atom bw])
+  = DeterminedType (BitVecType (natInt $ read bw))
+toType (List [Atom "Array",List idx,el])
+  = case (do
+             idx'' <- mapM (\tp -> case tp of
+                             DeterminedType t -> return t
+                             _ -> Nothing
+                           ) idx'
+             el' <- case el' of
+               DeterminedType t -> return t
+               _ -> Nothing
+             return (ArrayType idx'' el')) of
+    Just rtp -> DeterminedType rtp
+    Nothing -> QueryType [| ArrayRepr $(toIdx idx')
+                            $(case el' of
+                               DeterminedType t -> liftTypeRepr t
+                               QueryType q -> q) |]
   where
-    end' = read end
-    start' = read start
-funName (List [Atom "_",Atom "divisible",Atom n])
-  = Just $ FunCon 'Divisible [FunInt (read n)]
-funName _ = Nothing
+    idx' = fmap toType idx
+    el' = toType el
+    toIdx [] = [| NoArg |]
+    toIdx (i:is) = [| Arg $(case i of
+                             DeterminedType tp -> liftTypeRepr tp
+                             QueryType q -> q)
+                      $(toIdx is) |]
+toType (Atom name) = QueryType [| DataRepr (getDatatype
+                                            (Proxy::Proxy $(TH.conT $ TH.mkName name))) |]
 
-toFun :: BasicExpr -> TH.ExpQ
-toFun expr = case funName expr of
-  Just name -> funNameToExpr name
-  Nothing -> case expr of
-    Atom name -> TH.varE (TH.mkName name)
-    _ -> error $ "Unknown function: "++show expr
+thElementType :: THType -> THType
+thElementType (DeterminedType (ArrayType _ el)) = DeterminedType el
+thElementType (QueryType q) = QueryType [| case $(q) of
+                                          ArrayRepr _ el -> el |]
 
-toFunPat :: BasicExpr -> TH.PatQ
-toFunPat expr = case funName expr of
-  Just name -> funNameToPattern name
+thIndexType :: THType -> Either [Type] TH.ExpQ
+thIndexType (DeterminedType (ArrayType idx _)) = Left idx
+thIndexType (QueryType q) = Right [| case $(q) of
+                                    ArrayRepr idx _ -> idx |]
 
-toType :: BasicExpr -> TH.TypeQ
-toType (Atom "Bool") = [t| BoolType |]
-toType (Atom "Int") = [t| IntType |]
-toType (Atom "Real") = [t| RealType |]
-toType (List [Atom "_",Atom "BitVec",Atom bw]) = [t| BitVecType $(mkNum $ read bw) |]
-toType (List [Atom "Array",List idx,el]) = [t| ArrayType $(toTypes idx) $(toType el) |]
-toType (Atom name) = [t| DataType $(TH.conT $ TH.mkName name) |]
-
-toTypes :: [BasicExpr] -> TH.TypeQ
-toTypes [] = [t| '[] |]
-toTypes (x:xs) = [t| $(toType x) ': $(toTypes xs) |]
-
-mkArgs :: Map String TH.Exp -> [BasicExpr] -> TH.ExpQ
-mkArgs _ [] = [| return NoArg |]
-mkArgs bind (x:xs) = [| liftM2 Arg $(toExpr bind x) $(mkArgs bind xs) |]
+thMakeArray :: Either [Type] TH.ExpQ -> THType -> THType
+thMakeArray (Left idx) (DeterminedType el) = DeterminedType (ArrayType idx el)
+thMakeArray idx el
+  = QueryType [| ArrayRepr $(case idx of
+                              Left idx' -> liftTHTypes (fmap DeterminedType idx')
+                              Right q -> q)
+                 $(liftTHType el) |]
 
 mkArgsPat :: [BasicExpr] -> TH.PatQ
 mkArgsPat [] = [p| NoArg |]

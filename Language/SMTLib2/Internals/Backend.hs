@@ -12,6 +12,12 @@ import Data.Functor.Identity
 type SMTAction b r = b -> SMTMonad b (r,b)
 
 class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
+       GetType (Expr b),GetType (Var b),GetType (QVar b),
+       GetFunType (Fun b),
+       GetConType (Constr b),
+       GetFieldType (Field b),
+       GetType (FunArg b),
+       GetType (LVar b),
        Typeable (Expr b),
        Typeable (Var b),
        Typeable (QVar b),
@@ -46,25 +52,24 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
   comment :: String -> SMTAction b ()
   push :: SMTAction b ()
   pop :: SMTAction b ()
-  declareVar :: GetType t => Maybe String -> SMTAction b (Var b t)
-  createQVar :: GetType t => Maybe String -> SMTAction b (QVar b t)
-  createFunArg :: GetType t => Maybe String -> SMTAction b (FunArg b t)
-  defineVar :: GetType t => Maybe String -> Expr b t -> SMTAction b (Var b t)
-  declareFun :: (GetTypes arg,GetType t) => Maybe String -> SMTAction b (Fun b '(arg,t))
-  defineFun :: (GetTypes arg,GetType r) => Maybe String
-            -> Args (FunArg b) arg -> Expr b r -> SMTAction b (Fun b '(arg,r))
+  declareVar :: Repr t -> Maybe String -> SMTAction b (Var b t)
+  createQVar :: Repr t -> Maybe String -> SMTAction b (QVar b t)
+  createFunArg :: Repr t -> Maybe String -> SMTAction b (FunArg b t)
+  defineVar :: Maybe String -> Expr b t -> SMTAction b (Var b t)
+  declareFun :: Args Repr arg -> Repr t -> Maybe String -> SMTAction b (Fun b '(arg,t))
+  defineFun :: Maybe String -> Args (FunArg b) arg -> Expr b r -> SMTAction b (Fun b '(arg,r))
   assert :: Expr b BoolType -> SMTAction b ()
   assertId :: Expr b BoolType -> SMTAction b (ClauseId b)
   assertPartition :: Expr b BoolType -> Partition -> SMTAction b ()
   checkSat :: Maybe Tactic -> CheckSatLimits -> SMTAction b CheckSatResult
   getUnsatCore :: SMTAction b [ClauseId b]
-  getValue :: GetType t => Expr b t -> SMTAction b (Value (Constr b) t)
+  getValue :: Expr b t -> SMTAction b (Value (Constr b) t)
   getModel :: SMTAction b (Model b)
-  modelEvaluate :: GetType t => Model b -> Expr b t -> SMTAction b (Value (Constr b) t)
+  modelEvaluate :: Model b -> Expr b t -> SMTAction b (Value (Constr b) t)
   getProof :: SMTAction b (Expr b BoolType)
-  simplify :: GetType t => Expr b t -> SMTAction b (Expr b t)
-  toBackend :: GetType t => Expression (Var b) (QVar b) (Fun b) (Constr b) (Field b) (FunArg b) (LVar b) (Expr b) t -> SMTAction b (Expr b t)
-  fromBackend :: GetType t => b -> Expr b t
+  simplify :: Expr b t -> SMTAction b (Expr b t)
+  toBackend :: Expression (Var b) (QVar b) (Fun b) (Constr b) (Field b) (FunArg b) (LVar b) (Expr b) t -> SMTAction b (Expr b t)
+  fromBackend :: b -> Expr b t
               -> Expression (Var b) (QVar b) (Fun b) (Constr b) (Field b) (FunArg b) (LVar b) (Expr b) t
   declareDatatypes :: TypeCollection sigs
                    -> SMTAction b (BackendTypeCollection (Constr b) (Field b) sigs)
@@ -74,7 +79,7 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
 type BackendTypeCollection con field sigs
   = Datatypes (BackendDatatype con field) sigs
 
-newtype BackendDatatype con field (sig :: ([[Type]],*)) --(sigs::[[Type]]) dt
+newtype BackendDatatype con field (sig :: ([[Type]],*))
   = BackendDatatype { bconstructors :: Constrs (BackendConstr con field) (Fst sig) (Snd sig) }
 
 data BackendConstr con field (sig :: ([Type],*))
@@ -88,6 +93,7 @@ data BackendConstr con field (sig :: ([Type],*))
 data BackendField (field :: (*,Type) -> *) dt (t :: Type)
   = BackendField { bfieldName :: String
                  , bfieldRepr :: field '(dt,t)
+                 , bfieldType :: Repr t
                  , bfieldGet :: dt -> ConcreteValue t }
 
 -- | The interpolation partition
@@ -111,8 +117,8 @@ newtype AssignmentModel b
   = AssignmentModel { assignments :: [Assignment b] }
 
 data Assignment b
-  = forall (t :: Type). GetType t => VarAssignment (Var b t) (Expr b t)
-  | forall (arg :: [Type]) (t :: Type). (GetTypes arg,GetType t) => FunAssignment (Fun b '(arg,t)) (Args (FunArg b) arg) (Expr b t)
+  = forall (t :: Type). VarAssignment (Var b t) (Expr b t)
+  | forall (arg :: [Type]) (t :: Type). FunAssignment (Fun b '(arg,t)) (Args (FunArg b) arg) (Expr b t)
 
 -- | Options controling the behaviour of the SMT solver
 data SMTOption
@@ -129,23 +135,23 @@ data SMTInfo i where
   SMTSolverVersion :: SMTInfo String
 
 data UntypedVar v (t :: Type) where
-  UntypedVar :: GetType t => v -> UntypedVar v t
+  UntypedVar :: v -> Repr t -> UntypedVar v t
  
 data UntypedFun v (sig::([Type],Type)) where
-  UntypedFun :: (GetTypes arg,GetType ret) => v -> UntypedFun v '(arg,ret)
+  UntypedFun :: v -> Args Repr arg -> Repr ret -> UntypedFun v '(arg,ret)
 
 data UntypedCon v (sig::([Type],*)) where
-  UntypedCon :: (GetTypes arg,IsDatatype dt) => v -> UntypedCon v '(arg,dt)
+  UntypedCon :: IsDatatype dt => v -> Args Repr arg -> Proxy dt -> UntypedCon v '(arg,dt)
 
 data UntypedField v (sig::(*,Type)) where
-  UntypedField :: (IsDatatype dt,GetType t) => v -> UntypedField v '(dt,t)
+  UntypedField :: (IsDatatype dt) => v -> Proxy dt -> Repr t -> UntypedField v '(dt,t)
 
 data RenderedSubExpr t = RenderedSubExpr (Int -> ShowS)
 
 instance GShow RenderedSubExpr where
   gshowsPrec p (RenderedSubExpr f) = f p
 
-showsBackendExpr :: (Backend b,GetType t) => b -> Int -> Expr b t -> ShowS
+showsBackendExpr :: (Backend b) => b -> Int -> Expr b t -> ShowS
 showsBackendExpr b p expr = showsPrec p recE
   where
     recE = runIdentity $ mapExpr return return return return return return return
@@ -153,78 +159,63 @@ showsBackendExpr b p expr = showsPrec p recE
     load = fromBackend b expr
 
 instance Eq v => Eq (UntypedVar v t) where
-  (==) (UntypedVar x) (UntypedVar y) = x==y
+  (==) (UntypedVar x _) (UntypedVar y _) = x==y
 
 instance Eq v => Eq (UntypedFun v sig) where
-  (==) (UntypedFun x) (UntypedFun y) = x==y
+  (==) (UntypedFun x _ _) (UntypedFun y _ _) = x==y
 
 instance Eq v => Eq (UntypedCon v sig) where
-  (==) (UntypedCon x) (UntypedCon y) = x==y
+  (==) (UntypedCon x _ _) (UntypedCon y _ _) = x==y
 
 instance Eq v => Eq (UntypedField v sig) where
-  (==) (UntypedField x) (UntypedField y) = x==y
+  (==) (UntypedField x _ _) (UntypedField y _ _) = x==y
 
 instance Ord v => Ord (UntypedVar v t) where
-  compare (UntypedVar x) (UntypedVar y) = compare x y
+  compare (UntypedVar x _) (UntypedVar y _) = compare x y
 
 instance Ord v => Ord (UntypedFun v sig) where
-  compare (UntypedFun x) (UntypedFun y) = compare x y
+  compare (UntypedFun x _ _) (UntypedFun y _ _) = compare x y
 
 instance Ord v => Ord (UntypedCon v sig) where
-  compare (UntypedCon x) (UntypedCon y) = compare x y
+  compare (UntypedCon x _ _) (UntypedCon y _ _) = compare x y
 
 instance Ord v => Ord (UntypedField v sig) where
-  compare (UntypedField x) (UntypedField y) = compare x y
+  compare (UntypedField x _ _) (UntypedField y _ _) = compare x y
 
 instance Eq v => GEq (UntypedVar v) where
-  geq x1@(UntypedVar v1) x2@(UntypedVar v2) = case x1 of
-    (_::UntypedVar v p) -> case x2 of
-      (_::UntypedVar v q) -> do
-        Refl <- geq (getType::Repr p)
-                    (getType::Repr q)
-        if v1==v2
-          then return Refl
-          else Nothing
+  geq (UntypedVar v1 tp1) (UntypedVar v2 tp2) = do
+    Refl <- geq tp1 tp2
+    if v1==v2
+      then return Refl
+      else Nothing
 
 instance Eq v => GEq (UntypedFun v) where
-  geq x1@(UntypedFun v1) x2@(UntypedFun v2) = case x1 of
-    (_::UntypedFun v '(arg1,t1)) -> case x2 of
-      (_::UntypedFun v '(arg2,t2)) -> do
-        Refl <- geq (getTypes::Args Repr arg1)
-                    (getTypes::Args Repr arg2)
-        Refl <- geq (getType::Repr t1)
-                    (getType::Repr t2)
-        if v1==v2
-          then return Refl
-          else Nothing
+  geq (UntypedFun v1 a1 r1) (UntypedFun v2 a2 r2) = do
+    Refl <- geq a1 a2
+    Refl <- geq r1 r2
+    if v1==v2
+      then return Refl
+      else Nothing
 
 instance Eq v => GEq (UntypedCon v) where
-  geq x1@(UntypedCon v1) x2@(UntypedCon v2) = case x1 of
-    (_::UntypedCon v '(arg1,dt1)) -> case x2 of
-      (_::UntypedCon v '(arg2,dt2)) -> do
-        Refl <- geq (getTypes::Args Repr arg1)
-                    (getTypes::Args Repr arg2)
-        Refl <- eqT :: Maybe (dt1 :~: dt2)
-        if v1==v2
-          then return Refl
-          else Nothing
+  geq (UntypedCon v1 t1 (_::Proxy dt1)) (UntypedCon v2 t2 (_::Proxy dt2)) = do
+    Refl <- geq t1 t2
+    Refl <- eqT :: Maybe (dt1 :~: dt2)
+    if v1==v2
+      then return Refl
+      else Nothing
 
 instance Eq v => GEq (UntypedField v) where
-  geq x1@(UntypedField v1) x2@(UntypedField v2) = case x1 of
-    (_::UntypedField v '(dt1,t1)) -> case x2 of
-      (_::UntypedField v '(dt2,t2)) -> do
-        Refl <- eqT :: Maybe (dt1 :~: dt2)
-        Refl <- geq (getType::Repr t1)
-                    (getType::Repr t2)
-        if v1==v2
-          then return Refl
-          else Nothing
+  geq (UntypedField v1 (_::Proxy dt1) t1) x2@(UntypedField v2 (_::Proxy dt2) t2) = do
+    Refl <- eqT :: Maybe (dt1 :~: dt2)
+    Refl <- geq t1 t2
+    if v1==v2
+      then return Refl
+      else Nothing
 
 instance Ord v => GCompare (UntypedVar v) where
-  gcompare x1@(UntypedVar v1) x2@(UntypedVar v2) = case x1 of
-    (_::UntypedVar v p) -> case x2 of
-      (_::UntypedVar v q) -> case gcompare (getType::Repr p)
-                                           (getType::Repr q) of
+  gcompare (UntypedVar v1 t1) (UntypedVar v2 t2)
+    = case gcompare t1 t2 of
         GEQ -> case compare v1 v2 of
           EQ -> GEQ
           LT -> GLT
@@ -232,12 +223,9 @@ instance Ord v => GCompare (UntypedVar v) where
         r -> r
 
 instance Ord v => GCompare (UntypedFun v) where
-  gcompare x1@(UntypedFun v1) x2@(UntypedFun v2) = case x1 of
-    (_::UntypedFun v '(arg1,t1)) -> case x2 of
-      (_::UntypedFun v '(arg2,t2)) -> case gcompare (getTypes::Args Repr arg1)
-                                                    (getTypes::Args Repr arg2) of
-        GEQ -> case gcompare (getType::Repr t1)
-                             (getType::Repr t2) of
+  gcompare (UntypedFun v1 a1 t1) (UntypedFun v2 a2 t2)
+    = case gcompare a1 a2 of
+        GEQ -> case gcompare t1 t2 of
           GEQ -> case compare v1 v2 of
             EQ -> GEQ
             LT -> GLT
@@ -248,50 +236,46 @@ instance Ord v => GCompare (UntypedFun v) where
         GGT -> GGT
 
 instance Ord v => GCompare (UntypedCon v) where
-  gcompare x1@(UntypedCon v1) x2@(UntypedCon v2) = case x1 of
-    (_::UntypedCon v '(arg1,dt1)) -> case x2 of
-      (_::UntypedCon v '(arg2,dt2)) -> case gcompare (getTypes::Args Repr arg1)
-                                                     (getTypes::Args Repr arg2) of
-        GEQ -> case eqT :: Maybe (dt1 :~: dt2) of
-          Just Refl -> case compare v1 v2 of
-            EQ -> GEQ
-            LT -> GLT
-            GT -> GGT
-          Nothing -> case compare (typeOf (Proxy::Proxy dt1))
-                                  (typeOf (Proxy::Proxy dt2)) of
-            LT -> GLT
-            GT -> GGT
-        GLT -> GLT
-        GGT -> GGT
+  gcompare (UntypedCon v1 a1 (_::Proxy dt1)) x2@(UntypedCon v2 a2 (_::Proxy dt2))
+    = case gcompare a1 a2 of
+    GEQ -> case eqT :: Maybe (dt1 :~: dt2) of
+      Just Refl -> case compare v1 v2 of
+        EQ -> GEQ
+        LT -> GLT
+        GT -> GGT
+      Nothing -> case compare (typeOf (Proxy::Proxy dt1))
+                      (typeOf (Proxy::Proxy dt2)) of
+                 LT -> GLT
+                 GT -> GGT
+    GLT -> GLT
+    GGT -> GGT
 
 instance Ord v => GCompare (UntypedField v) where
-  gcompare x1@(UntypedField v1) x2@(UntypedField v2) = case x1 of
-    (_::UntypedField v '(dt1,t1)) -> case x2 of
-      (_::UntypedField v '(dt2,t2)) -> case gcompare (getType::Repr t1)
-                                                     (getType::Repr t2) of
-        GEQ -> case eqT :: Maybe (dt1 :~: dt2) of
-          Just Refl -> case compare v1 v2 of
-            EQ -> GEQ
-            LT -> GLT
-            GT -> GGT
-          Nothing -> case compare (typeOf (Proxy::Proxy dt1))
-                                  (typeOf (Proxy::Proxy dt2)) of
-            LT -> GLT
-            GT -> GGT
-        GLT -> GLT
-        GGT -> GGT
+  gcompare (UntypedField v1 (_::Proxy dt1) t1) (UntypedField v2 (_::Proxy dt2) t2)
+    = case gcompare t1 t2 of
+    GEQ -> case eqT :: Maybe (dt1 :~: dt2) of
+      Just Refl -> case compare v1 v2 of
+        EQ -> GEQ
+        LT -> GLT
+        GT -> GGT
+      Nothing -> case compare (typeOf (Proxy::Proxy dt1))
+                      (typeOf (Proxy::Proxy dt2)) of
+                 LT -> GLT
+                 GT -> GGT
+    GLT -> GLT
+    GGT -> GGT
 
 instance Show v => Show (UntypedVar v t) where
-  showsPrec p (UntypedVar v) = showsPrec p v
+  showsPrec p (UntypedVar v _) = showsPrec p v
 
 instance Show v => Show (UntypedFun v sig) where
-  showsPrec p (UntypedFun v) = showsPrec p v
+  showsPrec p (UntypedFun v _ _) = showsPrec p v
 
 instance Show v => Show (UntypedCon v sig) where
-  showsPrec p (UntypedCon v) = showsPrec p v
+  showsPrec p (UntypedCon v _ _) = showsPrec p v
 
 instance Show v => Show (UntypedField v sig) where
-  showsPrec p (UntypedField v) = showsPrec p v
+  showsPrec p (UntypedField v _ _) = showsPrec p v
 
 instance Show v => GShow (UntypedVar v) where
   gshowsPrec = showsPrec
@@ -304,3 +288,15 @@ instance Show v => GShow (UntypedCon v) where
 
 instance Show v => GShow (UntypedField v) where
   gshowsPrec = showsPrec
+
+instance GetType (UntypedVar v) where
+  getType (UntypedVar _ tp) = tp
+
+instance GetFunType (UntypedFun v) where
+  getFunType (UntypedFun _ arg tp) = (arg,tp)
+
+instance GetConType (UntypedCon v) where
+  getConType (UntypedCon _ args dt) = (args,getDatatype dt)
+
+instance GetFieldType (UntypedField v) where
+  getFieldType (UntypedField _ dt tp) = (getDatatype dt,tp)
