@@ -3,6 +3,8 @@ module Language.SMTLib2.Internals.TH where
 
 import Language.SMTLib2.Internals.Type
 import Language.SMTLib2.Internals.Type.Nat
+import Language.SMTLib2.Internals.Type.List (List(..))
+import qualified Language.SMTLib2.Internals.Type.List as List
 import Language.SMTLib2.Internals.Expression
 import qualified Language.SMTLib2.Internals.Backend as B
 import Language.SMTLib2.Internals.Monad
@@ -27,8 +29,9 @@ data BasicExpr = Atom String
 
 class SMTType tp where
   getRepr :: Repr tp
+
 class SMTTypes tps where
-  getReprs :: Args Repr tps
+  getReprs :: List Repr tps
 
 instance SMTType BoolType where
   getRepr = BoolRepr
@@ -43,9 +46,9 @@ instance (SMTTypes idx,SMTType el) => SMTType (ArrayType idx el) where
 instance IsDatatype dt => SMTType (DataType dt) where
   getRepr = DataRepr (getDatatype Proxy)
 instance SMTTypes '[] where
-  getReprs = NoArg
+  getReprs = Nil
 instance (SMTType tp,SMTTypes tps) => SMTTypes (tp ': tps) where
-  getReprs = Arg getRepr getReprs
+  getReprs = Cons getRepr getReprs
 
 data THType = DeterminedType Type
             | QueryType TH.ExpQ
@@ -63,16 +66,16 @@ liftTypeRepr (ArrayType idx el)
   = [| ArrayRepr $(toArgs $ fmap liftTypeRepr idx) $(liftTypeRepr el) |]
   where
     toArgs :: [TH.ExpQ] -> TH.ExpQ
-    toArgs [] = [| NoArg |]
-    toArgs (x:xs) = [| Arg $(x) $(toArgs xs) |]
+    toArgs [] = [| Nil |]
+    toArgs (x:xs) = [| Cons $(x) $(toArgs xs) |]
 
 liftTHType :: THType -> TH.ExpQ
 liftTHType (DeterminedType tp) = liftTypeRepr tp
 liftTHType (QueryType q) = q
 
 liftTHTypes :: [THType] -> TH.ExpQ
-liftTHTypes [] = [| NoArg |]
-liftTHTypes (tp:tps) = [| Arg $(liftTHType tp) $(liftTHTypes tps) |]
+liftTHTypes [] = [| Nil |]
+liftTHTypes (tp:tps) = [| Cons $(liftTHType tp) $(liftTHTypes tps) |]
 
 liftNumType :: Type -> TH.ExpQ
 liftNumType IntType = [| NumInt |]
@@ -481,8 +484,8 @@ toExpression bind (List (fun:args))
     rargs = fmap (toExpression bind) args
     funType = deriveFunctionType rfun (Just (fmap (Just . deriveType) rargs),Nothing)
     toArgs :: [THExpression] -> TH.ExpQ
-    toArgs [] = [| return NoArg |]
-    toArgs (e:es) = [| liftM2 Arg $(getExpr' e) $(toArgs es) |]
+    toArgs [] = [| return Nil |]
+    toArgs (e:es) = [| liftM2 Cons $(getExpr' e) $(toArgs es) |]
 toExpression bind (HsExpr expr) = case TH.parseExp expr of
   Left err -> error $ "Failed to parse haskell expression: "++show expr
   Right expr' -> THExpr { deriveType = QueryType [| getType $(return expr') |]
@@ -503,18 +506,18 @@ toQuantifier q bind vars body
                         , TH.lamE [pat] (getExpr' $ toExpression nbind body)
                         ] }
   where
-    mkPat bind [] = return ([p| NoArg |],bind)
+    mkPat bind [] = return ([p| Nil |],bind)
     mkPat bind ((var,tp):vars) = do
       qvar <- TH.newName "q"
       (pat,nbind) <- mkPat bind vars
-      return (TH.conP 'Arg [TH.varP qvar,pat],
+      return (TH.conP 'Cons [TH.varP qvar,pat],
               Map.insert var (THExpr { deriveType = tp
                                      , getExpr' = [| embed (QVar $(TH.varE qvar)) |]
                                      }) nbind)
-    mkTps [] = [| NoArg |]
-    mkTps ((_,tp):tps) = [| Arg $(case tp of
-                                   DeterminedType t -> liftTypeRepr t
-                                   QueryType q -> q)
+    mkTps [] = [| Nil |]
+    mkTps ((_,tp):tps) = [| Cons $(case tp of
+                                    DeterminedType t -> liftTypeRepr t
+                                    QueryType q -> q)
                             $(mkTps tps) |]
 
 parseList :: String -> Maybe ([BasicExpr],String)
@@ -646,7 +649,7 @@ toFunDef ((name,tp):args) body mp vec = do
                   (Map.insert name (THExpr tp (return expr)) mp)
                   (TH.varE fv:vec)))))
 toFunDef [] body mp vec = do
-  let args = foldl (\args e -> [| Arg $(e) $(args) |]) [| NoArg |] vec
+  let args = foldl (\args e -> [| Cons $(e) $(args) |]) [| Nil |] vec
   [| $(toExpr mp body) >>= embedSMT . B.defineFun Nothing $(args) |]
 
 entypeExpr :: Proxy (t::Type) -> e t -> e t
@@ -655,7 +658,7 @@ entypeExpr _ = id
 toExpr :: THBind -> BasicExpr -> TH.ExpQ
 toExpr bind e = getExpr' (toExpression bind e)
 
-enforceTypes :: Proxy tps -> (Args e tps -> a) -> (Args e tps -> a)
+enforceTypes :: Proxy tps -> (List e tps -> a) -> (List e tps -> a)
 enforceTypes _ = id
 
 toVarSig :: [BasicExpr] -> [(String,THType)]
@@ -663,7 +666,7 @@ toVarSig = fmap (\(List [Atom name,tp]) -> (name,toType tp))
 
 toQuant :: [(String,TH.Type)] -> Map String TH.Exp -> TH.Q (TH.Exp,Map String TH.Exp)
 toQuant [] mp = do
-  expr <- [| return NoArg |]
+  expr <- [| return Nil |]
   return (expr,mp)
 toQuant ((name,tp):args) mp = do
   q <- TH.newName "q"
@@ -672,14 +675,14 @@ toQuant ((name,tp):args) mp = do
   exp' <- [| do
                v <- embedSMT $ B.createQVar (Just name)
                vs <- $(return rest)
-               return (Arg (v :: $(return tp)) vs) |]
+               return (Cons (v :: $(return tp)) vs) |]
   return (exp',Map.insert name expr nmp)
 
 quantSig :: [(String,TH.Type)] -> TH.TypeQ
 quantSig [] = TH.promotedNilT
 quantSig ((_,tp):tps) = [t| $(return tp) ': $(quantSig tps) |]
 
-asSig :: Proxy sig -> (Args e sig -> a) -> (Args e sig -> a)
+asSig :: Proxy sig -> (List e sig -> a) -> (List e sig -> a)
 asSig _ = id
 
 -- fieldProxy :: FromSMT repr => (dt -> ValueType repr) -> Proxy repr
@@ -810,10 +813,10 @@ toType (List [Atom "Array",List idx,el])
   where
     idx' = fmap toType idx
     el' = toType el
-    toIdx [] = [| NoArg |]
-    toIdx (i:is) = [| Arg $(case i of
-                             DeterminedType tp -> liftTypeRepr tp
-                             QueryType q -> q)
+    toIdx [] = [| Nil |]
+    toIdx (i:is) = [| Cons $(case i of
+                              DeterminedType tp -> liftTypeRepr tp
+                              QueryType q -> q)
                       $(toIdx is) |]
 toType (Atom name) = QueryType [| DataRepr (getDatatype
                                             (Proxy::Proxy $(TH.conT $ TH.mkName name))) |]
@@ -837,8 +840,8 @@ thMakeArray idx el
                  $(liftTHType el) |]
 
 mkArgsPat :: [BasicExpr] -> TH.PatQ
-mkArgsPat [] = [p| NoArg |]
-mkArgsPat (x:xs) = [p| Arg $(toPat x) $(mkArgsPat xs) |]
+mkArgsPat [] = [p| Nil |]
+mkArgsPat (x:xs) = [p| Cons $(toPat x) $(mkArgsPat xs) |]
 
 mkAllEqPat :: [BasicExpr] -> TH.PatQ
 mkAllEqPat xs = TH.viewP [| allEqToList |]

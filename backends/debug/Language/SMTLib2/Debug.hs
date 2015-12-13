@@ -6,6 +6,8 @@ module Language.SMTLib2.Debug
 
 import Language.SMTLib2.Internals.Backend
 import Language.SMTLib2.Internals.Type hiding (Constr,Field)
+import Language.SMTLib2.Internals.Type.List (List(..))
+import qualified Language.SMTLib2.Internals.Type.List as List
 import Language.SMTLib2.Internals.Expression (Expression(Let),LetBinding(..))
 import Language.SMTLib2.Pipe
 
@@ -230,16 +232,16 @@ instance (Backend b) => Backend (DebugBackend b) where
           getFieldVars (bconFields con) $
           b { debugCons = DMap.insert (bconRepr con)
                                       (UntypedCon (T.pack $ bconName con)
-                                       (runIdentity $ mapArgs (return . bfieldType) (bconFields con))
+                                       (runIdentity $ List.mapM (return . bfieldType) (bconFields con))
                                        Proxy)
                                       (debugCons b) }
 
       getFieldVars :: IsDatatype dt
-                   => Args (BackendField (Field b) dt) sig
+                   => List (BackendField (Field b) dt) sig
                    -> DebugBackend b
                    -> DebugBackend b
-      getFieldVars NoArg b = b
-      getFieldVars (Arg f fs) b
+      getFieldVars Nil b = b
+      getFieldVars (Cons f fs) b
         = getFieldVars fs $
           b { debugFields = DMap.insert (bfieldRepr f)
                                         (UntypedField (T.pack $ bfieldName f)
@@ -310,12 +312,12 @@ renderExpr b expr
   where
     expr' = fromBackend (debugBackend' b) expr
     nb = case expr' of
-      Let args _ -> runIdentity $ foldArgs (\cb var -> do
-                                               let (name,nnames) = genName' (debugNames cb) "var"
-                                               return cb { debugNames = nnames
-                                                         , debugLVars = DMap.insert (letVar var)
-                                                                        (UntypedVar name (getType $ letVar var))
-                                                                        (debugLVars cb)
-                                                         }
-                                           ) b args
+      Let args _ -> runIdentity $ List.foldM (\cb var -> do
+                                                 let (name,nnames) = genName' (debugNames cb) "var"
+                                                 return cb { debugNames = nnames
+                                                           , debugLVars = DMap.insert (letVar var)
+                                                                          (UntypedVar name (getType $ letVar var))
+                                                                          (debugLVars cb)
+                                                           }
+                                             ) b args
       _ -> b

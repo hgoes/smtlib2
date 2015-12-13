@@ -28,6 +28,7 @@ Library
                   Language.SMTLib2.Internals.Monad
                   Language.SMTLib2.Internals.Type
                   Language.SMTLib2.Internals.Type.Nat
+                  Language.SMTLib2.Internals.Type.List
                   Language.SMTLib2.Internals.TH
                   Language.SMTLib2.Strategy
                   Language.SMTLib2

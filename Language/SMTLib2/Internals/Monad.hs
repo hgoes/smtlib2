@@ -2,6 +2,8 @@ module Language.SMTLib2.Internals.Monad where
 
 import Language.SMTLib2.Internals.Backend as B
 import Language.SMTLib2.Internals.Type
+import Language.SMTLib2.Internals.Type.List (List(..))
+import qualified Language.SMTLib2.Internals.Type.List as List
 
 import Control.Monad.State.Strict
 import Data.Typeable
@@ -135,12 +137,12 @@ lookupConstructor name dt f = lookup (bconstructors dt) f
                                   else lookup cons f
 
 constructDatatype :: GEq con => con '(arg,ret)
-                  -> Args ConcreteValue arg
+                  -> List ConcreteValue arg
                   -> B.BackendDatatype con field '(cons,ret)
                   -> ret
 constructDatatype con args dt = get con args (bconstructors dt)
   where
-    get :: GEq con => con '(arg,ret) -> Args ConcreteValue arg
+    get :: GEq con => con '(arg,ret) -> List ConcreteValue arg
         -> Constrs (BackendConstr con field) sigs ret -> ret
     get con args (ConsCon x xs)
       = case geq con (bconRepr x) of
@@ -152,13 +154,13 @@ lookupField :: String -> B.BackendConstr con field '(arg,dt)
             -> a
 lookupField name con f = lookup (bconFields con) f
   where
-    lookup :: Args (B.BackendField field dt) arg
+    lookup :: List (B.BackendField field dt) arg
            -> (forall tp. B.BackendField field dt tp -> a)
            -> a
-    lookup NoArg _ = error $ "smtlib2: "++name++" is not a field."
-    lookup (Arg x xs) f = if bfieldName x==name
-                          then f x
-                          else lookup xs f
+    lookup Nil _ = error $ "smtlib2: "++name++" is not a field."
+    lookup (Cons x xs) f = if bfieldName x==name
+                           then f x
+                           else lookup xs f
 
 lookupDatatypeCon :: (IsDatatype dt,Typeable con,Typeable field)
                   => DTProxy dt -> String -> DatatypeInfo con field
@@ -181,7 +183,7 @@ mkConcr (IntValue v) = return (IntValueC v)
 mkConcr (RealValue v) = return (RealValueC v)
 mkConcr (BitVecValue v bw) = return (BitVecValueC v bw)
 mkConcr (ConstrValue con args) = do
-  args' <- mapArgs mkConcr args
+  args' <- List.mapM mkConcr args
   st <- get
   return $ ConstrValueC $
     constructDatatype con args' $
@@ -196,5 +198,5 @@ mkAbstr (ConstrValueC v) = do
   st <- get
   getConstructor v (bconstructors $ lookupDatatype DTProxy (datatypes st)) $
     \con args -> do
-      rargs <- mapArgs mkAbstr args
+      rargs <- List.mapM mkAbstr args
       return $ ConstrValue (bconRepr con) rargs

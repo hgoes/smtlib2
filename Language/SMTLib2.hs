@@ -45,6 +45,7 @@ module Language.SMTLib2 (
   ) where
 
 import Language.SMTLib2.Internals.Type
+import qualified Language.SMTLib2.Internals.Type.List as List
 import Language.SMTLib2.Internals.Type.Nat
 import Language.SMTLib2.Internals.Monad
 import Language.SMTLib2.Internals.Expression
@@ -142,7 +143,7 @@ constant v = do
       let bdt = lookupDatatype (DTProxy::DTProxy dt) (datatypes st)
       getConstructor v (B.bconstructors bdt) $
         \con args -> do
-          rargs <- mapArgs mkAbstr args
+          rargs <- List.mapM mkAbstr args
           return $ ConstrValue (B.bconRepr con) rargs
 
 getUnsatCore :: B.Backend b => SMT b [B.ClauseId b]

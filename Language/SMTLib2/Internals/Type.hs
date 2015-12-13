@@ -1,6 +1,8 @@
 module Language.SMTLib2.Internals.Type where
 
 import Language.SMTLib2.Internals.Type.Nat
+import Language.SMTLib2.Internals.Type.List (List(..))
+import qualified Language.SMTLib2.Internals.Type.List as List
 
 import Data.Proxy
 import Data.Typeable
@@ -9,6 +11,7 @@ import Text.Show
 import Data.List (genericLength,genericReplicate)
 import Data.GADT.Compare
 import Data.GADT.Show
+import Control.Monad.Identity
 
 data Type = BoolType
           | IntType
@@ -46,7 +49,7 @@ class (Typeable t,Typeable (DatatypeSig t),Show t,Ord t) => IsDatatype t where
   getDatatype :: e t -> Datatype '(DatatypeSig t,t)
   getTypeCollection :: e t -> TypeCollection (TypeCollectionSig t)
   getConstructor :: t -> Constrs con (DatatypeSig t) t
-                 -> (forall arg. con '(arg,t) -> Args ConcreteValue arg -> a)
+                 -> (forall arg. con '(arg,t) -> List ConcreteValue arg -> a)
                  -> a
 
 type TypeCollection sigs = Datatypes Datatype sigs
@@ -57,8 +60,8 @@ data Datatype (sig :: ([[Type]],*))
 
 data Constr (sig :: ([Type],*))
   = Constr { conName :: String
-           , conFields :: Args (Field (Snd sig)) (Fst sig)
-           , construct :: Args ConcreteValue (Fst sig) -> Snd sig
+           , conFields :: List (Field (Snd sig)) (Fst sig)
+           , construct :: List ConcreteValue (Fst sig) -> Snd sig
            , conTest :: Snd sig -> Bool }
 
 data Field a (t :: Type) = Field { fieldName :: String
@@ -72,7 +75,7 @@ data Value (con :: ([Type],*) -> *) (a :: Type) where
   BitVecValue :: Integer -> Natural n -> Value con (BitVecType n)
   ConstrValue :: (Typeable con,IsDatatype t)
               => con '(arg,t)
-              -> Args (Value con) arg
+              -> List (Value con) arg
               -> Value con (DataType t)
 
 data ConcreteValue (a :: Type) where
@@ -89,17 +92,12 @@ data Repr (t :: Type) where
   IntRepr :: Repr IntType
   RealRepr :: Repr RealType
   BitVecRepr :: Natural n -> Repr (BitVecType n)
-  ArrayRepr :: Args Repr idx -> Repr val -> Repr (ArrayType idx val)
+  ArrayRepr :: List Repr idx -> Repr val -> Repr (ArrayType idx val)
   DataRepr :: IsDatatype dt => Datatype '(DatatypeSig dt,dt) -> Repr (DataType dt)
 
 data NumRepr (t :: Type) where
   NumInt :: NumRepr IntType
   NumReal :: NumRepr RealType
-
-data Args (e :: Type -> *) (a :: [Type]) where
-  NoArg :: Args e '[]
-  Arg :: e t -> Args e ts -> Args e (t ': ts)
-  deriving Typeable
 
 data Constrs (con :: ([Type],*) -> *) (a :: [[Type]]) t where
   NoCon :: Constrs con '[] t
@@ -114,16 +112,16 @@ data Datatypes (dts :: ([[Type]],*) -> *) (sigs :: [([[Type]],*)]) where
           -> Datatypes dts ('(DatatypeSig dt,dt) ': sigs)
 
 data FunRepr (sig :: ([Type],Type)) where
-  FunRepr :: Args Repr arg -> Repr tp -> FunRepr '(arg,tp)
+  FunRepr :: List Repr arg -> Repr tp -> FunRepr '(arg,tp)
 
 class GetType v where
   getType :: v tp -> Repr tp
 
 class GetFunType fun where
-  getFunType :: fun '(arg,res) -> (Args Repr arg,Repr res)
+  getFunType :: fun '(arg,res) -> (List Repr arg,Repr res)
 
 class GetConType con where
-  getConType :: IsDatatype dt => con '(arg,dt) -> (Args Repr arg,Datatype '(DatatypeSig dt,dt))
+  getConType :: IsDatatype dt => con '(arg,dt) -> (List Repr arg,Datatype '(DatatypeSig dt,dt))
 
 class GetFieldType field where
   getFieldType :: IsDatatype dt => field '(dt,tp) -> (Datatype '(DatatypeSig dt,dt),Repr tp)
@@ -242,26 +240,6 @@ instance GCompare ConcreteValue where
       LT -> GLT
       GT -> GGT
 
-instance GEq e => GEq (Args e) where
-  geq NoArg NoArg = Just Refl
-  geq (Arg x xs) (Arg y ys) = do
-    Refl <- geq x y
-    Refl <- geq xs ys
-    return Refl
-  geq _ _ = Nothing
-
-instance GCompare e => GCompare (Args e) where
-  gcompare NoArg NoArg = GEQ
-  gcompare NoArg _ = GLT
-  gcompare _ NoArg = GGT
-  gcompare (Arg x xs) (Arg y ys) = case gcompare x y of
-    GEQ -> case gcompare xs ys of
-      GEQ -> GEQ
-      GLT -> GLT
-      GGT -> GGT
-    GLT -> GLT
-    GGT -> GGT
-
 instance GEq Repr where
   geq BoolRepr BoolRepr = Just Refl
   geq IntRepr IntRepr = Just Refl
@@ -365,7 +343,7 @@ instance GShow con => Show (Value con tp) where
                                        showString "ConstrValue " .
                                        gshowsPrec 11 con.
                                        showChar ' ' .
-                                       showListWith id (argsToList (showsPrec 0) args)
+                                       showsPrec 11 args
 
 instance GShow con => GShow (Value con) where
   gshowsPrec = showsPrec
@@ -396,16 +374,6 @@ instance Show (ConcreteValue t) where
 instance GShow ConcreteValue where
   gshowsPrec = showsPrec
 
-instance GShow e => Show (Args e sig) where
-  showsPrec p NoArg = showString "NoArg"
-  showsPrec p (Arg x xs) = showParen (p>10) $
-                           showString "Arg " .
-                           gshowsPrec 11 x . showChar ' ' .
-                           showsPrec 11 xs
-
-instance GShow e => GShow (Args e) where
-  gshowsPrec = showsPrec
-
 instance Show (Datatype sig) where
   showsPrec p dt = showParen (p>10) $
                    showString "Datatype " .
@@ -424,60 +392,6 @@ deriving instance Show (NumRepr t)
 instance GShow NumRepr where
   gshowsPrec = showsPrec
 
-mapArgs :: Monad m => (forall t. e1 t -> m (e2 t))
-        -> Args e1 arg
-        -> m (Args e2 arg)
-mapArgs f NoArg = return NoArg
-mapArgs f (Arg x xs) = do
-  x' <- f x
-  xs' <- mapArgs f xs
-  return (Arg x' xs')
-
-foldArgs :: Monad m => (forall t. s -> e t -> m s)
-         -> s
-         -> Args e arg
-         -> m s
-foldArgs _ s NoArg = return s
-foldArgs f s (Arg x xs) = do
-  ns <- f s x
-  foldArgs f ns xs
-
-mapAccumArgs :: Monad m => (forall t. a -> e1 t -> m (a,e2 t))
-             -> a
-             -> Args e1 arg
-             -> m (a,Args e2 arg)
-mapAccumArgs f x NoArg = return (x,NoArg)
-mapAccumArgs f x (Arg y ys) = do
-  (nx1,ny) <- f x y
-  (nx2,nys) <- mapAccumArgs f nx1 ys
-  return (nx2,Arg ny nys)
-
---withArgs :: (Monad m) => (forall t. m (e t)) -> m (Args e tps)
---withArgs f = mapArgs (const f) getTypes
-
-argsToList :: (forall (t :: Type). e t -> a) -> Args e arg -> [a]
-argsToList _ NoArg = []
-argsToList f (Arg x xs) = f x:argsToList f xs
-
-argsToListM :: Monad m => (forall (t :: Type). e t -> m a)
-            -> Args e arg -> m [a]
-argsToListM _ NoArg = return []
-argsToListM f (Arg x xs) = do
-  x' <- f x
-  xs' <- argsToListM f xs
-  return (x':xs')
-
-argsEqM :: Monad m => (forall (t :: Type). a t -> b t -> m Bool)
-        -> Args a tps
-        -> Args b tps
-        -> m Bool
-argsEqM _ NoArg NoArg = return True
-argsEqM eq (Arg x xs) (Arg y ys) = do
-  same <- eq x y
-  if same
-    then argsEqM eq xs ys
-    else return False
-
 mapValue :: (Monad m,Typeable con2)
          => (forall arg dt. con1 '(arg,dt) -> m (con2 '(arg,dt)))
          -> Value con1 a
@@ -488,7 +402,7 @@ mapValue _ (RealValue r) = return (RealValue r)
 mapValue _ (BitVecValue b bw) = return (BitVecValue b bw)
 mapValue f (ConstrValue con args) = do
   con' <- f con
-  args' <- mapArgs (mapValue f) args
+  args' <- List.mapM (mapValue f) args
   return (ConstrValue con' args')
 
 findConstrByName :: String -> Datatype '(cons,dt)
@@ -511,7 +425,7 @@ findConstrByName' name dt = findConstrByName name dt
 valueToConcrete :: (Monad m)
                 => (forall arg tp. (IsDatatype tp)
                     => con '(arg,tp)
-                    -> Args ConcreteValue arg
+                    -> List ConcreteValue arg
                     -> m tp)
                 -> Value con t -> m (ConcreteValue t)
 valueToConcrete _ (BoolValue v) = return (BoolValueC v)
@@ -519,7 +433,7 @@ valueToConcrete _ (IntValue v) = return (IntValueC v)
 valueToConcrete _ (RealValue v) = return (RealValueC v)
 valueToConcrete _ (BitVecValue v bw) = return (BitVecValueC v bw)
 valueToConcrete f (ConstrValue con arg) = do
-  arg' <- mapArgs (valueToConcrete f) arg
+  arg' <- List.mapM (valueToConcrete f) arg
   res <- f con arg'
   return (ConstrValueC res)
 
@@ -528,7 +442,7 @@ valueFromConcrete :: (Monad m,Typeable con)
                       => tp
                       -> (forall arg.
                           con '(arg,tp)
-                          -> Args ConcreteValue arg
+                          -> List ConcreteValue arg
                           -> m a)
                       -> m a)
                   -> ConcreteValue t
@@ -539,7 +453,7 @@ valueFromConcrete _ (RealValueC v) = return (RealValue v)
 valueFromConcrete _ (BitVecValueC v bw) = return (BitVecValue v bw)
 valueFromConcrete f (ConstrValueC v)
   = f v (\con arg -> do
-            arg' <- mapArgs (valueFromConcrete f) arg
+            arg' <- List.mapM (valueFromConcrete f) arg
             return (ConstrValue con arg'))
                                   
 valueType :: Value con tp -> Repr tp
@@ -556,9 +470,9 @@ valueTypeC (RealValueC _) = RealRepr
 valueTypeC (BitVecValueC _ bw) = BitVecRepr bw
 valueTypeC (ConstrValueC _) = DataRepr (getDatatype Proxy)
 
-liftType :: Args Repr tps -> Args Repr idx -> Args Repr (Lifted tps idx)
-liftType NoArg _ = NoArg
-liftType (Arg tp tps) idx = Arg (ArrayRepr idx tp) (liftType tps idx)
+liftType :: List Repr tps -> List Repr idx -> List Repr (Lifted tps idx)
+liftType List.Nil idx = List.Nil
+liftType (List.Cons x xs) idx = List.Cons (ArrayRepr idx x) (liftType xs idx)
 
 numRepr :: NumRepr tp -> Repr tp
 numRepr NumInt = IntRepr

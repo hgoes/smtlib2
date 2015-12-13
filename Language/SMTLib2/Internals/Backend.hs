@@ -1,6 +1,7 @@
 module Language.SMTLib2.Internals.Backend where
 
 import Language.SMTLib2.Internals.Type hiding (Constr,Field)
+import Language.SMTLib2.Internals.Type.List (List(..))
 import Language.SMTLib2.Internals.Expression
 import Language.SMTLib2.Strategy
 
@@ -56,8 +57,8 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
   createQVar :: Repr t -> Maybe String -> SMTAction b (QVar b t)
   createFunArg :: Repr t -> Maybe String -> SMTAction b (FunArg b t)
   defineVar :: Maybe String -> Expr b t -> SMTAction b (Var b t)
-  declareFun :: Args Repr arg -> Repr t -> Maybe String -> SMTAction b (Fun b '(arg,t))
-  defineFun :: Maybe String -> Args (FunArg b) arg -> Expr b r -> SMTAction b (Fun b '(arg,r))
+  declareFun :: List Repr arg -> Repr t -> Maybe String -> SMTAction b (Fun b '(arg,t))
+  defineFun :: Maybe String -> List (FunArg b) arg -> Expr b r -> SMTAction b (Fun b '(arg,r))
   assert :: Expr b BoolType -> SMTAction b ()
   assertId :: Expr b BoolType -> SMTAction b (ClauseId b)
   assertPartition :: Expr b BoolType -> Partition -> SMTAction b ()
@@ -85,8 +86,8 @@ newtype BackendDatatype con field (sig :: ([[Type]],*))
 data BackendConstr con field (sig :: ([Type],*))
   = BackendConstr { bconName :: String
                   , bconRepr :: con sig
-                  , bconFields :: Args (BackendField field (Snd sig)) (Fst sig)
-                  , bconstruct :: Args ConcreteValue (Fst sig) -> (Snd sig)
+                  , bconFields :: List (BackendField field (Snd sig)) (Fst sig)
+                  , bconstruct :: List ConcreteValue (Fst sig) -> (Snd sig)
                   , bconTest :: Snd sig -> Bool
                   }
 
@@ -118,7 +119,7 @@ newtype AssignmentModel b
 
 data Assignment b
   = forall (t :: Type). VarAssignment (Var b t) (Expr b t)
-  | forall (arg :: [Type]) (t :: Type). FunAssignment (Fun b '(arg,t)) (Args (FunArg b) arg) (Expr b t)
+  | forall (arg :: [Type]) (t :: Type). FunAssignment (Fun b '(arg,t)) (List (FunArg b) arg) (Expr b t)
 
 -- | Options controling the behaviour of the SMT solver
 data SMTOption
@@ -138,10 +139,10 @@ data UntypedVar v (t :: Type) where
   UntypedVar :: v -> Repr t -> UntypedVar v t
  
 data UntypedFun v (sig::([Type],Type)) where
-  UntypedFun :: v -> Args Repr arg -> Repr ret -> UntypedFun v '(arg,ret)
+  UntypedFun :: v -> List Repr arg -> Repr ret -> UntypedFun v '(arg,ret)
 
 data UntypedCon v (sig::([Type],*)) where
-  UntypedCon :: IsDatatype dt => v -> Args Repr arg -> Proxy dt -> UntypedCon v '(arg,dt)
+  UntypedCon :: IsDatatype dt => v -> List Repr arg -> Proxy dt -> UntypedCon v '(arg,dt)
 
 data UntypedField v (sig::(*,Type)) where
   UntypedField :: (IsDatatype dt) => v -> Proxy dt -> Repr t -> UntypedField v '(dt,t)

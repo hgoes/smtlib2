@@ -2,6 +2,8 @@ module Language.SMTLib2.Internals.Embed where
 
 import Language.SMTLib2.Internals.Expression
 import Language.SMTLib2.Internals.Type hiding (Constr,Field)
+import Language.SMTLib2.Internals.Type.List (List(..))
+import qualified Language.SMTLib2.Internals.Type.List as List
 import Language.SMTLib2.Internals.Monad
 import Language.SMTLib2.Internals.Backend
 
@@ -32,8 +34,8 @@ class (Monad m,
   embed :: Expression (EmVar m e) (EmQVar m e) (EmFun m e) (EmConstr m e) (EmField m e) (EmFunArg m e) (EmLVar m e) e tp
         -> m (e tp)
   embedQuantifier :: Quantifier
-                  -> Args Repr arg
-                  -> (forall m e. Embed m e => Args (EmQVar m e) arg -> m (e BoolType))
+                  -> List Repr arg
+                  -> (forall m e. Embed m e => List (EmQVar m e) arg -> m (e BoolType))
                   -> m (e BoolType)
   embedConstrTest :: IsDatatype dt => String -> Proxy dt -> e (DataType dt)
                   -> m (e BoolType)
@@ -72,19 +74,19 @@ instance (Backend b,e ~ Expr b) => Embed (SMT b) e where
   type EmLVar (SMT b) e = LVar b
   embed = embedSMT . toBackend
   embedQuantifier quant tps f = do
-    args <- mapArgs (\tp -> embedSMT (createQVar tp Nothing)) tps
+    args <- List.mapM (\tp -> embedSMT (createQVar tp Nothing)) tps
     body <- f args
     embedSMT $ toBackend (Quantification quant args body)
   embedConstrTest name (_::Proxy dt) e = do
     st <- get
     let bdt = lookupDatatype (DTProxy::DTProxy dt) (datatypes st)
     lookupConstructor name bdt $
-      \bcon -> embedSMT $ toBackend (App (Test (bconRepr bcon)) (Arg e NoArg))
+      \bcon -> embedSMT $ toBackend (App (Test (bconRepr bcon)) (Cons e Nil))
   embedGetField name fname (_::Proxy dt) tp e = do
     st <- get
     lookupDatatypeField (DTProxy::DTProxy dt) fname name (datatypes st) $
       \field -> case geq tp (bfieldType field) of
-      Just Refl -> embedSMT $ toBackend (App (Field (bfieldRepr field)) (Arg e NoArg))
+      Just Refl -> embedSMT $ toBackend (App (Field (bfieldRepr field)) (Cons e Nil))
   embedConst v = do
     rv <- mkAbstr v
     embedSMT $ toBackend (Const rv)
@@ -107,8 +109,8 @@ data SMTExpr var qvar fun con field farg lvar tp where
              (SMTExpr var qvar fun con field farg lvar)
              tp -> SMTExpr var qvar fun con field farg lvar tp
   SMTQuant :: Quantifier
-           -> Args Repr args
-           -> (Args qvar args
+           -> List Repr args
+           -> (List qvar args
                -> SMTExpr var qvar fun con field farg lvar BoolType)
            -> SMTExpr var qvar fun con field farg lvar BoolType
   SMTTestCon :: IsDatatype dt => String -> Proxy dt
@@ -178,7 +180,7 @@ encodeExpr (SMTExpr e) = do
         encodeExpr e
   embedSMT $ toBackend e'
 encodeExpr (SMTQuant q tps f) = do
-  args <- mapArgs (\tp -> embedSMT (createQVar tp Nothing)) tps
+  args <- List.mapM (\tp -> embedSMT (createQVar tp Nothing)) tps
   body <- encodeExpr (f args)
   embedSMT $ toBackend (Quantification q args body)
 encodeExpr (SMTTestCon name (_::Proxy dt) e) = do
@@ -186,13 +188,13 @@ encodeExpr (SMTTestCon name (_::Proxy dt) e) = do
   st <- get
   let bdt = lookupDatatype (DTProxy::DTProxy dt) (datatypes st)
   lookupConstructor name bdt $
-    \bcon -> embedSMT $ toBackend (App (Test (bconRepr bcon)) (Arg e' NoArg))
+    \bcon -> embedSMT $ toBackend (App (Test (bconRepr bcon)) (Cons e' Nil))
 encodeExpr (SMTGetField name fname (_::Proxy dt) tp e) = do
   e' <- encodeExpr e
   st <- get
   lookupDatatypeField (DTProxy::DTProxy dt) fname name (datatypes st) $
     \field -> case geq tp (bfieldType field) of
-    Just Refl -> embedSMT $ toBackend (App (Field $ bfieldRepr field) (Arg e' NoArg))
+    Just Refl -> embedSMT $ toBackend (App (Field $ bfieldRepr field) (Cons e' Nil))
 encodeExpr (SMTConst c) = do
   rc <- mkAbstr c
   embedSMT $ toBackend (Const rc)

@@ -2,12 +2,15 @@ module Language.SMTLib2.Internals.Expression where
 
 import Language.SMTLib2.Internals.Type hiding (Field)
 import Language.SMTLib2.Internals.Type.Nat
+import Language.SMTLib2.Internals.Type.List (List(..))
+import qualified Language.SMTLib2.Internals.Type.List as List
 
 import Data.Proxy
 import Data.Typeable
 import Text.Show
 import Data.GADT.Compare
 import Data.GADT.Show
+import Data.Functor.Identity
 
 type family AllEq (tp :: Type) (n :: Nat) :: [Type] where
   AllEq tp Z = '[]
@@ -17,33 +20,33 @@ type family Length (tps :: [Type]) :: Nat where
   Length '[] = Z
   Length (x ': xs) = S (Length xs)
 
-allEqToList :: Natural n -> Args a (AllEq tp n) -> [a tp]
-allEqToList Zero NoArg = []
-allEqToList (Succ n) (Arg x xs) = x:allEqToList n xs
+allEqToList :: Natural n -> List a (AllEq tp n) -> [a tp]
+allEqToList Zero Nil = []
+allEqToList (Succ n) (Cons x xs) = x:allEqToList n xs
 
-allEqFromList :: [a tp] -> (forall n. Natural n -> Args a (AllEq tp n) -> r) -> r
-allEqFromList [] f = f Zero NoArg
-allEqFromList (x:xs) f = allEqFromList xs (\n arg -> f (Succ n) (Arg x arg))
+allEqFromList :: [a tp] -> (forall n. Natural n -> List a (AllEq tp n) -> r) -> r
+allEqFromList [] f = f Zero Nil
+allEqFromList (x:xs) f = allEqFromList xs (\n arg -> f (Succ n) (Cons x arg))
 
-allEqOf :: Repr tp -> Natural n -> Args Repr (AllEq tp n)
-allEqOf tp Zero = NoArg
-allEqOf tp (Succ n) = Arg tp (allEqOf tp n)
+allEqOf :: Repr tp -> Natural n -> List Repr (AllEq tp n)
+allEqOf tp Zero = Nil
+allEqOf tp (Succ n) = Cons tp (allEqOf tp n)
 
 mapAllEq :: Monad m => (e1 tp -> m (e2 tp))
          -> Natural n
-         -> Args e1 (AllEq tp n)
-         -> m (Args e2 (AllEq tp n))
-mapAllEq f Zero NoArg = return NoArg
-mapAllEq f (Succ n) (Arg x xs) = do
+         -> List e1 (AllEq tp n)
+         -> m (List e2 (AllEq tp n))
+mapAllEq f Zero Nil = return Nil
+mapAllEq f (Succ n) (Cons x xs) = do
   x' <- f x
   xs' <- mapAllEq f n xs
-  return (Arg x' xs')
+  return (Cons x' xs')
 
 data Function (fun :: ([Type],Type) -> *) (con :: ([Type],*) -> *) (field :: (*,Type) -> *) (sig :: ([Type],Type)) where
   Fun :: fun '(arg,res) -> Function fun con field '(arg,res)
   Eq :: Repr tp -> Natural n -> Function fun con field '(AllEq tp n,BoolType)
   Distinct :: Repr tp -> Natural n -> Function fun con field '(AllEq tp n,BoolType)
-  Map :: Args Repr idx -> Function fun con field '(arg,res)
+  Map :: List Repr idx -> Function fun con field '(arg,res)
       -> Function fun con field '(Lifted arg idx,ArrayType idx res)
   Ord :: NumRepr tp -> OrdOp -> Function fun con field '([tp,tp],BoolType)
   Arith :: NumRepr tp -> ArithOp -> Natural n
@@ -59,9 +62,9 @@ data Function (fun :: ([Type],Type) -> *) (con :: ([Type],*) -> *) (field :: (*,
   BVComp :: BVCompOp -> Natural a -> Function fun con field '([BitVecType a,BitVecType a],BoolType)
   BVBin :: BVBinOp -> Natural a -> Function fun con field '([BitVecType a,BitVecType a],BitVecType a)
   BVUn :: BVUnOp -> Natural a -> Function fun con field '( '[BitVecType a],BitVecType a)
-  Select :: Args Repr idx -> Repr val -> Function fun con field '(ArrayType idx val ': idx,val)
-  Store :: Args Repr idx -> Repr val -> Function fun con field '(ArrayType idx val ': val ': idx,ArrayType idx val)
-  ConstArray :: Args Repr idx -> Repr val -> Function fun con field '( '[val],ArrayType idx val)
+  Select :: List Repr idx -> Repr val -> Function fun con field '(ArrayType idx val ': idx,val)
+  Store :: List Repr idx -> Repr val -> Function fun con field '(ArrayType idx val ': val ': idx,ArrayType idx val)
+  ConstArray :: List Repr idx -> Repr val -> Function fun con field '( '[val],ArrayType idx val)
   Concat :: Natural n1 -> Natural n2 -> Function fun con field '([BitVecType n1,BitVecType n2],BitVecType (n1 + n2))
   Extract :: (((start + len) <= bw) ~ True)
           => Natural bw -> Natural start -> Natural len -> Function fun con field '( '[BitVecType bw],BitVecType len)
@@ -121,14 +124,14 @@ data Expression (v :: Type -> *) (qv :: Type -> *) (fun :: ([Type],Type) -> *) (
   FVar :: fv res -> Expression v qv fun con field fv lv e res
   LVar :: lv res -> Expression v qv fun con field fv lv e res
   App :: Function fun con field '(arg,res)
-      -> Args e arg
+      -> List e arg
       -> Expression v qv fun con field fv lv e res
   Const :: Value con a -> Expression v qv fun con field fv lv e a
   AsArray :: Function fun con field '(arg,res)
           -> Expression v qv fun con field fv lv e (ArrayType arg res)
-  Quantification :: Quantifier -> Args qv arg -> e BoolType
+  Quantification :: Quantifier -> List qv arg -> e BoolType
                  -> Expression v qv fun con field fv lv e BoolType
-  Let :: Args (LetBinding lv e) arg
+  Let :: List (LetBinding lv e) arg
       -> e res
       -> Expression v qv fun con field fv lv e res
 
@@ -180,38 +183,38 @@ instance SMTArith RealType where
 
 functionType :: (GetFunType fun,GetConType con,GetFieldType field)
              => Function fun con field '(arg,res)
-             -> (Args Repr arg,Repr res)
+             -> (List Repr arg,Repr res)
 functionType (Fun fun) = getFunType fun
 functionType (Eq tp n) = (allEqOf tp n,BoolRepr)
 functionType (Distinct tp n) = (allEqOf tp n,BoolRepr)
 functionType (Map idx f) = let (arg,res) = functionType f
                            in (liftType arg idx,ArrayRepr idx res)
-functionType (Ord tp _) = (Arg (numRepr tp) (Arg (numRepr tp) NoArg),BoolRepr)
+functionType (Ord tp _) = (Cons (numRepr tp) (Cons (numRepr tp) Nil),BoolRepr)
 functionType (Arith tp _ n) = (allEqOf (numRepr tp) n,numRepr tp)
-functionType (ArithIntBin _) = (Arg IntRepr (Arg IntRepr NoArg),IntRepr)
-functionType Divide = (Arg RealRepr (Arg RealRepr NoArg),RealRepr)
-functionType (Abs tp) = (Arg (numRepr tp) NoArg,numRepr tp)
-functionType Not = (Arg BoolRepr NoArg,BoolRepr)
+functionType (ArithIntBin _) = (Cons IntRepr (Cons IntRepr Nil),IntRepr)
+functionType Divide = (Cons RealRepr (Cons RealRepr Nil),RealRepr)
+functionType (Abs tp) = (Cons (numRepr tp) Nil,numRepr tp)
+functionType Not = (Cons BoolRepr Nil,BoolRepr)
 functionType (Logic op n) = (allEqOf BoolRepr n,BoolRepr)
-functionType ToReal = (Arg IntRepr NoArg,RealRepr)
-functionType ToInt = (Arg RealRepr NoArg,IntRepr)
-functionType (ITE tp) = (Arg BoolRepr (Arg tp (Arg tp NoArg)),tp)
-functionType (BVComp _ n) = (Arg (BitVecRepr n) (Arg (BitVecRepr n) NoArg),BoolRepr)
-functionType (BVBin _ n) = (Arg (BitVecRepr n) (Arg (BitVecRepr n) NoArg),BitVecRepr n)
-functionType (BVUn _ n) = (Arg (BitVecRepr n) NoArg,BitVecRepr n)
-functionType (Select idx el) = (Arg (ArrayRepr idx el) idx,el)
-functionType (Store idx el) = (Arg (ArrayRepr idx el) (Arg el idx),ArrayRepr idx el)
-functionType (ConstArray idx el) = (Arg el NoArg,ArrayRepr idx el)
-functionType (Concat bw1 bw2) = (Arg (BitVecRepr bw1) (Arg (BitVecRepr bw2) NoArg),
+functionType ToReal = (Cons IntRepr Nil,RealRepr)
+functionType ToInt = (Cons RealRepr Nil,IntRepr)
+functionType (ITE tp) = (Cons BoolRepr (Cons tp (Cons tp Nil)),tp)
+functionType (BVComp _ n) = (Cons (BitVecRepr n) (Cons (BitVecRepr n) Nil),BoolRepr)
+functionType (BVBin _ n) = (Cons (BitVecRepr n) (Cons (BitVecRepr n) Nil),BitVecRepr n)
+functionType (BVUn _ n) = (Cons (BitVecRepr n) Nil,BitVecRepr n)
+functionType (Select idx el) = (Cons (ArrayRepr idx el) idx,el)
+functionType (Store idx el) = (Cons (ArrayRepr idx el) (Cons el idx),ArrayRepr idx el)
+functionType (ConstArray idx el) = (Cons el Nil,ArrayRepr idx el)
+functionType (Concat bw1 bw2) = (Cons (BitVecRepr bw1) (Cons (BitVecRepr bw2) Nil),
                                  BitVecRepr (naturalAdd bw1 bw2))
-functionType (Extract bw start len) = (Arg (BitVecRepr bw) NoArg,BitVecRepr len)
+functionType (Extract bw start len) = (Cons (BitVecRepr bw) Nil,BitVecRepr len)
 functionType (Constructor con) = let (tps,dt) = getConType con
                                  in (tps,DataRepr dt)
 functionType (Test con) = let (_,dt) = getConType con
-                          in (Arg (DataRepr dt) NoArg,BoolRepr)
+                          in (Cons (DataRepr dt) Nil,BoolRepr)
 functionType (Field f) = let (dt,tp) = getFieldType f
-                         in (Arg (DataRepr dt) NoArg,tp)
-functionType (Divisible _) = (Arg IntRepr NoArg,BoolRepr)
+                         in (Cons (DataRepr dt) Nil,tp)
+functionType (Divisible _) = (Cons IntRepr Nil,BoolRepr)
 
 expressionType :: (GetType v,GetType qv,GetFunType fun,GetConType con,
                    GetFieldType field,GetType fv,GetType lv,GetType e)
@@ -245,20 +248,20 @@ mapExpr _ _ _ _ _ f _ _ (FVar v) = fmap FVar (f v)
 mapExpr _ _ _ _ _ _ f _ (LVar v) = fmap LVar (f v)
 mapExpr _ _ f g h _ _ i (App fun args) = do
   fun' <- mapFunction f g h fun
-  args' <- mapArgs i args
+  args' <- List.mapM i args
   return (App fun' args')
 mapExpr _ _ _ f _ _ _ _ (Const val) = fmap Const (mapValue f val)
 mapExpr _ _ f g h _ _ _ (AsArray fun) = fmap AsArray (mapFunction f g h fun)
 mapExpr _ f _ _ _ _ _ g (Quantification q args body) = do
-  args' <- mapArgs f args
+  args' <- List.mapM f args
   body' <- g body
   return (Quantification q args' body')
 mapExpr _ _ _ _ _ _ f g (Let args body) = do
-  args' <- mapArgs (\bind -> do
-                      nv <- f (letVar bind)
-                      nexpr <- g (letExpr bind)
-                      return $ LetBinding nv nexpr
-                   ) args
+  args' <- List.mapM (\bind -> do
+                         nv <- f (letVar bind)
+                         nexpr <- g (letExpr bind)
+                         return $ LetBinding nv nexpr
+                     ) args
   body' <- g body
   return (Let args' body')
 
@@ -316,7 +319,7 @@ instance (GShow v,GShow qv,GShow fun,GShow con,GShow field,GShow fv,GShow lv,GSh
       showString "App " .
       showsPrec 11 fun .
       showChar ' ' .
-      showListWith id (argsToList (gshowsPrec 0) args)
+      showsPrec 11 args
   showsPrec p (Const val) = showsPrec p val
   showsPrec p (AsArray fun)
     = showParen (p>10) $
@@ -325,15 +328,16 @@ instance (GShow v,GShow qv,GShow fun,GShow con,GShow field,GShow fv,GShow lv,GSh
   showsPrec p (Quantification q args body)
     = showParen (p>10) $
       showsPrec 11 q .
-      showListWith id (argsToList (gshowsPrec 0) args) .
+      showChar ' ' .
+      showsPrec 11 args .
       showChar ' ' .
       gshowsPrec 11 body
   showsPrec p (Let args body)
     = showParen (p>10) $
       showString "Let " .
-      showListWith id (argsToList
+      showListWith id (runIdentity $ List.toList
                        (\(LetBinding v e)
-                        -> (gshowsPrec 10 v) . showChar '=' . (gshowsPrec 10 e)
+                        -> return $ (gshowsPrec 10 v) . showChar '=' . (gshowsPrec 10 e)
                       ) args)  .
       showChar ' ' .
       gshowsPrec 10 body
