@@ -148,7 +148,7 @@ instance (GCompare var,GetType var,
 instance (GetType var,GetType qvar,GetFunType fun,GetConType con,
           GetFieldType field,GetType farg,GetType lvar)
          => GetType (SMTExpr var qvar fun con field farg lvar) where
-  getType (SMTExpr e) = expressionType e
+  getType (SMTExpr e) = getType e
   getType (SMTQuant _ _ _) = BoolRepr
   getType (SMTTestCon _ _ _) = BoolRepr
   getType (SMTGetField _ _ _ tp _) = tp

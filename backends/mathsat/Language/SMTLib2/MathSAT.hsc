@@ -192,7 +192,7 @@ instance Backend MathSATBackend where
   toBackend expr b = do
     (env,nb) <- getEnv b
     res <- exprToMSat env expr
-    return (UntypedVar res (expressionType expr),nb)
+    return (UntypedVar res (getType expr),nb)
   fromBackend b trm = unsafePerformIO $ do
     (env,nb) <- getEnv b
     exprFromMSat env trm

@@ -115,7 +115,7 @@ instance Backend Z3Solver where
   toBackend expr solv = do
     (ctx,solv1) <- getContext solv
     nd <- toZ3 ctx expr
-    return (UntypedVar nd (expressionType expr),solv1)
+    return (UntypedVar nd (getType expr),solv1)
   assert (UntypedVar nd _) solv = do
     (ctx,solver,solv1) <- getSolver solv
     solverAssertCnstr ctx solver nd

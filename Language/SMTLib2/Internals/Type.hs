@@ -7,11 +7,9 @@ import qualified Language.SMTLib2.Internals.Type.List as List
 import Data.Proxy
 import Data.Typeable
 import Numeric
-import Text.Show
 import Data.List (genericLength,genericReplicate)
 import Data.GADT.Compare
 import Data.GADT.Show
-import Control.Monad.Identity
 
 data Type = BoolType
           | IntType

@@ -12,8 +12,6 @@ import Language.SMTLib2.Strategy as Strat
 
 import qualified Data.Text as T
 import qualified Data.Text.Read as T
-import Data.IntMap (IntMap)
-import qualified Data.IntMap.Strict as IMap
 import Data.Map (Map)
 import qualified Data.Map.Strict as Map
 import Data.Proxy
@@ -78,7 +76,7 @@ instance GShow PipeExpr where
   gshowsPrec = showsPrec
 
 instance GetType PipeExpr where
-  getType (PipeExpr e) = expressionType e
+  getType (PipeExpr e) = getType e
 
 instance Backend SMTPipe where
   type SMTMonad SMTPipe = IO
@@ -124,7 +122,7 @@ instance Backend SMTPipe where
         (name'',nb) = genName b name'
     return (UntypedVar name'' tp,nb { vars = Map.insert name'' (FunArg tp) (vars nb) })
   defineVar name (PipeExpr expr) b = do
-    let tp = expressionType expr
+    let tp = getType expr
         (sym,req,nnames) = renderDefineVar (names b) tp name (exprToLisp expr)
         nb = b { names = nnames
                , vars = Map.insert sym (Var tp) (vars b) }
@@ -222,7 +220,7 @@ instance Backend SMTPipe where
     putRequest b (L.List [L.Symbol "simplify"
                          ,exprToLisp expr])
     resp <- parseResponse b
-    case runExcept $ lispToExprTyped b (expressionType expr) resp of
+    case runExcept $ lispToExprTyped b (getType expr) resp of
       Right res -> return (res,b)
       Left err -> error $ "smtlib2: Unknown simplify response: "++show resp++" ["++err++"]"
   toBackend expr b = return (PipeExpr expr,b)
@@ -582,9 +580,9 @@ lispToExprUntyped st l res = lispToExprWith (pipeParser st) Nothing l $
 
 lispToExprTyped :: SMTPipe -> Repr t -> L.Lisp -> LispParse (PipeExpr t)
 lispToExprTyped st tp l = lispToExprWith (pipeParser st) (Just (Sort tp)) l $
-                          \e -> case geq tp (expressionType e) of
+                          \e -> case geq tp (getType e) of
                           Just Refl -> return (PipeExpr e)
-                          Nothing -> throwE $ show l++" has type "++show (expressionType e)++", but "++show tp++" was expected."
+                          Nothing -> throwE $ show l++" has type "++show (getType e)++", but "++show tp++" was expected."
 
 pipeParser :: SMTPipe
            -> LispParser PipeVar PipeVar PipeFun PipeConstr PipeField PipeVar PipeVar PipeExpr
@@ -675,7 +673,7 @@ lispToExprWith p hint (L.List (fun:args)) res = do
                       Right (AnyExpr e) -> Just $ Sort (getType e)
                    ) args'
   AnyFunction fun' <- getParsedFunction parsed hints
-  let (argTps,ret) = functionType fun'
+  let (argTps,ret) = getFunType fun'
   args'' <- catchE (makeList p argTps args') $
             \err -> throwE $ "While parsing arguments of function: "++
                     show fun'++": "++err
@@ -1334,7 +1332,7 @@ functionSymbolWithSig f g h i j = do
                          ,typeSymbol res]
     else return sym
   where
-    (arg,res) = functionType j
+    (arg,res) = getFunType j
 
 typeSymbol :: Repr t -> L.Lisp
 typeSymbol BoolRepr = L.Symbol "Bool"

@@ -30,13 +30,17 @@ data List e (tp :: [a]) where
   Nil :: List e '[]
   Cons :: e x -> List e xs -> List e (x ': xs)
 
-access :: Monad m => List e lst -> Natural idx -> (e (Index lst idx) -> m (e tp)) -> m (List e (Insert lst idx tp))
+access :: Monad m => List e lst -> Natural idx -> (e (Index lst idx) -> m (a,e tp)) -> m (a,List e (Insert lst idx tp))
 access (Cons x xs) Zero f = do
-  nx <- f x
-  return (Cons nx xs)
+  (res,nx) <- f x
+  return (res,Cons nx xs)
 access (Cons x xs) (Succ n) f = do
-  nxs <- access xs n f
-  return (Cons x nxs)
+  (res,nxs) <- access xs n f
+  return (res,Cons x nxs)
+
+index :: List e lst -> Natural idx -> e (Index lst idx)
+index (Cons x xs) Zero = x
+index (Cons x xs) (Succ n) = index xs n
 
 insert :: List e lst -> Natural idx -> e tp -> List e (Insert lst idx tp)
 insert (Cons x xs) Zero y = Cons y xs
@@ -51,6 +55,15 @@ mapM _ Nil = return Nil
 mapM f (Cons x xs) = do
   nx <- f x
   nxs <- mapM f xs
+  return (Cons nx nxs)
+
+mapIndexM :: Monad m => (forall n. Natural n -> e (Index lst n) -> m (e' (Index lst n)))
+          -> List e lst
+          -> m (List e' lst)
+mapIndexM f Nil = return Nil
+mapIndexM f (Cons x xs) = do
+  nx <- f Zero x
+  nxs <- mapIndexM (\n -> f (Succ n)) xs
   return (Cons nx nxs)
 
 cons :: e x -> List e xs -> List e (x ': xs)
@@ -69,6 +82,14 @@ toList f Nil = return []
 toList f (Cons x xs) = do
   nx <- f x
   nxs <- toList f xs
+  return (nx : nxs)
+
+toListIndex :: Monad m => (forall n. Natural n -> e (Index lst n) -> m a)
+            -> List e lst -> m [a]
+toListIndex f Nil = return []
+toListIndex f (Cons x xs) = do
+  nx <- f Zero x
+  nxs <- toListIndex (\n -> f (Succ n)) xs
   return (nx : nxs)
 
 foldM :: Monad m => (forall x. s -> e x -> m s) -> s -> List e lst -> m s
@@ -94,6 +115,12 @@ zipToListM f (Cons x xs) (Cons y ys) = do
   zs <- zipToListM f xs ys
   return (z : zs)
 
+instance GEq e => Eq (List e lst) where
+  (==) Nil Nil = True
+  (==) (Cons x xs) (Cons y ys) = case geq x y of
+    Just Refl -> xs==ys
+    Nothing -> False
+
 instance GEq e => GEq (List e) where
   geq Nil Nil = Just Refl
   geq (Cons x xs) (Cons y ys) = do
@@ -101,6 +128,13 @@ instance GEq e => GEq (List e) where
     Refl <- geq xs ys
     return Refl
   geq _ _ = Nothing
+
+instance GCompare e => Ord (List e lst) where
+  compare Nil Nil = EQ
+  compare (Cons x xs) (Cons y ys) = case gcompare x y of
+    GEQ -> compare xs ys
+    GLT -> LT
+    GGT -> GT
 
 instance GCompare e => GCompare (List e) where
   gcompare Nil Nil = GEQ

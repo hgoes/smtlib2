@@ -55,9 +55,9 @@ evalResultType (ArrayResult mdl) = let (idx,el) = arrayModelType mdl
 arrayModelType :: (GetFunType fun,GetConType con,GetFieldType field)
                => ArrayModel fun con field idx res -> (List Repr idx,Repr res)
 arrayModelType (ArrayConst res idx) = (idx,evalResultType res)
-arrayModelType (ArrayFun fun) = functionType fun
+arrayModelType (ArrayFun fun) = getFunType fun
 arrayModelType (ArrayMap fun args idx)
-  = let (farg,ftp) = functionType fun
+  = let (farg,ftp) = getFunType fun
     in (idx,ftp)
 arrayModelType (ArrayStore idx el mdl)
   = (runIdentity $ List.mapM (return.evalResultType) idx,evalResultType el)

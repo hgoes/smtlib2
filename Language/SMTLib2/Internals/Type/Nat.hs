@@ -5,6 +5,7 @@ import Data.Proxy
 import Data.Typeable
 import Data.Constraint
 import Data.GADT.Compare
+import Data.GADT.Show
 
 data Nat = Z | S Nat deriving Typeable
 
@@ -58,6 +59,10 @@ naturalToInteger = conv 0
 naturalAdd :: Natural n -> Natural m -> Natural (n + m)
 naturalAdd Zero n = n
 naturalAdd (Succ x) y = Succ (naturalAdd x y)
+
+naturalSub :: Natural (n + m) -> Natural n -> Natural m
+naturalSub n Zero = n
+naturalSub (Succ sum) (Succ n) = naturalSub sum n
 
 naturalLEQ :: Natural n -> Natural m -> Maybe (Dict ((n <= m) ~ True))
 naturalLEQ Zero _ = Just Dict
@@ -240,3 +245,6 @@ instance GCompare Natural where
     GEQ -> GEQ
     GLT -> GLT
     GGT -> GGT
+
+instance GShow Natural where
+  gshowsPrec = showsPrec
