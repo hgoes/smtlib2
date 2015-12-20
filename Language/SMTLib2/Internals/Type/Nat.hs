@@ -40,6 +40,10 @@ type family (+) (n :: Nat) (m :: Nat) :: Nat where
   (+) Z n = n
   (+) (S n) m = S ((+) n m)
 
+type family (-) (n :: Nat) (m :: Nat) :: Nat where
+  (-) n Z = n
+  (-) (S n) (S m) = n - m
+
 type family (<=) (n :: Nat) (m :: Nat) :: Bool where
   (<=) Z m = True
   (<=) (S n) Z = False

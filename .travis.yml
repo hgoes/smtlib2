@@ -1,17 +1,33 @@
-language: haskell
-ghc: "7.10"
-addons:
-  apt:
-    sources:
-      - hvr-ghc
-    packages:
-      - ghc-7.10.3
-      - cabal-install-1.22
-      - happy-1.19.5
+#language: haskell
+#ghc: "7.10"
+language: c
+sudo: false
+matrix:
+  include:
+    - env: CABALVER=1.22 GHCVER=7.10.3 HAPPYVER=1.19.5
+      addons:
+        apt:
+          sources:
+            - hvr-ghc
+            packages:
+              - ghc-7.10.3
+              - cabal-install-1.22
+              - happy-1.19.5
 
+before_install:
+  - export PATH=/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:$PATH
+
+install:
+  - cabal --version
+  - echo "$(ghc --version) [$(ghc --print-project-git-commit-id 2> /dev/null || echo '?')]"
+  - travis_retry cabal update
+  - cabal install --only-dependencies --enable-tests --enable-benchmarks
+  - cabal install --only-dependencies --enable-tests --enable-benchmarks ./backends/pipe
+  - cabal install --only-dependencies --enable-tests --enable-benchmarks ./backends/debug
+  - cabal install --only-dependencies --enable-tests --enable-benchmarks ./backends/timing
+  
 script:
   - cabal install -v1
   - cabal install -v1 ./backends/pipe
   - cabal install -v1 ./backends/debug
   - cabal install -v1 ./backends/timing
-sudo: false
