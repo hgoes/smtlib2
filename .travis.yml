@@ -15,7 +15,7 @@ matrix:
             - happy-1.19.5
 
 before_install:
-  - export PATH=/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:$PATH
+  - export PATH=/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:/opt/happy/$HAPPYVER/bin:$PATH
 
 install:
   - cabal --version
