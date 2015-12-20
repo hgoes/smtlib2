@@ -4,6 +4,8 @@ module Language.SMTLib2.QuickCheck where
 import qualified Language.SMTLib2.Internals.Backend as B
 import Language.SMTLib2.Internals.Expression hiding (AnyFunction)
 import Language.SMTLib2.Internals.Type
+import Language.SMTLib2.Internals.Type.List (List(..))
+import qualified Language.SMTLib2.Internals.Type.List as List
 import Language.SMTLib2.Internals.Type.Nat
 
 import Test.QuickCheck hiding (Args)
@@ -18,14 +20,13 @@ import Data.GADT.Show
 import Data.GADT.Compare
 import Control.Monad.State.Strict
 
-data ExprGen m b var qvar fun con field farg e tp
-  = ExprGen ((forall t. GetType t
-              => Expression var qvar fun con field farg e t
+data ExprGen m b var qvar fun con field farg lvar e tp
+  = ExprGen ((forall t. Expression var qvar fun con field farg lvar e t
               -> b -> m (e t,b))
              -> b
              -> m (e tp,b))
 
-type BackendExprGen b tp = ExprGen (B.SMTMonad b) b (B.Var b) (B.QVar b) (B.Fun b) (B.Constr b) (B.Field b) (B.FunArg b) (B.Expr b) tp
+type BackendExprGen b tp = ExprGen (B.SMTMonad b) b (B.Var b) (B.QVar b) (B.Fun b) (B.Constr b) (B.Field b) (B.FunArg b) (B.LVar b) (B.Expr b) tp
 
 newtype VarSet v (tp :: Type) = VarSet (Set (v tp))
 
@@ -36,18 +37,19 @@ data GenContext var qvar fun
            }
 
 data AnyFunction f (tp :: Type)
-  = forall arg. GetTypes arg
-    => AnyFunction (f '(arg,tp))
+  = forall (arg::[Type]). AnyFunction (f '(arg,tp))
 
-data AnyType = forall tp. GetType tp => AnyType (Proxy tp)
+data AnyType = forall tp. AnyType (Repr tp)
 
-data AnyTypes = forall tps. GetTypes tps => AnyTypes (Proxy tps)
+data AnyTypes = forall tps. AnyTypes (List Repr tps)
 
-data TestExpr var qvar fun con field farg tp
-  = TestExpr (Expression var qvar fun con field farg (TestExpr var qvar fun con field farg) tp)
+data AnyNatural = forall n. AnyNatural (Natural n)
 
-type TestExprGen var qvar fun con field farg tp
-  = ExprGen Identity () var qvar fun con field farg (TestExpr var qvar fun con field farg) tp
+data TestExpr var qvar fun con field farg lvar tp
+  = TestExpr (Expression var qvar fun con field farg lvar (TestExpr var qvar fun con field farg lvar) tp)
+
+type TestExprGen var qvar fun con field farg lvar tp
+  = ExprGen Identity () var qvar fun con field farg lvar (TestExpr var qvar fun con field farg lvar) tp
 
 emptyContext :: GenContext var qvar fun
 emptyContext = GenCtx { allVars = DMap.empty
@@ -59,12 +61,12 @@ roundTripTest :: (B.Backend b,B.SMTMonad b ~ IO)
               -> IO b
               -> Property
 roundTripTest ctx (cb::IO b) = monadicIO $ do
-  AnyType (_::Proxy tp) <- pick genType
-  expr <- pick (genTestExpr ctx)
+  AnyType tp <- pick genType
+  expr <- pick (genTestExpr tp ctx)
   cond <- run $ do
     b <- cb
     (expr1,nb) <- encodeTestExpr expr b
-    let expr2 = decodeTestExpr (expr1::B.Expr b tp) nb
+    let expr2 = decodeTestExpr expr1 nb
     return $ expr2==expr
   assert cond
 
@@ -79,62 +81,62 @@ roundTripTest ctx = do
   let expr3 = decodeTestExpr expr2 nb
   assert $ expr1 == expr3-}
 
-encodeTestExpr :: (B.Backend b,GetType tp)
-               => TestExpr (B.Var b) (B.QVar b) (B.Fun b) (B.Constr b) (B.Field b) (B.FunArg b) tp
+encodeTestExpr :: (B.Backend b)
+               => TestExpr (B.Var b) (B.QVar b) (B.Fun b) (B.Constr b) (B.Field b) (B.FunArg b) (B.LVar b) tp
                -> b
                -> B.SMTMonad b (B.Expr b tp,b)
 encodeTestExpr e b = runStateT (encode' e) b
   where
-    encode' :: (B.Backend b,GetType tp)
-            => TestExpr (B.Var b) (B.QVar b) (B.Fun b) (B.Constr b) (B.Field b) (B.FunArg b) tp
+    encode' :: (B.Backend b)
+            => TestExpr (B.Var b) (B.QVar b) (B.Fun b) (B.Constr b) (B.Field b) (B.FunArg b) (B.LVar b) tp
             -> StateT b (B.SMTMonad b) (B.Expr b tp)
     encode' (TestExpr e) = do
-      e' <- mapExpr return return return return return return encode' e
+      e' <- mapExpr return return return return return return return encode' e
       b <- get
       (ne,nb) <- lift $ B.toBackend e' b
       put nb
       return ne
 
-decodeTestExpr :: (B.Backend b,GetType tp)
+decodeTestExpr :: (B.Backend b)
                => B.Expr b tp
                -> b
-               -> TestExpr (B.Var b) (B.QVar b) (B.Fun b) (B.Constr b) (B.Field b) (B.FunArg b) tp
+               -> TestExpr (B.Var b) (B.QVar b) (B.Fun b) (B.Constr b) (B.Field b) (B.FunArg b) (B.LVar b) tp
 decodeTestExpr e b
-  = TestExpr $ runIdentity $ mapExpr return return return return return return
+  = TestExpr $ runIdentity $ mapExpr return return return return return return return
     (\e' -> return (decodeTestExpr e' b)) (B.fromBackend b e)
 
-genTestExpr :: GetType tp => GenContext var qvar fun
-            -> Gen (TestExpr var qvar fun con field farg tp)
-genTestExpr ctx = do
-  ExprGen egen <- genExpr ctx
+genTestExpr :: (GetFunType fun,GetFieldType field,GetConType con)
+            => Repr tp -> GenContext var qvar fun
+            -> Gen (TestExpr var qvar fun con field farg lvar tp)
+genTestExpr tp ctx = do
+  ExprGen egen <- genExpr tp ctx
   return $ fst $ runIdentity (egen (\e _ -> return (TestExpr e,())) ())
 
-genExpr :: (Monad m,GetType t)
-        => GenContext var qvar fun
-        -> Gen (ExprGen m b var qvar fun con field farg e t)
-genExpr ctx = sized $ \sz -> if sz==0
-                             then oneof [ gen | Just gen <- [genVar
-                                                            ,genQVar
-                                                            ,Just $ genConst Proxy] ]
-                             else resize (sz `div` 2) $ oneof
-                                  [genApp]
-                                  
+genExpr :: (Monad m,GetFunType fun,GetFieldType field,GetConType con)
+        => Repr t -> GenContext var qvar fun
+        -> Gen (ExprGen m b var qvar fun con field farg lvar e t)
+genExpr tp ctx = sized $ \sz -> if sz==0
+                                then oneof [ gen | Just gen <- [genVar tp
+                                                               ,genQVar tp
+                                                               ,Just $ genConst tp] ]
+                                else resize (sz `div` 2) $ oneof
+                                     [genApp tp]
   where
-    genVar = do
-      VarSet vs <- DMap.lookup getType (allVars ctx)
+    genVar tp = do
+      VarSet vs <- DMap.lookup tp (allVars ctx)
       if Set.null vs
         then Nothing
         else return $ elements [ ExprGen (\f -> f (Var v))
                                | v <- Set.toList vs ]
-    genQVar = do
-      VarSet vs <- DMap.lookup getType (allQVars ctx)
+    genQVar tp = do
+      VarSet vs <- DMap.lookup tp (allQVars ctx)
       if Set.null vs
         then Nothing
         else return $ elements [ ExprGen (\f -> f (QVar v))
                                | v <- Set.toList vs ]
-    genConst :: (GetType t,Monad m) => Proxy t
-             -> Gen (ExprGen m b var qvar fun con field farg e t)
-    genConst (_::Proxy t) = case getType :: Repr t of
+    genConst :: (Monad m) => Repr t
+             -> Gen (ExprGen m b var qvar fun con field farg lvar e t)
+    genConst tp = case tp of
       BoolRepr -> do
         val <- arbitrary
         return $ ExprGen $ \f -> f (Const $ BoolValue val)
@@ -145,182 +147,170 @@ genExpr ctx = sized $ \sz -> if sz==0
         val <- arbitrary
         return $ ExprGen $ \f -> f (Const $ RealValue val)
       BitVecRepr bw -> do
-        val <- choose (0,2^bw-1)
-        return $ ExprGen $ \f -> f (Const $ BitVecValue val)
-      ArrayRepr _ (_::Repr el) -> do
-        ExprGen c <- genConst (Proxy::Proxy el)
+        val <- choose (0,2^(naturalToInteger bw)-1)
+        return $ ExprGen $ \f -> f (Const $ BitVecValue val bw)
+      ArrayRepr idx el -> do
+        ExprGen c <- genConst el
         return $ ExprGen $ \f b -> do
           (rel,b1) <- c f b
-          f (App ConstArray (Arg rel NoArg)) b1
+          f (App (ConstArray idx el) (Cons rel Nil)) b1
 
-    genApp = do
-      AnyFunction fun <- genFunction ctx
-      args <- withArgs (genExpr ctx)
+    --genApp :: (Monad m) => Repr tp
+    --       -> Gen (ExprGen m b var qvar fun con field farg lvar e tp)
+    genApp tp = do
+      AnyFunction fun <- genFunction tp ctx
+      let (args,_) = getFunType fun
+      args' <- List.mapM (\tp -> genExpr tp ctx) args
       return $ ExprGen $ \f b -> do
-        (nb,rargs) <- mapAccumArgs (\b (ExprGen g) -> do
-                                       (expr,nb) <- g f b
-                                       return (nb,expr)
-                                   ) b args
+        (nb,rargs) <- List.mapAccumM (\b (ExprGen g) -> do
+                                         (expr,nb) <- g f b
+                                         return (nb,expr)
+                                     ) b args'
         f (App fun rargs) nb
 
-genFunction :: GetType tp
-            => GenContext var qvar fun
+genFunction :: Repr tp
+            -> GenContext var qvar fun
             -> Gen (AnyFunction (Function fun con field) tp)
-genFunction ctx = oneof [ gen | Just gen <- [genFun
-                                            ,genBuiltin Proxy] ]
+genFunction tp ctx = oneof [ gen | Just gen <- [genFun
+                                               ,genBuiltin tp] ]
   where
     genFun = do
-      VarSet funs <- DMap.lookup getType (allFuns ctx)
+      VarSet funs <- DMap.lookup tp (allFuns ctx)
       if Set.null funs
         then Nothing
         else return $ elements [ AnyFunction (Fun f)
                                | AnyFunction f <- Set.toList funs ]
-    genBuiltin :: GetType t => Proxy t -> Maybe (Gen (AnyFunction (Function fun con field) t))
-    genBuiltin (_::Proxy t) = case getType :: Repr t of
+    genBuiltin :: Repr t -> Maybe (Gen (AnyFunction (Function fun con field) t))
+    genBuiltin tp = case tp of
       BoolRepr -> Just $ oneof
-                  [sized $
-                   \len -> do
-                     AnyType (tp::Proxy tp) <- genType
-                     withAllEqLen tp len $
-                       \(_::Proxy (tp ': arg))
-                       -> elements [AnyFunction (Eq::Function fun con field '(tp ': arg,BoolType))
-                                   ,AnyFunction (Distinct::Function fun con field '(tp ': arg,BoolType))]
+                  [do
+                      AnyType tp <- genType
+                      AnyNatural sz <- genNatural
+                      elements [AnyFunction (Eq tp sz)
+                               ,AnyFunction (Distinct tp sz)]
                   ,do
                       op <- elements [Ge,Gt,Le,Lt]
-                      return $ AnyFunction (OrdInt op)
+                      return $ AnyFunction (Ord NumInt op)
                   ,do
                       op <- elements [Ge,Gt,Le,Lt]
-                      return $ AnyFunction (OrdReal op)
+                      return $ AnyFunction (Ord NumReal op)
                   ,return $ AnyFunction Not
-                  ,sized $
-                   \len -> withAllEqLen (Proxy::Proxy BoolType) len $
-                           \(_::Proxy (BoolType ': arg)) -> do
-                             op <- elements [And,Or,XOr,Implies]
-                             return (AnyFunction (Logic op::Function fun con field '(BoolType ': arg,BoolType)))
-                  ,return $ AnyFunction ITE
+                  ,do
+                      AnyNatural sz <- genNatural
+                      op <- elements [And,Or,XOr,Implies]
+                      return (AnyFunction (Logic op sz))
+                  ,return $ AnyFunction (ITE tp)
                   ,do
                       op <- elements [BVULE,BVULT,BVUGE,BVUGT,BVSLE,BVSLT,BVSGE,BVSGT]
                       sz <- arbitrarySizedNatural
-                      reifyNat (sz::Integer) $
-                        \(_::Proxy bw)
-                        -> return $ AnyFunction (BVComp op::Function fun con field
-                                                            '( '[BitVecType bw,BitVecType bw],
-                                                               BoolType))
+                      reifyNatural (sz::Integer) $
+                        \bw -> return $ AnyFunction (BVComp op bw)
                   ,do
-                      AnyTypes (_::Proxy idx) <- genTypes
-                      return $ AnyFunction (Select::Function fun con field
-                                                    '(ArrayType idx BoolType ': idx,BoolType))
+                      AnyTypes idx <- genTypes
+                      return $ AnyFunction (Select idx tp)
                   ]
       IntRepr -> Just $ oneof
-                 [sized $
-                  \len -> withAllEqLen (Proxy::Proxy IntType) len $
-                          \(_::Proxy (IntType ': arg)) -> do
-                            op <- elements [Plus,Mult,Minus]
-                            return (AnyFunction (ArithInt op::Function fun con field
-                                                              '(IntType ': arg,IntType)))
+                 [do
+                     AnyNatural len <- genNatural
+                     op <- elements [Plus,Mult,Minus]
+                     return (AnyFunction (Arith NumInt op len))
                  ,do
                      op <- elements [Div,Mod,Rem]
                      return $ AnyFunction (ArithIntBin op)
-                 ,return $ AnyFunction AbsInt
-                 ,return $ AnyFunction ITE
+                 ,return $ AnyFunction (Abs NumInt)
+                 ,return $ AnyFunction (ITE tp)
                  ,return $ AnyFunction ToInt
                  ,do
-                     AnyTypes (_::Proxy idx) <- genTypes
-                     return $ AnyFunction (Select::Function fun con field
-                                                   '(ArrayType idx IntType ': idx,IntType))
+                     AnyTypes idx <- genTypes
+                     return $ AnyFunction (Select idx tp)
                  ]
       RealRepr -> Just $ oneof
-                  [sized $
-                   \len -> withAllEqLen (Proxy::Proxy RealType) len $
-                           \(_::Proxy (RealType ': arg)) -> do
-                             op <- elements [Plus,Mult,Minus]
-                             return (AnyFunction (ArithReal op::Function fun con field
-                                                                '(RealType ': arg,RealType)))
+                  [do
+                      AnyNatural sz <- genNatural
+                      op <- elements [Plus,Mult,Minus]
+                      return (AnyFunction (Arith NumReal op sz))
                   ,return $ AnyFunction Divide
-                  ,return $ AnyFunction AbsReal
+                  ,return $ AnyFunction (Abs NumReal)
                   ,return $ AnyFunction ToReal
-                  ,return $ AnyFunction ITE
+                  ,return $ AnyFunction (ITE tp)
                   ,do
-                      AnyTypes (_::Proxy idx) <- genTypes
-                      return $ AnyFunction (Select::Function fun con field
-                                                    '(ArrayType idx RealType ': idx,RealType))
+                      AnyTypes idx <- genTypes
+                      return $ AnyFunction (Select idx tp)
                   ]
-      (BitVecRepr _::Repr t)
+      (BitVecRepr bw)
         -> Just $ oneof
-           [return $ AnyFunction ITE
+           [return $ AnyFunction (ITE tp)
            ,do
                op <- elements [BVAdd,BVSub,BVMul,BVURem,BVSRem,BVUDiv,BVSDiv,BVSHL,BVLSHR,BVASHR,BVXor,BVAnd,BVOr]
-               return $ AnyFunction (BVBin op)
+               return $ AnyFunction (BVBin op bw)
            ,do
                op <- elements [BVNot,BVNeg]
-               return $ AnyFunction (BVUn op)
+               return $ AnyFunction (BVUn op bw)
            ,do
-               AnyTypes (_::Proxy idx) <- genTypes
-               return $ AnyFunction (Select::Function fun con field
-                                             '(ArrayType idx t ': idx,t))
+               AnyTypes idx <- genTypes
+               return $ AnyFunction (Select idx tp)
                --TODO: Concat, Extract
            ]
-      ArrayRepr (_::Args Repr idx) (_::Repr el)
+      ArrayRepr idx el
         -> Just $ oneof
-           [return $ AnyFunction ITE
+           [return $ AnyFunction (ITE tp)
            ,do
-               AnyTypes (_::Proxy idx') <- genTypes
-               return $ AnyFunction (Select::Function fun con field
-                                             '(ArrayType idx' (ArrayType idx el) ': idx',
-                                               ArrayType idx el))
-           ,return $ AnyFunction Store
-           ,return $ AnyFunction ConstArray]
+               AnyTypes idx' <- genTypes
+               return $ AnyFunction (Select idx' tp)
+           ,return $ AnyFunction (Store idx el)
+           ,return $ AnyFunction (ConstArray idx el)]
       _ -> Nothing
 
 genType :: Gen AnyType
-genType = sized $ \sz -> oneof $ [return $ AnyType (Proxy::Proxy BoolType)
-                                 ,return $ AnyType (Proxy::Proxy IntType)
-                                 ,return $ AnyType (Proxy::Proxy RealType)
+genType = sized $ \sz -> oneof $ [return $ AnyType BoolRepr
+                                 ,return $ AnyType IntRepr
+                                 ,return $ AnyType RealRepr
                                  ,do
                                      sz <- arbitrarySizedNatural
-                                     reifyNat sz $ \(_::Proxy bw)
-                                                   -> return $ AnyType (Proxy::Proxy (BitVecType bw))]++
+                                     reifyNatural sz $ \bw -> return $ AnyType (BitVecRepr bw)]++
                          (if sz>0
                           then [do
-                                   AnyTypes (_::Proxy tps) <- resize (sz `div` 2) genTypes
-                                   AnyType (_::Proxy tp) <- resize (sz `div` 2) genType
-                                   return $ AnyType (Proxy::Proxy (ArrayType tps tp))
+                                   AnyTypes tps <- resize (sz `div` 2) genTypes
+                                   AnyType tp <- resize (sz `div` 2) genType
+                                   return $ AnyType (ArrayRepr tps tp)
                                ]
                           else [])
 
 genTypes :: Gen AnyTypes
 genTypes = sized $ \len -> gen' len
   where
-    gen' 0 = return $ AnyTypes (Proxy::Proxy ('[]::[Type]))
+    gen' 0 = return $ AnyTypes Nil
     gen' n = do
-      AnyTypes (_::Proxy tps) <- gen' (n-1)
-      AnyType (_::Proxy tp) <- genType
-      return $ AnyTypes (Proxy::Proxy (tp ': tps))
+      AnyTypes tps <- gen' (n-1)
+      AnyType tp <- genType
+      return $ AnyTypes (Cons tp tps)
 
-withAllEqLen :: GetType tp => Proxy tp -> Int
-             -> (forall tps. (AllEq (tp ': tps),SameType (tp ': tps) ~ tp)
-                 => Proxy (tp ': tps) -> a)
+genNatural :: Gen AnyNatural
+genNatural = sized $ \len -> reifyNatural len (return.AnyNatural)
+
+withAllEqLen :: Repr tp -> Int
+             -> (forall tps. List Repr (tp ': tps) -> a)
              -> a
-withAllEqLen (_::Proxy tp) 0 f = f (Proxy::Proxy '[tp])
-withAllEqLen (p::Proxy tp) n f
-  = withAllEqLen p (n-1) $
-    \(_::Proxy (tp ': tps)) -> f (Proxy::Proxy (tp ': tp ': tps))
+withAllEqLen tp 0 f = f (Cons tp Nil)
+withAllEqLen tp n f
+  = withAllEqLen tp (n-1) $
+    \tps -> f (Cons tp tps)
 
-instance (GShow var,GShow qvar,GShow fun,GShow con,GShow field,GShow farg)
-         => GShow (TestExpr var qvar fun con field farg) where
+instance (GShow var,GShow qvar,GShow fun,GShow con,GShow field,GShow farg,GShow lvar)
+         => GShow (TestExpr var qvar fun con field farg lvar) where
   gshowsPrec n (TestExpr e) = gshowsPrec n e
 
-instance (GShow var,GShow qvar,GShow fun,GShow con,GShow field,GShow farg)
-         => Show (TestExpr var qvar fun con field farg tp) where
+instance (GShow var,GShow qvar,GShow fun,GShow con,GShow field,GShow farg,GShow lvar)
+         => Show (TestExpr var qvar fun con field farg lvar tp) where
   showsPrec = gshowsPrec
 
 instance Show AnyType where
-  show (AnyType (_::Proxy tp)) = show (getType::Repr tp)
+  show (AnyType tp) = show tp
 
-instance (GEq var,GEq qvar,GEq fun,GEq con,GEq field,GEq farg)
-         => GEq (TestExpr var qvar fun con field farg) where
+instance (GEq var,GEq qvar,GEq fun,GEq con,GEq field,GEq farg,GEq lvar)
+         => GEq (TestExpr var qvar fun con field farg lvar) where
   geq (TestExpr x) (TestExpr y) = geq x y
 
-instance (GEq var,GEq qvar,GEq fun,GEq con,GEq field,GEq farg)
-         => Eq (TestExpr var qvar fun con field farg tp) where
+instance (GEq var,GEq qvar,GEq fun,GEq con,GEq field,GEq farg,GEq lvar)
+         => Eq (TestExpr var qvar fun con field farg lvar tp) where
   (==) (TestExpr x) (TestExpr y) = x==y

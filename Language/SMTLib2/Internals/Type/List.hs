@@ -115,6 +115,15 @@ zipToListM f (Cons x xs) (Cons y ys) = do
   zs <- zipToListM f xs ys
   return (z : zs)
 
+mapAccumM :: Monad m => (forall x. s -> e x -> m (s,e' x))
+          -> s -> List e xs
+          -> m (s,List e' xs)
+mapAccumM _ s Nil = return (s,Nil)
+mapAccumM f s (Cons x xs) = do
+  (s1,x') <- f s x
+  (s2,xs') <- mapAccumM f s1 xs
+  return (s2,Cons x' xs')
+
 instance GEq e => Eq (List e lst) where
   (==) Nil Nil = True
   (==) (Cons x xs) (Cons y ys) = case geq x y of
