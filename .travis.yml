@@ -1,5 +1,13 @@
 language: haskell
 ghc: "7.8"
+addons:
+  apt:
+    sources:
+      - hvr-ghc
+    packages:
+      - ghc-7.10.3
+      - cabal-install-1.22
+
 script:
   - cabal install -v1
   - cabal install -v1 ./backends/pipe
