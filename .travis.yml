@@ -1,5 +1,5 @@
 language: haskell
-ghc: "7.8"
+ghc: "7.10"
 addons:
   apt:
     sources:
@@ -7,6 +7,7 @@ addons:
     packages:
       - ghc-7.10.3
       - cabal-install-1.22
+      - happy-1.19.5
 
 script:
   - cabal install -v1
