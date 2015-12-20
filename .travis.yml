@@ -1,5 +1,5 @@
 language: haskell
-ghc: "7.10"
+ghc: "7.8"
 script:
   - cabal install -v1
   - cabal install -v1 ./backends/pipe
