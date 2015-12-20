@@ -21,13 +21,6 @@ install:
   - cabal --version
   - echo "$(ghc --version) [$(ghc --print-project-git-commit-id 2> /dev/null || echo '?')]"
   - travis_retry cabal update
-  - cabal install --only-dependencies --enable-tests --enable-benchmarks
-  - cabal install --only-dependencies --enable-tests --enable-benchmarks ./backends/pipe
-  - cabal install --only-dependencies --enable-tests --enable-benchmarks ./backends/debug
-  - cabal install --only-dependencies --enable-tests --enable-benchmarks ./backends/timing
-  
+  - cabal install --only-dependencies --enable-tests --enable-benchmarks . ./extras/quickcheck ./backends/pipe ./backends/debug ./backends/timing
 script:
-  - cabal install --enable-tests -v1
-  - cabal install --enable-tests -v1 ./backends/pipe
-  - cabal install --enable-tests -v1 ./backends/debug
-  - cabal install --enable-tests -v1 ./backends/timing
+  - cabal install --enable-tests -v1 . ./extras/quickcheck ./backends/pipe ./backends/debug ./backends/timing
