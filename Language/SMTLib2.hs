@@ -130,21 +130,14 @@ defineVarNamed name e = do
 
 constant :: (B.Backend b) => ConcreteValue t -> SMT b (B.Expr b t)
 constant v = do
-  val <- mkAbstr v
+  val <- valueFromConcrete
+         (\(v::dt) f -> do
+             st <- get
+             let bdt = lookupDatatype (DTProxy::DTProxy dt) (datatypes st)
+             getConstructor v (B.bconstructors bdt) $
+               \con args -> f (B.bconRepr con) args
+         ) v
   embedSMT $ B.toBackend (Const val)
-  where
-    mkAbstr :: (B.Backend b) => ConcreteValue tp -> SMT b (Value (B.Constr b) tp)
-    mkAbstr (BoolValueC v) = return (BoolValue v)
-    mkAbstr (IntValueC v) = return (IntValue v)
-    mkAbstr (RealValueC v) = return (RealValue v)
-    mkAbstr (BitVecValueC v bw) = return (BitVecValue v bw)
-    mkAbstr (ConstrValueC (v::dt)) = do
-      st <- get
-      let bdt = lookupDatatype (DTProxy::DTProxy dt) (datatypes st)
-      getConstructor v (B.bconstructors bdt) $
-        \con args -> do
-          rargs <- List.mapM mkAbstr args
-          return $ ConstrValue (B.bconRepr con) rargs
 
 getUnsatCore :: B.Backend b => SMT b [B.ClauseId b]
 getUnsatCore = embedSMT B.getUnsatCore
