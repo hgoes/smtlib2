@@ -20,28 +20,41 @@ program = do
 main = withZ3 program >>= print
      @ -}
 module Language.SMTLib2 (
+  -- * SMT Monad
   SMT(),
   B.Backend(),
-  withBackend,withBackendExitCleanly,
+  withBackend,
+  withBackendExitCleanly,
+  -- * Setting options
   setOption,B.SMTOption(..),
+  -- * Getting informations about the solver
   getInfo,B.SMTInfo(..),
-  registerDatatype,
-  declare,declareVar,declareVar',declareVarNamed,declareVarNamed',define,defineVar,defineVarNamed,
-  expr,constant,
+  -- * Expressions
+  B.Expr(),expr,(.==.),(.>=.),(.>.),(.<=.),(.<.),
+  -- ** Declaring variables
+  declare,declareVar,declareVar',declareVarNamed,declareVarNamed',
+  -- ** Defining variables
+  define,defineVar,defineVarNamed,defConst,
+  -- ** Constants
+  constant,ConcreteValue(..),
+  -- ** Analyzation
   AnalyzedExpr(),analyze,getExpr,
-  B.Expr(),
-  Type(..),
-  assert,assertId,assertPartition,B.Partition(..),
-  checkSat,checkSatWith,
+  -- * Satisfiability
+  assert,checkSat,checkSatWith,
   B.CheckSatResult(..),
   B.CheckSatLimits(..),noLimits,
-  getValue,
-  ConcreteValue(..),
-  push,pop,stack,
-  defConst,
-  getUnsatCore,B.ClauseId(),
+  -- ** Unsatisfiable core
+  assertId,getUnsatCore,B.ClauseId(),
+  -- ** Interpolation
+  assertPartition,B.Partition(..),
   getInterpolant,
-  (.==.),(.>=.),(.>.),(.<=.),(.<.)
+  -- ** Stack
+  push,pop,stack,
+  -- ** Models
+  getValue,
+  -- * Types
+  registerDatatype,
+  Type(..)
   ) where
 
 import Language.SMTLib2.Internals.Type
@@ -63,15 +76,19 @@ setOption opt = embedSMT $ B.setOption opt
 getInfo :: B.Backend b => B.SMTInfo i -> SMT b i
 getInfo info = embedSMT $ B.getInfo info
 
+-- | Asserts a boolean expression to be true.
+--   A successive successful `checkSat` calls mean that the generated model is consistent with the assertion.
 assert :: B.Backend b => B.Expr b BoolType -> SMT b ()
 assert = embedSMT . B.assert
 
+-- | Works like `assert`, but additionally allows the user to find the unsatisfiable core of a set of assignments using `getUnsatCore`.
 assertId :: B.Backend b => B.Expr b BoolType -> SMT b (B.ClauseId b)
 assertId = embedSMT . B.assertId
 
 assertPartition :: B.Backend b => B.Expr b BoolType -> B.Partition -> SMT b ()
 assertPartition e p = embedSMT (B.assertPartition e p)
 
+-- | Checks if the set of asserted expressions is satisfiable.
 checkSat :: B.Backend b => SMT b B.CheckSatResult
 checkSat = embedSMT (B.checkSat Nothing noLimits)
 

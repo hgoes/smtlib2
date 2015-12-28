@@ -607,6 +607,20 @@ args = QuasiQuoter { quoteExp = quoteExpr
       Nothing -> fail $ "Failed to parse argument type: "++s
       Just tps -> toTypes tps-}
 
+-- | This quasiquoter can be used to generate SMTLib2 expressions or pattern matches.
+--   For example, to assert the fact that variable @x@ is equal to variable @y@ we can use
+--
+--   > [expr| (= x y) |] >>= assert
+--
+--   To perform pattern matching against an expression @e@, we can use:
+--
+--   > analyze e >>= \re -> case re of
+--   >   [expr| (+ x y) |] -> ...
+--
+--   Types can also be generated using for example:
+--
+--   > myExpr :: Backend b => SMT b (Expr b [expr| (Array Int Bool) |])
+--   > myExpr = [expr| ((as const (Array Int Bool)) False) |]
 expr :: QuasiQuoter
 expr = QuasiQuoter { quoteExp = quoteExpr
                    , quotePat = quotePattern
