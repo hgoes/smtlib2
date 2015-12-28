@@ -57,6 +57,10 @@ liftNat :: Nat -> TH.ExpQ
 liftNat Z = [| Zero |]
 liftNat (S n) = [| Succ $(liftNat n) |]
 
+liftNatType :: Nat -> TH.TypeQ
+liftNatType Z = [t| 'Z |]
+liftNatType (S n) = [t| 'S $(liftNatType n) |]
+
 liftTypeRepr :: Type -> TH.ExpQ
 liftTypeRepr BoolType = [| BoolRepr |]
 liftTypeRepr IntType = [| IntRepr |]
@@ -68,6 +72,18 @@ liftTypeRepr (ArrayType idx el)
     toArgs :: [TH.ExpQ] -> TH.ExpQ
     toArgs [] = [| Nil |]
     toArgs (x:xs) = [| Cons $(x) $(toArgs xs) |]
+
+liftType' :: Type -> TH.TypeQ
+liftType' BoolType = [t| 'BoolType |]
+liftType' IntType = [t| 'IntType |]
+liftType' RealType = [t| 'RealType |]
+liftType' (BitVecType bw) = [t| 'BitVecType $(liftNatType bw) |]
+liftType' (ArrayType idx el)
+  = [t| ArrayType $(toArgs $ fmap liftType' idx) $(liftType' el) |]
+  where
+    toArgs :: [TH.TypeQ] -> TH.TypeQ
+    toArgs [] = [t| '[] |]
+    toArgs (x:xs) = [t| ( '(:) ) $(x) $(toArgs xs) |]
 
 liftTHType :: THType -> TH.ExpQ
 liftTHType (DeterminedType tp) = liftTypeRepr tp
@@ -593,7 +609,8 @@ args = QuasiQuoter { quoteExp = quoteExpr
 
 expr :: QuasiQuoter
 expr = QuasiQuoter { quoteExp = quoteExpr
-                   , quotePat = quotePattern }
+                   , quotePat = quotePattern
+                   , quoteType = quoteTp }
   where
     quoteExpr :: String -> TH.ExpQ
     quoteExpr s = case parseSingleExpr s of
@@ -604,6 +621,13 @@ expr = QuasiQuoter { quoteExp = quoteExpr
     quotePattern s = case parseSingleExpr s of
       Nothing -> fail $ "Failed to parse pattern: "++s
       Just expr -> toPat expr
+
+    quoteTp :: String -> TH.TypeQ
+    quoteTp s = case parseSingleExpr s of
+      Nothing -> fail $ "Failed to parse type: "++s
+      Just expr -> case toType expr of
+        DeterminedType tp -> liftType' tp
+        QueryType _ -> fail $ "Failed to parse type: "++s
 
 declare :: QuasiQuoter
 declare = QuasiQuoter { quoteExp = quoteExpr }
