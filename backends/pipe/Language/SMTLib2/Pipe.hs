@@ -19,6 +19,7 @@ import Data.Constraint
 import Data.Typeable
 import Data.GADT.Compare
 import Data.GADT.Show
+import Data.Monoid
 
 import System.Process
 import System.IO
