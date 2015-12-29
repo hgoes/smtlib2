@@ -6,6 +6,7 @@ module Language.SMTLib2.Timing
 import Language.SMTLib2.Internals.Backend
 import Data.Time.Clock
 import Control.Monad.Trans
+import Data.Typeable
 
 timingBackend :: (Backend b,MonadIO (SMTMonad b))
               => (NominalDiffTime -> SMTMonad b ())
@@ -15,7 +16,7 @@ timingBackend act b = TimingBackend { timingBackend' = b
 
 data TimingBackend b = MonadIO (SMTMonad b) => TimingBackend { timingBackend' :: b
                                                              , reportTime :: NominalDiffTime -> SMTMonad b ()
-                                                             }
+                                                             } deriving Typeable
 
 withTiming :: SMTAction b r
            -> SMTAction (TimingBackend b) r

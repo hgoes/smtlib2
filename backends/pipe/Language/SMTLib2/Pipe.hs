@@ -45,6 +45,7 @@ data SMTPipe = SMTPipe { channelIn :: Handle
                        , vars :: Map T.Text RevVar
                        , datatypes :: Map T.Text PipeDatatype
                        , interpolationMode :: InterpolationMode }
+             deriving Typeable
 
 data RevVar = forall (t::Type). Var !(Repr t)
             | forall (t::Type). QVar !(Repr t)

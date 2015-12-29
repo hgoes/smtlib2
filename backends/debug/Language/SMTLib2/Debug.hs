@@ -22,6 +22,7 @@ import qualified Data.Map as Map
 import Data.Proxy
 import qualified Data.Text as T
 import Data.Functor.Identity
+import Data.Typeable
 
 import Data.Dependent.Map (DMap)
 import qualified Data.Dependent.Map as DMap
@@ -55,6 +56,7 @@ data DebugBackend (b :: *)
                     , debugLVars :: DMap (LVar b) (UntypedVar T.Text)
                     , debugCIds :: Map (ClauseId b) T.Text
                     }
+  deriving Typeable
 
 outputLisp :: DebugBackend (b:: *) -> L.Lisp -> SMTMonad b (DebugBackend b)
 outputLisp b lsp
