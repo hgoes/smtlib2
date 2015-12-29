@@ -13,6 +13,15 @@ matrix:
             - ghc-7.10.3
             - cabal-install-1.22
             - happy-1.19.5
+    - env: CABALVER=1.18 GHCVER=7.8.4 HAPPYVER=1.19.5
+      addons:
+        apt:
+          sources:
+            - hvr-ghc
+          packages:
+            - ghc-7.8.4
+            - cabal-install-1.18
+            - happy-1.19.5
 
 before_install:
   - export PATH=/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:/opt/happy/$HAPPYVER/bin:$PATH
