@@ -60,13 +60,13 @@ data RevVar = forall (t::Type). Var !(Repr t)
 data InterpolationMode = Z3Interpolation [T.Text] [T.Text]
                        | MathSATInterpolation
 
-newtype PipeExpr (t :: Type) = PipeExpr (Expression PipeVar PipeVar PipeFun PipeConstr PipeField PipeVar PipeVar PipeExpr t) deriving Show
+newtype PipeExpr (t :: Type) = PipeExpr (Expression PipeVar PipeVar PipeFun PipeConstr PipeField PipeVar PipeVar PipeExpr t) deriving (Show,Typeable)
 type PipeVar = UntypedVar T.Text
 type PipeFun = UntypedFun T.Text
 type PipeConstr = UntypedCon T.Text
 type PipeField = UntypedField T.Text
 
-newtype PipeClauseId = PipeClauseId T.Text deriving (Show,Eq,Ord)
+newtype PipeClauseId = PipeClauseId T.Text deriving (Show,Eq,Ord,Typeable)
 
 instance GEq PipeExpr where
   geq (PipeExpr e1) (PipeExpr e2) = geq e1 e2
