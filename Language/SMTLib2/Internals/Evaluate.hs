@@ -186,8 +186,8 @@ evaluateFun :: forall m fun con field arg res.
             -> List (EvalResult fun con field) arg
             -> m (EvalResult fun con field res)
 evaluateFun ev _ (Fun f) arg = ev f arg
-evaluateFun ev evf (Eq tp n) args = fmap (ValueResult . BoolValue) $
-                                    isEq n tp args
+evaluateFun ev evf (Eq tp n) args = isEq n tp args >>=
+                                    return . ValueResult . BoolValue
   where
     isEq :: Natural n -> Repr tp -> List (EvalResult fun con field) (AllEq tp n) -> m Bool
     isEq Zero _ Nil = return True
@@ -197,8 +197,8 @@ evaluateFun ev evf (Eq tp n) args = fmap (ValueResult . BoolValue) $
       if eq
         then isEq (Succ n) tp (Cons y xs)
         else return False
-evaluateFun ev evf (Distinct tp n) args = fmap (ValueResult . BoolValue) $
-                                          isDistinct n tp args
+evaluateFun ev evf (Distinct tp n) args = isDistinct n tp args >>=
+                                          return . ValueResult . BoolValue
   where
     isDistinct :: Natural n -> Repr tp -> List (EvalResult fun con field) (AllEq tp n) -> m Bool
     isDistinct Zero _ Nil = return True
