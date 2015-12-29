@@ -12,7 +12,9 @@ import Data.GADT.Show
 import Data.Dependent.Map (DMap)
 import qualified Data.Dependent.Map as Map
 import Control.Exception (onException)
+#if !MIN_VERSION_base(4,8,0)
 import Control.Applicative
+#endif
 
 newtype Backend b => SMT b a = SMT { runSMT :: StateT (SMTState b) (SMTMonad b) a }
 

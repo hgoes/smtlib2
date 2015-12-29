@@ -2,6 +2,7 @@ module Language.SMTLib2.Internals.Backend where
 
 import Language.SMTLib2.Internals.Type hiding (Constr,Field)
 import Language.SMTLib2.Internals.Type.List (List(..))
+import qualified Language.SMTLib2.Internals.Type.List as List
 import Language.SMTLib2.Internals.Expression
 import Language.SMTLib2.Strategy
 
@@ -9,6 +10,7 @@ import Data.Typeable
 import Data.GADT.Compare
 import Data.GADT.Show
 import Data.Functor.Identity
+import Text.Show
 
 type SMTAction b r = b -> SMTMonad b (r,b)
 
@@ -36,7 +38,8 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
        GCompare (Field b),GShow (Field b),
        GCompare (FunArg b),GShow (FunArg b),
        GCompare (LVar b),GShow (LVar b),
-       Ord (ClauseId b),Show (ClauseId b)) => Backend b where
+       Ord (ClauseId b),Show (ClauseId b),
+       Show (Model b)) => Backend b where
   type SMTMonad b :: * -> *
   type Expr b :: Type -> *
   type Var b :: Type -> *
@@ -47,7 +50,7 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
   type FunArg b :: Type -> *
   type LVar b :: Type -> *
   type ClauseId b :: *
-  type Model b
+  type Model b :: *
   setOption :: SMTOption -> SMTAction b ()
   getInfo :: SMTInfo i -> SMTAction b i
   comment :: String -> SMTAction b ()
@@ -119,7 +122,8 @@ newtype AssignmentModel b
 
 data Assignment b
   = forall (t :: Type). VarAssignment (Var b t) (Expr b t)
-  | forall (arg :: [Type]) (t :: Type). FunAssignment (Fun b '(arg,t)) (List (FunArg b) arg) (Expr b t)
+  | forall (arg :: [Type]) (t :: Type).
+    FunAssignment (Fun b '(arg,t)) (List (FunArg b) arg) (Expr b t)
 
 -- | Options controling the behaviour of the SMT solver
 data SMTOption
@@ -303,3 +307,22 @@ instance GetConType (UntypedCon v) where
 
 instance GetFieldType (UntypedField v) where
   getFieldType (UntypedField _ dt tp) = (getDatatype dt,tp)
+
+instance (GShow (Var b),GShow (Expr b),GShow (Fun b),GShow (FunArg b))
+         => Show (Assignment b) where
+  showsPrec p (VarAssignment var expr)
+    = showParen (p>10) $
+      gshowsPrec 9 var .
+      showString " = " .
+      gshowsPrec 9 expr
+  showsPrec p (FunAssignment fun args body)
+    = showParen (p>10) $
+      gshowsPrec 9 fun .
+      showListWith id (runIdentity $ List.toList (return . gshowsPrec 0) args) .
+      showString " = " .
+      gshowsPrec 9 body
+
+instance (GShow (Var b),GShow (Expr b),GShow (Fun b),GShow (FunArg b))
+         => Show (AssignmentModel b) where
+  showsPrec p (AssignmentModel assign)
+    = showsPrec p assign

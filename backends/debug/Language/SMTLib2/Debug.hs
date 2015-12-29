@@ -111,6 +111,7 @@ instance (Backend b) => Backend (DebugBackend b) where
   type FunArg (DebugBackend b) = FunArg b
   type LVar (DebugBackend b) = LVar b
   type ClauseId (DebugBackend b) = ClauseId b
+  type Model (DebugBackend b) = Model b
   setOption opt b = do
     b1 <- outputLisp b (renderSetOption opt)
     ((),nb) <- setOption opt (debugBackend' b1)
@@ -289,7 +290,28 @@ instance (Backend b) => Backend (DebugBackend b) where
     outputResponse b2 (show $ L.List [ L.Symbol ((debugCIds b2) Map.! cid)
                                      | cid <- res ])
     return (res,b2)
-
+  getModel b = do
+    b1 <- outputLisp b (L.List [L.Symbol "get-model"])
+    (mdl,nb) <- getModel (debugBackend' b1)
+    let b2 = b1 { debugBackend' = nb }
+    outputResponse b2 (show mdl)
+    return (mdl,b2)
+  modelEvaluate mdl e b = do
+    (res,nb) <- modelEvaluate mdl e (debugBackend' b)
+    return (res,b { debugBackend' = nb })
+  getProof b = do
+    b1 <- outputLisp b (L.List [L.Symbol "get-proof"])
+    (proof,nb) <- getProof (debugBackend' b1)
+    let b2 = b1 { debugBackend' = nb }
+    outputResponse b2 (show $ renderExpr b2 proof)
+    return (proof,b2)
+  simplify e b = do
+    (res,nb) <- simplify e (debugBackend' b)
+    return (res,b { debugBackend' = nb })
+  comment msg b = do
+    b1 <- outputLine b True msg
+    return ((),b1)
+    
 renderExpr :: (Backend b) => DebugBackend b -> Expr b tp
            -> L.Lisp
 renderExpr b expr

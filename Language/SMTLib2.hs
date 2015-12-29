@@ -51,14 +51,15 @@ module Language.SMTLib2 (
   push,pop,stack,
   -- ** Models
   getValue,
+  getModel,
+  B.Model(),
+  modelEvaluate,
   -- * Types
   registerDatatype,
   Type(..)
   ) where
 
 import Language.SMTLib2.Internals.Type
-import qualified Language.SMTLib2.Internals.Type.List as List
-import Language.SMTLib2.Internals.Type.Nat
 import Language.SMTLib2.Internals.Monad
 import Language.SMTLib2.Internals.Expression
 import Language.SMTLib2.Internals.Embed
@@ -66,7 +67,6 @@ import qualified Language.SMTLib2.Internals.Backend as B
 import Language.SMTLib2.Internals.TH
 import Language.SMTLib2.Strategy
 
-import Data.Proxy
 import Control.Monad.State.Strict
 
 setOption :: B.Backend b => B.SMTOption -> SMT b ()
@@ -100,6 +100,16 @@ noLimits = B.CheckSatLimits Nothing Nothing
 getValue :: (B.Backend b) => B.Expr b t -> SMT b (ConcreteValue t)
 getValue e = do
   res <- embedSMT $ B.getValue e
+  mkConcr res
+
+-- | After a successful `checkSat` query, return a satisfying assignment that makes all asserted formula true.
+getModel :: B.Backend b => SMT b (B.Model b)
+getModel = embedSMT B.getModel
+
+-- | Evaluate an expression in a model, yielding a concrete value.
+modelEvaluate :: B.Backend b => B.Model b -> B.Expr b t -> SMT b (ConcreteValue t)
+modelEvaluate mdl e = do
+  res <- embedSMT $ B.modelEvaluate mdl e
   mkConcr res
 
 push,pop :: B.Backend b => SMT b ()

@@ -8,7 +8,7 @@ import Language.SMTLib2.Internals.Type.List (List(..))
 import qualified Language.SMTLib2.Internals.Type.List as List
 import Language.SMTLib2.Internals.Expression
 
-import Z3.Base
+import Z3.Base as Z3
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Typeable
@@ -59,6 +59,9 @@ type Z3Fun = UntypedFun FuncDecl
 type Z3Con = UntypedCon Constructor
 type Z3Field = UntypedField FuncDecl
 
+instance Show Z3.Model where
+  showsPrec _ _ = showString "Z3Model"
+
 instance Backend Z3Solver where
   type SMTMonad Z3Solver = IO
   type Expr Z3Solver = UntypedVar AST
@@ -70,6 +73,7 @@ instance Backend Z3Solver where
   type FunArg Z3Solver = Z3Var
   type LVar Z3Solver = Z3Var
   type ClauseId Z3Solver = AST
+  type Model Z3Solver = Z3.Model
   setOption (SMTLogic log) solv = do
     (ctx,nsolv) <- getContext solv
     let logic = case log of

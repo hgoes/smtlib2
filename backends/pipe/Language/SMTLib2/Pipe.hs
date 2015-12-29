@@ -19,21 +19,21 @@ import Data.Constraint
 import Data.Typeable
 import Data.GADT.Compare
 import Data.GADT.Show
+#if !MIN_VERSION_base(4,8,0)
 import Data.Monoid
+#endif
 
 import System.Process
 import System.IO
 import qualified Data.ByteString as BS hiding (reverse)
 import qualified Data.ByteString.Char8 as BS8
 import Blaze.ByteString.Builder
-import Data.Attoparsec
+import Data.Attoparsec.ByteString
 
 import qualified Data.AttoLisp as L
 import qualified Data.Attoparsec.Number as L
 import Data.Ratio
 
-import Control.Monad.Reader
-import Control.Monad.State.Strict
 import Control.Monad.Identity
 import Control.Monad.Trans.Except
 
