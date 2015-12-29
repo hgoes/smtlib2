@@ -54,6 +54,7 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
   setOption :: SMTOption -> SMTAction b ()
   getInfo :: SMTInfo i -> SMTAction b i
   comment :: String -> SMTAction b ()
+  comment _ b = return ((),b)
   push :: SMTAction b ()
   pop :: SMTAction b ()
   declareVar :: Repr t -> Maybe String -> SMTAction b (Var b t)

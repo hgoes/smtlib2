@@ -5,7 +5,6 @@ import Language.SMTLib2.Internals.Type.Nat
 import Language.SMTLib2.Internals.Type.List (List(..))
 import qualified Language.SMTLib2.Internals.Type.List as List
 
-import Data.Proxy
 import Data.Typeable
 import Text.Show
 import Data.GADT.Compare
@@ -15,10 +14,6 @@ import Data.Functor.Identity
 type family AllEq (tp :: Type) (n :: Nat) :: [Type] where
   AllEq tp Z = '[]
   AllEq tp (S n) = tp ': (AllEq tp n)
-
-type family Length (tps :: [Type]) :: Nat where
-  Length '[] = Z
-  Length (x ': xs) = S (Length xs)
 
 allEqToList :: Natural n -> List a (AllEq tp n) -> [a tp]
 allEqToList Zero Nil = []
@@ -798,13 +793,6 @@ instance (GCompare fun,GCompare con,GCompare field)
   gcompare _ (Field _) = GGT
   gcompare (Divisible n1) (Divisible n2) = case compare n1 n2 of
     EQ -> GEQ
-    LT -> GLT
-    GT -> GGT
-
-compareNat :: (KnownNat a,KnownNat b) => Proxy a -> Proxy b -> GOrdering a b
-compareNat (prA::Proxy a) (prB::Proxy b) = case eqT::Maybe (a :~: b) of
-  Just Refl -> GEQ
-  Nothing -> case compare (natVal prA) (natVal prB) of
     LT -> GLT
     GT -> GGT
 

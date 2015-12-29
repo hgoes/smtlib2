@@ -268,7 +268,7 @@ sortFromMSat env tp f = do
         else do
         isBV <- isBVType env tp
         case isBV of
-         Just sz -> reifyNatural sz $
+         Just sz -> reifyNat (fromIntegral sz) $
                     \sz' -> f (BitVecRepr sz')
          Nothing -> do
            isArr <- isArrayType env tp
@@ -547,7 +547,7 @@ exprFromMSat env (UntypedVar term tp) = do
               rhs <- termGetArg term 1
               tp <- termGetType lhs
               Just sz <- isBVType env tp
-              reifyNatural sz $
+              reifyNat (fromIntegral sz) $
                 \bw -> return $ App (BVComp BVULT bw)
                        (Cons (UntypedVar lhs (BitVecRepr bw))
                         (Cons (UntypedVar rhs (BitVecRepr bw))
@@ -557,7 +557,7 @@ exprFromMSat env (UntypedVar term tp) = do
               rhs <- termGetArg term 1
               tp <- termGetType lhs
               Just sz <- isBVType env tp
-              reifyNatural sz $
+              reifyNat (fromIntegral sz) $
                 \bw -> return $ App (BVComp BVSLT bw)
                        (Cons (UntypedVar lhs (BitVecRepr bw))
                         (Cons (UntypedVar rhs (BitVecRepr bw))
@@ -567,7 +567,7 @@ exprFromMSat env (UntypedVar term tp) = do
               rhs <- termGetArg term 1
               tp <- termGetType lhs
               Just sz <- isBVType env tp
-              reifyNatural sz $
+              reifyNat (fromIntegral sz) $
                 \bw -> return $ App (BVComp BVULE bw)
                        (Cons (UntypedVar lhs (BitVecRepr bw))
                         (Cons (UntypedVar rhs (BitVecRepr bw))
@@ -577,7 +577,7 @@ exprFromMSat env (UntypedVar term tp) = do
               rhs <- termGetArg term 1
               tp <- termGetType lhs
               Just sz <- isBVType env tp
-              reifyNatural sz $
+              reifyNat (fromIntegral sz) $
                 \bw -> return $ App (BVComp BVSLE bw)
                        (Cons (UntypedVar lhs (BitVecRepr bw))
                         (Cons (UntypedVar rhs (BitVecRepr bw))
@@ -623,8 +623,8 @@ exprFromMSat env (UntypedVar term tp) = do
               tpR <- termGetType rhs
               Just szL <- isBVType env tpL
               Just szR <- isBVType env tpR
-              reifyNatural szL $
-                \bw1 -> reifyNatural szR $
+              reifyNat (fromIntegral szL) $
+                \bw1 -> reifyNat (fromIntegral szR) $
                         \bw2 -> case geq bw (naturalAdd bw1 bw2) of
                         Just Refl -> return $ App (Concat bw1 bw2)
                                      (Cons (UntypedVar lhs (BitVecRepr bw1))
@@ -634,8 +634,8 @@ exprFromMSat env (UntypedVar term tp) = do
               Just (msb,lsb) <- termIsBVExtract env term
               arg <- termGetArg term 0
               Just sz <- termGetType arg >>= isBVType env
-              reifyNatural lsb $
-                \start -> reifyNatural sz $
+              reifyNat (fromIntegral lsb) $
+                \start -> reifyNat (fromIntegral sz) $
                           \rsz -> case naturalLEQ (naturalAdd start bw) rsz of
                           Just Dict -> return $ App (Extract rsz start bw)
                                        (Cons (UntypedVar arg (BitVecRepr rsz))

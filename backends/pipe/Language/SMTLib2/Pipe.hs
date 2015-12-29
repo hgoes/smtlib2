@@ -904,8 +904,8 @@ lispToFunction _ sort (L.List [L.Symbol "_",L.Symbol "extract",L.Number (L.I end
     (\args -> case args of
        [Just (Sort srt)] -> case srt of
          BitVecRepr size
-           -> reifyNatural start $
-              \start' -> reifyNatural (end-start+1) $
+           -> reifyNat (fromInteger start) $
+              \start' -> reifyNat (fromInteger $ end-start+1) $
                          \len' -> case naturalLEQ (naturalAdd start' len') size of
                          Just Dict -> return $ AnyFunction (Extract size start' len')
                          Nothing -> throwE $ "Invalid extract parameters."
@@ -1031,7 +1031,7 @@ lispToSort r (L.List ((L.Symbol "Array"):tps)) = do
     splitLast (x:xs) = let (xs',y') = splitLast xs
                        in (x:xs',y')
 lispToSort _ (L.List [L.Symbol "_",L.Symbol "BitVec",L.Number (L.I n)])
-  = reifyNatural n $ \bw -> return (Sort (BitVecRepr bw))
+  = reifyNat (fromInteger n) $ \bw -> return (Sort (BitVecRepr bw))
 lispToSort r (L.Symbol name) = parseDatatype r name $
                                \pr -> Sort (DataRepr (getDatatype pr))
 lispToSort _ lsp = throwE $ "Invalid SMT type: "++show lsp
@@ -1056,7 +1056,7 @@ lispToConstant (L.Symbol "false") = return (AnyValue (BoolValue False))
 lispToConstant (lispToNumber -> Just n) = return (AnyValue (IntValue n))
 lispToConstant (lispToReal -> Just n) = return (AnyValue (RealValue n))
 lispToConstant (lispToBitVec -> Just (val,sz))
-  = reifyNatural sz $ \bw -> return (AnyValue (BitVecValue val bw))
+  = reifyNat (fromInteger sz) $ \bw -> return (AnyValue (BitVecValue val bw))
 lispToConstant l = throwE $ "Invalid constant "++show l
 
 lispToConstrConstant :: SMTPipe -> L.Lisp -> LispParse (AnyValue PipeConstr)

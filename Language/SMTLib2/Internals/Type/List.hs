@@ -5,6 +5,7 @@ import Language.SMTLib2.Internals.Type.Nat
 import Prelude hiding (length,mapM,insert)
 import Data.GADT.Compare
 import Data.GADT.Show
+import Language.Haskell.TH
 
 type family Index (lst :: [a]) (idx :: Nat) :: a where
   Index (x ': xs) Z = x
@@ -29,6 +30,28 @@ type family Length (lst :: [a]) :: Nat where
 data List e (tp :: [a]) where
   Nil :: List e '[]
   Cons :: e x -> List e xs -> List e (x ': xs)
+
+list :: [ExpQ] -> ExpQ
+list [] = [| Nil |]
+list (x:xs) = [| Cons $(x) $(list xs) |]
+
+nil :: List e '[]
+nil = Nil
+
+list1 :: e t1 -> List e '[t1]
+list1 x1 = Cons x1 Nil
+
+list2 :: e t1 -> e t2 -> List e '[t1,t2]
+list2 x1 x2 = Cons x1 (Cons x2 Nil)
+
+list3 :: e t1 -> e t2 -> e t3 -> List e '[t1,t2,t3]
+list3 x1 x2 x3 = Cons x1 (Cons x2 (Cons x3 Nil))
+
+reifyList :: (forall r'. a -> (forall tp. e tp -> r') -> r')
+          -> [a] -> (forall tp. List e tp -> r)
+          -> r
+reifyList _ [] g = g Nil
+reifyList f (x:xs) g = f x $ \x' -> reifyList f xs $ \xs' -> g (Cons x' xs')
 
 access :: Monad m => List e lst -> Natural idx -> (e (Index lst idx) -> m (a,e tp)) -> m (a,List e (Insert lst idx tp))
 access (Cons x xs) Zero f = do

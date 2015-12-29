@@ -57,6 +57,7 @@ instance (Backend b) => Backend (TimingBackend b) where
   getUnsatCore = withTiming getUnsatCore
   getValue = withTiming . getValue
   getModel = withTiming getModel
+  modelEvaluate mdl e = withTiming (modelEvaluate mdl e)
   getProof = withTiming getProof
   simplify = withTiming . simplify
   toBackend = withTiming . toBackend
@@ -64,4 +65,3 @@ instance (Backend b) => Backend (TimingBackend b) where
   declareDatatypes = withTiming . declareDatatypes
   interpolate = withTiming interpolate
   exit = withTiming exit
-  

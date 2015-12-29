@@ -3,7 +3,6 @@ module Language.SMTLib2.Internals.TH where
 import Language.SMTLib2.Internals.Type
 import Language.SMTLib2.Internals.Type.Nat
 import Language.SMTLib2.Internals.Type.List (List(..))
-import qualified Language.SMTLib2.Internals.Type.List as List
 import Language.SMTLib2.Internals.Expression
 import qualified Language.SMTLib2.Internals.Backend as B
 import Language.SMTLib2.Internals.Monad
@@ -25,29 +24,6 @@ data BasicExpr = Atom String
                | List [BasicExpr]
                | HsExpr String
                deriving Show
-
-class SMTType tp where
-  getRepr :: Repr tp
-
-class SMTTypes tps where
-  getReprs :: List Repr tps
-
-instance SMTType BoolType where
-  getRepr = BoolRepr
-instance SMTType IntType where
-  getRepr = IntRepr
-instance SMTType RealType where
-  getRepr = RealRepr
-instance KnownNat bw => SMTType (BitVecType bw) where
-  getRepr = BitVecRepr natural
-instance (SMTTypes idx,SMTType el) => SMTType (ArrayType idx el) where
-  getRepr = ArrayRepr getReprs getRepr
-instance IsDatatype dt => SMTType (DataType dt) where
-  getRepr = DataRepr (getDatatype Proxy)
-instance SMTTypes '[] where
-  getReprs = Nil
-instance (SMTType tp,SMTTypes tps) => SMTTypes (tp ': tps) where
-  getReprs = Cons getRepr getReprs
 
 data THType = DeterminedType Type
             | QueryType TH.ExpQ

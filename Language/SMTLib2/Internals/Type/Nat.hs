@@ -1,39 +1,16 @@
 module Language.SMTLib2.Internals.Type.Nat where
 
-import Data.Proxy
 import Data.Typeable
 import Data.Constraint
 import Data.GADT.Compare
 import Data.GADT.Show
+import Language.Haskell.TH
 
 data Nat = Z | S Nat deriving Typeable
-
-#if __GLASGOW_HASKELL__ < 710
-deriving instance Typeable 'Z
-deriving instance Typeable 'S
-#endif
-
-class Typeable n => KnownNat (n :: Nat) where
-  natVal :: p n -> Integer
-  natPred :: p n -> Pred n
-  natural :: Natural n
-
-data Pred (n::Nat) where
-   NoPred :: Pred Z
-   Pred :: KnownNat n => Proxy n -> Pred (S n)
 
 data Natural (n::Nat) where
   Zero :: Natural Z
   Succ :: Natural n -> Natural (S n)
-
-instance KnownNat Z where
-  natVal _ = 0
-  natPred _ = NoPred
-  natural = Zero
-instance KnownNat n => KnownNat (S n) where
-  natVal (_::p (S n)) = succ (natVal (Proxy::Proxy n))
-  natPred _ = Pred Proxy
-  natural = Succ natural
 
 type family (+) (n :: Nat) (m :: Nat) :: Nat where
   (+) Z n = n
@@ -83,89 +60,68 @@ instance Eq (Natural n) where
 instance Ord (Natural n) where
   compare _ _ = EQ
 
-reifyNatural :: (Num a,Ord a) => a -> (forall n. Natural n -> r) -> r
-reifyNatural n f
-  | n < 0 = error "reifyNatural: Can only reify numbers >= 0."
-  | otherwise = reify' n f
+reifyNat :: Nat -> (forall n. Natural n -> r) -> r
+reifyNat Z f = f Zero
+reifyNat (S n) f = reifyNat n $ \n' -> f (Succ n')
+
+nat :: (Num a,Ord a) => a -> ExpQ
+nat n
+  | n < 0 = error $ "nat: Can only use numbers >= 0."
+  | otherwise = nat' n
   where
-    reify' :: (Num a,Eq a) => a -> (forall n. Natural n -> r) -> r
-    reify' 0 f = f Zero
-    reify' n f = reify' (n-1) $ f.Succ
+    nat' 0 = [| Zero |]
+    nat' n = [| Succ $(nat' (n-1)) |]
 
-sameNat :: (KnownNat a,KnownNat b) => Proxy a -> Proxy b
-        -> Maybe (a :~: b)
-sameNat _ _ = eqT
+instance Eq Nat where
+  (==) Z Z = True
+  (==) (S x) (S y) = x == y
+  (==) _ _ = False
 
-gcompareNat :: (KnownNat a,KnownNat b) => Proxy a -> Proxy b -> GOrdering a b
-gcompareNat p1 p2 = case sameNat p1 p2 of
-  Just Refl -> GEQ
-  Nothing -> case compare (natVal p1) (natVal p2) of
-    LT -> GLT
-    GT -> GGT
+instance Ord Nat where
+  compare Z Z = EQ
+  compare Z _ = LT
+  compare _ Z = GT
+  compare (S x) (S y) = compare x y
 
-reifyNat :: (Num a,Ord a) => a -> (forall n. KnownNat n => Proxy n -> r) -> r
-reifyNat n f
-  | n < 0 = error "smtlib2: Can only reify numbers >= 0."
-  | otherwise = reifyNat' n f
-  where
-    reifyNat' :: (Num a,Eq a) => a -> (forall n. KnownNat n => Proxy n -> r) -> r
-    reifyNat' 0 f' = f' (Proxy::Proxy Z)
-    reifyNat' n' f' = reifyNat' (n'-1) (f'.g)
+instance Num Nat where
+  (+) Z n = n
+  (+) (S n) m = S (n + m)
+  (-) n Z = n
+  (-) (S n) (S m) = n - m
+  (-) _ _ = error $ "Cannot produce negative natural numbers."
+  (*) Z n = Z
+  (*) (S n) m = m+(n*m)
+  negate _ = error $ "Cannot produce negative natural numbers."
+  abs = id
+  signum Z = Z
+  signum (S _) = S Z
+  fromInteger x
+    | x<0 = error $ "Cannot produce negative natural numbers."
+    | otherwise = f x
+    where
+      f 0 = Z
+      f n = S (f (n-1))
 
-    g :: Proxy n -> Proxy (S n)
-    g _ = Proxy
+instance Enum Nat where
+  succ = S
+  pred (S n) = n
+  pred Z = error $ "Cannot produce negative natural numbers."
+  toEnum 0 = Z
+  toEnum n = S (toEnum (n-1))
+  fromEnum Z = 0
+  fromEnum (S n) = (fromEnum n)+1
 
-reifyAdd :: (Num a,Ord a) => a -> a -> (forall n1 n2. (KnownNat n1,KnownNat n2,KnownNat (n1 + n2))
-                                        => Proxy n1 -> Proxy n2 -> r) -> r
-reifyAdd n1 n2 f
-  | n1 < 0 || n2 < 0 = error "smtlib2: Can only reify numbers >= 0."
-  | otherwise = reifyAdd' n1 n2 f
-  where
-    reifyAdd' :: (Num a,Ord a) => a -> a
-                 -> (forall n1 n2. (KnownNat n1,KnownNat n2,KnownNat (n1 + n2))
-                     => Proxy n1 -> Proxy n2 -> r) -> r
-    reifyAdd' 0 n2' f' = reifyNat n2' $ \(_::Proxy i) -> f' (Proxy::Proxy Z) (Proxy::Proxy i)
-    reifyAdd' n1' n2' f' = reifyAdd' (n1'-1) n2' $
-                           \(_::Proxy i1) (_::Proxy i2)
-                           -> f' (Proxy::Proxy (S i1)) (Proxy::Proxy i2)
+instance Real Nat where
+  toRational Z = 0
+  toRational (S n) = (toRational n)+1
 
-reifyExtract :: (Num a,Ord a) => a -> a -> a
-             -> (forall start len size.
-                 (KnownNat start,KnownNat len,KnownNat size,
-                  ((start + len) <= size) ~ True) =>
-                 Proxy start -> Proxy len -> Proxy size -> r)
-             -> Maybe r
-reifyExtract start len sz f
-  | start < 0 || len < 0 || sz < 0 || start+len > sz = Nothing
-  | otherwise = Just $ reifyExtract' start len sz f
-  where
-    reifyExtract' :: (Num a,Ord a) => a -> a -> a
-                  -> (forall start len size.
-                      (KnownNat start,KnownNat len,KnownNat size,
-                       ((start + len) <= size) ~ True) =>
-                      Proxy start -> Proxy len -> Proxy size -> r)
-                  -> r
-    reifyExtract' 0 len sz f
-      = reifyLeq len sz $
-        \plen psz -> f (Proxy::Proxy Z) plen psz
-    reifyExtract' start len sz f
-      = reifyExtract' (start-1) len (sz-1) $
-        \(_::Proxy start) plen (_::Proxy sz)
-         -> f (Proxy::Proxy (S start)) plen (Proxy::Proxy (S sz))
-    reifyLeq :: (Num a,Ord a) => a -> a
-             -> (forall n1 n2. (KnownNat n1,KnownNat n2,(n1 <= n2) ~ True)
-                 => Proxy n1 -> Proxy n2 -> r) -> r
-    reifyLeq 0 sz f = reifyNat sz $
-                      \pr -> f (Proxy::Proxy Z) pr
-    reifyLeq len sz f = reifyLeq (len-1) (sz-1) $
-                        \(_::Proxy len) (_::Proxy sz)
-                         -> f (Proxy::Proxy (S len)) (Proxy::Proxy (S sz))
-
-deriveAdd :: (KnownNat n1,KnownNat n2) => Proxy n1 -> Proxy n2 -> Dict (KnownNat (n1 + n2))
-deriveAdd (n1::Proxy n1) (n2::Proxy n2) = reifyAdd (natVal n1) (natVal n2) $
-                  \(_::Proxy n1') (_::Proxy n2') -> case eqT of
-                     Just (Refl::n1 :~: n1') -> case eqT of
-                       Just (Refl::n2 :~: n2') -> Dict
+instance Integral Nat where
+  quotRem x y = let (q,r) = quotRem (toInteger x) (toInteger y)
+                in (fromInteger q,fromInteger r)
+  toInteger = f 0
+    where
+      f n Z = n
+      f n (S m) = f (n+1) m
 
 type N0  = Z
 type N1  = S N0

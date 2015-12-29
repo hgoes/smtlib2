@@ -1,7 +1,7 @@
 module Language.SMTLib2.Internals.Type where
 
 import Language.SMTLib2.Internals.Type.Nat
-import Language.SMTLib2.Internals.Type.List (List(..))
+import Language.SMTLib2.Internals.Type.List (List(..),reifyList)
 import qualified Language.SMTLib2.Internals.Type.List as List
 
 import Data.Proxy
@@ -111,6 +111,33 @@ class GetConType con where
 
 class GetFieldType field where
   getFieldType :: IsDatatype dt => field '(dt,tp) -> (Datatype '(DatatypeSig dt,dt),Repr tp)
+
+bool :: Repr BoolType
+bool = BoolRepr
+
+int :: Repr IntType
+int = IntRepr
+
+real :: Repr RealType
+real = RealRepr
+
+bitvec :: Natural bw -> Repr (BitVecType bw)
+bitvec = BitVecRepr
+
+array :: List Repr idx -> Repr el -> Repr (ArrayType idx el)
+array = ArrayRepr
+
+reifyType :: Type -> (forall tp. Repr tp -> a) -> a
+reifyType BoolType f = f BoolRepr
+reifyType IntType f = f IntRepr
+reifyType RealType f = f RealRepr
+reifyType (BitVecType bw) f
+  = reifyNat bw $ \bw' -> f (BitVecRepr bw')
+reifyType (ArrayType idx el) f
+  = reifyList reifyType idx $
+    \idx' -> reifyType el $
+             \el' -> f (ArrayRepr idx' el')
+reifyType (DataType _) _ = error $ "reifyType: Cannot reify user defined datatypes yet."
 
 instance GetType Repr where
   getType = id

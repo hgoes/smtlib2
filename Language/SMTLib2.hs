@@ -31,7 +31,7 @@ module Language.SMTLib2 (
   -- * Expressions
   B.Expr(),expr,(.==.),(.>=.),(.>.),(.<=.),(.<.),
   -- ** Declaring variables
-  declare,declareVar,declareVar',declareVarNamed,declareVarNamed',
+  declare,declareVar,declareVarNamed,
   -- ** Defining variables
   define,defineVar,defineVarNamed,defConst,
   -- ** Constants
@@ -56,10 +56,16 @@ module Language.SMTLib2 (
   modelEvaluate,
   -- * Types
   registerDatatype,
-  Type(..)
+  Type(..),Repr(..),reifyType,bool,int,real,bitvec,array,
+  -- ** Numbers
+  Nat(..),Natural(..),nat,reifyNat,
+  -- ** Lists
+  List(..),list,reifyList,nil,list1,list2,list3
   ) where
 
 import Language.SMTLib2.Internals.Type
+import Language.SMTLib2.Internals.Type.Nat
+import Language.SMTLib2.Internals.Type.List
 import Language.SMTLib2.Internals.Monad
 import Language.SMTLib2.Internals.Expression
 import Language.SMTLib2.Internals.Embed
@@ -128,19 +134,13 @@ defConst e = do
   v <- embedSMT $ B.defineVar Nothing e
   embedSMT $ B.toBackend (Var v)
 
-declareVar :: (B.Backend b,SMTType t) => SMT b (B.Expr b t)
-declareVar = declareVar' getRepr
-
-declareVar' :: B.Backend b => Repr t -> SMT b (B.Expr b t)
-declareVar' tp = do
+declareVar :: B.Backend b => Repr t -> SMT b (B.Expr b t)
+declareVar tp = do
   v <- embedSMT $ B.declareVar tp Nothing
   embedSMT $ B.toBackend (Var v)
 
-declareVarNamed :: (B.Backend b,SMTType t) => String -> SMT b (B.Expr b t)
-declareVarNamed = declareVarNamed' getRepr
-
-declareVarNamed' :: B.Backend b => Repr t -> String -> SMT b (B.Expr b t)
-declareVarNamed' tp name = do
+declareVarNamed :: B.Backend b => Repr t -> String -> SMT b (B.Expr b t)
+declareVarNamed tp name = do
   v <- embedSMT $ B.declareVar tp (Just name)
   embedSMT $ B.toBackend (Var v)
 
@@ -185,7 +185,7 @@ getExpr e = do
   st <- get
   return $ B.fromBackend (backend st) e
 
-(.==.) :: (B.Backend b,SMTType t) => B.Expr b t -> B.Expr b t -> SMT b (B.Expr b BoolType)
+(.==.) :: (B.Backend b) => B.Expr b t -> B.Expr b t -> SMT b (B.Expr b BoolType)
 (.==.) lhs rhs = [expr| (= lhs rhs) |]
 
 (.<=.),(.<.),(.>=.),(.>.) :: (B.Backend b,SMTOrd t) => B.Expr b t -> B.Expr b t -> SMT b (B.Expr b BoolType)

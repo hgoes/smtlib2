@@ -203,7 +203,7 @@ genFunction tp ctx = oneof [ gen | Just gen <- [genFun
                   ,do
                       op <- elements [BVULE,BVULT,BVUGE,BVUGT,BVSLE,BVSLT,BVSGE,BVSGT]
                       sz <- arbitrarySizedNatural
-                      reifyNatural (sz::Integer) $
+                      reifyNat sz $
                         \bw -> return $ AnyFunction (BVComp op bw)
                   ,do
                       AnyTypes idx <- genTypes
@@ -267,7 +267,7 @@ genType = sized $ \sz -> oneof $ [return $ AnyType BoolRepr
                                  ,return $ AnyType RealRepr
                                  ,do
                                      sz <- arbitrarySizedNatural
-                                     reifyNatural sz $ \bw -> return $ AnyType (BitVecRepr bw)]++
+                                     reifyNat sz $ \bw -> return $ AnyType (BitVecRepr bw)]++
                          (if sz>0
                           then [do
                                    AnyTypes tps <- resize (sz `div` 2) genTypes
@@ -286,7 +286,7 @@ genTypes = sized $ \len -> gen' len
       return $ AnyTypes (Cons tp tps)
 
 genNatural :: Gen AnyNatural
-genNatural = sized $ \len -> reifyNatural len (return.AnyNatural)
+genNatural = sized $ \len -> reifyNat (fromIntegral len) (return.AnyNatural)
 
 withAllEqLen :: Repr tp -> Int
              -> (forall tps. List Repr (tp ': tps) -> a)
