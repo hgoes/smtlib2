@@ -32,4 +32,4 @@ install:
   - travis_retry cabal update
   - cabal install --only-dependencies --enable-tests --enable-benchmarks . ./extras/quickcheck ./backends/pipe ./backends/debug ./backends/timing
 script:
-  - cabal install --enable-tests -v1 . ./extras/quickcheck ./backends/pipe ./backends/debug ./backends/timing
+  - cabal install --enable-tests -v2 . ./extras/quickcheck ./backends/pipe ./backends/debug ./backends/timing
