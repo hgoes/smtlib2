@@ -1,4 +1,3 @@
-{-# LANGUAGE StandaloneDeriving #-}
 module Language.SMTLib2.Internals.Type.Nat where
 
 import Data.Proxy

@@ -1,4 +1,3 @@
-{-# LANGUAGE TemplateHaskell,QuasiQuotes #-}
 {- | Example usage: This program tries to find two numbers greater than zero which sum up to 5.
 
      @

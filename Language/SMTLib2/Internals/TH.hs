@@ -1,4 +1,3 @@
-{-# LANGUAGE TemplateHaskell,ViewPatterns #-}
 module Language.SMTLib2.Internals.TH where
 
 import Language.SMTLib2.Internals.Type

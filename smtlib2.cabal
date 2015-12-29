@@ -16,10 +16,29 @@ Source-Repository head
 
 Library
   Build-Depends: base >=4 && <5, constraints, mtl, containers, template-haskell, haskell-src-meta, dependent-sum, dependent-map
-  Extensions: GADTs,FlexibleContexts,FlexibleInstances,ExistentialQuantification,KindSignatures,DataKinds,TypeFamilies,AllowAmbiguousTypes,TypeOperators,MultiParamTypeClasses,ScopedTypeVariables,RankNTypes,UndecidableInstances,GeneralizedNewtypeDeriving,DeriveDataTypeable,CPP,PolyKinds,StandaloneDeriving,EmptyDataDecls,PatternSynonyms,ViewPatterns
-  if impl(ghc < 7.10) {
-    Extensions: PolyKinds,StandaloneDeriving
-  }
+  Extensions:
+             GADTs
+             FlexibleContexts
+             FlexibleInstances
+             ExistentialQuantification
+             KindSignatures
+             DataKinds
+             TypeFamilies
+             TypeOperators
+             MultiParamTypeClasses
+             ScopedTypeVariables
+             RankNTypes
+             UndecidableInstances
+             GeneralizedNewtypeDeriving
+             DeriveDataTypeable
+             CPP
+             PolyKinds
+             StandaloneDeriving
+             EmptyDataDecls
+             PatternSynonyms
+             ViewPatterns
+             TemplateHaskell
+             QuasiQuotes
   GHC-Options: -fwarn-unused-imports
   Exposed-Modules:
                   Language.SMTLib2.Internals.Backend
@@ -33,5 +52,4 @@ Library
                   Language.SMTLib2.Internals.TH
                   Language.SMTLib2.Strategy
                   Language.SMTLib2
-                  --Language.SMTLib2.LowLevel
                   Language.SMTLib2.Internals.Evaluate
