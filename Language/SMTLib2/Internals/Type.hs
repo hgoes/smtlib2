@@ -19,18 +19,6 @@ data Type = BoolType
           | forall a. DataType a
           deriving Typeable
 
-#if __GLASGOW_HASKELL__ < 710
-deriving instance Typeable 'BoolType
-deriving instance Typeable 'IntType
-deriving instance Typeable 'RealType
-deriving instance Typeable 'BitVecType
-deriving instance Typeable 'ArrayType
-deriving instance Typeable 'DataType
-
-deriving instance Typeable ('[])
-deriving instance Typeable (':)
-#endif
-
 type family Lifted (tps :: [Type]) (idx :: [Type]) :: [Type] where
   Lifted '[] idx = '[]
   Lifted (tp ': tps) idx = (ArrayType idx tp) ': Lifted tps idx
