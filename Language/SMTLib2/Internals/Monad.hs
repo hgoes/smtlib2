@@ -12,6 +12,7 @@ import Data.GADT.Show
 import Data.Dependent.Map (DMap)
 import qualified Data.Dependent.Map as Map
 import Control.Exception (onException)
+import Control.Applicative
 
 newtype Backend b => SMT b a = SMT { runSMT :: StateT (SMTState b) (SMTMonad b) a }
 
