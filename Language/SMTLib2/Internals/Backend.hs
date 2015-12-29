@@ -135,17 +135,19 @@ data SMTInfo i where
   SMTSolverName :: SMTInfo String
   SMTSolverVersion :: SMTInfo String
 
-data UntypedVar v (t :: Type) where
-  UntypedVar :: v -> Repr t -> UntypedVar v t
+data UntypedVar v (t :: Type) = UntypedVar v (Repr t) deriving Typeable
  
 data UntypedFun v (sig::([Type],Type)) where
   UntypedFun :: v -> List Repr arg -> Repr ret -> UntypedFun v '(arg,ret)
+  deriving Typeable
 
 data UntypedCon v (sig::([Type],*)) where
   UntypedCon :: IsDatatype dt => v -> List Repr arg -> Proxy dt -> UntypedCon v '(arg,dt)
+  deriving Typeable
 
 data UntypedField v (sig::(*,Type)) where
   UntypedField :: (IsDatatype dt) => v -> Proxy dt -> Repr t -> UntypedField v '(dt,t)
+  deriving Typeable
 
 data RenderedSubExpr t = RenderedSubExpr (Int -> ShowS)
 
