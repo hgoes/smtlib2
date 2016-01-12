@@ -42,11 +42,7 @@ liftTypeRepr IntType = [| IntRepr |]
 liftTypeRepr RealType = [| RealRepr |]
 liftTypeRepr (BitVecType bw) = [| BitVecRepr $(liftNat bw) |]
 liftTypeRepr (ArrayType idx el)
-  = [| ArrayRepr $(toArgs $ fmap liftTypeRepr idx) $(liftTypeRepr el) |]
-  where
-    toArgs :: [TH.ExpQ] -> TH.ExpQ
-    toArgs [] = [| Nil |]
-    toArgs (x:xs) = [| Cons $(x) $(toArgs xs) |]
+  = [| ArrayRepr $(liftList $ fmap liftTypeRepr idx) $(liftTypeRepr el) |]
 
 liftType' :: Type -> TH.TypeQ
 liftType' BoolType = [t| 'BoolType |]
@@ -59,6 +55,10 @@ liftType' (ArrayType idx el)
     toArgs :: [TH.TypeQ] -> TH.TypeQ
     toArgs [] = [t| '[] |]
     toArgs (x:xs) = [t| ( '(:) ) $(x) $(toArgs xs) |]
+
+liftList :: [TH.ExpQ] -> TH.ExpQ
+liftList [] = [| Nil |]
+liftList (x:xs) = [| Cons $(x) $(liftList xs) |]
 
 liftTHType :: THType -> TH.ExpQ
 liftTHType (DeterminedType tp) = liftTypeRepr tp
@@ -299,7 +299,25 @@ toFunction (Atom "store")
                     Left tps -> liftTHTypes (fmap DeterminedType tps)
                     Right q -> q)
            $(liftTHType $ thElementType arr) |]
-
+toFunction (List [Atom "as",Atom "const",List [Atom "Array",List idx,el]])
+  = THFun { deriveFunctionType = \_ -> (Just [Just elTp],Just arrTp)
+          , getSymbol = \_ -> [| ConstArray $(liftList $ fmap liftTHType idxTps)
+                                 $(liftTHType elTp) |]
+          , allEqSymbol = error "Cannot apply constant array function to list."
+          , match = [p| ConstArray _ _ |] }
+  where
+    idxTps = fmap toType idx
+    elTp = toType el
+    qarrTp = [| ArrayRepr $(liftList $ fmap liftTHType idxTps)
+                $(liftTHType elTp) |]
+                
+    arrTp = case mapM (\tp -> case tp of
+                        DeterminedType tp' -> Just tp'
+                        _ -> Nothing) idxTps of
+            Just idx' -> case elTp of
+              DeterminedType el' -> DeterminedType (ArrayType idx' el')
+              _ -> QueryType qarrTp
+            Nothing -> QueryType qarrTp
 
 toOrd :: TH.Name -> THFunction
 toOrd name = THFun { deriveFunctionType = \(args,_)

@@ -2,10 +2,17 @@ module Language.SMTLib2.Internals.Type.List where
 
 import Language.SMTLib2.Internals.Type.Nat
 
-import Prelude hiding (length,mapM,insert)
+import Prelude hiding (head,tail,length,mapM,insert,drop,take,last,reverse,map)
 import Data.GADT.Compare
 import Data.GADT.Show
 import Language.Haskell.TH
+import Data.Proxy
+
+type family Head (lst :: [a]) :: a where
+  Head (x ': xs) = x
+
+type family Tail (lst :: [a]) :: [a] where
+  Tail (x ': xs) = xs
 
 type family Index (lst :: [a]) (idx :: Nat) :: a where
   Index (x ': xs) Z = x
@@ -26,6 +33,34 @@ type family Append (lst :: [a]) (el :: a) :: [a] where
 type family Length (lst :: [a]) :: Nat where
   Length '[] = Z
   Length (x ': xs) = S (Length xs)
+
+type family Drop (lst :: [a]) (i :: Nat) :: [a] where
+  Drop lst Z = lst
+  Drop (x ': xs) (S n) = Drop xs n
+
+type family Take (lst :: [a]) (i :: Nat) :: [a] where
+  Take xs Z = '[]
+  Take (x ': xs) (S n) = x ': (Take xs n)
+
+type family StripPrefix (lst :: [a]) (pre :: [a]) :: [a] where
+  StripPrefix xs '[] = xs
+  StripPrefix (x ': xs) (x ': ys) = StripPrefix xs ys
+
+type family Last (lst :: [a]) :: a where
+  Last '[x] = x
+  Last (x ': y ': rest) = Last (y ': rest)
+
+type family DropLast (lst :: [a]) :: [a] where
+  DropLast '[x] = '[]
+  DropLast (x ': y ': rest) = x ': (DropLast (y ': rest))
+
+type family Reverse (lst :: [a]) :: [a] where
+  Reverse '[] = '[]
+  Reverse (x ': xs) = Append (Reverse xs) x
+
+type family Map (lst :: [a]) (f :: a -> b) :: [b] where
+  Map '[] f = '[]
+  Map (x ': xs) f = (f x) ': (Map xs f)
 
 data List e (tp :: [a]) where
   Nil :: List e '[]
@@ -53,13 +88,31 @@ reifyList :: (forall r'. a -> (forall tp. e tp -> r') -> r')
 reifyList _ [] g = g Nil
 reifyList f (x:xs) g = f x $ \x' -> reifyList f xs $ \xs' -> g (Cons x' xs')
 
-access :: Monad m => List e lst -> Natural idx -> (e (Index lst idx) -> m (a,e tp)) -> m (a,List e (Insert lst idx tp))
+access :: Monad m => List e lst -> Natural idx
+       -> (e (Index lst idx) -> m (a,e tp))
+       -> m (a,List e (Insert lst idx tp))
 access (Cons x xs) Zero f = do
   (res,nx) <- f x
   return (res,Cons nx xs)
 access (Cons x xs) (Succ n) f = do
   (res,nxs) <- access xs n f
   return (res,Cons x nxs)
+
+access' :: Monad m => List e lst -> Natural idx
+        -> (e (Index lst idx) -> m (a,e (Index lst idx)))
+        -> m (a,List e lst)
+access' (Cons x xs) Zero f = do
+  (res,nx) <- f x
+  return (res,Cons nx xs)
+access' (Cons x xs) (Succ n) f = do
+  (res,nxs) <- access' xs n f
+  return (res,Cons x nxs)
+
+head :: List e lst -> e (Head lst)
+head (Cons x xs) = x
+
+tail :: List e lst -> List e (Tail lst)
+tail (Cons x xs) = xs
 
 index :: List e lst -> Natural idx -> e (Index lst idx)
 index (Cons x xs) Zero = x
@@ -99,6 +152,56 @@ append (Cons x xs) y = Cons x (append xs y)
 length :: List e lst -> Natural (Length lst)
 length Nil = Zero
 length (Cons _ xs) = Succ (length xs)
+
+drop :: List e lst -> Natural i -> List e (Drop lst i)
+drop xs Zero = xs
+drop (Cons x xs) (Succ n) = drop xs n
+
+take :: List e lst -> Natural i -> List e (Take lst i)
+take xs Zero = Nil
+take (Cons x xs) (Succ n) = Cons x (take xs n)
+
+last :: List e lst -> e (Last lst)
+last (Cons x Nil) = x
+last (Cons x (Cons y rest)) = last (Cons y rest)
+
+dropLast :: List e lst -> List e (DropLast lst)
+dropLast (Cons _ Nil) = Nil
+dropLast (Cons x (Cons y rest)) = Cons x (dropLast (Cons y rest))
+
+stripPrefix :: GEq e => List e lst -> List e pre -> Maybe (List e (StripPrefix lst pre))
+stripPrefix xs Nil = Just xs
+stripPrefix (Cons x xs) (Cons y ys)
+  = case geq x y of
+  Just Refl -> stripPrefix xs ys
+  Nothing -> Nothing
+
+reverse :: List e lst -> List e (Reverse lst)
+reverse Nil = Nil
+reverse (Cons x xs) = append (reverse xs) x
+
+map :: List e lst -> (forall x. e x -> e (f x)) -> List e (Map lst f)
+map Nil _ = Nil
+map (Cons x xs) f = Cons (f x) (map xs f)
+
+unmap :: List p lst -> List e (Map lst f) -> (forall x. e (f x) -> e x) -> List e lst
+unmap Nil Nil _ = Nil
+unmap (Cons _ tps) (Cons x xs) f = Cons (f x) (unmap tps xs f)
+
+unmapM :: Monad m => List p lst -> List e (Map lst f)
+       -> (forall x. e (f x) -> m (e x)) -> m (List e lst)
+unmapM Nil Nil _ = return Nil
+unmapM (Cons _ tps) (Cons x xs) f = do
+  x' <- f x
+  xs' <- unmapM tps xs f
+  return $ Cons x' xs'
+
+mapM' :: Monad m => List e lst -> (forall x. e x -> m (e (f x))) -> m (List e (Map lst f))
+mapM' Nil _ = return Nil
+mapM' (Cons x xs) f = do
+  x' <- f x
+  xs' <- mapM' xs f
+  return (Cons x' xs')
 
 toList :: Monad m => (forall x. e x -> m a) -> List e lst -> m [a]
 toList f Nil = return []

@@ -271,6 +271,9 @@ instance GEq Repr where
         return Refl
   geq _ _ = Nothing
 
+instance Eq (Repr tp) where
+  (==) _ _ = True
+
 instance GEq NumRepr where
   geq NumInt NumInt = Just Refl
   geq NumReal NumReal = Just Refl
@@ -314,6 +317,9 @@ instance GCompare Repr where
         Nothing -> if datatypeName dt1 < datatypeName dt2
                    then GLT
                    else GGT
+
+instance Ord (Repr tp) where
+  compare _ _ = EQ
 
 instance GCompare NumRepr where
   gcompare NumInt NumInt = GEQ

@@ -25,10 +25,6 @@ type family (<=) (n :: Nat) (m :: Nat) :: Bool where
   (<=) (S n) Z = False
   (<=) (S n) (S m) = (<=) n m
 
-type family Sum (n :: [Nat]) :: Nat where
-  Sum '[] = Z
-  Sum (a ': b) = a + (Sum b)
-
 naturalToInteger :: Natural n -> Integer
 naturalToInteger = conv 0
   where
@@ -43,6 +39,12 @@ naturalAdd (Succ x) y = Succ (naturalAdd x y)
 naturalSub :: Natural (n + m) -> Natural n -> Natural m
 naturalSub n Zero = n
 naturalSub (Succ sum) (Succ n) = naturalSub sum n
+
+naturalSub' :: Natural n -> Natural m
+            -> (forall diff. ((m + diff) ~ n) => Natural diff -> a)
+            -> a
+naturalSub' n Zero f = f n
+naturalSub' (Succ sum) (Succ n) f = naturalSub' sum n f
 
 naturalLEQ :: Natural n -> Natural m -> Maybe (Dict ((n <= m) ~ True))
 naturalLEQ Zero _ = Just Dict

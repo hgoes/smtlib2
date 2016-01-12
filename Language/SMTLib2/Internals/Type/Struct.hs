@@ -39,6 +39,16 @@ type family Size (struct :: Tree a) :: Nat where
   Size (Node '[]) = Z
   Size (Node (x ': xs)) = (Size x) + (Size (Node xs))
 
+access :: Monad m => Struct e tp -> List Natural idx
+       -> (e (ElementIndex tp idx) -> m (a,e (ElementIndex tp idx)))
+       -> m (a,Struct e tp)
+access (Singleton x) Nil f = do
+  (res,nx) <- f x
+  return (res,Singleton nx)
+access (Struct xs) (Cons n ns) f = do
+  (res,nxs) <- List.access' xs n (\x -> access x ns f)
+  return (res,Struct nxs)
+
 accessElement :: Monad m => Struct e tp -> List Natural idx
               -> (e (ElementIndex tp idx) -> m (a,e ntp))
               -> m (a,Struct e (Insert tp idx (Leaf ntp)))
