@@ -176,66 +176,73 @@ instance SMTArith RealType where
   mult = Arith NumReal Mult
   abs' = Abs NumReal
 
-functionType :: (forall arg t. fun '(arg,t) -> (List Repr arg,Repr t))
+functionType :: Monad m
+             => (forall arg t. fun '(arg,t) -> m (List Repr arg,Repr t))
              -> (forall arg dt. IsDatatype dt => con '(arg,dt)
-                 -> (List Repr arg,Datatype '(DatatypeSig dt,dt)))
+                 -> m (List Repr arg,Datatype '(DatatypeSig dt,dt)))
              -> (forall dt t. IsDatatype dt => field '(dt,t)
-                 -> (Datatype '(DatatypeSig dt,dt),Repr t))
+                 -> m (Datatype '(DatatypeSig dt,dt),Repr t))
              -> Function fun con field '(arg,res)
-             -> (List Repr arg,Repr res)
+             -> m (List Repr arg,Repr res)
 functionType f _ _ (Fun fun) = f fun
-functionType _ _ _ (Eq tp n) = (allEqOf tp n,BoolRepr)
-functionType _ _ _ (Distinct tp n) = (allEqOf tp n,BoolRepr)
-functionType f g h (Map idx fun) = let (arg,res) = functionType f g h fun
-                                   in (liftType arg idx,ArrayRepr idx res)
-functionType _ _ _ (Ord tp _) = (Cons (numRepr tp) (Cons (numRepr tp) Nil),BoolRepr)
-functionType _ _ _ (Arith tp _ n) = (allEqOf (numRepr tp) n,numRepr tp)
-functionType _ _ _ (ArithIntBin _) = (Cons IntRepr (Cons IntRepr Nil),IntRepr)
-functionType _ _ _ Divide = (Cons RealRepr (Cons RealRepr Nil),RealRepr)
-functionType _ _ _ (Abs tp) = (Cons (numRepr tp) Nil,numRepr tp)
-functionType _ _ _ Not = (Cons BoolRepr Nil,BoolRepr)
-functionType _ _ _ (Logic op n) = (allEqOf BoolRepr n,BoolRepr)
-functionType _ _ _ ToReal = (Cons IntRepr Nil,RealRepr)
-functionType _ _ _ ToInt = (Cons RealRepr Nil,IntRepr)
-functionType _ _ _ (ITE tp) = (Cons BoolRepr (Cons tp (Cons tp Nil)),tp)
-functionType _ _ _ (BVComp _ n) = (Cons (BitVecRepr n) (Cons (BitVecRepr n) Nil),BoolRepr)
-functionType _ _ _ (BVBin _ n) = (Cons (BitVecRepr n) (Cons (BitVecRepr n) Nil),BitVecRepr n)
-functionType _ _ _ (BVUn _ n) = (Cons (BitVecRepr n) Nil,BitVecRepr n)
-functionType _ _ _ (Select idx el) = (Cons (ArrayRepr idx el) idx,el)
-functionType _ _ _ (Store idx el) = (Cons (ArrayRepr idx el) (Cons el idx),ArrayRepr idx el)
-functionType _ _ _ (ConstArray idx el) = (Cons el Nil,ArrayRepr idx el)
-functionType _ _ _ (Concat bw1 bw2) = (Cons (BitVecRepr bw1) (Cons (BitVecRepr bw2) Nil),
-                                       BitVecRepr (naturalAdd bw1 bw2))
-functionType _ _ _ (Extract bw start len) = (Cons (BitVecRepr bw) Nil,BitVecRepr len)
-functionType _ f _ (Constructor con) = let (tps,dt) = f con
-                                       in (tps,DataRepr dt)
-functionType _ f _ (Test con) = let (_,dt) = f con
-                                in (Cons (DataRepr dt) Nil,BoolRepr)
-functionType _ _ f (Field field) = let (dt,tp) = f field
-                                   in (Cons (DataRepr dt) Nil,tp)
-functionType _ _ _ (Divisible _) = (Cons IntRepr Nil,BoolRepr)
+functionType _ _ _ (Eq tp n) = return (allEqOf tp n,BoolRepr)
+functionType _ _ _ (Distinct tp n) = return (allEqOf tp n,BoolRepr)
+functionType f g h (Map idx fun) = do
+  (arg,res) <- functionType f g h fun
+  return (liftType arg idx,ArrayRepr idx res)
+functionType _ _ _ (Ord tp _) = return (Cons (numRepr tp) (Cons (numRepr tp) Nil),BoolRepr)
+functionType _ _ _ (Arith tp _ n) = return (allEqOf (numRepr tp) n,numRepr tp)
+functionType _ _ _ (ArithIntBin _) = return (Cons IntRepr (Cons IntRepr Nil),IntRepr)
+functionType _ _ _ Divide = return (Cons RealRepr (Cons RealRepr Nil),RealRepr)
+functionType _ _ _ (Abs tp) = return (Cons (numRepr tp) Nil,numRepr tp)
+functionType _ _ _ Not = return (Cons BoolRepr Nil,BoolRepr)
+functionType _ _ _ (Logic op n) = return (allEqOf BoolRepr n,BoolRepr)
+functionType _ _ _ ToReal = return (Cons IntRepr Nil,RealRepr)
+functionType _ _ _ ToInt = return (Cons RealRepr Nil,IntRepr)
+functionType _ _ _ (ITE tp) = return (Cons BoolRepr (Cons tp (Cons tp Nil)),tp)
+functionType _ _ _ (BVComp _ n) = return (Cons (BitVecRepr n) (Cons (BitVecRepr n) Nil),BoolRepr)
+functionType _ _ _ (BVBin _ n) = return (Cons (BitVecRepr n) (Cons (BitVecRepr n) Nil),BitVecRepr n)
+functionType _ _ _ (BVUn _ n) = return (Cons (BitVecRepr n) Nil,BitVecRepr n)
+functionType _ _ _ (Select idx el) = return (Cons (ArrayRepr idx el) idx,el)
+functionType _ _ _ (Store idx el) = return (Cons (ArrayRepr idx el) (Cons el idx),ArrayRepr idx el)
+functionType _ _ _ (ConstArray idx el) = return (Cons el Nil,ArrayRepr idx el)
+functionType _ _ _ (Concat bw1 bw2) = return (Cons (BitVecRepr bw1) (Cons (BitVecRepr bw2) Nil),
+                                              BitVecRepr (naturalAdd bw1 bw2))
+functionType _ _ _ (Extract bw start len) = return (Cons (BitVecRepr bw) Nil,BitVecRepr len)
+functionType _ f _ (Constructor con) = do
+  (tps,dt) <- f con
+  return (tps,DataRepr dt)
+functionType _ f _ (Test con) = do
+  (_,dt) <- f con
+  return (Cons (DataRepr dt) Nil,BoolRepr)
+functionType _ _ f (Field field) = do
+  (dt,tp) <- f field
+  return (Cons (DataRepr dt) Nil,tp)
+functionType _ _ _ (Divisible _) = return (Cons IntRepr Nil,BoolRepr)
 
-expressionType :: (forall t. v t -> Repr t)
-               -> (forall t. qv t -> Repr t)
-               -> (forall arg t. fun '(arg,t) -> (List Repr arg,Repr t))
+expressionType :: Monad m
+               => (forall t. v t -> m (Repr t))
+               -> (forall t. qv t -> m (Repr t))
+               -> (forall arg t. fun '(arg,t) -> m (List Repr arg,Repr t))
                -> (forall arg dt. IsDatatype dt => con '(arg,dt)
-                   -> (List Repr arg,Datatype '(DatatypeSig dt,dt)))
+                   -> m (List Repr arg,Datatype '(DatatypeSig dt,dt)))
                -> (forall dt t. IsDatatype dt => field '(dt,t)
-                   -> (Datatype '(DatatypeSig dt,dt),Repr t))
-               -> (forall t. fv t -> Repr t)
-               -> (forall t. lv t -> Repr t)
-               -> (forall t. e t -> Repr t)
+                   -> m (Datatype '(DatatypeSig dt,dt),Repr t))
+               -> (forall t. fv t -> m (Repr t))
+               -> (forall t. lv t -> m (Repr t))
+               -> (forall t. e t -> m (Repr t))
                -> Expression v qv fun con field fv lv e res
-               -> Repr res
+               -> m (Repr res)
 expressionType f _ _ _ _ _ _ _ (Var v) = f v
 expressionType _ f _ _ _ _ _ _ (QVar v) = f v
 expressionType _ _ _ _ _ f _ _ (FVar v) = f v
 expressionType _ _ _ _ _ _ f _ (LVar v) = f v
-expressionType _ _ f g h _ _ _ (App fun arg) = snd $ functionType f g h fun
-expressionType _ _ _ _ _ _ _ _ (Const v) = valueType v
-expressionType _ _ f g h _ _ _ (AsArray fun) = let (arg,res) = functionType f g h fun
-                                               in ArrayRepr arg res
-expressionType _ _ _ _ _ _ _ _ (Quantification _ _ _) = BoolRepr
+expressionType _ _ f g h _ _ _ (App fun arg) = fmap snd $ functionType f g h fun
+expressionType _ _ _ _ _ _ _ _ (Const v) = return $ valueType v
+expressionType _ _ f g h _ _ _ (AsArray fun) = do
+  (arg,res) <- functionType f g h fun
+  return $ ArrayRepr arg res
+expressionType _ _ _ _ _ _ _ _ (Quantification _ _ _) = return BoolRepr
 expressionType _ _ _ _ _ _ _ f (Let _ body) = f body
 
 mapExpr :: (Functor m,Monad m,Typeable con2)
@@ -888,9 +895,11 @@ instance GetFieldType NoField where
 instance (GetType v,GetType qv,GetFunType fun,GetConType con,
           GetFieldType field,GetType fv,GetType lv,GetType e)
          => GetType (Expression v qv fun con field fv lv e) where
-  getType = expressionType getType getType getFunType getConType getFieldType
-            getType getType getType
+  getType = runIdentity . expressionType
+            (return.getType) (return.getType) (return.getFunType) (return.getConType) (return.getFieldType)
+            (return.getType) (return.getType) (return.getType)
 
 instance (GetFunType fun,GetConType con,GetFieldType field)
          => GetFunType (Function fun con field) where
-  getFunType = functionType getFunType getConType getFieldType
+  getFunType = runIdentity . functionType
+               (return.getFunType) (return.getConType) (return.getFieldType)
