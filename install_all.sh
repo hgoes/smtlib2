@@ -1,7 +1,7 @@
 #!/bin/bash
 
-BACKENDS="debug timing boolector stp yices"
-EXTRAS="th views"
+BACKENDS="z3 mathsat pipe debug timing"
+EXTRAS="emulated-modulus"
 INSTALL="cabal install --disable-documentation --force-reinstalls"
 
 $INSTALL
