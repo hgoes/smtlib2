@@ -61,12 +61,12 @@ liftList [] = [| Nil |]
 liftList (x:xs) = [| Cons $(x) $(liftList xs) |]
 
 liftTHType :: THType -> TH.ExpQ
-liftTHType (DeterminedType tp) = liftTypeRepr tp
+liftTHType (DeterminedType tp) = [| return $(liftTypeRepr tp) |]
 liftTHType (QueryType q) = q
 
 liftTHTypes :: [THType] -> TH.ExpQ
-liftTHTypes [] = [| Nil |]
-liftTHTypes (tp:tps) = [| Cons $(liftTHType tp) $(liftTHTypes tps) |]
+liftTHTypes [] = [| return Nil |]
+liftTHTypes (tp:tps) = [| liftM2 Cons $(liftTHType tp) $(liftTHTypes tps) |]
 
 liftNumType :: Type -> TH.ExpQ
 liftNumType IntType = [| NumInt |]
@@ -111,10 +111,8 @@ toFunction (Atom "=")
                                           tp:_ -> fmap (const (Just (DeterminedType tp))) tps,
                                      Just (DeterminedType BoolType))
           , getSymbol = \(args,_) -> case args of
-            Just xs@((Just (DeterminedType tp)):_)
-              -> [| Eq $(liftTypeRepr tp) $(liftNat $ natLength xs) |]
-            Just xs@((Just (QueryType q)):_)
-              -> [| Eq $(q) $(liftNat $ natLength xs) |]
+            Just xs@((Just tp):_)
+              -> [| $(liftTHType tp) >>= \rtp -> return $ Eq rtp $(liftNat $ natLength xs) |]
           , allEqSymbol = [| eq' |]
           , match = [p| Eq _ _ |] }
 toFunction (Atom "distinct")
@@ -128,10 +126,8 @@ toFunction (Atom "distinct")
                                           tp:_ -> fmap (const (Just (DeterminedType tp))) tps,
                                      Just (DeterminedType BoolType))
           , getSymbol = \(args,_) -> case args of
-            Just xs@((Just (DeterminedType tp)):_)
-              -> [| Eq $(liftTypeRepr tp) $(liftNat $ natLength xs) |]
-            Just xs@((Just (QueryType q)):_)
-              -> [| Eq $(q) $(liftNat $ natLength xs) |]
+            Just xs@((Just tp):_)
+              -> [| $(liftTHType tp) >>= \rtp -> return $ Distinct rtp $(liftNat $ natLength xs) |]
           , allEqSymbol = [| distinct' |]
           , match = [p| Distinct _ _ |] }
 toFunction (List [Atom "map",fun])
@@ -184,9 +180,10 @@ toFunction (List [Atom "map",fun])
                         ftp = case tp of
                           Nothing -> Nothing
                           Just tp' -> Just $ thElementType tp'
-                    in [| Map $(case idx of
-                                 Left idx' -> liftTHTypes (fmap DeterminedType idx')
-                                 Right q -> q)
+                    in [| liftM2 Map
+                          $(case idx of
+                             Left idx' -> liftTHTypes (fmap DeterminedType idx')
+                             Right q -> q)
                           $(getSymbol rfun (fargs,ftp)) |]
 toFunction (Atom "<=") = toOrd 'Le
 toFunction (Atom "<") = toOrd 'Lt
@@ -201,7 +198,7 @@ toFunction (Atom "rem") = toArithBin 'Rem
 toFunction (Atom "/") = THFun { deriveFunctionType = const (Just [Just (DeterminedType RealType)
                                                                  ,Just (DeterminedType RealType)],
                                                             Just (DeterminedType RealType))
-                              , getSymbol = const [| Divide |]
+                              , getSymbol = const [| return Divide |]
                               , allEqSymbol = error "Cannot apply / function to list."
                               , match = [p| Divide |] }
 toFunction (Atom "abs")
@@ -215,16 +212,16 @@ toFunction (Atom "abs")
               Just tp -> (Just [Just tp],Just tp)
               Nothing -> (Just [Nothing],Nothing)
           , getSymbol = \(_,rtp) -> case rtp of
-            Just (DeterminedType IntType) -> [| Abs NumInt |]
-            Just (DeterminedType RealType) -> [| Abs NumReal |]
-            Just (QueryType q) -> [| Abs (case asNumRepr $(q) of
-                                           Just r -> r) |]
+            Just (DeterminedType IntType) -> [| return $ Abs NumInt |]
+            Just (DeterminedType RealType) -> [| return $ Abs NumReal |]
+            Just (QueryType q) -> [| $(q) >>= \repr -> return $ Abs (case asNumRepr repr of
+                                                                      Just r -> r) |]
           , allEqSymbol = error "Cannot apply abs function to list."
           , match = [p| Abs _ |] }
 toFunction (Atom "not")
   = THFun { deriveFunctionType = \_ -> (Just [Just $ DeterminedType BoolType],
                                         Just (DeterminedType BoolType))
-          , getSymbol = const [| Not |]
+          , getSymbol = const [| return Not |]
           , allEqSymbol = error "Cannot apply not function to list."
           , match = [p| Not |] }
 toFunction (Atom "and") = toLogic 'And
@@ -234,13 +231,13 @@ toFunction (Atom "=>") = toLogic 'Implies
 toFunction (Atom "to_real")
   = THFun { deriveFunctionType = \_ -> (Just [Just $ DeterminedType IntType],
                                         Just (DeterminedType RealType))
-          , getSymbol = const [| ToReal |]
+          , getSymbol = const [| return ToReal |]
           , allEqSymbol = error "Cannot apply to-real function to list."
           , match = [p| ToReal |] }
 toFunction (Atom "to_int")
   = THFun { deriveFunctionType = \_ -> (Just [Just $ DeterminedType RealType],
                                         Just (DeterminedType IntType))
-          , getSymbol = const [| ToInt |]
+          , getSymbol = const [| return ToInt |]
           , allEqSymbol = error "Cannot apply to-int function to list."
           , match = [p| ToInt |] }
 toFunction (Atom "ite")
@@ -262,7 +259,7 @@ toFunction (Atom "ite")
                                [] -> rtp
                        in (Just [Just $ DeterminedType BoolType
                                 ,res,res],res)
-    sym (_,Just rtp) = [| ITE $(liftTHType rtp) |]
+    sym (_,Just rtp) = [| fmap ITE $(liftTHType rtp) |]
 toFunction (Atom "select")
   = THFun { deriveFunctionType = deriv
           , getSymbol = sym
@@ -277,9 +274,9 @@ toFunction (Atom "select")
         _ -> (args,rtp)
       _ -> (args,rtp)
     sym (Just (Just arr:_),_)
-      = [| Select $(case thIndexType arr of
-                     Left tps -> liftTHTypes (fmap DeterminedType tps)
-                     Right q -> q)
+      = [| liftM2 Select $(case thIndexType arr of
+                            Left tps -> liftTHTypes (fmap DeterminedType tps)
+                            Right q -> q)
            $(liftTHType $ thElementType arr) |]
 toFunction (Atom "store")
   = THFun { deriveFunctionType = deriv
@@ -295,13 +292,15 @@ toFunction (Atom "store")
         _ -> (args,rtp)
       _ -> (args,rtp)
     sym (Just (Just arr:_),_)
-      = [| Store $(case thIndexType arr of
-                    Left tps -> liftTHTypes (fmap DeterminedType tps)
-                    Right q -> q)
+      = [| liftM2 Store
+           $(case thIndexType arr of
+              Left tps -> liftTHTypes (fmap DeterminedType tps)
+              Right q -> q)
            $(liftTHType $ thElementType arr) |]
 toFunction (List [Atom "as",Atom "const",List [Atom "Array",List idx,el]])
   = THFun { deriveFunctionType = \_ -> (Just [Just elTp],Just arrTp)
-          , getSymbol = \_ -> [| ConstArray $(liftList $ fmap liftTHType idxTps)
+          , getSymbol = \_ -> [| liftM2 ConstArray
+                                 $(liftTHTypes idxTps)
                                  $(liftTHType elTp) |]
           , allEqSymbol = error "Cannot apply constant array function to list."
           , match = [p| ConstArray _ _ |] }
@@ -342,9 +341,9 @@ toOrd name = THFun { deriveFunctionType = \(args,_)
   where
     getSym (Just [Just tp,_],_)
       = case tp of
-      DeterminedType tp' -> [| Ord $(liftNumType tp') $(TH.conE name) |]
-      QueryType q -> [| Ord (case asNumRepr $(q) of
-                              Just rtp -> rtp) $(TH.conE name) |]
+      DeterminedType tp' -> [| return $ Ord $(liftNumType tp') $(TH.conE name) |]
+      QueryType q -> [| $(q) >>= \repr -> return $ Ord (case asNumRepr repr of
+                                                         Just rtp -> rtp) $(TH.conE name) |]
 
 toArith :: TH.Name -> THFunction
 toArith name = THFun { deriveFunctionType = deriv
@@ -371,22 +370,22 @@ toArith name = THFun { deriveFunctionType = deriv
                                    Nothing -> Nothing,
                                   Just $ QueryType tp)
                          [] -> (args,rtp)
-    sym (Just args,Just (DeterminedType tp)) = [| Arith $(case tp of
-                                                           IntType -> [| NumInt |]
-                                                           RealType -> [| NumReal |])
+    sym (Just args,Just (DeterminedType tp)) = [| return $ Arith $(case tp of
+                                                                    IntType -> [| NumInt |]
+                                                                    RealType -> [| NumReal |])
                                                   $(TH.conE name)
                                                   $(liftNat $ natLength args)
                                                 |]
-    sym (Just args,Just (QueryType q)) = [| Arith (case asNumRepr $(q) of
-                                                    Just r -> r) $(TH.conE name)
-                                            $(liftNat $ natLength args)
-                                          |]
+    sym (Just args,Just (QueryType q)) = [| $(q) >>= \repr -> return $
+                                                              Arith (case asNumRepr repr of
+                                                                      Just r -> r) $(TH.conE name)
+                                                              $(liftNat $ natLength args) |]
 
 toArithBin :: TH.Name -> THFunction
 toArithBin name = THFun { deriveFunctionType = \_ -> (Just [Just (DeterminedType IntType)
                                                            ,Just (DeterminedType IntType)],
                                                       Just (DeterminedType IntType))
-                        , getSymbol = \_ -> [| ArithIntBin $(TH.conE name) |]
+                        , getSymbol = \_ -> [| return $ ArithIntBin $(TH.conE name) |]
                         , allEqSymbol = error $ "Cannot apply binary function to list."
                         , match = [p| ArithIntBin $(TH.conP name []) |] }
 
@@ -396,7 +395,7 @@ toLogic name = THFun { deriveFunctionType = \(args,_)
                                                             (Just $ DeterminedType BoolType))) args,
                                                 Just (DeterminedType BoolType))
                      , getSymbol = \(args,_) -> case args of
-                       Just args' -> [| Logic $(TH.conE name)
+                       Just args' -> [| return $ Logic $(TH.conE name)
                                         $(liftNat $ natLength args') |]
                      , allEqSymbol = [| logic' $(TH.conE name) |]
                      , match = [p| Logic $(TH.conP name []) _ |] }
@@ -431,7 +430,8 @@ toExpression _ (List [Atom "_",Atom "as-array",fun])
                             ) tps of
                   Just det -> case tp of
                     DeterminedType rdet -> DeterminedType (ArrayType det rdet)
-           , getExpr' = [| embedSMT $ B.toBackend (AsArray $(getSymbol rfun funType)) |] }
+           , getExpr' = [| $(getSymbol rfun funType) >>=
+                           \sym -> embedSMT $ B.toBackend (AsArray sym) |] }
   where
     rfun = toFunction fun
     funType = deriveFunctionType rfun (Nothing,Nothing)
@@ -450,7 +450,7 @@ toExpression bind (Atom name)
                      , getExpr' = [| embed (Const (IntValue $(TH.litE $ TH.integerL num))) |] }
   | otherwise = case Map.lookup name bind of
       Just res -> res
-      Nothing -> THExpr { deriveType = QueryType [| getType $(TH.varE (TH.mkName name)) |]
+      Nothing -> THExpr { deriveType = QueryType [| embedTypeOf $(TH.varE (TH.mkName name)) |]
                         , getExpr' = [| return $(TH.varE (TH.mkName name)) |] }
 toExpression bind (List [List [Atom "is",Atom dt,Atom con],expr])
   = THExpr { deriveType = DeterminedType BoolType
@@ -467,7 +467,7 @@ toExpression bind (List [List [Atom "get",Atom dt,Atom con,Atom field,tp],expr])
                                      (Proxy:: Proxy $(TH.conT $ TH.mkName dt))
                                      $(liftTHType $ toType tp) |]] }
 toExpression bind (List [Atom "const",HsExpr c])
-  = THExpr { deriveType = QueryType $ TH.appE [| valueTypeC |] e
+  = THExpr { deriveType = QueryType [| return (valueTypeC $(e)) |]
            , getExpr' = TH.appE [| embedConst |] e }
   where
     e = case TH.parseExp c of
@@ -484,10 +484,9 @@ toExpression bind (List [fun,Atom "#",HsExpr e])
 toExpression bind (List (fun:args))
   = THExpr { deriveType = case funType of
              (_,Just rtp) -> rtp
-           , getExpr' = [| $(toArgs rargs) >>=
-                           embed . (App
-                                    $(getSymbol rfun funType)
-                                   ) |] }
+           , getExpr' = [| $(getSymbol rfun funType) >>=
+                           \sym -> $(toArgs rargs) >>=
+                                   embed . (App sym) |] }
   where
     rfun = toFunction fun
     rargs = fmap (toExpression bind) args
@@ -497,7 +496,7 @@ toExpression bind (List (fun:args))
     toArgs (e:es) = [| liftM2 Cons $(getExpr' e) $(toArgs es) |]
 toExpression bind (HsExpr expr) = case TH.parseExp expr of
   Left err -> error $ "Failed to parse haskell expression: "++show expr
-  Right expr' -> THExpr { deriveType = QueryType [| getType $(return expr') |]
+  Right expr' -> THExpr { deriveType = QueryType [| embedTypeOf $(return expr') |]
                         , getExpr' = [| return $(return expr') |] }
   
 toQuantifier :: Quantifier -> THBind -> [BasicExpr] -> BasicExpr -> THExpression
@@ -642,10 +641,13 @@ declare = QuasiQuoter { quoteExp = quoteExpr }
     quoteExpr :: String -> TH.ExpQ
     quoteExpr s = case parseArgs s of
       Nothing -> fail $ "Failed to parse type: "++s
-      Just [tp] -> [| embedSMT (B.declareVar $(liftTHType $ toType tp) Nothing) >>=
-                      embedSMT . B.toBackend . Var |]
+      Just [tp] -> [| $(liftTHType $ toType tp) >>=
+                      \rtp -> embedSMT (B.declareVar rtp Nothing) >>=
+                              embedSMT . B.toBackend . Var |]
       Just [List sig,tp]
-        -> [| fmap Fun (embedSMT $ B.declareFun $(liftTHTypes rsig) $(liftTHType rtp) Nothing) |]
+        -> [| $(liftTHTypes rsig) >>=
+              \argTp -> $(liftTHType rtp) >>=
+                        \resTp -> fmap Fun (embedSMT $ B.declareFun argTp resTp Nothing) |]
         where
           rtp = toType tp
           rsig = fmap toType sig
@@ -837,37 +839,32 @@ toType (List [Atom "Array",List idx,el])
                _ -> Nothing
              return (ArrayType idx'' el')) of
     Just rtp -> DeterminedType rtp
-    Nothing -> QueryType [| ArrayRepr $(toIdx idx')
-                            $(case el' of
-                               DeterminedType t -> liftTypeRepr t
-                               QueryType q -> q) |]
+    Nothing -> QueryType [| liftM2 ArrayRepr
+                            $(liftTHTypes idx')
+                            $(liftTHType el') |]
   where
     idx' = fmap toType idx
     el' = toType el
-    toIdx [] = [| Nil |]
-    toIdx (i:is) = [| Cons $(case i of
-                              DeterminedType tp -> liftTypeRepr tp
-                              QueryType q -> q)
-                      $(toIdx is) |]
-toType (Atom name) = QueryType [| DataRepr (getDatatype
-                                            (Proxy::Proxy $(TH.conT $ TH.mkName name))) |]
+toType (Atom name) = QueryType [| return $ DataRepr $ getDatatype
+                                  (Proxy::Proxy $(TH.conT $ TH.mkName name)) |]
 
 thElementType :: THType -> THType
 thElementType (DeterminedType (ArrayType _ el)) = DeterminedType el
-thElementType (QueryType q) = QueryType [| case $(q) of
-                                          ArrayRepr _ el -> el |]
+thElementType (QueryType q) = QueryType [| $(q) >>= \repr -> case repr of
+                                          ArrayRepr _ el -> return el |]
 
 thIndexType :: THType -> Either [Type] TH.ExpQ
 thIndexType (DeterminedType (ArrayType idx _)) = Left idx
-thIndexType (QueryType q) = Right [| case $(q) of
-                                    ArrayRepr idx _ -> idx |]
+thIndexType (QueryType q) = Right [| $(q) >>= \repr -> case repr of
+                                    ArrayRepr idx _ -> return idx |]
 
 thMakeArray :: Either [Type] TH.ExpQ -> THType -> THType
 thMakeArray (Left idx) (DeterminedType el) = DeterminedType (ArrayType idx el)
 thMakeArray idx el
-  = QueryType [| ArrayRepr $(case idx of
-                              Left idx' -> liftTHTypes (fmap DeterminedType idx')
-                              Right q -> q)
+  = QueryType [| liftM2 ArrayRepr
+                 $(case idx of
+                    Left idx' -> liftTHTypes (fmap DeterminedType idx')
+                    Right q -> q)
                  $(liftTHType el) |]
 
 mkArgsPat :: [BasicExpr] -> TH.PatQ
