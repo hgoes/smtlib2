@@ -60,7 +60,9 @@ module Language.SMTLib2 (
   -- ** Numbers
   Nat(..),Natural(..),nat,reifyNat,
   -- ** Lists
-  List(..),list,reifyList,nil,list1,list2,list3
+  List(..),list,reifyList,nil,list1,list2,list3,
+  -- * Misc
+  comment
   ) where
 
 import Language.SMTLib2.Internals.Type
@@ -184,6 +186,9 @@ getExpr :: (B.Backend b) => B.Expr b tp
 getExpr e = do
   st <- get
   return $ B.fromBackend (backend st) e
+
+comment :: (B.Backend b) => String -> SMT b ()
+comment msg = embedSMT $ B.comment msg
 
 (.==.) :: (B.Backend b) => B.Expr b t -> B.Expr b t -> SMT b (B.Expr b BoolType)
 (.==.) lhs rhs = [expr| (= lhs rhs) |]
