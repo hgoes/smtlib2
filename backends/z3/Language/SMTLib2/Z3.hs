@@ -179,7 +179,7 @@ typeToZ3 ctx BoolRepr = mkBoolSort ctx
 typeToZ3 ctx IntRepr = mkIntSort ctx
 typeToZ3 ctx RealRepr = mkRealSort ctx
 typeToZ3 ctx (BitVecRepr bw) = mkBvSort ctx (naturalToInteger bw)
-typeToZ3 ctx (ArrayRepr (Cons idx Nil) el) = do
+typeToZ3 ctx (ArrayRepr (idx ::: Nil) el) = do
   idx' <- typeToZ3 ctx idx
   el' <- typeToZ3 ctx el
   mkArraySort ctx idx' el'
@@ -192,6 +192,14 @@ toZ3 ctx (Const val) = toZ3Const ctx val
 toZ3 ctx (App fun args) = toZ3App ctx fun args
 --toZ3 ctx (AsArray fun
 toZ3 ctx e = error $ "toZ3: "++show e
+
+{-fromZ3 :: Context
+       -> Z3Var tp
+       -> IO (Expression Z3Var Z3Var Z3Fun Z3Con Z3Field Z3Var Z3Var (UntypedVar AST) tp)
+fromZ3 ctx (UntypedVar var tp) = do
+  kind <- getAstKind ctx var
+  case kind of
+    Z3_APP_AST -> -}
 
 untypedVar :: Z3Expr t -> AST
 untypedVar (UntypedVar x _) = x
@@ -207,24 +215,24 @@ toZ3App ctx (Eq tp n) args = mkEq' (runIdentity $ List.toList (\(UntypedVar v _)
     mkEq' (x:xs) = do
       lst <- mapM (mkEq ctx x) xs
       mkAnd ctx lst
-toZ3App ctx Not (Cons (UntypedVar x _) Nil) = mkNot ctx x
+toZ3App ctx Not ((UntypedVar x _) ::: Nil) = mkNot ctx x
 toZ3App ctx (Logic And _) args = mkAnd ctx $ runIdentity $ List.toList (return.untypedVar) args
 toZ3App ctx (Logic Or _) args = mkOr ctx $ runIdentity $ List.toList (return.untypedVar) args
-toZ3App ctx (Logic Implies _) (Cons lhs (Cons rhs Nil)) = mkImplies ctx (untypedVar lhs) (untypedVar rhs)
-toZ3App ctx (Select _ _) (Cons arr (Cons idx Nil)) = mkSelect ctx (untypedVar arr) (untypedVar idx)
-toZ3App ctx (Store _ _) (Cons arr (Cons val (Cons idx Nil)))
+toZ3App ctx (Logic Implies _) (lhs ::: rhs ::: Nil) = mkImplies ctx (untypedVar lhs) (untypedVar rhs)
+toZ3App ctx (Select _ _) (arr ::: idx ::: Nil) = mkSelect ctx (untypedVar arr) (untypedVar idx)
+toZ3App ctx (Store _ _) (arr ::: val ::: idx ::: Nil)
   = mkStore ctx (untypedVar arr) (untypedVar idx) (untypedVar val)
-toZ3App ctx (ConstArray (Cons idx Nil) el) (Cons arg Nil) = do
+toZ3App ctx (ConstArray (idx ::: Nil) el) (arg ::: Nil) = do
   srt <- typeToZ3 ctx idx
   mkConstArray ctx srt (untypedVar arg)
 toZ3App ctx (Arith NumInt Plus _) args = mkAdd ctx $ runIdentity $ List.toList (return.untypedVar) args
 toZ3App ctx (Arith NumInt Minus _) args = mkSub ctx $ runIdentity $ List.toList (return.untypedVar) args
 toZ3App ctx (Arith NumInt Mult _) args = mkMul ctx $ runIdentity $ List.toList (return.untypedVar) args
-toZ3App ctx (ArithIntBin Div) (Cons x (Cons y Nil)) = mkDiv ctx (untypedVar x) (untypedVar y)
-toZ3App ctx (ArithIntBin Mod) (Cons x (Cons y Nil)) = mkMod ctx (untypedVar x) (untypedVar y)
-toZ3App ctx (ArithIntBin Rem) (Cons x (Cons y Nil)) = mkRem ctx (untypedVar x) (untypedVar y)
-toZ3App ctx (ITE _) (Cons cond (Cons ifT (Cons ifF Nil))) = mkIte ctx (untypedVar cond) (untypedVar ifT) (untypedVar ifF)
-toZ3App ctx (Ord NumInt op) (Cons lhs (Cons rhs Nil))
+toZ3App ctx (ArithIntBin Div) (x ::: y ::: Nil) = mkDiv ctx (untypedVar x) (untypedVar y)
+toZ3App ctx (ArithIntBin Mod) (x ::: y ::: Nil) = mkMod ctx (untypedVar x) (untypedVar y)
+toZ3App ctx (ArithIntBin Rem) (x ::: y ::: Nil) = mkRem ctx (untypedVar x) (untypedVar y)
+toZ3App ctx (ITE _) (cond ::: ifT ::: ifF ::: Nil) = mkIte ctx (untypedVar cond) (untypedVar ifT) (untypedVar ifF)
+toZ3App ctx (Ord NumInt op) (lhs ::: rhs ::: Nil)
   = (case op of
        Ge -> mkGe
        Gt -> mkGt

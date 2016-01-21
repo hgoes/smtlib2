@@ -244,7 +244,7 @@ instance (Backend b) => Backend (DebugBackend b) where
                    -> DebugBackend b
                    -> DebugBackend b
       getFieldVars Nil b = b
-      getFieldVars (Cons f fs) b
+      getFieldVars (f ::: fs) b
         = getFieldVars fs $
           b { debugFields = DMap.insert (bfieldRepr f)
                                         (UntypedField (T.pack $ bfieldName f)

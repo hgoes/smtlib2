@@ -278,16 +278,15 @@ instance Backend SMTPipe where
       mkFields :: IsDatatype dt => SMTPipe -> List (Type.Field dt) arg
                -> (List (BackendField PipeField dt) arg,SMTPipe)
       mkFields b Nil = (Nil,b)
-      mkFields b (Cons (f::Type.Field dt t) fs)
+      mkFields b ((f::Type.Field dt t) ::: fs)
         = let b1 = b { vars = Map.insert (T.pack $ fieldName f)
                                          (Field (Proxy::Proxy dt) (fieldType f))
                                          (vars b) }
               (fs',b2) = mkFields b1 fs
-          in (Cons (BackendField (fieldName f)
-                                (UntypedField (T.pack $ fieldName f) Proxy (fieldType f))
-                                (fieldType f)
-                                (fieldGet f))
-                  fs',b2)
+          in ((BackendField (fieldName f)
+               (UntypedField (T.pack $ fieldName f) Proxy (fieldType f))
+               (fieldType f)
+               (fieldGet f)) ::: fs',b2)
   exit b = do
     putRequest b (L.List [L.Symbol "exit"])
     hClose (channelIn b)
@@ -329,7 +328,7 @@ renderDefineFun renderFV renderE names name args body
     (name'',nnames) = genName' names name'
     mkList :: GetType fv => (forall t. fv t -> L.Lisp) -> List fv ts -> [L.Lisp]
     mkList _ Nil = []
-    mkList renderFV (Cons v xs)
+    mkList renderFV (v ::: xs)
       = (L.List [renderFV v,typeSymbol (getType v)]):
         mkList renderFV xs
 
@@ -382,7 +381,7 @@ renderDeclareDatatype coll
 
     mkFields :: List (Type.Field dt) arg -> [L.Lisp]
     mkFields Nil = []
-    mkFields (Cons f fs) = mkField f : mkFields fs
+    mkFields (f ::: fs) = mkField f : mkFields fs
 
     mkField :: Type.Field dt t -> L.Lisp
     mkField f = L.List [L.Symbol $ T.pack $ fieldName f
@@ -496,7 +495,7 @@ parseGetModel b (L.List ((L.Symbol "model"):mdl)) = do
     withFunList b ((L.List [L.Symbol v,tp]):ls) f = do
       Sort tp <- lispToSort parser tp
       withFunList (b { vars = Map.insert v (FunArg tp) (vars b) }) ls $
-        \b' tps args -> f b' (Cons tp tps) (Cons (UntypedVar v tp) args)
+        \b' tps args -> f b' (tp ::: tps) ((UntypedVar v tp) ::: args)
     withFunList _ lsp _ = throwE $ "Invalid fun args: "++show lsp
 parseGetModel _ lsp = throwE $ "Invalid model: "++show lsp
 
@@ -694,21 +693,21 @@ lispToExprWith p hint (L.List (fun:args)) res = do
              -> List Repr arg -> [Either L.Lisp (AnyExpr e)] -> LispParse (List e arg)
     makeList _ Nil [] = return Nil
     makeList _ Nil _  = throwE $ "Too many arguments to function."
-    makeList p (Cons tp args) (e:es) = case e of
+    makeList p (tp ::: args) (e:es) = case e of
       Right (AnyExpr e') -> do
         r <- case geq tp (getType e') of
            Just Refl -> return e'
            Nothing -> throwE $ "Argument "++gshowsPrec 11 e' ""++" has wrong type."
         rs <- makeList p args es
-        return (Cons r rs)
+        return (r ::: rs)
       Left l -> parseRecursive p (Just $ Sort tp) l $
                 \e' -> do
                   r <- case geq tp (getType e') of
                      Just Refl -> return e'
                      Nothing -> throwE $ "Argument "++gshowsPrec 11 e' ""++" has wrong type."
                   rs <- makeList p args es
-                  return (Cons r rs)
-    makeList _ (Cons _ _) [] = throwE $ "Not enough arguments to function."
+                  return (r ::: rs)
+    makeList _ (_ ::: _) [] = throwE $ "Not enough arguments to function."
 lispToExprWith _ _ lsp _ = throwE $ "Invalid SMT expression: "++show lsp
 
 mkQuant :: LispParser v qv fun con field fv lv e -> [L.Lisp]
@@ -718,7 +717,7 @@ mkQuant p [] f = f p Nil
 mkQuant p ((L.List [L.Symbol name,sort]):args) f = do
   Sort srt <- lispToSort p sort
   let (qvar,np) = registerQVar p name srt
-  mkQuant np args $ \p args -> f p (Cons qvar args)
+  mkQuant np args $ \p args -> f p (qvar ::: args)
 mkQuant _ lsp _ = throwE $ "Invalid forall/exists parameter: "++show lsp
 
 mkLet :: GetType e
@@ -731,7 +730,7 @@ mkLet p ((L.List [L.Symbol name,expr]):args) f
   = parseRecursive p Nothing expr $
     \expr' -> do
       let (lvar,np) = registerLetVar p name (getType expr')
-      mkLet np args $ \p args -> f p (Cons (LetBinding lvar expr') args)
+      mkLet np args $ \p args -> f p ((LetBinding lvar expr') ::: args)
 mkLet _ lsp _ = throwE $ "Invalid let parameter: "++show lsp
 
 withEq :: Repr t -> [b]
@@ -739,7 +738,7 @@ withEq :: Repr t -> [b]
        -> a
 withEq tp [] f = f Zero Nil
 withEq tp (_:xs) f = withEq tp xs $
-                     \n args -> f (Succ n) (Cons tp args)
+                     \n args -> f (Succ n) (tp ::: args)
                                              
 lispToFunction :: LispParser v qv fun con field fv lv e
                -> Maybe Sort -> L.Lisp -> LispParse (ParsedFunction fun con field)
@@ -1043,7 +1042,7 @@ lispToSorts _ [] f = return (f Nil)
 lispToSorts r (x:xs) f = do
   Sort tp <- lispToSort r x
   lispToSorts r xs $
-    \tps -> f (Cons tp tps)
+    \tps -> f (tp ::: tps)
 
 lispToValue :: SMTPipe -> L.Lisp -> LispParse (AnyValue PipeConstr)
 lispToValue b l = case runExcept $ lispToConstant l of
@@ -1077,14 +1076,14 @@ lispToConstrConstant b sym = do
     makeList :: List Repr arg -> [L.Lisp] -> LispParse (List (Value PipeConstr) arg)
     makeList Nil [] = return Nil
     makeList Nil _  = throwE $ "Too many arguments to constructor."
-    makeList (Cons p args) (l:ls) = do
+    makeList (p ::: args) (l:ls) = do
       AnyValue v <- lispToValue b l
       v' <- case geq p (valueType v) of
         Just Refl -> return v
         Nothing -> throwE $ "Type error in constructor arguments."
       vs <- makeList args ls
-      return (Cons v' vs)
-    makeList (Cons _ _) [] = throwE $ "Not enough arguments to constructor."
+      return (v' ::: vs)
+    makeList (_ ::: _) [] = throwE $ "Not enough arguments to constructor."
 
 lispToNumber :: L.Lisp -> Maybe Integer
 lispToNumber (L.Number (L.I n)) = Just n
@@ -1157,7 +1156,7 @@ exprToLispWith _ f _ _ _ _ _ _ _ (Expr.QVar v) = f v
 exprToLispWith _ _ _ _ _ _ f _ _ (Expr.FVar v) = f v
 exprToLispWith _ _ _ _ _ _ _ f _ (Expr.LVar v) = f v
 -- This is a special case because the argument order is different
-exprToLispWith _ _ f g h i _ _ j (Expr.App (Store _ _) (Cons arr (Cons val idx))) = do
+exprToLispWith _ _ f g h i _ _ j (Expr.App (Store _ _) (arr ::: val ::: idx)) = do
   arr' <- j arr
   idx' <- List.toList j idx
   val' <- j val
