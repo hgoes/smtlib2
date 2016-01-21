@@ -87,7 +87,7 @@ outputLine b@(DebugBackend {}) isComment str = do
   if isComment
     then do
       when (debugUseColor b) $ liftIO $ hSetSGR (debugHandle b) [Reset,SetColor Foreground Dull White]
-      liftIO $ hPutStr (debugHandle b) $ ';':' ':str
+      liftIO $ hPutStrLn (debugHandle b) $ ';':' ':str
     else do
       when (debugUseColor b) $ liftIO $ hSetSGR (debugHandle b) [Reset,SetColor Foreground Dull Green]
       liftIO $ hPutStrLn (debugHandle b) str
