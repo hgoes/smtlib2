@@ -241,29 +241,3 @@ toZ3Const ctx (BitVecValue v bw)
   = mkBitvector ctx (fromInteger $ naturalToInteger bw) v
 toZ3Const ctx val = error $ "toZ3Const: "++show val
 
-
-{-
-exprToZ3 :: Context
-         -> Map Integer (AST,String)
-         -> Map String FuncDecl
-         -> Map (Integer,Integer) AST
-         -> 
-         -> SMTExpr a
-         -> IO AST
-exprToZ3 _ vars _ _ (Var i _) = case Map.lookup i vars of
-  Just (ast,_) -> return ast
-exprToZ3 ctx vars constr _ (Const c ann) = case mangle of
-  PrimitiveMangling f -> valueToZ3 ctx constr (f c ann)
-  ComplexMangling f -> exprToZ3 ctx vars constr (f c ann)
-exprToZ3 ctx vars constr (
-
-valueToZ3 :: Context -> Map String FuncDecl -> Value -> IO AST
-valueToZ3 ctx constr (BoolValue v) = mkBool ctx v
-valueToZ3 ctx constr (IntValue i)  = mkInteger ctx i
-valueToZ3 ctx constr (RealValue r) = mkRational ctx r
-valueToZ3 ctx constr (BVValue w v) = mkBitvector ctx (fromIntegral w) v
-valueToZ3 ctx constr (Constr name args _) = case Map.lookup name constr of
-  Just decl -> do
-    args' <- mapM (valueToZ3 ctx constr) args
-    mkApp ctx decl args'
--}
