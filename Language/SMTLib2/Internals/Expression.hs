@@ -220,7 +220,7 @@ functionType _ _ f (Field field) = do
   return (DataRepr dt ::: Nil,tp)
 functionType _ _ _ (Divisible _) = return (IntRepr ::: Nil,BoolRepr)
 
-expressionType :: Monad m
+expressionType :: (Monad m,Functor m)
                => (forall t. v t -> m (Repr t))
                -> (forall t. qv t -> m (Repr t))
                -> (forall arg t. fun '(arg,t) -> m (List Repr arg,Repr t))
