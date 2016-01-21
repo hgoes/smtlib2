@@ -153,7 +153,7 @@ genExpr tp ctx = sized $ \sz -> if sz==0
         ExprGen c <- genConst el
         return $ ExprGen $ \f b -> do
           (rel,b1) <- c f b
-          f (App (ConstArray idx el) (Cons rel Nil)) b1
+          f (App (ConstArray idx el) (rel ::: Nil)) b1
 
     --genApp :: (Monad m) => Repr tp
     --       -> Gen (ExprGen m b var qvar fun con field farg lvar e tp)
@@ -283,7 +283,7 @@ genTypes = sized $ \len -> gen' len
     gen' n = do
       AnyTypes tps <- gen' (n-1)
       AnyType tp <- genType
-      return $ AnyTypes (Cons tp tps)
+      return $ AnyTypes (tp ::: tps)
 
 genNatural :: Gen AnyNatural
 genNatural = sized $ \len -> reifyNat (fromIntegral len) (return.AnyNatural)
@@ -291,10 +291,10 @@ genNatural = sized $ \len -> reifyNat (fromIntegral len) (return.AnyNatural)
 withAllEqLen :: Repr tp -> Int
              -> (forall tps. List Repr (tp ': tps) -> a)
              -> a
-withAllEqLen tp 0 f = f (Cons tp Nil)
+withAllEqLen tp 0 f = f (tp ::: Nil)
 withAllEqLen tp n f
   = withAllEqLen tp (n-1) $
-    \tps -> f (Cons tp tps)
+    \tps -> f (tp ::: tps)
 
 instance (GShow var,GShow qvar,GShow fun,GShow con,GShow field,GShow farg,GShow lvar)
          => GShow (TestExpr var qvar fun con field farg lvar) where
