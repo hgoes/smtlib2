@@ -45,7 +45,7 @@ access :: Monad m => Struct e tp -> List Natural idx
 access (Singleton x) Nil f = do
   (res,nx) <- f x
   return (res,Singleton nx)
-access (Struct xs) (Cons n ns) f = do
+access (Struct xs) (n ::: ns) f = do
   (res,nxs) <- List.access' xs n (\x -> access x ns f)
   return (res,Struct nxs)
 
@@ -55,30 +55,30 @@ accessElement :: Monad m => Struct e tp -> List Natural idx
 accessElement (Singleton x) Nil f = do
   (res,nx) <- f x
   return (res,Singleton nx)
-accessElement (Struct xs) (Cons n ns) f = do
+accessElement (Struct xs) (n ::: ns) f = do
   (res,nxs) <- List.access xs n (\x -> accessElement x ns f)
   return (res,Struct nxs)
 
 index :: Struct e tp -> List Natural idx -> Struct e (Index tp idx)
 index x Nil = x
-index (Struct xs) (Cons n ns) = index (List.index xs n) ns
+index (Struct xs) (n ::: ns) = index (List.index xs n) ns
 
 elementIndex :: Struct e tp -> List Natural idx -> e (ElementIndex tp idx)
 elementIndex (Singleton x) Nil = x
-elementIndex (Struct xs) (Cons n ns)
+elementIndex (Struct xs) (n ::: ns)
   = elementIndex (List.index xs n) ns
 
 insert :: Struct e tps -> List Natural idx -> Struct e tp
        -> Struct e (Insert tps idx tp)
 insert x Nil y = y
-insert (Struct xs) (Cons n ns) y
+insert (Struct xs) (n ::: ns) y
   = Struct (List.insert xs n (insert (List.index xs n) ns y))
 
 remove :: Struct e tps -> List Natural idx -> Struct e (Remove tps idx)
-remove (Struct xs) (Cons n Nil) = Struct (List.remove xs n)
-remove (Struct xs) (Cons n1 (Cons n2 ns))
+remove (Struct xs) (n ::: Nil) = Struct (List.remove xs n)
+remove (Struct xs) (n1 ::: n2 ::: ns)
   = Struct (List.insert xs n1
-            (remove (List.index xs n1) (Cons n2 ns)))
+            (remove (List.index xs n1) (n2 ::: ns)))
 
 mapM :: Monad m => (forall x. e x -> m (e' x)) -> Struct e tps -> m (Struct e' tps)
 mapM f (Singleton x) = do
@@ -99,7 +99,7 @@ mapIndexM f (Singleton x) = do
   nx <- f Nil x
   return (Singleton nx)
 mapIndexM f (Struct xs) = do
-  nxs <- List.mapIndexM (\n -> mapIndexM (\ns -> f (Cons n ns))) xs
+  nxs <- List.mapIndexM (\n -> mapIndexM (\ns -> f (n ::: ns))) xs
   return (Struct nxs)
 
 map :: (forall x. e x -> e' x) -> Struct e tps -> Struct e' tps
@@ -108,7 +108,7 @@ map f = runIdentity . (mapM (return.f))
 size :: Struct e tps -> Natural (Size tps)
 size (Singleton x) = Succ Zero
 size (Struct Nil) = Zero
-size (Struct (Cons x xs)) = naturalAdd (size x) (size (Struct xs))
+size (Struct (x ::: xs)) = naturalAdd (size x) (size (Struct xs))
 
 flatten :: Monad m => (forall x. e x -> m a) -> ([a] -> m a) -> Struct e tps -> m a
 flatten f _ (Singleton x) = f x
@@ -123,7 +123,7 @@ flattenIndex :: Monad m => (forall idx. List Natural idx
              -> Struct e tps -> m a
 flattenIndex f _ (Singleton x) = f Nil x
 flattenIndex f g (Struct xs) = do
-  nxs <- List.toListIndex (\n x -> flattenIndex (\idx -> f (Cons n idx)) g x) xs
+  nxs <- List.toListIndex (\n x -> flattenIndex (\idx -> f (n ::: idx)) g x) xs
   g nxs
 
 zipWithM :: Monad m => (forall x. e1 x -> e2 x -> m (e3 x))

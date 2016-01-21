@@ -490,8 +490,8 @@ valueTypeC (BitVecValueC _ bw) = BitVecRepr bw
 valueTypeC (ConstrValueC _) = DataRepr (getDatatype Proxy)
 
 liftType :: List Repr tps -> List Repr idx -> List Repr (Lifted tps idx)
-liftType List.Nil idx = List.Nil
-liftType (List.Cons x xs) idx = List.Cons (ArrayRepr idx x) (liftType xs idx)
+liftType Nil idx = Nil
+liftType (x ::: xs) idx = (ArrayRepr idx x) ::: (liftType xs idx)
 
 numRepr :: NumRepr tp -> Repr tp
 numRepr NumInt = IntRepr

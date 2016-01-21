@@ -17,25 +17,25 @@ type family AllEq (tp :: Type) (n :: Nat) :: [Type] where
 
 allEqToList :: Natural n -> List a (AllEq tp n) -> [a tp]
 allEqToList Zero Nil = []
-allEqToList (Succ n) (Cons x xs) = x:allEqToList n xs
+allEqToList (Succ n) (x ::: xs) = x:allEqToList n xs
 
 allEqFromList :: [a tp] -> (forall n. Natural n -> List a (AllEq tp n) -> r) -> r
 allEqFromList [] f = f Zero Nil
-allEqFromList (x:xs) f = allEqFromList xs (\n arg -> f (Succ n) (Cons x arg))
+allEqFromList (x:xs) f = allEqFromList xs (\n arg -> f (Succ n) (x ::: arg))
 
 allEqOf :: Repr tp -> Natural n -> List Repr (AllEq tp n)
 allEqOf tp Zero = Nil
-allEqOf tp (Succ n) = Cons tp (allEqOf tp n)
+allEqOf tp (Succ n) = tp ::: allEqOf tp n
 
 mapAllEq :: Monad m => (e1 tp -> m (e2 tp))
          -> Natural n
          -> List e1 (AllEq tp n)
          -> m (List e2 (AllEq tp n))
 mapAllEq f Zero Nil = return Nil
-mapAllEq f (Succ n) (Cons x xs) = do
+mapAllEq f (Succ n) (x ::: xs) = do
   x' <- f x
   xs' <- mapAllEq f n xs
-  return (Cons x' xs')
+  return (x' ::: xs')
 
 data Function (fun :: ([Type],Type) -> *) (con :: ([Type],*) -> *) (field :: (*,Type) -> *) (sig :: ([Type],Type)) where
   Fun :: fun '(arg,res) -> Function fun con field '(arg,res)
@@ -190,35 +190,35 @@ functionType _ _ _ (Distinct tp n) = return (allEqOf tp n,BoolRepr)
 functionType f g h (Map idx fun) = do
   (arg,res) <- functionType f g h fun
   return (liftType arg idx,ArrayRepr idx res)
-functionType _ _ _ (Ord tp _) = return (Cons (numRepr tp) (Cons (numRepr tp) Nil),BoolRepr)
+functionType _ _ _ (Ord tp _) = return (numRepr tp ::: numRepr tp ::: Nil,BoolRepr)
 functionType _ _ _ (Arith tp _ n) = return (allEqOf (numRepr tp) n,numRepr tp)
-functionType _ _ _ (ArithIntBin _) = return (Cons IntRepr (Cons IntRepr Nil),IntRepr)
-functionType _ _ _ Divide = return (Cons RealRepr (Cons RealRepr Nil),RealRepr)
-functionType _ _ _ (Abs tp) = return (Cons (numRepr tp) Nil,numRepr tp)
-functionType _ _ _ Not = return (Cons BoolRepr Nil,BoolRepr)
+functionType _ _ _ (ArithIntBin _) = return (IntRepr ::: IntRepr ::: Nil,IntRepr)
+functionType _ _ _ Divide = return (RealRepr ::: RealRepr ::: Nil,RealRepr)
+functionType _ _ _ (Abs tp) = return (numRepr tp ::: Nil,numRepr tp)
+functionType _ _ _ Not = return (BoolRepr ::: Nil,BoolRepr)
 functionType _ _ _ (Logic op n) = return (allEqOf BoolRepr n,BoolRepr)
-functionType _ _ _ ToReal = return (Cons IntRepr Nil,RealRepr)
-functionType _ _ _ ToInt = return (Cons RealRepr Nil,IntRepr)
-functionType _ _ _ (ITE tp) = return (Cons BoolRepr (Cons tp (Cons tp Nil)),tp)
-functionType _ _ _ (BVComp _ n) = return (Cons (BitVecRepr n) (Cons (BitVecRepr n) Nil),BoolRepr)
-functionType _ _ _ (BVBin _ n) = return (Cons (BitVecRepr n) (Cons (BitVecRepr n) Nil),BitVecRepr n)
-functionType _ _ _ (BVUn _ n) = return (Cons (BitVecRepr n) Nil,BitVecRepr n)
-functionType _ _ _ (Select idx el) = return (Cons (ArrayRepr idx el) idx,el)
-functionType _ _ _ (Store idx el) = return (Cons (ArrayRepr idx el) (Cons el idx),ArrayRepr idx el)
-functionType _ _ _ (ConstArray idx el) = return (Cons el Nil,ArrayRepr idx el)
-functionType _ _ _ (Concat bw1 bw2) = return (Cons (BitVecRepr bw1) (Cons (BitVecRepr bw2) Nil),
+functionType _ _ _ ToReal = return (IntRepr ::: Nil,RealRepr)
+functionType _ _ _ ToInt = return (RealRepr ::: Nil,IntRepr)
+functionType _ _ _ (ITE tp) = return (BoolRepr ::: tp ::: tp ::: Nil,tp)
+functionType _ _ _ (BVComp _ n) = return (BitVecRepr n ::: BitVecRepr n ::: Nil,BoolRepr)
+functionType _ _ _ (BVBin _ n) = return (BitVecRepr n ::: BitVecRepr n ::: Nil,BitVecRepr n)
+functionType _ _ _ (BVUn _ n) = return (BitVecRepr n ::: Nil,BitVecRepr n)
+functionType _ _ _ (Select idx el) = return (ArrayRepr idx el ::: idx,el)
+functionType _ _ _ (Store idx el) = return (ArrayRepr idx el ::: el ::: idx,ArrayRepr idx el)
+functionType _ _ _ (ConstArray idx el) = return (el ::: Nil,ArrayRepr idx el)
+functionType _ _ _ (Concat bw1 bw2) = return (BitVecRepr bw1 ::: BitVecRepr bw2 ::: Nil,
                                               BitVecRepr (naturalAdd bw1 bw2))
-functionType _ _ _ (Extract bw start len) = return (Cons (BitVecRepr bw) Nil,BitVecRepr len)
+functionType _ _ _ (Extract bw start len) = return (BitVecRepr bw ::: Nil,BitVecRepr len)
 functionType _ f _ (Constructor con) = do
   (tps,dt) <- f con
   return (tps,DataRepr dt)
 functionType _ f _ (Test con) = do
   (_,dt) <- f con
-  return (Cons (DataRepr dt) Nil,BoolRepr)
+  return (DataRepr dt ::: Nil,BoolRepr)
 functionType _ _ f (Field field) = do
   (dt,tp) <- f field
-  return (Cons (DataRepr dt) Nil,tp)
-functionType _ _ _ (Divisible _) = return (Cons IntRepr Nil,BoolRepr)
+  return (DataRepr dt ::: Nil,tp)
+functionType _ _ _ (Divisible _) = return (IntRepr ::: Nil,BoolRepr)
 
 expressionType :: Monad m
                => (forall t. v t -> m (Repr t))

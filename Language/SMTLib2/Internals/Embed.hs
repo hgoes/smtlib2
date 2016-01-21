@@ -81,12 +81,12 @@ instance (Backend b,e ~ Expr b) => Embed (SMT b) e where
     st <- get
     let bdt = lookupDatatype (DTProxy::DTProxy dt) (datatypes st)
     lookupConstructor name bdt $
-      \bcon -> embedSMT $ toBackend (App (Test (bconRepr bcon)) (Cons e Nil))
+      \bcon -> embedSMT $ toBackend (App (Test (bconRepr bcon)) (e ::: Nil))
   embedGetField name fname (_::Proxy dt) tp e = do
     st <- get
     lookupDatatypeField (DTProxy::DTProxy dt) fname name (datatypes st) $
       \field -> case geq tp (bfieldType field) of
-      Just Refl -> embedSMT $ toBackend (App (Field (bfieldRepr field)) (Cons e Nil))
+      Just Refl -> embedSMT $ toBackend (App (Field (bfieldRepr field)) (e ::: Nil))
   embedConst v = do
     rv <- mkAbstr v
     embedSMT $ toBackend (Const rv)
@@ -188,13 +188,13 @@ encodeExpr (SMTTestCon name (_::Proxy dt) e) = do
   st <- get
   let bdt = lookupDatatype (DTProxy::DTProxy dt) (datatypes st)
   lookupConstructor name bdt $
-    \bcon -> embedSMT $ toBackend (App (Test (bconRepr bcon)) (Cons e' Nil))
+    \bcon -> embedSMT $ toBackend (App (Test (bconRepr bcon)) (e' ::: Nil))
 encodeExpr (SMTGetField name fname (_::Proxy dt) tp e) = do
   e' <- encodeExpr e
   st <- get
   lookupDatatypeField (DTProxy::DTProxy dt) fname name (datatypes st) $
     \field -> case geq tp (bfieldType field) of
-    Just Refl -> embedSMT $ toBackend (App (Field $ bfieldRepr field) (Cons e' Nil))
+    Just Refl -> embedSMT $ toBackend (App (Field $ bfieldRepr field) (e' ::: Nil))
 encodeExpr (SMTConst c) = do
   rc <- mkAbstr c
   embedSMT $ toBackend (Const rc)

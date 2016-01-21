@@ -6,7 +6,6 @@ import Prelude hiding (head,tail,length,mapM,insert,drop,take,last,reverse,map)
 import Data.GADT.Compare
 import Data.GADT.Show
 import Language.Haskell.TH
-import Data.Proxy
 
 type family Head (lst :: [a]) :: a where
   Head (x ': xs) = x
@@ -64,148 +63,150 @@ type family Map (lst :: [a]) (f :: a -> b) :: [b] where
 
 data List e (tp :: [a]) where
   Nil :: List e '[]
-  Cons :: e x -> List e xs -> List e (x ': xs)
+  (:::) :: e x -> List e xs -> List e (x ': xs)
+
+infixr 9 :::
 
 list :: [ExpQ] -> ExpQ
 list [] = [| Nil |]
-list (x:xs) = [| Cons $(x) $(list xs) |]
+list (x:xs) = [| $(x) ::: $(list xs) |]
 
 nil :: List e '[]
 nil = Nil
 
 list1 :: e t1 -> List e '[t1]
-list1 x1 = Cons x1 Nil
+list1 x1 = x1 ::: Nil
 
 list2 :: e t1 -> e t2 -> List e '[t1,t2]
-list2 x1 x2 = Cons x1 (Cons x2 Nil)
+list2 x1 x2 = x1 ::: x2 ::: Nil
 
 list3 :: e t1 -> e t2 -> e t3 -> List e '[t1,t2,t3]
-list3 x1 x2 x3 = Cons x1 (Cons x2 (Cons x3 Nil))
+list3 x1 x2 x3 = x1 ::: x2 ::: x3 ::: Nil
 
 reifyList :: (forall r'. a -> (forall tp. e tp -> r') -> r')
           -> [a] -> (forall tp. List e tp -> r)
           -> r
 reifyList _ [] g = g Nil
-reifyList f (x:xs) g = f x $ \x' -> reifyList f xs $ \xs' -> g (Cons x' xs')
+reifyList f (x:xs) g = f x $ \x' -> reifyList f xs $ \xs' -> g (x' ::: xs')
 
 access :: Monad m => List e lst -> Natural idx
        -> (e (Index lst idx) -> m (a,e tp))
        -> m (a,List e (Insert lst idx tp))
-access (Cons x xs) Zero f = do
+access (x ::: xs) Zero f = do
   (res,nx) <- f x
-  return (res,Cons nx xs)
-access (Cons x xs) (Succ n) f = do
+  return (res,nx ::: xs)
+access (x ::: xs) (Succ n) f = do
   (res,nxs) <- access xs n f
-  return (res,Cons x nxs)
+  return (res,x ::: nxs)
 
 access' :: Monad m => List e lst -> Natural idx
         -> (e (Index lst idx) -> m (a,e (Index lst idx)))
         -> m (a,List e lst)
-access' (Cons x xs) Zero f = do
+access' (x ::: xs) Zero f = do
   (res,nx) <- f x
-  return (res,Cons nx xs)
-access' (Cons x xs) (Succ n) f = do
+  return (res,nx ::: xs)
+access' (x ::: xs) (Succ n) f = do
   (res,nxs) <- access' xs n f
-  return (res,Cons x nxs)
+  return (res,x ::: nxs)
 
 head :: List e lst -> e (Head lst)
-head (Cons x xs) = x
+head (x ::: xs) = x
 
 tail :: List e lst -> List e (Tail lst)
-tail (Cons x xs) = xs
+tail (x ::: xs) = xs
 
 index :: List e lst -> Natural idx -> e (Index lst idx)
-index (Cons x xs) Zero = x
-index (Cons x xs) (Succ n) = index xs n
+index (x ::: xs) Zero = x
+index (x ::: xs) (Succ n) = index xs n
 
 insert :: List e lst -> Natural idx -> e tp -> List e (Insert lst idx tp)
-insert (Cons x xs) Zero y = Cons y xs
-insert (Cons x xs) (Succ n) y = Cons x (insert xs n y)
+insert (x ::: xs) Zero y = y ::: xs
+insert (x ::: xs) (Succ n) y = x ::: (insert xs n y)
 
 remove :: List e lst -> Natural idx -> List e (Remove lst idx)
-remove (Cons x xs) Zero = xs
-remove (Cons x xs) (Succ n) = Cons x (remove xs n)
+remove (x ::: xs) Zero = xs
+remove (x ::: xs) (Succ n) = x ::: (remove xs n)
 
 mapM :: Monad m => (forall x. e x -> m (e' x)) -> List e lst -> m (List e' lst)
 mapM _ Nil = return Nil
-mapM f (Cons x xs) = do
+mapM f (x ::: xs) = do
   nx <- f x
   nxs <- mapM f xs
-  return (Cons nx nxs)
+  return (nx ::: nxs)
 
 mapIndexM :: Monad m => (forall n. Natural n -> e (Index lst n) -> m (e' (Index lst n)))
           -> List e lst
           -> m (List e' lst)
 mapIndexM f Nil = return Nil
-mapIndexM f (Cons x xs) = do
+mapIndexM f (x ::: xs) = do
   nx <- f Zero x
   nxs <- mapIndexM (\n -> f (Succ n)) xs
-  return (Cons nx nxs)
+  return (nx ::: nxs)
 
 cons :: e x -> List e xs -> List e (x ': xs)
-cons = Cons
+cons = (:::)
 
 append :: List e xs -> e x -> List e (Append xs x)
-append Nil y = Cons y Nil
-append (Cons x xs) y = Cons x (append xs y)
+append Nil y = y ::: Nil
+append (x ::: xs) y = x ::: (append xs y)
 
 length :: List e lst -> Natural (Length lst)
 length Nil = Zero
-length (Cons _ xs) = Succ (length xs)
+length (_ ::: xs) = Succ (length xs)
 
 drop :: List e lst -> Natural i -> List e (Drop lst i)
 drop xs Zero = xs
-drop (Cons x xs) (Succ n) = drop xs n
+drop (x ::: xs) (Succ n) = drop xs n
 
 take :: List e lst -> Natural i -> List e (Take lst i)
 take xs Zero = Nil
-take (Cons x xs) (Succ n) = Cons x (take xs n)
+take (x ::: xs) (Succ n) = x ::: (take xs n)
 
 last :: List e lst -> e (Last lst)
-last (Cons x Nil) = x
-last (Cons x (Cons y rest)) = last (Cons y rest)
+last (x ::: Nil) = x
+last (x ::: y ::: rest) = last (y ::: rest)
 
 dropLast :: List e lst -> List e (DropLast lst)
-dropLast (Cons _ Nil) = Nil
-dropLast (Cons x (Cons y rest)) = Cons x (dropLast (Cons y rest))
+dropLast (_ ::: Nil) = Nil
+dropLast (x ::: y ::: rest) = x ::: (dropLast (y ::: rest))
 
 stripPrefix :: GEq e => List e lst -> List e pre -> Maybe (List e (StripPrefix lst pre))
 stripPrefix xs Nil = Just xs
-stripPrefix (Cons x xs) (Cons y ys)
+stripPrefix (x ::: xs) (y ::: ys)
   = case geq x y of
   Just Refl -> stripPrefix xs ys
   Nothing -> Nothing
 
 reverse :: List e lst -> List e (Reverse lst)
 reverse Nil = Nil
-reverse (Cons x xs) = append (reverse xs) x
+reverse (x ::: xs) = append (reverse xs) x
 
 map :: List e lst -> (forall x. e x -> e (f x)) -> List e (Map lst f)
 map Nil _ = Nil
-map (Cons x xs) f = Cons (f x) (map xs f)
+map (x ::: xs) f = (f x) ::: (map xs f)
 
 unmap :: List p lst -> List e (Map lst f) -> (forall x. e (f x) -> e x) -> List e lst
 unmap Nil Nil _ = Nil
-unmap (Cons _ tps) (Cons x xs) f = Cons (f x) (unmap tps xs f)
+unmap (_ ::: tps) (x ::: xs) f = (f x) ::: (unmap tps xs f)
 
 unmapM :: Monad m => List p lst -> List e (Map lst f)
        -> (forall x. e (f x) -> m (e x)) -> m (List e lst)
 unmapM Nil Nil _ = return Nil
-unmapM (Cons _ tps) (Cons x xs) f = do
+unmapM (_ ::: tps) (x ::: xs) f = do
   x' <- f x
   xs' <- unmapM tps xs f
-  return $ Cons x' xs'
+  return $ x' ::: xs'
 
 mapM' :: Monad m => List e lst -> (forall x. e x -> m (e (f x))) -> m (List e (Map lst f))
 mapM' Nil _ = return Nil
-mapM' (Cons x xs) f = do
+mapM' (x ::: xs) f = do
   x' <- f x
   xs' <- mapM' xs f
-  return (Cons x' xs')
+  return (x' ::: xs')
 
 toList :: Monad m => (forall x. e x -> m a) -> List e lst -> m [a]
 toList f Nil = return []
-toList f (Cons x xs) = do
+toList f (x ::: xs) = do
   nx <- f x
   nxs <- toList f xs
   return (nx : nxs)
@@ -213,30 +214,30 @@ toList f (Cons x xs) = do
 toListIndex :: Monad m => (forall n. Natural n -> e (Index lst n) -> m a)
             -> List e lst -> m [a]
 toListIndex f Nil = return []
-toListIndex f (Cons x xs) = do
+toListIndex f (x ::: xs) = do
   nx <- f Zero x
   nxs <- toListIndex (\n -> f (Succ n)) xs
   return (nx : nxs)
 
 foldM :: Monad m => (forall x. s -> e x -> m s) -> s -> List e lst -> m s
 foldM f s Nil = return s
-foldM f s (Cons x xs) = do
+foldM f s (x ::: xs) = do
   ns <- f s x
   foldM f ns xs
 
 zipWithM :: Monad m => (forall x. e1 x -> e2 x -> m (e3 x))
          -> List e1 lst -> List e2 lst -> m (List e3 lst)
 zipWithM f Nil Nil = return Nil
-zipWithM f (Cons x xs) (Cons y ys) = do
+zipWithM f (x ::: xs) (y ::: ys) = do
   z <- f x y
   zs <- zipWithM f xs ys
-  return $ Cons z zs
+  return $ z ::: zs
 
 zipToListM :: Monad m => (forall x. e1 x -> e2 x -> m a)
            -> List e1 lst -> List e2 lst
            -> m [a]
 zipToListM f Nil Nil = return []
-zipToListM f (Cons x xs) (Cons y ys) = do
+zipToListM f (x ::: xs) (y ::: ys) = do
   z <- f x y
   zs <- zipToListM f xs ys
   return (z : zs)
@@ -245,20 +246,20 @@ mapAccumM :: Monad m => (forall x. s -> e x -> m (s,e' x))
           -> s -> List e xs
           -> m (s,List e' xs)
 mapAccumM _ s Nil = return (s,Nil)
-mapAccumM f s (Cons x xs) = do
+mapAccumM f s (x ::: xs) = do
   (s1,x') <- f s x
   (s2,xs') <- mapAccumM f s1 xs
-  return (s2,Cons x' xs')
+  return (s2,x' ::: xs')
 
 instance GEq e => Eq (List e lst) where
   (==) Nil Nil = True
-  (==) (Cons x xs) (Cons y ys) = case geq x y of
+  (==) (x ::: xs) (y ::: ys) = case geq x y of
     Just Refl -> xs==ys
     Nothing -> False
 
 instance GEq e => GEq (List e) where
   geq Nil Nil = Just Refl
-  geq (Cons x xs) (Cons y ys) = do
+  geq (x ::: xs) (y ::: ys) = do
     Refl <- geq x y
     Refl <- geq xs ys
     return Refl
@@ -266,7 +267,7 @@ instance GEq e => GEq (List e) where
 
 instance GCompare e => Ord (List e lst) where
   compare Nil Nil = EQ
-  compare (Cons x xs) (Cons y ys) = case gcompare x y of
+  compare (x ::: xs) (y ::: ys) = case gcompare x y of
     GEQ -> compare xs ys
     GLT -> LT
     GGT -> GT
@@ -275,7 +276,7 @@ instance GCompare e => GCompare (List e) where
   gcompare Nil Nil = GEQ
   gcompare Nil _ = GLT
   gcompare _ Nil = GGT
-  gcompare (Cons x xs) (Cons y ys) = case gcompare x y of
+  gcompare (x ::: xs) (y ::: ys) = case gcompare x y of
     GEQ -> case gcompare xs ys of
       GEQ -> GEQ
       GLT -> GLT
@@ -285,16 +286,16 @@ instance GCompare e => GCompare (List e) where
 
 instance GShow e => Show (List e lst) where
   showsPrec p Nil = showString "[]"
-  showsPrec p (Cons x xs) = showChar '[' .
-                            gshowsPrec 0 x .
-                            showLst xs .
-                            showChar ']'
+  showsPrec p (x ::: xs) = showChar '[' .
+                           gshowsPrec 0 x .
+                           showLst xs .
+                           showChar ']'
     where
       showLst :: List e lst' -> ShowS
       showLst Nil = id
-      showLst (Cons x xs) = showChar ',' .
-                            gshowsPrec 0 x .
-                            showLst xs
+      showLst (x ::: xs) = showChar ',' .
+                           gshowsPrec 0 x .
+                           showLst xs
 
 instance GShow e => GShow (List e) where
   gshowsPrec = showsPrec

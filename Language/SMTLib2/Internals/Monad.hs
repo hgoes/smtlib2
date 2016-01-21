@@ -161,9 +161,9 @@ lookupField name con f = lookup (bconFields con) f
            -> (forall tp. B.BackendField field dt tp -> a)
            -> a
     lookup Nil _ = error $ "smtlib2: "++name++" is not a field."
-    lookup (Cons x xs) f = if bfieldName x==name
-                           then f x
-                           else lookup xs f
+    lookup (x ::: xs) f = if bfieldName x==name
+                          then f x
+                          else lookup xs f
 
 lookupDatatypeCon :: (IsDatatype dt,Typeable con,Typeable field)
                   => DTProxy dt -> String -> DatatypeInfo con field

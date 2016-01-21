@@ -191,19 +191,19 @@ evaluateFun ev evf (Eq tp n) args = isEq n tp args >>=
   where
     isEq :: Natural n -> Repr tp -> List (EvalResult fun con field) (AllEq tp n) -> m Bool
     isEq Zero _ Nil = return True
-    isEq (Succ Zero) _ (Cons _ Nil) = return True
-    isEq (Succ (Succ n)) tp (Cons x (Cons y xs)) = do
+    isEq (Succ Zero) _ (_ ::: Nil) = return True
+    isEq (Succ (Succ n)) tp (x ::: y ::: xs) = do
       eq <- evalResultEq ev evf x y
       if eq
-        then isEq (Succ n) tp (Cons y xs)
+        then isEq (Succ n) tp (y ::: xs)
         else return False
 evaluateFun ev evf (Distinct tp n) args = isDistinct n tp args >>=
                                           return . ValueResult . BoolValue
   where
     isDistinct :: Natural n -> Repr tp -> List (EvalResult fun con field) (AllEq tp n) -> m Bool
     isDistinct Zero _ Nil = return True
-    isDistinct (Succ Zero) _ (Cons _ Nil) = return True
-    isDistinct (Succ n) tp (Cons x xs) = do
+    isDistinct (Succ Zero) _ (_ ::: Nil) = return True
+    isDistinct (Succ n) tp (x ::: xs) = do
       neq <- isNeq n tp x xs
       if neq
         then isDistinct n tp xs
@@ -211,19 +211,19 @@ evaluateFun ev evf (Distinct tp n) args = isDistinct n tp args >>=
     isNeq :: Natural n -> Repr tp -> EvalResult fun con field tp
           -> List (EvalResult fun con field) (AllEq tp n) -> m Bool
     isNeq Zero _ _ Nil = return True
-    isNeq (Succ n) tp x (Cons y ys) = do
+    isNeq (Succ n) tp x (y ::: ys) = do
       eq <- evalResultEq ev evf x y
       if eq
         then return False
         else isNeq n tp x ys
-evaluateFun _ _ (Ord NumInt op) (Cons (ValueResult (IntValue lhs)) (Cons (ValueResult (IntValue rhs)) Nil))
+evaluateFun _ _ (Ord NumInt op) ((ValueResult (IntValue lhs)) ::: (ValueResult (IntValue rhs)) ::: Nil)
   = return $ ValueResult $ BoolValue (cmp op lhs rhs)
   where
     cmp Ge = (>=)
     cmp Gt = (>)
     cmp Le = (<=)
     cmp Lt = (<)
-evaluateFun _ _ (Ord NumReal op) (Cons (ValueResult (RealValue lhs)) (Cons (ValueResult (RealValue rhs)) Nil))
+evaluateFun _ _ (Ord NumReal op) ((ValueResult (RealValue lhs)) ::: (ValueResult (RealValue rhs)) ::: Nil)
   = return $ ValueResult $ BoolValue (cmp op lhs rhs)
   where
     cmp Ge = (>=)
@@ -250,19 +250,19 @@ evaluateFun _ _ (Arith NumReal op n) args
     eval Minus [] = 0
     eval Minus [x] = -x
     eval Minus (x:xs) = x-sum xs
-evaluateFun _ _ (ArithIntBin op) (Cons (ValueResult (IntValue lhs)) (Cons (ValueResult (IntValue rhs)) Nil))
+evaluateFun _ _ (ArithIntBin op) ((ValueResult (IntValue lhs)) ::: (ValueResult (IntValue rhs)) ::: Nil)
   = return $ ValueResult $ IntValue (eval op lhs rhs)
   where
     eval Div = div
     eval Mod = mod
     eval Rem = rem
-evaluateFun _ _ Divide (Cons (ValueResult (RealValue lhs)) (Cons (ValueResult (RealValue rhs)) Nil))
+evaluateFun _ _ Divide ((ValueResult (RealValue lhs)) ::: (ValueResult (RealValue rhs)) ::: Nil)
   = return $ ValueResult $ RealValue (lhs / rhs)
-evaluateFun _ _ (Abs NumInt) (Cons (ValueResult (IntValue x)) Nil)
+evaluateFun _ _ (Abs NumInt) ((ValueResult (IntValue x)) ::: Nil)
   = return $ ValueResult $ IntValue $ abs x
-evaluateFun _ _ (Abs NumReal) (Cons (ValueResult (RealValue x)) Nil)
+evaluateFun _ _ (Abs NumReal) ((ValueResult (RealValue x)) ::: Nil)
   = return $ ValueResult $ RealValue $ abs x
-evaluateFun _ _ Not (Cons (ValueResult (BoolValue x)) Nil)
+evaluateFun _ _ Not ((ValueResult (BoolValue x)) ::: Nil)
   = return $ ValueResult $ BoolValue $ not x
 evaluateFun _ _ (Logic op n) args
   = return $ ValueResult $ BoolValue $
@@ -275,13 +275,13 @@ evaluateFun _ _ (Logic op n) args
     eval Implies = impl
     impl [x] = x
     impl (x:xs) = if x then impl xs else False
-evaluateFun _ _ ToReal (Cons (ValueResult (IntValue x)) Nil)
+evaluateFun _ _ ToReal ((ValueResult (IntValue x)) ::: Nil)
   = return $ ValueResult $ RealValue $ fromInteger x
-evaluateFun _ _ ToInt (Cons (ValueResult (RealValue x)) Nil)
+evaluateFun _ _ ToInt ((ValueResult (RealValue x)) ::: Nil)
   = return $ ValueResult $ IntValue $ round x
-evaluateFun _ _ (ITE _) (Cons (ValueResult (BoolValue c)) (Cons x (Cons y Nil)))
+evaluateFun _ _ (ITE _) ((ValueResult (BoolValue c)) ::: x ::: y ::: Nil)
   = return $ if c then x else y
-evaluateFun _ _ (BVComp op _) (Cons (ValueResult (BitVecValue x nx)) (Cons (ValueResult (BitVecValue y ny)) Nil))
+evaluateFun _ _ (BVComp op _) ((ValueResult (BitVecValue x nx)) ::: (ValueResult (BitVecValue y ny)) ::: Nil)
   = return $ ValueResult $ BoolValue $ comp op
   where
     bw = naturalToInteger nx
@@ -295,7 +295,7 @@ evaluateFun _ _ (BVComp op _) (Cons (ValueResult (BitVecValue x nx)) (Cons (Valu
     comp BVSLT = sx < sy
     comp BVSGE = sx >= sy
     comp BVSGT = sx > sy
-evaluateFun _ _ (BVBin op _) (Cons (ValueResult (BitVecValue x nx)) (Cons (ValueResult (BitVecValue y ny)) Nil))
+evaluateFun _ _ (BVBin op _) ((ValueResult (BitVecValue x nx)) ::: (ValueResult (BitVecValue y ny)) ::: Nil)
   = return $ ValueResult $ BitVecValue (comp op) nx
   where
     bw = naturalToInteger nx
@@ -317,32 +317,32 @@ evaluateFun _ _ (BVBin op _) (Cons (ValueResult (BitVecValue x nx)) (Cons (Value
     comp BVXor = xor x y
     comp BVAnd = x .&. y
     comp BVOr = x .|. y
-evaluateFun _ _ (BVUn op _) (Cons (ValueResult (BitVecValue x nx)) Nil)
+evaluateFun _ _ (BVUn op _) ((ValueResult (BitVecValue x nx)) ::: Nil)
   = return $ ValueResult $ BitVecValue (comp op) nx
   where
     bw = naturalToInteger nx
     comp BVNot = xor (2^bw-1) x
     comp BVNeg = 2^bw-x
-evaluateFun ev evf (Select _ _) (Cons (ArrayResult mdl) idx)
+evaluateFun ev evf (Select _ _) ((ArrayResult mdl) ::: idx)
   = evaluateArray ev evf mdl idx
-evaluateFun _ _ (Store _ _) (Cons (ArrayResult mdl) (Cons el idx))
+evaluateFun _ _ (Store _ _) ((ArrayResult mdl) ::: el ::: idx)
   = return $ ArrayResult (ArrayStore idx el mdl)
-evaluateFun _ _ (ConstArray idx _) (Cons val Nil)
+evaluateFun _ _ (ConstArray idx _) (val ::: Nil)
   = return $ ArrayResult (ArrayConst val idx)
-evaluateFun _ _ (Concat _ _) (Cons (ValueResult (BitVecValue x nx)) (Cons (ValueResult (BitVecValue y ny)) Nil))
+evaluateFun _ _ (Concat _ _) ((ValueResult (BitVecValue x nx)) ::: (ValueResult (BitVecValue y ny)) ::: Nil)
   = return $ ValueResult $ BitVecValue (x*(2^bw)+y) (naturalAdd nx ny)
   where
     bw = naturalToInteger nx
-evaluateFun _ _ (Extract bw start len) (Cons (ValueResult (BitVecValue x nx)) Nil)
+evaluateFun _ _ (Extract bw start len) ((ValueResult (BitVecValue x nx)) ::: Nil)
   = return $ ValueResult $ BitVecValue (x `div` (2^(naturalToInteger start))) len
 evaluateFun _ _ (Constructor con) args = do
   rargs <- List.mapM (\(ValueResult v) -> return v) args
   return $ ValueResult $ ConstrValue con rargs
-evaluateFun _ _ (Test con) (Cons (ValueResult (ConstrValue con' _)) Nil)
+evaluateFun _ _ (Test con) ((ValueResult (ConstrValue con' _)) ::: Nil)
   = return $ ValueResult $ BoolValue $ case geq con con' of
   Just Refl -> True
   Nothing -> False
-evaluateFun _ ev (Field f) (Cons (ValueResult (ConstrValue con args)) Nil)
+evaluateFun _ ev (Field f) ((ValueResult (ConstrValue con args)) ::: Nil)
   = ev f con args
-evaluateFun _ _ (Divisible n) (Cons (ValueResult (IntValue i)) Nil)
+evaluateFun _ _ (Divisible n) ((ValueResult (IntValue i)) ::: Nil)
   = return $ ValueResult $ BoolValue $ i `mod` n == 0

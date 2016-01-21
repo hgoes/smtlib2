@@ -58,7 +58,7 @@ liftType' (ArrayType idx el)
 
 liftList :: [TH.ExpQ] -> TH.ExpQ
 liftList [] = [| Nil |]
-liftList (x:xs) = [| Cons $(x) $(liftList xs) |]
+liftList (x:xs) = [| $(x) ::: $(liftList xs) |]
 
 liftTHType :: THType -> TH.ExpQ
 liftTHType (DeterminedType tp) = [| return $(liftTypeRepr tp) |]
@@ -66,7 +66,7 @@ liftTHType (QueryType q) = q
 
 liftTHTypes :: [THType] -> TH.ExpQ
 liftTHTypes [] = [| return Nil |]
-liftTHTypes (tp:tps) = [| liftM2 Cons $(liftTHType tp) $(liftTHTypes tps) |]
+liftTHTypes (tp:tps) = [| liftM2 (:::) $(liftTHType tp) $(liftTHTypes tps) |]
 
 liftNumType :: Type -> TH.ExpQ
 liftNumType IntType = [| NumInt |]
@@ -493,7 +493,7 @@ toExpression bind (List (fun:args))
     funType = deriveFunctionType rfun (Just (fmap (Just . deriveType) rargs),Nothing)
     toArgs :: [THExpression] -> TH.ExpQ
     toArgs [] = [| return Nil |]
-    toArgs (e:es) = [| liftM2 Cons $(getExpr' e) $(toArgs es) |]
+    toArgs (e:es) = [| liftM2 (:::) $(getExpr' e) $(toArgs es) |]
 toExpression bind (HsExpr expr) = case TH.parseExp expr of
   Left err -> error $ "Failed to parse haskell expression: "++show expr
   Right expr' -> THExpr { deriveType = QueryType [| embedTypeOf $(return expr') |]
@@ -518,14 +518,14 @@ toQuantifier q bind vars body
     mkPat bind ((var,tp):vars) = do
       qvar <- TH.newName "q"
       (pat,nbind) <- mkPat bind vars
-      return (TH.conP 'Cons [TH.varP qvar,pat],
+      return (TH.conP '(:::) [TH.varP qvar,pat],
               Map.insert var (THExpr { deriveType = tp
                                      , getExpr' = [| embed (QVar $(TH.varE qvar)) |]
                                      }) nbind)
     mkTps [] = [| Nil |]
-    mkTps ((_,tp):tps) = [| Cons $(case tp of
-                                    DeterminedType t -> liftTypeRepr t
-                                    QueryType q -> q)
+    mkTps ((_,tp):tps) = [| $(case tp of
+                               DeterminedType t -> liftTypeRepr t
+                               QueryType q -> q) :::
                             $(mkTps tps) |]
 
 parseList :: String -> Maybe ([BasicExpr],String)
@@ -682,7 +682,7 @@ toFunDef ((name,tp):args) body mp vec = do
                   (Map.insert name (THExpr tp (return expr)) mp)
                   (TH.varE fv:vec)))))
 toFunDef [] body mp vec = do
-  let args = foldl (\args e -> [| Cons $(e) $(args) |]) [| Nil |] vec
+  let args = foldl (\args e -> [| $(e) ::: $(args) |]) [| Nil |] vec
   [| $(toExpr mp body) >>= embedSMT . B.defineFun Nothing $(args) |]
 
 entypeExpr :: Proxy (t::Type) -> e t -> e t
@@ -708,7 +708,7 @@ toQuant ((name,tp):args) mp = do
   exp' <- [| do
                v <- embedSMT $ B.createQVar (Just name)
                vs <- $(return rest)
-               return (Cons (v :: $(return tp)) vs) |]
+               return ((v :: $(return tp)) ::: vs) |]
   return (exp',Map.insert name expr nmp)
 
 quantSig :: [(String,TH.Type)] -> TH.TypeQ
@@ -869,7 +869,7 @@ thMakeArray idx el
 
 mkArgsPat :: [BasicExpr] -> TH.PatQ
 mkArgsPat [] = [p| Nil |]
-mkArgsPat (x:xs) = [p| Cons $(toPat x) $(mkArgsPat xs) |]
+mkArgsPat (x:xs) = [p| $(toPat x) ::: $(mkArgsPat xs) |]
 
 mkAllEqPat :: [BasicExpr] -> TH.PatQ
 mkAllEqPat xs = TH.viewP [| allEqToList |]
