@@ -10,9 +10,10 @@ import Language.SMTLib2.Internals.Backend
 import Data.Functor.Identity
 import Data.Proxy
 import Control.Monad.State
-import qualified Control.Monad.State.Strict as S
 import Data.Typeable
 import Data.GADT.Compare
+
+type EmbedExpr m e tp = Expression (EmVar m e) (EmQVar m e) (EmFun m e) (EmConstr m e) (EmField m e) (EmFunArg m e) (EmLVar m e) e tp
 
 class (Monad m,
        GCompare (EmVar m e),
@@ -31,7 +32,7 @@ class (Monad m,
   type EmField m e :: (*,Type) -> *
   type EmFunArg m e :: Type -> *
   type EmLVar m e :: Type -> *
-  embed :: Expression (EmVar m e) (EmQVar m e) (EmFun m e) (EmConstr m e) (EmField m e) (EmFunArg m e) (EmLVar m e) e tp
+  embed :: EmbedExpr m e tp
         -> m (e tp)
   embedQuantifier :: Quantifier
                   -> List Repr arg

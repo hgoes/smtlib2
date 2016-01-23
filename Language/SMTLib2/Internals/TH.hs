@@ -3,7 +3,9 @@ module Language.SMTLib2.Internals.TH where
 import Language.SMTLib2.Internals.Type
 import Language.SMTLib2.Internals.Type.Nat
 import Language.SMTLib2.Internals.Type.List (List(..))
+import qualified Language.SMTLib2.Internals.Type.List as List
 import Language.SMTLib2.Internals.Expression
+import qualified Language.SMTLib2.Internals.Interface as Pat
 import qualified Language.SMTLib2.Internals.Backend as B
 import Language.SMTLib2.Internals.Monad
 import Language.SMTLib2.Internals.Embed
@@ -19,6 +21,9 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Control.Monad (liftM2)
 import Data.Maybe (catMaybes)
+import Data.GADT.Compare
+import Data.Functor.Identity
+import Data.Constraint
 
 data BasicExpr = Atom String
                | List [BasicExpr]
@@ -84,7 +89,8 @@ data THFunction = THFun { deriveFunctionType :: (Maybe [Maybe THType],Maybe THTy
                                              -> (Maybe [Maybe THType],Maybe THType)
                         , getSymbol :: (Maybe [Maybe THType],Maybe THType) -> TH.ExpQ
                         , allEqSymbol :: TH.ExpQ
-                        , match :: TH.PatQ }
+                        , match :: TH.PatQ
+                        , matchAllEq :: TH.PatQ -> TH.PatQ }
 
 data THExpression = THExpr { deriveType :: THType
                            , getExpr' :: TH.ExpQ }
@@ -113,8 +119,9 @@ toFunction (Atom "=")
           , getSymbol = \(args,_) -> case args of
             Just xs@((Just tp):_)
               -> [| $(liftTHType tp) >>= \rtp -> return $ Eq rtp $(liftNat $ natLength xs) |]
-          , allEqSymbol = [| eq' |]
-          , match = [p| Eq _ _ |] }
+          , allEqSymbol = [| embed . Pat.EqLst |]
+          , match = [p| Eq _ _ |]
+          , matchAllEq = \r -> [p| Pat.EqLst $(r) |] }
 toFunction (Atom "distinct")
   = THFun { deriveFunctionType = \(args,_)
                                  -> (case args of
@@ -748,6 +755,12 @@ toPat (Atom name)
   | isDigit (head name) = let num = read name
                            in [p| AnalyzedExpr (Just (Const (IntValue $(TH.litP $ TH.integerL num)))) _ |]
   | otherwise = [p| AnalyzedExpr _ $(TH.varP (TH.mkName name)) |]
+toPat (List [fun,Atom "#",HsExpr arg])
+  = case TH.parsePat arg of
+  Left err -> error $ "While parsing pattern: "++show arg++": "++err
+  Right pat -> matchAllEq rfun (return pat)
+  where
+    rfun = toFunction fun
 toPat (List (fun:args))
   = [p| AnalyzedExpr (Just (App $(match rfun) $(mkArgsPat args))) _ |]
   where
@@ -755,12 +768,6 @@ toPat (List (fun:args))
 toPat (HsExpr e) = case TH.parsePat e of
   Left err -> error $ "While parsing pattern: "++show e++": "++err
   Right pat -> [p| AnalyzedExpr _ $(return pat) |]
-
-eq' :: Embed m e => [e t] -> m (e BoolType)
-eq' (x:xs) = do
-  tp <- embedTypeOf x
-  allEqFromList (x:xs) $
-    \n args -> embed (App (Eq tp n) args)
 
 distinct' :: Embed m e => [e t] -> m (e BoolType)
 distinct' (x:xs) = do

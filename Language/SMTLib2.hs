@@ -29,7 +29,7 @@ module Language.SMTLib2 (
   -- * Getting informations about the solver
   getInfo,B.SMTInfo(..),
   -- * Expressions
-  B.Expr(),expr,(.==.),(.>=.),(.>.),(.<=.),(.<.),
+  B.Expr(),expr,
   -- ** Declaring variables
   declare,declareVar,declareVarNamed,
   -- ** Defining variables
@@ -189,12 +189,3 @@ getExpr e = do
 
 comment :: (B.Backend b) => String -> SMT b ()
 comment msg = embedSMT $ B.comment msg
-
-(.==.) :: (B.Backend b) => B.Expr b t -> B.Expr b t -> SMT b (B.Expr b BoolType)
-(.==.) lhs rhs = [expr| (= lhs rhs) |]
-
-(.<=.),(.<.),(.>=.),(.>.) :: (B.Backend b,SMTOrd t) => B.Expr b t -> B.Expr b t -> SMT b (B.Expr b BoolType)
-(.<=.) lhs rhs = [expr| (<= lhs rhs) |]
-(.<.) lhs rhs = [expr| (< lhs rhs) |]
-(.>=.) lhs rhs = [expr| (>= lhs rhs) |]
-(.>.) lhs rhs = [expr| (> lhs rhs) |]
