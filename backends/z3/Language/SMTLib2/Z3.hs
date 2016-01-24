@@ -158,6 +158,10 @@ instance Backend Z3Solver where
     solverPop ctx solver 1
     return ((),solv1)
   exit solv = return ((),solv)
+  simplify (UntypedVar e tp) solv = do
+    (ctx,solv1) <- getContext solv
+    ne <- Z3.simplify ctx e
+    return (UntypedVar ne tp,solv1)
 
 fromZ3Value :: Context -> Z3Expr t -> IO (Value Z3Con t)
 fromZ3Value ctx (UntypedVar e tp) = case tp of
