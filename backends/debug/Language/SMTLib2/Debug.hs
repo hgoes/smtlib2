@@ -305,9 +305,13 @@ instance (Backend b) => Backend (DebugBackend b) where
     let b2 = b1 { debugBackend' = nb }
     outputResponse b2 (show $ renderExpr b2 proof)
     return (proof,b2)
-  simplify e b = do
-    (res,nb) <- simplify e (debugBackend' b)
-    return (res,b { debugBackend' = nb })
+  simplify expr b = do
+    let l = renderExpr b expr
+    b1 <- outputLisp b (L.List [L.Symbol "simplify",l])
+    (res,nb) <- simplify expr (debugBackend' b1)
+    let b2 = b1 { debugBackend' = nb }
+    outputResponse b2 (show $ renderExpr b2 res)
+    return (res,b2)
   comment msg b = do
     b1 <- outputLine b True msg
     return ((),b1)
