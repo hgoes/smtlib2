@@ -10,6 +10,7 @@ import Text.Show
 import Data.GADT.Compare
 import Data.GADT.Show
 import Data.Functor.Identity
+import Data.Ratio
 
 type family AllEq (tp :: Type) (n :: Nat) :: [Type] where
   AllEq tp Z = '[]
@@ -425,6 +426,208 @@ instance (GShow fun,GShow con,GShow field)
   showsPrec p (Divisible x) = showParen (p>10) $
                               showString "Divisible " .
                               showsPrec 11 x
+
+data RenderMode = SMTRendering deriving (Eq,Ord,Show)
+
+renderExprDefault :: (GetType qv,GShow v,GShow qv,GShow fun,GShow con,
+                      GShow field,GShow fv,GShow lv,GShow e)
+                  => RenderMode
+                  -> Expression v qv fun con field fv lv e tp
+                  -> ShowS
+renderExprDefault m = renderExpr m gshows gshows gshows gshows gshows gshows gshows gshows
+
+renderExpr :: (GetType qv) => RenderMode
+           -> (forall tp. v tp -> ShowS)
+           -> (forall tp. qv tp -> ShowS)
+           -> (forall arg res. fun '(arg,res) -> ShowS)
+           -> (forall arg dt. con '(arg,dt) -> ShowS)
+           -> (forall dt res. field '(dt,res) -> ShowS)
+           -> (forall tp. fv tp -> ShowS)
+           -> (forall tp. lv tp -> ShowS)
+           -> (forall tp. e tp -> ShowS)
+           -> Expression v qv fun con field fv lv e tp
+           -> ShowS
+renderExpr _ f _ _ _ _ _ _ _ (Var x) = f x
+renderExpr _ _ f _ _ _ _ _ _ (QVar x) = f x
+renderExpr _ _ _ _ _ _ f _ _ (FVar x) = f x
+renderExpr _ _ _ _ _ _ _ f _ (LVar x) = f x
+renderExpr SMTRendering _ _ f g h _ _ i (App fun args)
+  = showChar '(' .
+    renderFunction SMTRendering f g h fun .
+    renderArgs i args .
+    showChar ')'
+  where
+    renderArgs :: (forall tp. e tp -> ShowS) -> List e tps -> ShowS
+    renderArgs f Nil = id
+    renderArgs f (x ::: xs) = showChar ' ' . f x . renderArgs f xs
+renderExpr m _ _ _ f _ _ _ _ (Const val) = renderValue m f val
+renderExpr SMTRendering _ _ f g h _ _ _ (AsArray fun)
+  = showString "(_ as-array " .
+    renderFunction SMTRendering f g h fun .
+    showChar ')'
+renderExpr SMTRendering _ f _ _ _ _ _ g (Quantification q args body)
+  = showChar '(' .
+    showString (case q of
+                   Forall -> "forall"
+                   Exists -> "exists") .
+    showString " (" . renderArgs f args . showString ") " . g body . showChar ')'
+  where
+    renderArgs :: GetType qv => (forall tp. qv tp -> ShowS)
+               -> List qv tps -> ShowS
+    renderArgs _ Nil = id
+    renderArgs f (x ::: xs) = showChar '(' .
+                              f x . showChar ' ' .
+                              renderType SMTRendering (getType x) .
+                              showChar ')' .
+                              (case xs of
+                                  Nil -> id
+                                  _ -> showChar ' ' . renderArgs f xs)
+renderExpr SMTRendering _ _ _ _ _ _ f g (Let args body)
+  = showString "(let (" . renderArgs f g args . showString ") " . g body . showChar ')'
+  where
+    renderArgs :: (forall tp. lv tp -> ShowS) -> (forall tp. e tp -> ShowS)
+               -> List (LetBinding lv e) args
+               -> ShowS
+    renderArgs _ _ Nil = id
+    renderArgs f g (x ::: xs)
+      = showChar '(' .
+        f (letVar x) . showChar ' ' .
+        g (letExpr x) . showChar ')' .
+        (case xs of
+            Nil -> id
+            _ -> showChar ' ' . renderArgs f g xs)
+
+renderValue :: RenderMode -> (forall arg dt. con '(arg,dt) -> ShowS) -> Value con tp -> ShowS
+renderValue SMTRendering _ (BoolValue v) = if v then showString "true" else showString "false"
+renderValue SMTRendering _ (IntValue v)
+  = if v>=0 then showsPrec 0 v
+    else showString "(- " .
+         showsPrec 0 (negate v) .
+         showChar ')'
+renderValue SMTRendering _ (RealValue v)
+  = showString "(/ " . n . showChar ' ' . d . showChar ')'
+  where
+    n = if numerator v >= 0
+        then showsPrec 0 (numerator v)
+        else showString "(- " . showsPrec 0 (negate $ numerator v) . showChar ')'
+    d = showsPrec 0 (denominator v)
+renderValue SMTRendering _ (BitVecValue n bw)
+  = showString "(_ bv" .
+    showsPrec 0 n .
+    showChar ' ' .
+    showsPrec 0 (naturalToInteger bw) .
+    showChar ')'
+renderValue SMTRendering f (ConstrValue con Nil)
+  = f con
+renderValue SMTRendering f (ConstrValue con xs)
+  = showChar '(' . f con . renderValues f xs . showChar ')'
+  where
+    renderValues :: (forall arg dt. con '(arg,dt) -> ShowS) -> List (Value con) arg -> ShowS
+    renderValues f Nil = id
+    renderValues f (x ::: xs) = showChar ' ' . renderValue SMTRendering f x . renderValues f xs
+
+renderFunction :: RenderMode
+               -> (forall arg res. fun '(arg,res) -> ShowS)
+               -> (forall arg dt. con '(arg,dt) -> ShowS)
+               -> (forall dt res. field '(dt,res) -> ShowS)
+               -> Function fun con field '(arg,res)
+               -> ShowS
+renderFunction _ f _ _ (Fun x) = f x
+renderFunction SMTRendering _ _ _ (Eq _ _) = showChar '='
+renderFunction SMTRendering _ _ _ (Distinct _ _) = showString "distinct"
+renderFunction SMTRendering f g h (Map _ fun)
+  = showString "(map " .
+    renderFunction SMTRendering f g h fun .
+    showChar ')'
+renderFunction SMTRendering _ _ _ (Ord _ Ge) = showString ">="
+renderFunction SMTRendering _ _ _ (Ord _ Gt) = showChar '>'
+renderFunction SMTRendering _ _ _ (Ord _ Le) = showString "<="
+renderFunction SMTRendering _ _ _ (Ord _ Lt) = showString "<"
+renderFunction SMTRendering _ _ _ (Arith _ Plus _) = showChar '+'
+renderFunction SMTRendering _ _ _ (Arith _ Mult _) = showChar '*'
+renderFunction SMTRendering _ _ _ (Arith _ Minus _) = showChar '-'
+renderFunction SMTRendering _ _ _ (ArithIntBin Div) = showString "div"
+renderFunction SMTRendering _ _ _ (ArithIntBin Mod) = showString "mod"
+renderFunction SMTRendering _ _ _ (ArithIntBin Rem) = showString "rem"
+renderFunction SMTRendering _ _ _ Divide = showChar '/'
+renderFunction SMTRendering _ _ _ (Abs _) = showString "abs"
+renderFunction SMTRendering _ _ _ Not = showString "not"
+renderFunction SMTRendering _ _ _ (Logic And _) = showString "and"
+renderFunction SMTRendering _ _ _ (Logic Or _) = showString "or"
+renderFunction SMTRendering _ _ _ (Logic XOr _) = showString "xor"
+renderFunction SMTRendering _ _ _ (Logic Implies _) = showString "=>"
+renderFunction SMTRendering _ _ _ ToReal = showString "to_real"
+renderFunction SMTRendering _ _ _ ToInt = showString "to_int"
+renderFunction SMTRendering _ _ _ (ITE _) = showString "ite"
+renderFunction SMTRendering _ _ _ (BVComp op _) = showString $ case op of
+  BVULE -> "bvule"
+  BVULT -> "bvult"
+  BVUGE -> "bvuge"
+  BVUGT -> "bvugt"
+  BVSLE -> "bvsle"
+  BVSLT -> "bvslt"
+  BVSGE -> "bvsge"
+  BVSGT -> "bvsgt"
+renderFunction SMTRendering _ _ _ (BVBin op _) = showString $ case op of
+  BVAdd -> "bvadd"
+  BVSub -> "bvsub"
+  BVMul -> "bvmul"
+  BVURem -> "bvurem"
+  BVSRem -> "bvsrem"
+  BVUDiv -> "bvudiv"
+  BVSDiv -> "bvsdiv"
+  BVSHL -> "bvshl"
+  BVLSHR -> "bvshr"
+  BVASHR -> "bvashr"
+  BVXor -> "bvxor"
+  BVAnd -> "bvand"
+  BVOr -> "bvor"
+renderFunction SMTRendering _ _ _ (BVUn op _) = showString $ case op of
+  BVNot -> "bvnot"
+  BVNeg -> "bvneg"
+renderFunction SMTRendering _ _ _ (Select _ _) = showString "select"
+renderFunction SMTRendering _ _ _ (Store _ _) = showString "store"
+renderFunction SMTRendering _ _ _ (ConstArray idx el)
+  = showString "(as const " .
+    renderType SMTRendering (ArrayRepr idx el) .
+    showChar ')'
+renderFunction SMTRendering _ _ _ (Concat _ _) = showString "concat"
+renderFunction SMTRendering _ _ _ (Extract _ start len)
+  = showString "(_ extract " .
+    showString (show $ start'+len'-1) .
+    showChar ' ' .
+    showString (show start') .
+    showChar ')'
+  where
+    start' = naturalToInteger start
+    len' = naturalToInteger len
+renderFunction SMTRendering _ f _ (Constructor con) = f con
+renderFunction SMTRendering _ f _ (Test con) = showString "is-" . f con
+renderFunction SMTRendering _ _ f (Field field) = f field
+renderFunction SMTRendering _ _ _ (Divisible n) = showString "(_ divisible " .
+                                                  showsPrec 10 n .
+                                                  showChar ')'
+
+renderType :: RenderMode -> Repr tp -> ShowS
+renderType SMTRendering BoolRepr = showString "Bool"
+renderType SMTRendering IntRepr = showString "Int"
+renderType SMTRendering RealRepr = showString "Real"
+renderType SMTRendering (BitVecRepr bw) = showString "(BitVec " .
+                                          showString (show $ naturalToInteger bw) .
+                                          showChar ')'
+renderType SMTRendering (ArrayRepr idx el) = showString "(Array (" .
+                                             renderTypes idx .
+                                             showString ") " .
+                                             renderType SMTRendering el .
+                                             showChar ')'
+  where
+    renderTypes :: List Repr tps -> ShowS
+    renderTypes Nil = id
+    renderTypes (tp ::: Nil) = renderType SMTRendering tp
+    renderTypes (tp ::: tps) = renderType SMTRendering tp .
+                               showChar ' ' .
+                               renderTypes tps
+renderType _ (DataRepr dt) = showString (datatypeName dt)
 
 instance (GShow fun,GShow con,GShow field)
          => GShow (Function fun con field) where
