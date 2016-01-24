@@ -62,7 +62,7 @@ module Language.SMTLib2 (
   -- ** Lists
   List(..),list,reifyList,nil,list1,list2,list3,
   -- * Misc
-  comment
+  comment,simplify
   ) where
 
 import Language.SMTLib2.Internals.Type
@@ -189,3 +189,7 @@ getExpr e = do
 
 comment :: (B.Backend b) => String -> SMT b ()
 comment msg = embedSMT $ B.comment msg
+
+-- | Use the SMT solver to simplify a given expression.
+simplify :: B.Backend b => B.Expr b tp -> SMT b (B.Expr b tp)
+simplify e = embedSMT $ B.simplify e
