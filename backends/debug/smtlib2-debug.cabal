@@ -1,13 +1,24 @@
 Name:           smtlib2-debug
-Version:        0.1
+Version:        1.0
 Author:         Henning Günther <guenther@forsyte.at>
 License:        GPL-3
+License-File:   LICENSE
 Build-Type:     Simple
 Cabal-Version:  >=1.2
 
+Flag Base4_8
+  Description: Build with a newer base module
+  Default: True
+  Manual: False
+
 Library
-  Build-Depends:        base >= 4,smtlib2 >= 0.1, ansi-terminal >= 0.5, mtl
-  Extensions:		FlexibleInstances,MultiParamTypeClasses
+  Build-Depends:        smtlib2 >= 1.0 && < 1.1, smtlib2-pipe >= 1.0 && < 1.1, ansi-terminal >= 0.5,
+                        atto-lisp, mtl,containers,text, dependent-map >= 0.2
+  if flag(Base4_8)
+     Build-Depends: base >= 4.8 && < 5
+  else
+     Build-Depends: base >= 4 && < 5, transformers  
+  Extensions:		FlexibleContexts,TypeFamilies,GADTs,ExistentialQuantification,OverloadedStrings,DeriveDataTypeable
   GHC-Options: -fwarn-unused-imports
   Exposed-Modules:
     Language.SMTLib2.Debug

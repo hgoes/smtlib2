@@ -1,12 +1,12 @@
 Name:		smtlib2-emulated-modulus
-Version:	0.1
+Version:	1.0
 Author:         Henning Günther <guenther@forsyte.at>
 License:        GPL-3
 Build-Type:     Simple
 Cabal-Version:  >=1.2
 
 Library
-  Build-Depends:	base,smtlib2 >= 0.1,mtl,data-fix,containers,tagged
-  Extensions:		ScopedTypeVariables,FlexibleInstances,MultiParamTypeClasses,GADTs
+  Build-Depends:	base,smtlib2 >= 1.0 && < 1.1,mtl,containers,dependent-sum
+  Extensions:		ScopedTypeVariables,FlexibleInstances,MultiParamTypeClasses,GADTs,DataKinds,FlexibleContexts,TypeFamilies
   Exposed-Modules:
     Language.SMTLib2.ModulusEmulator

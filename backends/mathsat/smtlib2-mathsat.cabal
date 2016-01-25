@@ -1,0 +1,18 @@
+Name:           smtlib2-mathsat
+Version:        1.0
+Author:         Henning Günther <guenther@forsyte.at>
+Build-Type:     Simple
+Cabal-Version:  >=1.2
+
+Library
+  Build-Depends:        base >= 4,smtlib2 >= 1.0 && < 1.1,containers,constraints,dependent-sum
+  Extensions: 		ForeignFunctionInterface,CApiFFI,CPP,
+                        GeneralizedNewtypeDeriving,MultiParamTypeClasses,
+                        GADTs,ScopedTypeVariables,FlexibleInstances,TypeFamilies,
+                        DataKinds,RankNTypes,TypeOperators
+  Extra-Libraries:	mathsat, stdc++
+  C-Sources:            helper.c
+  Includes:             helper.h
+  GHC-Options: -fwarn-unused-imports
+  Exposed-Modules:
+    Language.SMTLib2.MathSAT

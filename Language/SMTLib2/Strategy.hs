@@ -1,7 +1,5 @@
 module Language.SMTLib2.Strategy where
 
-import Language.SMTLib2.Internals.Operators
-
 data Tactic
   = Skip
   | AndThen [Tactic]
@@ -20,7 +18,10 @@ data Probe a where
   ProbeOr :: [Probe Bool] -> Probe Bool
   ProbeNot :: Probe Bool -> Probe Bool
   ProbeEq :: Show a => Probe a -> Probe a -> Probe Bool
-  ProbeCompare :: SMTOrdOp -> Probe Integer -> Probe Integer -> Probe Bool
+  ProbeGt :: Probe Integer -> Probe Integer -> Probe Bool
+  ProbeGe :: Probe Integer -> Probe Integer -> Probe Bool
+  ProbeLt :: Probe Integer -> Probe Integer -> Probe Bool
+  ProbeLe :: Probe Integer -> Probe Integer -> Probe Bool
   IsPB :: Probe Bool
   ArithMaxDeg :: Probe Integer
   ArithAvgDeg :: Probe Integer
@@ -110,6 +111,22 @@ instance Show a => Show (Probe a) where
   showsPrec p (ProbeNot c) = showParen (p>10) (showString "ProbeNot " .
                                                showsPrec 11 c)
   showsPrec p (ProbeEq p1 p2) = showParen (p>10) (showString "ProbeEq " .
+                                                  showsPrec 11 p1 .
+                                                  showChar ' ' .
+                                                  showsPrec 11 p2)
+  showsPrec p (ProbeGe p1 p2) = showParen (p>10) (showString "ProbeGe " .
+                                                  showsPrec 11 p1 .
+                                                  showChar ' ' .
+                                                  showsPrec 11 p2)
+  showsPrec p (ProbeGt p1 p2) = showParen (p>10) (showString "ProbeGt " .
+                                                  showsPrec 11 p1 .
+                                                  showChar ' ' .
+                                                  showsPrec 11 p2)
+  showsPrec p (ProbeLe p1 p2) = showParen (p>10) (showString "ProbeLe " .
+                                                  showsPrec 11 p1 .
+                                                  showChar ' ' .
+                                                  showsPrec 11 p2)
+  showsPrec p (ProbeLt p1 p2) = showParen (p>10) (showString "ProbeLt " .
                                                   showsPrec 11 p1 .
                                                   showChar ' ' .
                                                   showsPrec 11 p2)

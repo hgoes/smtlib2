@@ -1,677 +1,867 @@
-{- | Defines the user-accessible interface of the smtlib2 library -}
-{-# LANGUAGE TypeFamilies,OverloadedStrings,FlexibleContexts,ScopedTypeVariables,CPP,ViewPatterns #-}
-module Language.SMTLib2.Internals.Interface where
+module Language.SMTLib2.Internals.Interface
+       (Same(),IsSMTNumber(),AppList(),
+        -- * Expressions
+        pattern Var,
+        -- ** Constants
+        SMTType(),pattern ConstBool,pattern ConstInt,pattern ConstReal,pattern ConstBV,
+        constant,asConstant,true,false,cbool,cint,creal,cbv,
+        -- ** Functions
+        pattern Fun,
+        -- *** Equality
+        pattern EqLst,pattern Eq,pattern (:==:),
+        eq,(.==.),
+        pattern DistinctLst,pattern Distinct,pattern (:/=:),
+        distinct,(./=.),
+        -- *** Comparison
+        pattern Ord,pattern (:>=:),pattern (:>:),pattern (:<=:),pattern (:<:),
+        ord,(.>=.),(.>.),(.<=.),(.<.),
+        -- *** Arithmetic
+        pattern ArithLst,pattern Arith,arith,
+        pattern PlusLst,pattern Plus,pattern (:+:),plus,(.+.),
+        pattern MultLst,pattern Mult,pattern (:*:),mult,(.*.),
+        pattern MinusLst,pattern Minus,pattern (:-:),pattern Neg,minus,(.-.),neg,
+        pattern Div,pattern Mod,pattern Rem,div',mod',rem',
+        pattern (:/:),(./.),
+        pattern Abs,abs',
+        -- *** Logic
+        pattern Not,not',
+        pattern LogicLst,pattern Logic,logic,
+        pattern AndLst,pattern And,pattern (:&:),and',(.&.),
+        pattern OrLst,pattern Or,pattern (:|:),or',(.|.),
+        pattern XOrLst,pattern XOr,xor',
+        pattern ImpliesLst,pattern Implies,pattern (:=>:),implies,(.=>.),
+        -- *** Conversion
+        pattern ToReal,pattern ToInt,toReal,toInt,
+        -- *** If-then-else
+        pattern ITE,ite,
+        -- *** Bitvectors
+        pattern BVComp,pattern BVULE,pattern BVULT,pattern BVUGE,pattern BVUGT,pattern BVSLE,pattern BVSLT,pattern BVSGE,pattern BVSGT,bvcomp,bvule,bvult,bvuge,bvugt,bvsle,bvslt,bvsge,bvsgt,
+        pattern BVBin,pattern BVAdd,pattern BVSub,pattern BVMul,pattern BVURem,pattern BVSRem,pattern BVUDiv,pattern BVSDiv,pattern BVSHL,pattern BVLSHR,pattern BVASHR,pattern BVXor,pattern BVAnd,pattern BVOr,bvbin,bvadd,bvsub,bvmul,bvurem,bvsrem,bvudiv,bvsdiv,bvshl,bvlshr,bvashr,bvxor,bvand,bvor,
+        pattern Concat,pattern Extract,concat',extract',
+        -- *** Arrays
+        pattern Select,pattern Store,pattern ConstArray,select,select1,store,store1,constArray,
+        -- *** Misc
+        pattern Divisible,divisible
+       ) where
 
-import Language.SMTLib2.Internals
-import Language.SMTLib2.Internals.Instances (extractAnnotation,dtList,conNil,conInsert,withSort)
-import Language.SMTLib2.Internals.Optimize
-import Language.SMTLib2.Internals.Operators
-import Language.SMTLib2.Strategy
+import Language.SMTLib2.Internals.Type
+import Language.SMTLib2.Internals.Type.Nat
+import Language.SMTLib2.Internals.Type.List (List(..))
+import qualified Language.SMTLib2.Internals.Type.List as List
+import Language.SMTLib2.Internals.Expression hiding (Function(..),OrdOp(..),ArithOp(..),ArithOpInt(..),LogicOp(..),BVCompOp(..),BVBinOp(..),Const,Var,arith,plus,minus,mult,abs')
+import qualified Language.SMTLib2.Internals.Expression as E
+import Language.SMTLib2.Internals.Embed
 
-import Data.Typeable
-import Data.Array
-import Data.Unit
-import Data.List (genericReplicate)
-import Data.Proxy
+import Data.Constraint
+import Data.Functor.Identity
+import Data.Ratio
 
--- | Check if the model is satisfiable (e.g. if there is a value for each variable so that every assertion holds)
-checkSat :: Monad m => SMT' m Bool
-checkSat = checkSat' Nothing noLimits >>= return.isSat
+-- Helper classes
 
--- | Check if the model is satisfiable using a given tactic. (Works only with Z3)
-checkSatUsing :: Monad m => Tactic -> SMT' m Bool
-checkSatUsing t = checkSat' (Just t) noLimits >>= return.isSat
+-- | All elements of this list must be of the same type
+class Same (tps :: [Type]) where
+  type SameType tps :: Type
+  -- | Extract the type that all elements of the list share.
+  --   This is simply the first element.
+  sameType :: List Repr tps -> Repr (SameType tps)
+  -- | Convert a list of same elements to an all-equal list.
+  --   This is just the identity function.
+  sameToAllEq :: List e tps -> List e (AllEq (SameType tps) (List.Length tps))
 
--- | Like 'checkSat', but gives you more options like choosing a tactic (Z3 only) or providing memory/time-limits
-checkSat' :: Monad m => Maybe Tactic -> CheckSatLimits -> SMT' m CheckSatResult
-checkSat' tactic limits = smtBackend $ \b -> smtHandle b (SMTCheckSat tactic limits)
+instance Same '[tp] where
+  type SameType '[tp] = tp
+  sameType (tp ::: Nil) = tp
+  sameToAllEq = id
 
-isSat :: CheckSatResult -> Bool
-isSat Sat = True
-isSat Unsat = False
-isSat Unknown = error "smtlib2: checkSat query return 'unknown' (To catch this, use checkSat' function)"
+instance (Same (tp ': tps),tp ~ (SameType (tp ': tps))) => Same (tp ': tp ': tps) where
+  type SameType (tp ': tp ': tps) = tp
+  sameType (x ::: _) = x
+  sameToAllEq (x ::: xs) = x ::: (sameToAllEq xs)
 
--- | Apply the given tactic to the current assertions. (Works only with Z3)
-apply :: Monad m => Tactic -> SMT' m [SMTExpr Bool]
-apply t = smtBackend $ \backend -> smtHandle backend (SMTApply t)
+-- | Convert an all-equal list to a list of elements of same type.
+--   This can fail (return 'Nothing') when the list is empty.
+allEqToSame :: Repr tp -> Natural n -> List e (AllEq tp n)
+            -> Maybe (Dict (Same (AllEq tp n),
+                            SameType (AllEq tp n) ~ tp))
+allEqToSame _ Zero Nil = Nothing
+allEqToSame tp (Succ Zero) (x ::: Nil) = Just Dict
+allEqToSame tp (Succ (Succ n)) (x ::: y ::: ys) = do
+  Dict <- allEqToSame tp (Succ n) (y ::: ys)
+  return Dict
 
--- | Push a new context on the stack
-push :: Monad m => SMT' m ()
-push = smtBackend $ \b -> smtHandle b SMTPush
+-- | The same as 'allEqToSame' but also returns the original list.
+--   Only used for pattern matching.
+allEqToSame' :: Repr tp -> Natural n -> List e (AllEq tp n)
+             -> Maybe (Dict (Same (AllEq tp n),
+                             SameType (AllEq tp n) ~ tp),
+                       List e (AllEq tp n))
+allEqToSame' tp n lst = do
+  d <- allEqToSame tp n lst
+  return (d,lst)
 
--- | Pop a new context from the stack
-pop :: Monad m => SMT' m ()
-pop = smtBackend $ \b -> smtHandle b SMTPop
+class IsSMTNumber (tp :: Type) where
+  smtNumRepr :: NumRepr tp
+  smtFromInteger :: Integer -> Value con tp
 
--- | Perform a stacked operation, meaning that every assertion and declaration made in it will be undone after the operation.
-stack :: Monad m => SMT' m a -> SMT' m a
-stack act = do
-  push
-  res <- act
-  pop
-  return res
+instance IsSMTNumber IntType where
+  smtNumRepr = NumInt
+  smtFromInteger n = IntValue n
 
--- | Insert a comment into the SMTLib2 command stream.
---   If you aren't looking at the command stream for debugging, this will do nothing.
-comment :: Monad m => String -> SMT' m ()
-comment msg = smtBackend $ \b -> smtHandle b (SMTComment msg)
+instance IsSMTNumber RealType where
+  smtNumRepr = NumReal
+  smtFromInteger n = RealValue (fromInteger n)
 
--- | Create a new named variable
-varNamed :: (SMTType t,Typeable t,Unit (SMTAnnotation t),Monad m) => String -> SMT' m (SMTExpr t)
-varNamed name = varNamedAnn name unit
+class HasMonad a where
+  type MatchMonad a (m :: * -> *) :: Constraint
+  type MonadResult a :: *
+  embedM :: (Monad m,MatchMonad a m) => a -> m (MonadResult a)
 
--- | Create a named and annotated variable.
-varNamedAnn :: (SMTType t,Typeable t,Monad m) => String -> SMTAnnotation t -> SMT' m (SMTExpr t)
-varNamedAnn = argVarsAnnNamed
+instance HasMonad (e (tp::Type)) where
+  type MatchMonad (e tp) m = ()
+  type MonadResult (e tp) = e tp
+  embedM = return
 
--- | Create a annotated variable
-varAnn :: (SMTType t,Typeable t,Monad m) => SMTAnnotation t -> SMT' m (SMTExpr t)
-varAnn ann = argVarsAnn ann
+instance HasMonad ((m :: * -> *) (e (tp::Type))) where
+  type MatchMonad (m (e tp)) m' = m ~ m'
+  type MonadResult (m (e tp)) = e tp
+  embedM x = x
 
--- | Create a fresh new variable
-var :: (SMTType t,Typeable t,Unit (SMTAnnotation t),Monad m) => SMT' m (SMTExpr t)
-var = argVarsAnn unit
+matchNumRepr :: NumRepr tp -> Dict (IsSMTNumber tp)
+matchNumRepr NumInt = Dict
+matchNumRepr NumReal = Dict
 
--- | Create a fresh untyped variable with a name
-untypedNamedVar :: Monad m => String -> Sort -> SMT' m (SMTExpr Untyped)
-untypedNamedVar name sort = do
-  dts <- smtBackend $ \b -> smtHandle b SMTDeclaredDataTypes
-  withSort dts sort $
-    \(_::t) ann -> do
-      v <- varNamedAnn name ann
-      return $ UntypedExpr (v::SMTExpr t)
+matchNumRepr' :: NumRepr tp -> (Dict (IsSMTNumber tp),NumRepr tp)
+matchNumRepr' r = (matchNumRepr r,r)
 
--- | Create a fresh untyped variable
-untypedVar :: Monad m => Sort -> SMT' m (SMTExpr Untyped)
-untypedVar sort = do
-  dts <- smtBackend $ \b -> smtHandle b SMTDeclaredDataTypes
-  withSort dts sort $
-    \(_::t) ann -> do
-      v <- varAnn ann
-      return $ UntypedExpr (v::SMTExpr t)
+-- Patterns
 
--- | Like `argVarsAnnNamed`, but defaults the name to "var"
-argVarsAnn :: (Args a,Monad m) => ArgAnnotation a -> SMT' m a
-argVarsAnn = argVarsAnnNamed' Nothing
+#if __GLASGOW_HASKELL__ >= 710
+#define SEP ->
+#define MK_SIG(PROV,REQ,NAME,LHS,RHS) pattern NAME :: PROV => REQ => LHS -> RHS
+#else
+#define SEP
+#define MK_SIG(PROV,REQ,NAME,LHS,RHS) pattern PROV => NAME LHS :: REQ => RHS
+#endif
 
--- | Create annotated named SMT variables of the `Args` class.
---   If more than one variable is needed, they get a numerical suffix.
-argVarsAnnNamed :: (Args a,Monad m) => String -> ArgAnnotation a -> SMT' m a
-argVarsAnnNamed name = argVarsAnnNamed' (Just name)
+MK_SIG((rtp ~ BoolType),(),ConstBool,Bool,Expression v qv fun con field fv lv e rtp)
+pattern ConstBool x = E.Const (BoolValue x)
 
-argVarsAnnNamed' :: (Args a,Monad m) => Maybe String -> ArgAnnotation a -> SMT' m a
-argVarsAnnNamed' name ann = do
-  (_,arg) <- foldExprs (\_ (_::SMTExpr t) ann' -> do
-                           declareType (undefined::t) ann'
-                           let info = FunInfo { funInfoProxy = Proxy::Proxy ((),t)
-                                              , funInfoArgAnn = ()
-                                              , funInfoResAnn = ann'
-                                              , funInfoName = name }
-                           res <- smtBackend $ \b -> smtHandle b (SMTDeclareFun info)
-                           let expr = Var res ann'
-                           case additionalConstraints (undefined::t) ann' of
-                            Nothing -> return ()
-                            Just constr -> mapM_ assert $ constr expr
-                           return ((),expr)
-                       ) () undefined ann
-  return arg
+MK_SIG((rtp ~ IntType),(),ConstInt,Integer,Expression v qv fun con field fv lv e rtp)
+pattern ConstInt x = E.Const (IntValue x)
 
--- | Like `argVarsAnn`, but can only be used for unit type annotations.
-argVars :: (Args a,Unit (ArgAnnotation a),Monad m) => SMT' m a
-argVars = argVarsAnn unit
+MK_SIG((rtp ~ RealType),(),ConstReal,Rational,Expression v qv fun con field fv lv e rtp)
+pattern ConstReal x = E.Const (RealValue x)
 
--- | A constant expression.
-constant :: (SMTValue t,Unit (SMTAnnotation t)) => t -> SMTExpr t
-constant x = Const x unit
+MK_SIG((rtp ~ BitVecType bw),(),ConstBV,Integer SEP (Natural bw),Expression v qv fun con field fv lv e rtp)
+pattern ConstBV x bw = E.Const (BitVecValue x bw)
 
--- | An annotated constant expression.
-constantAnn :: SMTValue t => t -> SMTAnnotation t -> SMTExpr t
-constantAnn x ann = Const x ann
+pattern Fun f arg = App (E.Fun f) arg
 
-getValue :: (SMTValue t,Monad m) => SMTExpr t -> SMT' m t
-getValue expr = smtBackend $ \b -> smtHandle b (SMTGetValue expr)
+MK_SIG((rtp ~ BoolType),(),EqLstP,(Repr tp) SEP [e tp],Expression v qv fun con field fv lv e rtp)
+pattern EqLstP tp lst <- App (E.Eq tp n) (allEqToList n -> lst) where
+   EqLstP tp lst = allEqFromList lst (\n -> App (E.Eq tp n))
 
-getValues :: (LiftArgs arg,Monad m) => arg -> SMT' m (Unpacked arg)
-getValues args = unliftArgs args getValue
+MK_SIG((rtp ~ BoolType),(GetType e),EqLst,[e tp],Expression v qv fun con field fv lv e rtp)
+pattern EqLst lst <- EqLstP _ lst where
+  EqLst lst@(x:_) = EqLstP (getType x) lst
 
--- | Extract all assigned values of the model
-getModel :: Monad m => SMT' m SMTModel
-getModel = smtBackend $ \b -> smtHandle b SMTGetModel
+MK_SIG((rtp ~ BoolType,Same tps),(GetType e),Eq,List e tps,Expression v qv fun con field fv lv e rtp)
+pattern Eq lst <- App (E.Eq tp n) (allEqToSame' tp n -> Just (Dict,lst)) where
+  Eq lst = sameApp E.Eq lst
 
--- | Extract all values of an array by giving the range of indices.
-unmangleArray :: (Liftable i,LiftArgs i,Ix (Unpacked i),SMTValue v,
-                  Unit (ArgAnnotation i),Monad m)
-                 => (Unpacked i,Unpacked i)
-                 -> SMTExpr (SMTArray i v)
-                 -> SMT' m (Array (Unpacked i) v)
-unmangleArray b expr = mapM (\i -> do
-                                v <- getValue (App SMTSelect (expr,liftArgs i unit))
-                                return (i,v)
-                            ) (range b) >>= return.array b
+MK_SIG((rtp ~ BoolType),(GetType e),(:==:),(e tp) SEP (e tp),Expression v qv fun con field fv lv e rtp)
+pattern (:==:) x y <- App (E.Eq _ (Succ (Succ Zero))) (x ::: y ::: Nil) where
+  (:==:) x y = App (E.Eq (getType x) (Succ (Succ Zero))) (x ::: y ::: Nil)
 
--- | Define a new function with a body
-defFun :: (Args a,SMTType r,Unit (ArgAnnotation a),Monad m)
-          => (a -> SMTExpr r) -> SMT' m (SMTFunction a r)
-defFun = defFunAnn unit
+MK_SIG((rtp ~ BoolType),(),DistinctLstP,(Repr tp) SEP [e tp],Expression v qv fun con field fv lv e rtp)
+pattern DistinctLstP tp lst <- App (E.Distinct tp n) (allEqToList n -> lst) where
+   DistinctLstP tp lst = allEqFromList lst (\n -> App (E.Distinct tp n))
 
--- | Define a new constant.
-defConst :: (SMTType r,Monad m) => SMTExpr r -> SMT' m (SMTExpr r)
-defConst = defConstNamed "constvar"
+MK_SIG((rtp ~ BoolType),(GetType e),DistinctLst,[e tp],Expression v qv fun con field fv lv e rtp)
+pattern DistinctLst lst <- DistinctLstP _ lst where
+  DistinctLst lst@(x:_) = DistinctLstP (getType x) lst
 
--- | Define a new constant with a name
-defConstNamed :: (SMTType r,Monad m) => String -> SMTExpr r -> SMT' m (SMTExpr r)
-defConstNamed name = defConstNamed' (Just name)
+MK_SIG((rtp ~ BoolType,Same tps),(GetType e),Distinct,List e tps,Expression v qv fun con field fv lv e rtp)
+pattern Distinct lst <- App (E.Distinct tp n) (allEqToSame' tp n -> Just (Dict,lst)) where
+  Distinct lst = sameApp E.Distinct lst
 
-defConstNamed' :: (SMTType r,Monad m) => Maybe String -> SMTExpr r -> SMT' m (SMTExpr r)
-defConstNamed' name e = do
-  i <- smtBackend $ \b -> smtHandle b (SMTDefineFun name (Proxy::Proxy ()) () e)
-  return (Var i (extractAnnotation e))
+MK_SIG((rtp ~ BoolType),(GetType e),(:/=:),(e tp) SEP (e tp),Expression v qv fun con field fv lv e rtp)
+pattern (:/=:) x y <- App (E.Distinct _ (Succ (Succ Zero))) (x ::: y ::: Nil) where
+  (:/=:) x y = App (E.Distinct (getType x) (Succ (Succ Zero))) (x ::: y ::: Nil)
 
--- | Define a new function with a body and custom type annotations for arguments and result.
-defFunAnnNamed :: (Args a,SMTType r,Monad m)
-                  => String -> ArgAnnotation a -> (a -> SMTExpr r) -> SMT' m (SMTFunction a r)
-defFunAnnNamed name = defFunAnnNamed' (Just name)
+MK_SIG((rtp ~ BoolType,IsSMTNumber tp),(),Ord,E.OrdOp SEP (e tp) SEP (e tp),Expression v qv fun con field fv lv e rtp)
+pattern Ord op x y <- App (E.Ord (matchNumRepr -> Dict) op) (x ::: y ::: Nil) where
+  Ord op x y = App (E.Ord smtNumRepr op) (x ::: y ::: Nil)
 
-defFunAnnNamed' :: (Args a,SMTType r,Monad m)
-                => Maybe String -> ArgAnnotation a -> (a -> SMTExpr r)
-                -> SMT' m (SMTFunction a r)
-defFunAnnNamed' name ann_arg (f::a -> SMTExpr r) = do
-  let (_,rargs) = foldExprsId (\i _ ann -> (i+1,FunArg i ann)) 0 (undefined::a) ann_arg
-      body = f rargs
-  i <- smtBackend $ \b -> smtHandle b (SMTDefineFun name (Proxy::Proxy a) ann_arg body)
-  return (SMTFun i (extractAnnotation body))
+MK_SIG((rtp ~ BoolType,IsSMTNumber tp),(),(:>=:),(e tp) SEP (e tp),Expression v qv fun con field fv lv e rtp)
+pattern (:>=:) x y <- App (E.Ord (matchNumRepr -> Dict) E.Ge) (x ::: y ::: Nil) where
+  (:>=:) x y = App (E.Ord smtNumRepr E.Ge) (x ::: y ::: Nil)
 
--- | Like `defFunAnnNamed`, but defaults the function name to "fun".
-defFunAnn :: (Args a,SMTType r,Monad m)
-             => ArgAnnotation a -> (a -> SMTExpr r) -> SMT' m (SMTFunction a r)
-defFunAnn = defFunAnnNamed' Nothing
+MK_SIG((rtp ~ BoolType,IsSMTNumber tp),(),(:>:),(e tp) SEP (e tp),Expression v qv fun con field fv lv e rtp)
+pattern (:>:) x y <- App (E.Ord (matchNumRepr -> Dict) E.Gt) (x ::: y ::: Nil) where
+  (:>:) x y = App (E.Ord smtNumRepr E.Gt) (x ::: y ::: Nil)
 
--- | Boolean conjunction
-and' :: SMTFunction [SMTExpr Bool] Bool
-and' = SMTLogic And
+MK_SIG((rtp ~ BoolType,IsSMTNumber tp),(),(:<=:),(e tp) SEP (e tp),Expression v qv fun con field fv lv e rtp)
+pattern (:<=:) x y <- App (E.Ord (matchNumRepr -> Dict) E.Le) (x ::: y ::: Nil) where
+  (:<=:) x y = App (E.Ord smtNumRepr E.Le) (x ::: y ::: Nil)
 
-(.&&.) :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
-(.&&.) x y = App (SMTLogic And) [x,y]
+MK_SIG((rtp ~ BoolType,IsSMTNumber tp),(),(:<:),(e tp) SEP (e tp),Expression v qv fun con field fv lv e rtp)
+pattern (:<:) x y <- App (E.Ord (matchNumRepr -> Dict) E.Lt) (x ::: y ::: Nil) where
+  (:<:) x y = App (E.Ord smtNumRepr E.Lt) (x ::: y ::: Nil)
 
--- | Boolean disjunction
-or' :: SMTFunction [SMTExpr Bool] Bool
-or' = SMTLogic Or
+MK_SIG((),(),ArithLstP,E.ArithOp SEP (NumRepr tp) SEP [e tp],Expression v qv fun con field fv lv e tp)
+pattern ArithLstP op tp lst <- App (E.Arith tp op n) (allEqToList n -> lst) where
+  ArithLstP op tp lst = allEqFromList lst (\n -> App (E.Arith tp op n))
 
-(.||.) :: SMTExpr Bool -> SMTExpr Bool -> SMTExpr Bool
-(.||.) x y = App (SMTLogic Or) [x,y]
+MK_SIG((IsSMTNumber tp),(),ArithLst,E.ArithOp SEP [e tp],Expression v qv fun con field fv lv e tp)
+pattern ArithLst op lst <- ArithLstP op (matchNumRepr -> Dict) lst where
+  ArithLst op lst = ArithLstP op smtNumRepr lst
 
--- | Create a boolean expression that encodes that the array is equal to the supplied constant array.
-arrayEquals :: (LiftArgs i,Liftable i,SMTValue v,Ix (Unpacked i),Unit (ArgAnnotation i),Unit (SMTAnnotation v))
-               => SMTExpr (SMTArray i v) -> Array (Unpacked i) v -> SMTExpr Bool
-arrayEquals expr arr 
-  = case [(select expr (liftArgs i unit)) .==. (constant v)
-         | (i,v) <- assocs arr ] of
-      [] -> constant True
-      xs -> foldl1 (.&&.) xs
+MK_SIG((IsSMTNumber tp,Same tps,tp ~ SameType tps),(),Arith,E.ArithOp SEP (List e tps),Expression v qv fun con field fv lv e tp)
+pattern Arith op lst <- App (E.Arith (matchNumRepr' -> (Dict,tp)) op n)
+                        (allEqToSame' (numRepr tp) n -> Just (Dict,lst)) where
+  Arith op lst = App (E.Arith smtNumRepr op (List.length lst)) (sameToAllEq lst)
 
--- | Asserts that a boolean expression is true
-assert :: Monad m => SMTExpr Bool -> SMT' m ()
-assert expr = smtBackend $ \b -> smtHandle b (SMTAssert expr Nothing Nothing)
+pattern PlusLst lst = ArithLst E.Plus lst
+pattern Plus lst = Arith E.Plus lst
+pattern (:+:) x y = Plus (x ::: y ::: Nil)
 
--- | Create a new interpolation group
-interpolationGroup :: Monad m => SMT' m InterpolationGroup
-interpolationGroup = smtBackend $ \b -> smtHandle b SMTNewInterpolationGroup
+pattern MinusLst lst = ArithLst E.Minus lst
+pattern Minus lst = Arith E.Minus lst
+pattern (:-:) x y = Minus (x ::: y ::: Nil)
+pattern Neg x = Arith E.Minus (x ::: Nil)
 
--- | Assert a boolean expression and track it for an unsat core call later
-assertId :: Monad m => SMTExpr Bool -> SMT' m ClauseId
-assertId expr = smtBackend $ \b -> do
-  (cid,b1) <- smtHandle b SMTNewClauseId
-  ((),b2) <- smtHandle b1 (SMTAssert expr Nothing (Just cid))
-  return (cid,b2)
+pattern MultLst lst = ArithLst E.Mult lst
+pattern Mult lst = Arith E.Mult lst
+pattern (:*:) x y = Mult (x ::: y ::: Nil)
 
--- | Assert a boolean expression to be true and assign it to an interpolation group
-assertInterp :: Monad m => SMTExpr Bool -> InterpolationGroup -> SMT' m ()
-assertInterp expr interp = smtBackend $ \b -> smtHandle b (SMTAssert expr (Just interp) Nothing)
+pattern Div x y = App (E.ArithIntBin E.Div) (x ::: y ::: Nil)
+pattern Mod x y = App (E.ArithIntBin E.Mod) (x ::: y ::: Nil)
+pattern Rem x y = App (E.ArithIntBin E.Rem) (x ::: y ::: Nil)
 
-getInterpolant :: Monad m => [InterpolationGroup] -> SMT' m (SMTExpr Bool)
-getInterpolant grps = smtBackend $ \b -> smtHandle b (SMTGetInterpolant grps)
+pattern (:/:) x y = App E.Divide (x ::: y ::: Nil)
 
-interpolate :: Monad m => [SMTExpr Bool] -> SMT' m [SMTExpr Bool]
-interpolate exprs = smtBackend $ \b -> smtHandle b (SMTInterpolate exprs)
+MK_SIG((IsSMTNumber tp),(),Abs,e tp,Expression v qv fun con field fv lv e tp)
+pattern Abs x <- App (E.Abs (matchNumRepr -> Dict)) (x ::: Nil) where
+  Abs x = App (E.Abs smtNumRepr) (x ::: Nil)
 
--- | Set an option for the underlying SMT solver
-setOption :: Monad m => SMTOption -> SMT' m ()
-setOption opt = smtBackend $ \b -> smtHandle b (SMTSetOption opt)
+pattern Not x = App E.Not (x ::: Nil)
 
--- | Get information about the underlying SMT solver
-getInfo :: (Monad m,Typeable i) => SMTInfo i -> SMT' m i
-getInfo inf = smtBackend $ \b -> smtHandle b (SMTGetInfo inf)
+MK_SIG((rtp ~ BoolType),(),LogicLst,E.LogicOp SEP [e BoolType],Expression v qv fun con field fv lv e rtp)
+pattern LogicLst op lst <- App (E.Logic op n) (allEqToList n -> lst) where
+  LogicLst op lst = allEqFromList lst (\n -> App (E.Logic op n))
 
--- | Create a new uniterpreted function with annotations for
---   the argument and the return type.
-funAnn :: (Liftable a,SMTType r,Monad m) => ArgAnnotation a -> SMTAnnotation r -> SMT' m (SMTFunction a r)
-funAnn = funAnnNamed' Nothing
+MK_SIG((rtp ~ BoolType,Same tps,SameType tps ~ BoolType),(),Logic,E.LogicOp SEP (List e tps),Expression v qv fun con field fv lv e rtp)
+pattern Logic op lst <- App (E.Logic op n) (allEqToSame' bool n -> Just (Dict,lst)) where
+  Logic op lst = App (E.Logic op (List.length lst)) (sameToAllEq lst)
 
--- | Create a new uninterpreted named function with annotation for
---   the argument and the return type.
-funAnnNamed :: (Liftable a, SMTType r,Monad m) => String -> ArgAnnotation a -> SMTAnnotation r -> SMT' m (SMTFunction a r)
-funAnnNamed name = funAnnNamed' (Just name)
+pattern AndLst lst = LogicLst E.And lst
+pattern And lst = Logic E.And lst
+MK_SIG((rtp ~ BoolType),(),(:&:),(e BoolType) SEP (e BoolType),Expression v qv fun con field fv lv e rtp)
+pattern (:&:) x y = App (E.Logic E.And (Succ (Succ Zero))) (x ::: y ::: Nil)
 
-funAnnNamed' :: (Liftable a, SMTType r,Monad m) => Maybe String -> ArgAnnotation a -> SMTAnnotation r -> SMT' m (SMTFunction a r)
-funAnnNamed' name annArg annRet
-  = withUndef $ \(_::a) (_::r) -> do
-    let finfo = FunInfo { funInfoProxy = Proxy::Proxy (a,r)
-                        , funInfoArgAnn = annArg
-                        , funInfoResAnn = annRet
-                        , funInfoName = name
-                        }
-    i <- smtBackend $ \b -> smtHandle b (SMTDeclareFun finfo)
-    let fun = SMTFun i annRet
-    case additionalConstraints (undefined::t) annRet of
-     Nothing -> return ()
-     Just constr -> assert $ forAllAnn annArg
-                    (\x -> case constr (fun `app` x) of
-                            [] -> constant True
-                            [x] -> x
-                            xs -> and' `app` xs)
-    return fun
+pattern OrLst lst = LogicLst E.Or lst
+pattern Or lst = Logic E.Or lst
+MK_SIG((rtp ~ BoolType),(),(:|:),(e BoolType) SEP (e BoolType),Expression v qv fun con field fv lv e rtp)
+pattern (:|:) x y = App (E.Logic E.Or (Succ (Succ Zero))) (x ::: y ::: Nil)
+
+pattern XOrLst lst = LogicLst E.XOr lst
+pattern XOr lst = Logic E.XOr lst
+
+pattern ImpliesLst lst = LogicLst E.Implies lst
+pattern Implies lst = Logic E.Implies lst
+MK_SIG((rtp ~ BoolType),(),(:=>:),(e BoolType) SEP (e BoolType),Expression v qv fun con field fv lv e rtp)
+pattern (:=>:) x y = App (E.Logic E.Implies (Succ (Succ Zero))) (x ::: y ::: Nil)
+
+pattern ToReal x = App E.ToReal (x ::: Nil)
+pattern ToInt x = App E.ToInt (x ::: Nil)
+
+MK_SIG((),(GetType e),ITE,(e BoolType) SEP (e tp) SEP (e tp),Expression v qv fun con field fv lv e tp)
+pattern ITE c ifT ifF <- App (E.ITE _) (c ::: ifT ::: ifF ::: Nil) where
+  ITE c ifT ifF = App (E.ITE (getType ifT)) (c ::: ifT ::: ifF ::: Nil)
+
+MK_SIG((rtp ~ BoolType),(GetType e),BVComp,E.BVCompOp SEP (e (BitVecType bw)) SEP (e (BitVecType bw)),Expression v qv fun con field fv lv e rtp)
+pattern BVComp op lhs rhs <- App (E.BVComp op _) (lhs ::: rhs ::: Nil) where
+  BVComp op lhs rhs = App (E.BVComp op (getBW lhs)) (lhs ::: rhs ::: Nil)
+
+pattern BVULE lhs rhs = BVComp E.BVULE lhs rhs
+pattern BVULT lhs rhs = BVComp E.BVULT lhs rhs
+pattern BVUGE lhs rhs = BVComp E.BVUGE lhs rhs
+pattern BVUGT lhs rhs = BVComp E.BVUGT lhs rhs
+pattern BVSLE lhs rhs = BVComp E.BVSLE lhs rhs
+pattern BVSLT lhs rhs = BVComp E.BVSLT lhs rhs
+pattern BVSGE lhs rhs = BVComp E.BVSGE lhs rhs
+pattern BVSGT lhs rhs = BVComp E.BVSGT lhs rhs
+
+MK_SIG((rtp ~ BitVecType bw),(GetType e),BVBin,E.BVBinOp SEP (e (BitVecType bw)) SEP (e (BitVecType bw)),Expression v qv fun con field fv lv e rtp)
+pattern BVBin op lhs rhs <- App (E.BVBin op _) (lhs ::: rhs ::: Nil) where
+  BVBin op lhs rhs = App (E.BVBin op (getBW lhs)) (lhs ::: rhs ::: Nil)
+
+pattern BVAdd lhs rhs = BVBin E.BVAdd lhs rhs
+pattern BVSub lhs rhs = BVBin E.BVSub lhs rhs
+pattern BVMul lhs rhs = BVBin E.BVMul lhs rhs
+pattern BVURem lhs rhs = BVBin E.BVURem lhs rhs
+pattern BVSRem lhs rhs = BVBin E.BVSRem lhs rhs
+pattern BVUDiv lhs rhs = BVBin E.BVUDiv lhs rhs
+pattern BVSDiv lhs rhs = BVBin E.BVSDiv lhs rhs
+pattern BVSHL lhs rhs = BVBin E.BVSHL lhs rhs
+pattern BVLSHR lhs rhs = BVBin E.BVLSHR lhs rhs
+pattern BVASHR lhs rhs = BVBin E.BVASHR lhs rhs
+pattern BVXor lhs rhs = BVBin E.BVXor lhs rhs
+pattern BVAnd lhs rhs = BVBin E.BVAnd lhs rhs
+pattern BVOr lhs rhs = BVBin E.BVOr lhs rhs
+
+MK_SIG((rtp ~ val),(GetType e),Select,(e (ArrayType idx val)) SEP (List e idx),Expression v qv fun con field fv lv e rtp)
+pattern Select arr idx <- App (E.Select _ _) (arr ::: idx) where
+  Select arr idx = case getType arr of
+    ArrayRepr idxTp elTp -> App (E.Select idxTp elTp) (arr ::: idx)
+
+MK_SIG((rtp ~ ArrayType idx val),(GetType e),Store,(e (ArrayType idx val)) SEP (List e idx) SEP (e val),Expression v qv fun con field fv lv e rtp)
+pattern Store arr idx el <- App (E.Store _ _) (arr ::: el ::: idx) where
+  Store arr idx el = case getType arr of
+    ArrayRepr idxTp elTp -> App (E.Store idxTp elTp) (arr ::: el ::: idx)
+
+MK_SIG((rtp ~ ArrayType idx val),(GetType e),ConstArray,(List Repr idx) SEP (e val),Expression v qv fun con field fv lv e rtp)
+pattern ConstArray idx el <- App (E.ConstArray idx _) (el ::: Nil) where
+  ConstArray idx el = App (E.ConstArray idx (getType el)) (el ::: Nil)
+
+MK_SIG((rtp ~ BitVecType (n1+n2)),(GetType e),Concat,(e (BitVecType n1)) SEP (e (BitVecType n2)),Expression v qv fun con field fv lv e rtp)
+pattern Concat lhs rhs <- App (E.Concat _ _) (lhs :::rhs ::: Nil) where
+  Concat lhs rhs = case getType lhs of
+    BitVecRepr n1 -> case getType rhs of
+      BitVecRepr n2 -> App (E.Concat n1 n2) (lhs ::: rhs ::: Nil)
+
+MK_SIG((rtp ~ BitVecType len,((start + len) <= bw) ~ True),(GetType e),Extract,(Natural start) SEP (Natural len) SEP (e (BitVecType bw)),Expression v qv fun con field fv lv e rtp)
+pattern Extract start len arg <- App (E.Extract _ start len) (arg ::: Nil) where
+  Extract start len arg = case getType arg of
+    BitVecRepr bw -> App (E.Extract bw start len) (arg ::: Nil)
+
+MK_SIG((rtp ~ BoolType),(),Divisible,Integer SEP (e IntType),Expression v qv fun con field fv lv e rtp)
+pattern Divisible n e = App (E.Divisible n) (e ::: Nil)
+
+sameApp :: (Same tps,GetType e)
+        => (Repr (SameType tps) -> Natural (List.Length tps)
+            -> E.Function fun con field '(AllEq (SameType tps) (List.Length tps),ret))
+        -> List e tps
+        -> Expression v qv fun con field fv lv e ret
+sameApp f lst = App (f (sameType $ runIdentity $
+                        List.mapM (return.getType) lst
+                       ) (List.length lst))
+                (sameToAllEq lst)
+
+getBW :: GetType e => e (BitVecType bw) -> Natural bw
+getBW e = case getType e of
+  BitVecRepr bw -> bw
+
+class SMTType t where
+  type SMTReprType t :: Type
+  toSMTConst :: t -> Value con (SMTReprType t)
+  fromSMTConst :: Value con (SMTReprType t) -> t
+
+instance SMTType Bool where
+  type SMTReprType Bool = BoolType
+  toSMTConst = BoolValue
+  fromSMTConst (BoolValue x) = x
+
+instance SMTType Integer where
+  type SMTReprType Integer = IntType
+  toSMTConst = IntValue
+  fromSMTConst (IntValue x) = x
+
+instance SMTType (Ratio Integer) where
+  type SMTReprType (Ratio Integer) = RealType
+  toSMTConst = RealValue
+  fromSMTConst (RealValue x) = x
+
+data BitVec bw = BitVec { bitVecValue :: Integer
+                        , bitVecWidth :: Natural bw } deriving (Eq,Ord,Show)
+
+instance SMTType (BitVec bw) where
+  type SMTReprType (BitVec bw) = BitVecType bw
+  toSMTConst (BitVec val sz) = BitVecValue val sz
+  fromSMTConst (BitVecValue val sz) = BitVec val sz
+
+{- XXX: This doesn't work in 7.10. Test it when 8.0 is out.
+
+pattern Const :: (SMTType ctp,rtp ~ (SMTReprType ctp)) => ctp
+              -> Expression v qv fun con field fv lv e rtp
+pattern Const v <- E.Const (fromSMTConst -> v) where
+  Const v = E.Const (toSMTConst v) -}
+
+--constant :: SMTType tp => tp -> Expression v qv fun con field fv lv e (SMTReprType tp)
+--constant x = E.Const (toSMTConst x)
+
+constant :: (Embed m e,SMTType tp) => tp -> m (e (SMTReprType tp))
+constant x = embed $ E.Const (toSMTConst x)
+
+cbool :: Embed m e => Bool -> m (e BoolType)
+cbool x = embed $ E.Const (BoolValue x)
+
+cint :: Embed m e => Integer -> m (e IntType)
+cint x = embed $ E.Const (IntValue x)
+
+creal :: Embed m e => Rational -> m (e RealType)
+creal x = embed $ E.Const (RealValue x)
+
+cbv :: Embed m e => Integer -> Natural bw -> m (e (BitVecType bw))
+cbv i bw = embed $ E.Const (BitVecValue i bw)
+
+asConstant :: SMTType tp => Expression v qv fun con field fv lv e (SMTReprType tp) -> Maybe tp
+asConstant (E.Const v) = Just $ fromSMTConst v
+asConstant _ = Nothing
+
+MK_SIG((tp ~ rtp),(),Var,(v tp),Expression v qv fun con field fv lv e rtp)
+pattern Var x = E.Var x
+
+(.==.) :: (Embed m e,HasMonad a,HasMonad b,
+           MatchMonad a m,MatchMonad b m,
+           MonadResult a ~ e tp,MonadResult b ~ e tp)
+       => a -> b -> m (e BoolType)
+(.==.) lhs rhs = do
+  lhs' <- embedM lhs
+  rhs' <- embedM rhs
+  tp <- embedTypeOf lhs'
+  embed $ App (E.Eq tp (Succ (Succ Zero))) (lhs' ::: rhs' ::: Nil)
+{-# INLINEABLE (.==.) #-}
+
+(./=.) :: (Embed m e,HasMonad a,HasMonad b,
+           MatchMonad a m,MatchMonad b m,
+           MonadResult a ~ e tp,MonadResult b ~ e tp)
+       => a -> b -> m (e BoolType)
+(./=.) lhs rhs = do
+  lhs' <- embedM lhs
+  rhs' <- embedM rhs
+  tp <- embedTypeOf lhs'
+  embed $ App (E.Distinct tp (Succ (Succ Zero))) (lhs' ::: rhs' ::: Nil)
+{-# INLINEABLE (./=.) #-}
+
+eq :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e tp)
+   => [a] -> m (e BoolType)
+eq [] = embed (E.Const (BoolValue True))
+eq xs = do
+  xs'@(x:_) <- mapM embedM xs
+  tp <- embedTypeOf x
+  allEqFromList xs' $ \n -> embed.(App (E.Eq tp n))
+{-# INLINEABLE eq #-}
+
+distinct :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e tp)
+         => [a] -> m (e BoolType)
+distinct [] = embed (E.Const (BoolValue True))
+distinct xs = do
+  xs'@(x:_) <- mapM embedM xs
+  tp <- embedTypeOf x
+  allEqFromList xs' $ \n -> embed.(App (E.Distinct tp n))
+{-# INLINEABLE distinct #-}
+
+ord :: (Embed m e,IsSMTNumber tp,HasMonad a,HasMonad b,
+        MatchMonad a m,MatchMonad b m,
+        MonadResult a ~ e tp,MonadResult b ~ e tp)
+    => E.OrdOp -> a -> b -> m (e BoolType)
+ord op lhs rhs = do
+  lhs' <- embedM lhs
+  rhs' <- embedM rhs
+  embed $ Ord op lhs' rhs'
+{-# INLINEABLE ord #-}
+
+(.>=.),(.>.),(.<=.),(.<.) :: (Embed m e,IsSMTNumber tp,HasMonad a,HasMonad b,
+                              MatchMonad a m,MatchMonad b m,
+                              MonadResult a ~ e tp,MonadResult b ~ e tp)
+                          => a -> b -> m (e BoolType)
+(.>=.) = ord E.Ge
+(.>.) = ord E.Gt
+(.<=.) = ord E.Le
+(.<.) = ord E.Lt
+{-# INLINEABLE (.>=.) #-}
+{-# INLINEABLE (.>.) #-}
+{-# INLINEABLE (.<=.) #-}
+{-# INLINEABLE (.<.) #-}
+
+arith :: (Embed m e,HasMonad a,MatchMonad a m,
+          MonadResult a ~ e tp,IsSMTNumber tp)
+      => E.ArithOp -> [a] -> m (e tp)
+arith op xs = mapM embedM xs >>= embed.(ArithLst op)
+{-# INLINEABLE arith #-}
+
+plus,minus,mult :: (Embed m e,HasMonad a,MatchMonad a m,
+                    MonadResult a ~ e tp,IsSMTNumber tp)
+                => [a] -> m (e tp)
+plus = arith E.Plus
+minus = arith E.Minus
+mult = arith E.Mult
+{-# INLINEABLE plus #-}
+{-# INLINEABLE minus #-}
+{-# INLINEABLE mult #-}
+
+(.+.),(.-.),(.*.) :: (Embed m e,HasMonad a,HasMonad b,
+                      MatchMonad a m,MatchMonad b m,
+                      MonadResult a ~ e tp,MonadResult b ~ e tp,
+                      IsSMTNumber tp)
+                  => a -> b -> m (e tp)
+(.+.) x y = do
+  x' <- embedM x
+  y' <- embedM y
+  embed $ x' :+: y'
+(.-.) x y = do
+  x' <- embedM x
+  y' <- embedM y
+  embed $ x' :-: y'
+(.*.) x y = do
+  x' <- embedM x
+  y' <- embedM y
+  embed $ x' :*: y'
+{-# INLINEABLE (.+.) #-}
+{-# INLINEABLE (.-.) #-}
+{-# INLINEABLE (.*.) #-}
+
+neg :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e tp,IsSMTNumber tp)
+    => a -> m (e tp)
+neg x = do
+  x' <- embedM x
+  embed $ Neg x'
+{-# INLINEABLE neg #-}
+
+abs' :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e tp,IsSMTNumber tp)
+     => a -> m (e tp)
+abs' x = do
+  x' <- embedM x
+  embed $ Abs x'
+{-# INLINEABLE abs' #-}
+
+instance (Embed m e) => Num (m (e IntType)) where
+  fromInteger x = embed $ E.Const $ smtFromInteger x
+  (+) x y = do
+    x' <- x
+    y' <- y
+    embed $ x' :+: y'
+  (-) x y = do
+    x' <- x
+    y' <- y
+    embed $ x' :-: y'
+  (*) x y = do
+    x' <- x
+    y' <- y
+    embed $ x' :*: y'
+  negate x = x >>= embed.Neg
+  abs x = x >>= embed.Abs
+  signum x = do
+    x' <- x
+    one <- embed $ E.Const (IntValue 1)
+    negOne <- embed $ E.Const (IntValue (-1))
+    zero <- embed $ E.Const (IntValue 0)
+    ltZero <- embed $ x' :<: zero
+    gtZero <- embed $ x' :>: zero
+    cond1 <- embed $ App (E.ITE int) (ltZero ::: negOne ::: zero ::: Nil)
+    embed $ App (E.ITE int) (gtZero ::: one ::: cond1 ::: Nil)
+
+instance (Embed m e) => Num (m (e RealType)) where
+  fromInteger x = embed $ E.Const $ smtFromInteger x
+  (+) x y = do
+    x' <- x
+    y' <- y
+    embed $ x' :+: y'
+  (-) x y = do
+    x' <- x
+    y' <- y
+    embed $ x' :-: y'
+  (*) x y = do
+    x' <- x
+    y' <- y
+    embed $ x' :*: y'
+  negate x = x >>= embed.Neg
+  abs x = x >>= embed.Abs
+  signum x = do
+    x' <- x
+    one <- embed $ E.Const (smtFromInteger 1)
+    negOne <- embed $ Neg one
+    zero <- embed $ E.Const (smtFromInteger 0)
+    ltZero <- embed $ x' :<: zero
+    gtZero <- embed $ x' :>: zero
+    cond1 <- embed $ App (E.ITE real) (ltZero ::: negOne ::: zero ::: Nil)
+    embed $ App (E.ITE real) (gtZero ::: one ::: cond1 ::: Nil)
+
+rem',div',mod' :: (Embed m e,HasMonad a,HasMonad b,
+                   MatchMonad a m,MatchMonad b m,
+                   MonadResult a ~ e IntType,MonadResult b ~ e IntType)
+               => a -> b -> m (e IntType)
+rem' x y = do
+  x' <- embedM x
+  y' <- embedM y
+  embed $ Rem x' y'
+div' x y = do
+  x' <- embedM x
+  y' <- embedM y
+  embed $ Div x' y'
+mod' x y = do
+  x' <- embedM x
+  y' <- embedM y
+  embed $ Mod x' y'
+{-# INLINEABLE rem' #-}
+{-# INLINEABLE div' #-}
+{-# INLINEABLE mod' #-}
+
+(./.) :: (Embed m e,HasMonad a,HasMonad b,MatchMonad a m,MatchMonad b m,
+          MonadResult a ~ e RealType,MonadResult b ~ e RealType)
+      => a -> b -> m (e RealType)
+(./.) x y = do
+  x' <- embedM x
+  y' <- embedM y
+  embed $ x' :/: y'
+{-# INLINEABLE (./.) #-}
+
+instance Embed m e => Fractional (m (e RealType)) where
+  (/) x y = do
+    x' <- x
+    y' <- y
+    embed $ x' :/: y'
+  fromRational r = embed $ E.Const $ RealValue r
+
+not' :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e BoolType)
+     => a -> m (e BoolType)
+not' x = embedM x >>= embed.Not
+{-# INLINEABLE not' #-}
+
+logic :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e BoolType)
+      => E.LogicOp -> [a] -> m (e BoolType)
+logic op lst = mapM embedM lst >>= embed.(LogicLst op)
+{-# INLINEABLE logic #-}
+
+and',or',xor',implies :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e BoolType)
+                      => [a] -> m (e BoolType)
+and' xs = mapM embedM xs >>= embed.AndLst
+or' xs = mapM embedM xs >>= embed.OrLst
+xor' xs = mapM embedM xs >>= embed.XOrLst
+implies xs = mapM embedM xs >>= embed.ImpliesLst
+{-# INLINEABLE and' #-}
+{-# INLINEABLE or' #-}
+{-# INLINEABLE xor' #-}
+{-# INLINEABLE implies #-}
+
+(.&.),(.|.),(.=>.) :: (Embed m e,HasMonad a,HasMonad b,
+                       MatchMonad a m,MatchMonad b m,
+                       MonadResult a ~ e BoolType,MonadResult b ~ e BoolType)
+                   => a -> b -> m (e BoolType)
+(.&.) x y = do
+  x' <- embedM x
+  y' <- embedM y
+  embed (x' :&: y')
+(.|.) x y = do
+  x' <- embedM x
+  y' <- embedM y
+  embed (x' :|: y')
+(.=>.) x y = do
+  x' <- embedM x
+  y' <- embedM y
+  embed (x' :=>: y')
+{-# INLINEABLE (.&.) #-}
+{-# INLINEABLE (.|.) #-}
+{-# INLINEABLE (.=>.) #-}
+
+toReal :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e IntType)
+       => a -> m (e RealType)
+toReal x = embedM x >>= embed.ToReal
+{-# INLINEABLE toReal #-}
+
+toInt :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e RealType)
+      => a -> m (e IntType)
+toInt x = embedM x >>= embed.ToInt
+{-# INLINEABLE toInt #-}
+
+ite :: (Embed m e,HasMonad a,HasMonad b,HasMonad c,
+        MatchMonad a m,MatchMonad b m,MatchMonad c m,
+        MonadResult a ~ e BoolType,MonadResult b ~ e tp,MonadResult c ~ e tp)
+    => a -> b -> c -> m (e tp)
+ite c ifT ifF = do
+  c' <- embedM c
+  ifT' <- embedM ifT
+  ifF' <- embedM ifF
+  tp <- embedTypeOf ifT'
+  embed $ App (E.ITE tp) (c' ::: ifT' ::: ifF' ::: Nil)
+{-# INLINEABLE ite #-}
+
+bvcomp :: forall m e a b bw.
+          (Embed m e,HasMonad a,HasMonad b,
+           MatchMonad a m,MatchMonad b m,
+           MonadResult a ~ e (BitVecType bw),MonadResult b ~ e (BitVecType bw))
+       => E.BVCompOp -> a -> b -> m (e BoolType)
+bvcomp op x y = do
+  (x' :: e (BitVecType bw)) <- embedM x
+  (y' :: e (BitVecType bw)) <- embedM y
+  BitVecRepr bw <- embedTypeOf x'
+  embed $ App (E.BVComp op bw) (x' ::: y' ::: Nil)
+{-# INLINEABLE bvcomp #-}
+
+bvule,bvult,bvuge,bvugt,bvsle,bvslt,bvsge,bvsgt :: (Embed m e,HasMonad a,HasMonad b,
+                                                    MatchMonad a m,MatchMonad b m,
+                                                    MonadResult a ~ e (BitVecType bw),MonadResult b ~ e (BitVecType bw))
+                                                   => a -> b -> m (e BoolType)
+bvule = bvcomp E.BVULE
+bvult = bvcomp E.BVULT
+bvuge = bvcomp E.BVUGE
+bvugt = bvcomp E.BVUGT
+bvsle = bvcomp E.BVSLE
+bvslt = bvcomp E.BVSLT
+bvsge = bvcomp E.BVSGE
+bvsgt = bvcomp E.BVSGT
+{-# INLINEABLE bvule #-}
+{-# INLINEABLE bvult #-}
+{-# INLINEABLE bvuge #-}
+{-# INLINEABLE bvugt #-}
+{-# INLINEABLE bvsle #-}
+{-# INLINEABLE bvslt #-}
+{-# INLINEABLE bvsge #-}
+{-# INLINEABLE bvsgt #-}
+
+bvbin :: forall m e a b bw.
+         (Embed m e,HasMonad a,HasMonad b,
+          MatchMonad a m,MatchMonad b m,
+          MonadResult a ~ e (BitVecType bw),MonadResult b ~ e (BitVecType bw))
+      => E.BVBinOp -> a -> b -> m (e (BitVecType bw))
+bvbin op x y = do
+  (x' :: e (BitVecType bw)) <- embedM x
+  (y' :: e (BitVecType bw)) <- embedM y
+  BitVecRepr bw <- embedTypeOf x'
+  embed $ App (E.BVBin op bw) (x' ::: y' ::: Nil)
+{-# INLINEABLE bvbin #-}
+
+bvadd,bvsub,bvmul,bvurem,bvsrem,bvudiv,bvsdiv,bvshl,bvlshr,bvashr,bvxor,bvand,bvor
+  :: (Embed m e,HasMonad a,HasMonad b,
+      MatchMonad a m,MatchMonad b m,
+      MonadResult a ~ e (BitVecType bw),MonadResult b ~ e (BitVecType bw))
+  => a -> b -> m (e (BitVecType bw))
+bvadd = bvbin E.BVAdd
+bvsub = bvbin E.BVSub
+bvmul = bvbin E.BVMul
+bvurem = bvbin E.BVURem
+bvsrem = bvbin E.BVSRem
+bvudiv = bvbin E.BVUDiv
+bvsdiv = bvbin E.BVSDiv
+bvshl = bvbin E.BVSHL
+bvlshr = bvbin E.BVLSHR
+bvashr = bvbin E.BVASHR
+bvxor = bvbin E.BVXor
+bvand = bvbin E.BVAnd
+bvor = bvbin E.BVOr
+{-# INLINEABLE bvadd #-}
+{-# INLINEABLE bvsub #-}
+{-# INLINEABLE bvmul #-}
+{-# INLINEABLE bvurem #-}
+{-# INLINEABLE bvsrem #-}
+{-# INLINEABLE bvudiv #-}
+{-# INLINEABLE bvsdiv #-}
+{-# INLINEABLE bvshl #-}
+{-# INLINEABLE bvlshr #-}
+{-# INLINEABLE bvashr #-}
+{-# INLINEABLE bvxor #-}
+{-# INLINEABLE bvand #-}
+{-# INLINEABLE bvor #-}
+
+class AppList (lst::[Type]) where
+  type AppFun lst (e::Type -> *) (m :: * -> *) a
+  appList :: Monad m => (List e lst -> m a) -> AppFun lst e m a
+
+instance AppList '[] where
+  type AppFun '[] e m a = m a
+  appList f = f Nil
+
+instance AppList xs => AppList (x ': xs) where
+  type AppFun (x ': xs) e m a = m (e x) -> AppFun xs e m a
+  appList f x = appList (\xs -> do
+                            x' <- x
+                            f (x' ::: xs))
+
+select :: (Embed m e,AppList idx)
+       => m (e (ArrayType idx val)) -> AppFun idx e m (e val)
+select arr = appList (mkSelect arr)
   where
-    withUndef :: (a -> r -> SMT' m (SMTFunction a r)) -> SMT' m (SMTFunction a r)
-    withUndef f = f undefined undefined
+    mkSelect :: Embed m e => m (e (ArrayType idx val)) -> List e idx -> m (e val)
+    mkSelect arr idx = do
+      arr' <- arr
+      ArrayRepr idxTp elTp <- embedTypeOf arr'
+      embed (App (E.Select idxTp elTp) (arr' ::: idx))
+{-# INLINEABLE select #-}
 
--- | funAnn with an annotation only for the return type.
-funAnnRet :: (Liftable a,SMTType r,Unit (ArgAnnotation a),Monad m)
-             => SMTAnnotation r -> SMT' m (SMTFunction a r)
-funAnnRet = funAnn unit
+select1 :: (Embed m e,HasMonad arr,HasMonad idx,
+            MatchMonad arr m,MatchMonad idx m,
+            MonadResult arr ~ e (ArrayType '[idx'] el),
+            MonadResult idx ~ e idx')
+        => arr -> idx -> m (e el)
+select1 arr idx = do
+  arr' <- embedM arr
+  idx' <- embedM idx
+  ArrayRepr (idxTp ::: Nil) elTp <- embedTypeOf arr'
+  embed $ App (E.Select (idxTp ::: Nil) elTp) (arr' ::: idx' ::: Nil)
+{-# INLINEABLE select1 #-}
 
--- | Create a new uninterpreted function.
-fun :: (Liftable a,SMTType r,SMTAnnotation r ~ (),Unit (ArgAnnotation a),Monad m)
-       => SMT' m (SMTFunction a r)
-fun = funAnn unit unit
-
--- | Apply a function to an argument
-app :: (Args arg,SMTType res) => SMTFunction arg res -> arg -> SMTExpr res
-app = App
-
--- | Lift a function to arrays
-map' :: (Liftable arg,Args i,SMTType res)
-        => SMTFunction arg res -> SMTFunction (Lifted arg i) (SMTArray i res)
-map' f = SMTMap f
-
--- | Two expressions shall be equal
-(.==.) :: SMTType a => SMTExpr a -> SMTExpr a -> SMTExpr Bool
-(.==.) x y = App SMTEq [x,y]
-
-infix 4 .==.
-
--- | A generalized version of `.==.`
-argEq :: Args a => a -> a -> SMTExpr Bool
-argEq xs ys = app and' res
+store :: (Embed m e,AppList idx)
+      => m (e (ArrayType idx val))
+      -> m (e val)
+      -> AppFun idx e m (e (ArrayType idx val))
+store arr nel = appList (mkStore arr nel)
   where
-    (res,_,_) = foldsExprsId
-                (\s [(arg1,_),(arg2,_)] _ -> ((arg1 .==. arg2):s,[arg1,arg2],undefined))
-                []
-                [(xs,()),(ys,())] (extractArgAnnotation xs)
-
--- | Declares all arguments to be distinct
-distinct :: SMTType a => [SMTExpr a] -> SMTExpr Bool
-distinct = App SMTDistinct
-
--- | Calculate the sum of arithmetic expressions
-plus :: (SMTArith a) => SMTFunction [SMTExpr a] a
-plus = SMTArith Plus
-
--- | Calculate the product of arithmetic expressions
-mult :: (SMTArith a) => SMTFunction [SMTExpr a] a
-mult = SMTArith Mult
-
--- | Subtracts two expressions
-minus :: (SMTArith a) => SMTFunction (SMTExpr a,SMTExpr a) a
-minus = SMTMinus
-
--- | Divide an arithmetic expression by another
-div' :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
-div' x y = App (SMTIntArith Div) (x,y)
-
-div'' :: SMTFunction (SMTExpr Integer,SMTExpr Integer) Integer
-div'' = SMTIntArith Div
-
--- | Perform a modulo operation on an arithmetic expression
-mod' :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
-mod' x y = App (SMTIntArith Mod) (x,y)
-
-mod'' :: SMTFunction (SMTExpr Integer,SMTExpr Integer) Integer
-mod'' = SMTIntArith Mod
-
--- | Calculate the remainder of the division of two integer expressions
-rem' :: SMTExpr Integer -> SMTExpr Integer -> SMTExpr Integer
-rem' x y = App (SMTIntArith Rem) (x,y)
-
-rem'' :: SMTFunction (SMTExpr Integer,SMTExpr Integer) Integer
-rem'' = SMTIntArith Rem
-
--- | Divide a rational expression by another one
-divide :: SMTExpr Rational -> SMTExpr Rational -> SMTExpr Rational
-divide x y = App SMTDivide (x,y)
-
-divide' :: SMTFunction (SMTExpr Rational,SMTExpr Rational) Rational
-divide' = SMTDivide
-
--- | For an expression @x@, this returns the expression @-x@.
-neg :: SMTArith a => SMTFunction (SMTExpr a) a
-neg = SMTNeg
-
--- | Convert an integer expression to a real expression
-toReal :: SMTExpr Integer -> SMTExpr Rational
-toReal = App SMTToReal
-
--- | Convert a real expression into an integer expression
-toInt :: SMTExpr Rational -> SMTExpr Integer
-toInt = App SMTToInt
-
--- | If-then-else construct
-ite :: (SMTType a) => SMTExpr Bool -- ^ If this expression is true
-       -> SMTExpr a -- ^ Then return this expression
-       -> SMTExpr a -- ^ Else this one
-       -> SMTExpr a
-ite c l r = App SMTITE (c,l,r)
-
--- | Exclusive or: Return true if exactly one argument is true.
-xor :: SMTFunction [SMTExpr Bool] Bool
-xor = SMTLogic XOr
-
--- | Implication
-(.=>.) :: SMTExpr Bool -- ^ If this expression is true
-          -> SMTExpr Bool -- ^ This one must be as well
-          -> SMTExpr Bool
-(.=>.) x y = App (SMTLogic Implies) [x,y]
-
--- | Negates a boolean expression
-not' :: SMTExpr Bool -> SMTExpr Bool
-not' = App SMTNot
-
-not'' :: SMTFunction (SMTExpr Bool) Bool
-not'' = SMTNot
-
--- | Extracts an element of an array by its index
-select :: (Liftable i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v
-select arr i = App SMTSelect (arr,i)
-
--- | The expression @store arr i v@ stores the value /v/ in the array /arr/ at position /i/ and returns the resulting new array.
-store :: (Liftable i,SMTType v) => SMTExpr (SMTArray i v) -> i -> SMTExpr v -> SMTExpr (SMTArray i v)
-store arr i v = App SMTStore (arr,i,v)
-
--- | Interpret a function /f/ from /i/ to /v/ as an array with indices /i/ and elements /v/.
---   Such that: @f \`app\` j .==. select (asArray f) j@ for all indices j.
-asArray :: (Args arg,Unit (ArgAnnotation arg),SMTType res)
-           => SMTFunction arg res -> SMTExpr (SMTArray arg res)
-asArray f = AsArray f unit
-
--- | Create an array where each element is the same.
-constArray :: (Args i,SMTType v) => SMTExpr v -- ^ This element will be at every index of the array
-           -> ArgAnnotation i -- ^ Annotations of the index type
-           -> SMTExpr (SMTArray i v)
-constArray e i_ann = App (SMTConstArray i_ann) e
-
--- | Bitvector and
-bvand :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
-bvand e1 e2 = App (SMTBVBin BVAnd) (e1,e2)
-
--- | Bitvector or
-bvor :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
-bvor e1 e2 = App (SMTBVBin BVOr) (e1,e2)
-
--- | Bitvector or
-bvxor :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
-bvxor e1 e2 = App (SMTBVBin BVXor) (e1,e2)
-
--- | Bitvector not
-bvnot :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t)
-bvnot e = App (SMTBVUn BVNot) e
-
--- | Bitvector signed negation
-bvneg :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t)
-bvneg e = App (SMTBVUn BVNeg) e
-
--- | Bitvector addition
-bvadd :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
-bvadd e1 e2 = App (SMTBVBin BVAdd) (e1,e2)
-
--- | Bitvector subtraction
-bvsub :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
-bvsub e1 e2 = App (SMTBVBin BVSub) (e1,e2)
-
--- | Bitvector multiplication
-bvmul :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
-bvmul e1 e2 = App (SMTBVBin BVMul) (e1,e2)
-
--- | Bitvector unsigned remainder
-bvurem :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
-bvurem e1 e2 = App (SMTBVBin BVURem) (e1,e2)
-
--- | Bitvector signed remainder
-bvsrem :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
-bvsrem e1 e2 = App (SMTBVBin BVSRem) (e1,e2)
-
--- | Bitvector unsigned division
-bvudiv :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
-bvudiv e1 e2 = App (SMTBVBin BVUDiv) (e1,e2)
-
--- | Bitvector signed division
-bvsdiv :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
-bvsdiv e1 e2 = App (SMTBVBin BVSDiv) (e1,e2)
-
--- | Bitvector unsigned less-or-equal
-bvule :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
-bvule e1 e2 = App (SMTBVComp BVULE) (e1,e2)
-
--- | Bitvector unsigned less-than
-bvult :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
-bvult e1 e2 = App (SMTBVComp BVULT) (e1,e2)
-
--- | Bitvector unsigned greater-or-equal
-bvuge :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
-bvuge e1 e2 = App (SMTBVComp BVUGE) (e1,e2)
-
--- | Bitvector unsigned greater-than
-bvugt :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
-bvugt e1 e2 = App (SMTBVComp BVUGT) (e1,e2)
-
--- | Bitvector signed less-or-equal
-bvsle :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
-bvsle e1 e2 = App (SMTBVComp BVSLE) (e1,e2)
-
--- | Bitvector signed less-than
-bvslt :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
-bvslt e1 e2 = App (SMTBVComp BVSLT) (e1,e2)
-
--- | Bitvector signed greater-or-equal
-bvsge :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
-bvsge e1 e2 = App (SMTBVComp BVSGE) (e1,e2)
-
--- | Bitvector signed greater-than
-bvsgt :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr Bool
-bvsgt e1 e2 = App (SMTBVComp BVSGT) (e1,e2)
-
--- | Bitvector shift left
-bvshl :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
-bvshl e1 e2 = App (SMTBVBin BVSHL) (e1,e2)
-
--- | Bitvector logical right shift
-bvlshr :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
-bvlshr e1 e2 = App (SMTBVBin BVLSHR) (e1,e2)
-
--- | Bitvector arithmetical right shift
-bvashr :: (IsBitVector t) => SMTExpr (BitVector t) -> SMTExpr (BitVector t) -> SMTExpr (BitVector t)
-bvashr e1 e2 = App (SMTBVBin BVASHR) (e1,e2)
-
--- | Concats two bitvectors into one.
-bvconcat :: (Concatable t1 t2) => SMTExpr (BitVector t1) -> SMTExpr (BitVector t2) -> SMTExpr (BitVector (ConcatResult t1 t2))
-bvconcat e1 e2 = App SMTConcat (e1,e2)
-
--- | Extract a sub-vector out of a given bitvector.
-bvextract :: (TypeableNat start,TypeableNat len,Extractable tp len')
-             => Proxy start -- ^ The start of the extracted region
-             -> Proxy len
-             -> SMTExpr (BitVector tp) -- ^ The bitvector to extract from
-             -> SMTExpr (BitVector len')
-bvextract start len (e::SMTExpr (BitVector tp))
-  = App (SMTExtract start len) e
-
-bvextract' :: Integer -> Integer -> SMTExpr (BitVector BVUntyped) -> SMTExpr (BitVector BVUntyped)
-bvextract' start len = reifyNat start $
-                       \start' -> reifyNat len $ \len' -> bvextract start' len'
-
--- | Safely split a 16-bit bitvector into two 8-bit bitvectors.
-bvsplitu16to8 :: SMTExpr BV16 -> (SMTExpr BV8,SMTExpr BV8)
-bvsplitu16to8 e = (App (SMTExtract (Proxy::Proxy N8) (Proxy::Proxy N8)) e,
-                   App (SMTExtract (Proxy::Proxy N0) (Proxy::Proxy N8)) e)
-
--- | Safely split a 32-bit bitvector into two 16-bit bitvectors.
-bvsplitu32to16 :: SMTExpr BV32 -> (SMTExpr BV16,SMTExpr BV16)
-bvsplitu32to16 e = (App (SMTExtract (Proxy::Proxy N16) (Proxy::Proxy N16)) e,
-                    App (SMTExtract (Proxy::Proxy N0) (Proxy::Proxy N16)) e)
-
--- | Safely split a 32-bit bitvector into four 8-bit bitvectors.
-bvsplitu32to8 :: SMTExpr BV32 -> (SMTExpr BV8,SMTExpr BV8,SMTExpr BV8,SMTExpr BV8)
-bvsplitu32to8 e = (App (SMTExtract (Proxy::Proxy N24) (Proxy::Proxy N8)) e,
-                   App (SMTExtract (Proxy::Proxy N16) (Proxy::Proxy N8)) e,
-                   App (SMTExtract (Proxy::Proxy N8) (Proxy::Proxy N8)) e,
-                   App (SMTExtract (Proxy::Proxy N0) (Proxy::Proxy N8)) e)
-
--- | Safely split a 64-bit bitvector into two 32-bit bitvectors.
-bvsplitu64to32 :: SMTExpr BV64 -> (SMTExpr BV32,SMTExpr BV32)
-bvsplitu64to32 e = (App (SMTExtract (Proxy::Proxy N32) (Proxy::Proxy N32)) e,
-                    App (SMTExtract (Proxy::Proxy N0) (Proxy::Proxy N32)) e)
-
--- | Safely split a 64-bit bitvector into four 16-bit bitvectors.
-bvsplitu64to16 :: SMTExpr BV64 -> (SMTExpr BV16,SMTExpr BV16,SMTExpr BV16,SMTExpr BV16)
-bvsplitu64to16 e = (App (SMTExtract (Proxy::Proxy N48) (Proxy::Proxy N16)) e,
-                    App (SMTExtract (Proxy::Proxy N32) (Proxy::Proxy N16)) e,
-                    App (SMTExtract (Proxy::Proxy N16) (Proxy::Proxy N16)) e,
-                    App (SMTExtract (Proxy::Proxy N0) (Proxy::Proxy N16)) e)
-
--- | Safely split a 64-bit bitvector into eight 8-bit bitvectors.
-bvsplitu64to8 :: SMTExpr BV64 -> (SMTExpr BV8,SMTExpr BV8,SMTExpr BV8,SMTExpr BV8,SMTExpr BV8,SMTExpr BV8,SMTExpr BV8,SMTExpr BV8)
-bvsplitu64to8 e = (App (SMTExtract (Proxy::Proxy N56) (Proxy::Proxy N8)) e,
-                   App (SMTExtract (Proxy::Proxy N48) (Proxy::Proxy N8)) e,
-                   App (SMTExtract (Proxy::Proxy N40) (Proxy::Proxy N8)) e,
-                   App (SMTExtract (Proxy::Proxy N32) (Proxy::Proxy N8)) e,
-                   App (SMTExtract (Proxy::Proxy N24) (Proxy::Proxy N8)) e,
-                   App (SMTExtract (Proxy::Proxy N16) (Proxy::Proxy N8)) e,
-                   App (SMTExtract (Proxy::Proxy N8) (Proxy::Proxy N8)) e,
-                   App (SMTExtract (Proxy::Proxy N0) (Proxy::Proxy N8)) e)
-
-mkQuantified :: (Args a,SMTType b) => (Integer -> [ProxyArg] -> SMTExpr b -> SMTExpr b)
-             -> ArgAnnotation a -> (a -> SMTExpr b)
-             -> SMTExpr b
-mkQuantified constr ann f = constr lvl sorts body
-  where
-    undef :: (a -> SMTExpr b) -> a
-    undef _ = undefined
-    sorts = getTypes (undef f) ann
-    Just (arg0,[]) = toArgs ann [InternalObj () prx
-                                | prx <- sorts ]
-    body' = f arg0
-    lvl = quantificationLevel body'
-    Just (arg1,[]) = toArgs ann [QVar lvl i prx
-                                | (i,prx) <- Prelude.zip [0..] sorts ]
-    body = f arg1
-    
--- | If the supplied function returns true for all possible values, the forall quantification returns true.
-forAll :: (Args a,Unit (ArgAnnotation a)) => (a -> SMTExpr Bool) -> SMTExpr Bool
-forAll = forAllAnn unit
-
--- | An annotated version of `forAll`.
-forAllAnn :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
-forAllAnn = mkQuantified Forall
-
--- | If the supplied function returns true for at least one possible value, the exists quantification returns true.
-exists :: (Args a,Unit (ArgAnnotation a)) => (a -> SMTExpr Bool) -> SMTExpr Bool
-exists = existsAnn unit
-
--- | An annotated version of `exists`.
-existsAnn :: Args a => ArgAnnotation a -> (a -> SMTExpr Bool) -> SMTExpr Bool
-existsAnn = mkQuantified Exists
-
--- | Binds an expression to a variable.
---   Can be used to prevent blowups in the command stream if expressions are used multiple times.
---   @let' x f@ is functionally equivalent to @f x@.
-let' :: (Args a,Unit (ArgAnnotation a),SMTType b) => a -> (a -> SMTExpr b) -> SMTExpr b
-let' = letAnn unit
-
--- | Like `let'`, but can be given an additional type annotation for the argument of the function.
-letAnn :: (Args a,SMTType b) => ArgAnnotation a -> a -> (a -> SMTExpr b) -> SMTExpr b
-letAnn ann arg = mkQuantified (\lvl _ body -> Let lvl args body) ann
-  where
-    args = fromArgs arg
-
--- | Like 'let'', but can define multiple variables of the same type.
-lets :: (Args a,Unit (ArgAnnotation a),SMTType b) => [a] -> ([a] -> SMTExpr b) -> SMTExpr b
-lets xs = letAnn (fmap (const unit) xs) xs
-
--- | Like 'forAll', but can quantify over more than one variable (of the same type).
-forAllList :: (Args a,Unit (ArgAnnotation a)) => Integer -- ^ Number of variables to quantify
-              -> ([a] -> SMTExpr Bool) -- ^ Function which takes a list of the quantified variables
-              -> SMTExpr Bool
-forAllList l = forAllAnn (genericReplicate l unit)
-
--- | Like `exists`, but can quantify over more than one variable (of the same type).
-existsList :: (Args a,Unit (ArgAnnotation a)) => Integer -- ^ Number of variables to quantify
-           -> ([a] -> SMTExpr Bool) -- ^ Function which takes a list of the quantified variables
-           -> SMTExpr Bool
-existsList l = existsAnn (genericReplicate l unit)
-
--- | Checks if the expression is formed a specific constructor.
-is :: (Args arg,SMTType dt) => SMTExpr dt -> Constructor arg dt -> SMTExpr Bool
-is e con = App (SMTConTest con) e
-
--- | Access a field of an expression
-(.#) :: (SMTType a,SMTType f) => SMTExpr a -> Field a f -> SMTExpr f
-(.#) e f = App (SMTFieldSel f) e
-
--- | Takes the first element of a list
-head' :: (SMTType a,Unit (SMTAnnotation a)) => SMTExpr [a] -> SMTExpr a
-head' = App (SMTBuiltIn "head" unit)
-
--- | Drops the first element from a list
-tail' :: (SMTType a,Unit (SMTAnnotation a)) => SMTExpr [a] -> SMTExpr [a]
-tail' = App (SMTBuiltIn "tail" unit)
-
--- | Checks if a list is empty.
-isNil :: (SMTType a) => SMTExpr [a] -> SMTExpr Bool
-isNil (e::SMTExpr [a]) = is e (Constructor [ProxyArg (undefined::[a]) (extractAnnotation e)] dtList conNil:: Constructor () [a])
-
--- | Checks if a list is non-empty.
-isInsert :: (SMTType a,Unit (SMTAnnotation a)) => SMTExpr [a] -> SMTExpr Bool
-isInsert (e::SMTExpr [a]) = is e (Constructor [ProxyArg (undefined::[a]) (extractAnnotation e)] dtList conInsert :: Constructor (SMTExpr a,SMTExpr [a]) [a])
-
--- | Sets the logic used for the following program (Not needed for many solvers).
-setLogic :: Monad m => String -> SMT' m ()
-setLogic name = smtBackend $ \b -> smtHandle b (SMTSetLogic name)
-
--- | Given an arbitrary expression, this creates a named version of it and a name to reference it later on.
-named :: (SMTType a,SMTAnnotation a ~ (),Monad m)
-         => String -> SMTExpr a -> SMT' m (SMTExpr a,SMTExpr a)
-named name expr = do
-  i <- smtBackend $ \b -> smtHandle b (SMTNameExpr name expr)
-  return (Named expr i,Var i (extractAnnotation expr))
-
--- | Like `named`, but defaults the name to "named".
-named' :: (SMTType a,SMTAnnotation a ~ (),Monad m)
-          => SMTExpr a -> SMT' m (SMTExpr a,SMTExpr a)
-named' = named "named"
-  
--- | After an unsuccessful 'checkSat' this method extracts a proof from the SMT solver that the instance is unsatisfiable.
-getProof :: Monad m => SMT' m (SMTExpr Bool)
-getProof = smtBackend $ \b -> smtHandle b SMTGetProof
-
--- | Use the SMT solver to simplify a given expression.
---   Currently only works with Z3.
-simplify :: (SMTType t,Monad m) => SMTExpr t -> SMT' m (SMTExpr t)
-simplify expr = smtBackend $ \b -> smtHandle b (SMTSimplify expr)
-
--- | After an unsuccessful 'checkSat', return a list of clauses which make the
---   instance unsatisfiable.
-getUnsatCore :: Monad m => SMT' m [ClauseId]
-getUnsatCore = smtBackend $ \b -> smtHandle b SMTGetUnsatCore
-  
-optimizeExpr' :: SMTExpr a -> SMTExpr a
-optimizeExpr' e = case optimizeExpr e of
-  Nothing -> e
-  Just e' -> e'
+    mkStore :: Embed m e => m (e (ArrayType idx val)) -> m (e val) -> List e idx
+            -> m (e (ArrayType idx val))
+    mkStore arr nel idx = do
+      arr' <- arr
+      nel' <- nel
+      ArrayRepr idxTp elTp <- embedTypeOf arr'
+      embed (App (E.Store idxTp elTp) (arr' ::: nel' ::: idx))
+{-# INLINEABLE store #-}
+
+store1 :: (Embed m e,HasMonad arr,HasMonad idx,HasMonad el,
+           MatchMonad arr m,MatchMonad idx m,MatchMonad el m,
+           MonadResult arr ~ e (ArrayType '[idx'] el'),
+           MonadResult idx ~ e idx',
+           MonadResult el ~ e el')
+        => arr -> idx -> el -> m (e (ArrayType '[idx'] el'))
+store1 arr idx el = do
+  arr' <- embedM arr
+  idx' <- embedM idx
+  el' <- embedM el
+  ArrayRepr (idxTp ::: Nil) elTp <- embedTypeOf arr'
+  embed $ App (E.Store (idxTp ::: Nil) elTp) (arr' ::: el' ::: idx' ::: Nil)
+{-# INLINEABLE store1 #-}
+
+constArray :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e tp)
+           => List Repr idx -> a
+           -> m (e (ArrayType idx tp))
+constArray idx el = do
+  el' <- embedM el
+  tp <- embedTypeOf el'
+  embed (App (E.ConstArray idx tp) (el' ::: Nil))
+{-# INLINEABLE constArray #-}
+
+concat' :: forall m e a b n1 n2.
+           (Embed m e,HasMonad a,HasMonad b,
+            MatchMonad a m,MatchMonad b m,
+            MonadResult a ~ e (BitVecType n1),MonadResult b ~ e (BitVecType n2))
+        => a -> b -> m (e (BitVecType (n1 + n2)))
+concat' x y = do
+  (x'::e (BitVecType n1)) <- embedM x
+  (y'::e (BitVecType n2)) <- embedM y
+  BitVecRepr bw1 <- embedTypeOf x'
+  BitVecRepr bw2 <- embedTypeOf y'
+  embed $ App (E.Concat bw1 bw2) (x' ::: y' ::: Nil)
+{-# INLINEABLE concat' #-}
+
+extract' :: forall m e a bw start len.
+            (Embed m e,HasMonad a,MatchMonad a m,
+             MonadResult a ~ e (BitVecType bw),
+             ((start + len) <= bw) ~ True)
+         => Natural start -> Natural len -> a
+         -> m (e (BitVecType len))
+extract' start len arg = do
+  (arg'::e (BitVecType bw)) <- embedM arg
+  BitVecRepr bw <- embedTypeOf arg'
+  embed (App (E.Extract bw start len) (arg' ::: Nil))
+{-# INLINEABLE extract' #-}
+
+divisible :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e IntType)
+          => Integer -> a -> m (e BoolType)
+divisible n x = embedM x >>= embed.(Divisible n)
+{-# INLINEABLE divisible #-}
+
+true,false :: Embed m e => m (e BoolType)
+true = embed $ E.Const (BoolValue True)
+false = embed $ E.Const (BoolValue False)
+{-# INLINEABLE true #-}
+{-# INLINEABLE false #-}

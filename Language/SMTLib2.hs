@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings,GADTs,FlexibleInstances,MultiParamTypeClasses,CPP #-}
 {- | Example usage: This program tries to find two numbers greater than zero which sum up to 5.
 
      @
@@ -19,99 +18,178 @@ program = do
 
 main = withZ3 program >>= print
      @ -}
-module Language.SMTLib2 
-       (-- * Data types
-         SMT'(),SMT,
-         SMTBackend(),AnyBackend(..),
-         SMTType,
-         SMTAnnotation,
-         SMTValue,
-         SMTArith,
-         SMTOrd(..),
-         SMTExpr,
-         SMTFunction,
-         SMTOption(..),
-         SMTArray,
-         Constructor,
-         Field,
-         Args(..),LiftArgs(..),
-         -- * Environment
-         withSMTBackend,withSMTBackendExitCleanly,
-         setOption,getInfo,setLogic,
-         SMTInfo(..),
-         assert,push,pop,stack,
-         checkSat,checkSat',checkSatUsing,apply,
-         CheckSatResult(..),
-         CheckSatLimits(..),noLimits,
-         getValue,getValues,getModel,
-         comment,
-         getProof,
-         simplify,
-         -- ** Unsatisfiable Core
-         ClauseId(),
-         assertId,
-         getUnsatCore,
-         -- ** Interpolation
-         InterpolationGroup(),
-         interpolationGroup,
-         assertInterp,
-         getInterpolant,
-         interpolate,
-         -- * Expressions
-         var,varNamed,varNamedAnn,varAnn,argVars,argVarsAnn,argVarsAnnNamed,
-         untypedVar,untypedNamedVar,
-         constant,constantAnn,
-         extractAnnotation,
-         let',lets,letAnn,
-         named,named',
-         optimizeExpr,optimizeExpr',
-         foldExpr,foldExprM,
-         foldArgs,foldArgsM,
-         -- ** Basic logic
-         (.==.),argEq,
-         distinct,
-         ite,
-         (.&&.),(.||.),and',or',xor,not',not'',(.=>.),
-         forAll,exists,
-         forAllAnn,existsAnn,
-         forAllList,existsList,
-         -- ** Arithmetic
-         plus,minus,mult,div',mod',rem',neg,divide,toReal,toInt,
-         -- ** Arrays
-         select,store,arrayEquals,unmangleArray,asArray,constArray,
-         -- ** Bitvectors
-         bvand,bvor,bvxor,bvnot,bvneg,
-         bvadd,bvsub,bvmul,bvurem,bvsrem,bvudiv,bvsdiv,
-         bvule,bvult,bvuge,bvugt,
-         bvsle,bvslt,bvsge,bvsgt,
-         bvshl,bvlshr,bvashr,
-         BitVector(..),
-#ifdef SMTLIB2_WITH_DATAKINDS
-         BVKind(..),
-#else
-         BVTyped,BVUntyped,
-#endif
-         BV8,BV16,BV32,BV64,
-         N0,N1,N2,N3,N4,N5,N6,N7,N8,N9,N10,N11,N12,N13,N14,N15,N16,N17,N18,N19,N20,N21,N22,N23,N24,N25,N26,N27,N28,N29,N30,N31,N32,N33,N34,N35,N36,N37,N38,N39,N40,N41,N42,N43,N44,N45,N46,N47,N48,N49,N50,N51,N52,N53,N54,N55,N56,N57,N58,N59,N60,N61,N62,N63,N64,
-         bvconcat,--bvextract,bvextractUnsafe,
-         bvsplitu16to8,
-         bvsplitu32to16,bvsplitu32to8,
-         bvsplitu64to32,bvsplitu64to16,bvsplitu64to8,
-         bvextract,bvextract',
-         -- ** Functions
-         funAnn,funAnnNamed,funAnnRet,fun,app,defFun,defConst,defConstNamed,defFunAnn,defFunAnnNamed,map',
-         -- ** Data types
-         is,(.#),
-         -- ** Lists
-         head',tail',insert',isNil,isInsert,
-         -- * Untyped expressions
-         Untyped,UntypedValue,
-         entype,entypeValue,
-         castUntypedExpr,castUntypedExprValue
-       )
-       where
+module Language.SMTLib2 (
+  -- * SMT Monad
+  SMT(),
+  B.Backend(),
+  withBackend,
+  withBackendExitCleanly,
+  -- * Setting options
+  setOption,B.SMTOption(..),
+  -- * Getting informations about the solver
+  getInfo,B.SMTInfo(..),
+  -- * Expressions
+  B.Expr(),expr,
+  -- ** Declaring variables
+  declare,declareVar,declareVarNamed,
+  -- ** Defining variables
+  define,defineVar,defineVarNamed,defConst,
+  -- ** Constants
+  constant,ConcreteValue(..),
+  -- ** Analyzation
+  AnalyzedExpr(),analyze,getExpr,
+  -- * Satisfiability
+  assert,checkSat,checkSatWith,
+  B.CheckSatResult(..),
+  B.CheckSatLimits(..),noLimits,
+  -- ** Unsatisfiable core
+  assertId,getUnsatCore,B.ClauseId(),
+  -- ** Interpolation
+  assertPartition,B.Partition(..),
+  getInterpolant,
+  -- ** Stack
+  push,pop,stack,
+  -- ** Models
+  getValue,
+  getModel,
+  B.Model(),
+  modelEvaluate,
+  -- * Types
+  registerDatatype,
+  Type(..),Repr(..),reifyType,bool,int,real,bitvec,array,
+  -- ** Numbers
+  Nat(..),Natural(..),nat,reifyNat,
+  -- ** Lists
+  List(..),list,reifyList,nil,list1,list2,list3,
+  -- * Misc
+  comment,simplify
+  ) where
 
-import Language.SMTLib2.Internals
-import Language.SMTLib2.Internals.Instances
-import Language.SMTLib2.Internals.Optimize
-import Language.SMTLib2.Internals.Interface
+import Language.SMTLib2.Internals.Type
+import Language.SMTLib2.Internals.Type.Nat
+import Language.SMTLib2.Internals.Type.List
+import Language.SMTLib2.Internals.Monad
+import Language.SMTLib2.Internals.Expression
+import Language.SMTLib2.Internals.Embed
+import qualified Language.SMTLib2.Internals.Backend as B
+import Language.SMTLib2.Internals.TH
+import Language.SMTLib2.Strategy
+
+import Control.Monad.State.Strict
+
+setOption :: B.Backend b => B.SMTOption -> SMT b ()
+setOption opt = embedSMT $ B.setOption opt
+
+getInfo :: B.Backend b => B.SMTInfo i -> SMT b i
+getInfo info = embedSMT $ B.getInfo info
+
+-- | Asserts a boolean expression to be true.
+--   A successive successful `checkSat` calls mean that the generated model is consistent with the assertion.
+assert :: B.Backend b => B.Expr b BoolType -> SMT b ()
+assert = embedSMT . B.assert
+
+-- | Works like `assert`, but additionally allows the user to find the unsatisfiable core of a set of assignments using `getUnsatCore`.
+assertId :: B.Backend b => B.Expr b BoolType -> SMT b (B.ClauseId b)
+assertId = embedSMT . B.assertId
+
+assertPartition :: B.Backend b => B.Expr b BoolType -> B.Partition -> SMT b ()
+assertPartition e p = embedSMT (B.assertPartition e p)
+
+-- | Checks if the set of asserted expressions is satisfiable.
+checkSat :: B.Backend b => SMT b B.CheckSatResult
+checkSat = embedSMT (B.checkSat Nothing noLimits)
+
+checkSatWith :: B.Backend b => Maybe Tactic -> B.CheckSatLimits -> SMT b B.CheckSatResult
+checkSatWith tactic limits = embedSMT (B.checkSat tactic limits)
+
+noLimits :: B.CheckSatLimits
+noLimits = B.CheckSatLimits Nothing Nothing
+
+getValue :: (B.Backend b) => B.Expr b t -> SMT b (ConcreteValue t)
+getValue e = do
+  res <- embedSMT $ B.getValue e
+  mkConcr res
+
+-- | After a successful `checkSat` query, return a satisfying assignment that makes all asserted formula true.
+getModel :: B.Backend b => SMT b (B.Model b)
+getModel = embedSMT B.getModel
+
+-- | Evaluate an expression in a model, yielding a concrete value.
+modelEvaluate :: B.Backend b => B.Model b -> B.Expr b t -> SMT b (ConcreteValue t)
+modelEvaluate mdl e = do
+  res <- embedSMT $ B.modelEvaluate mdl e
+  mkConcr res
+
+push,pop :: B.Backend b => SMT b ()
+push = embedSMT B.push
+pop = embedSMT B.pop
+
+stack :: B.Backend b => SMT b a -> SMT b a
+stack act = do
+  push
+  res <- act
+  pop
+  return res
+
+defConst :: B.Backend b => B.Expr b t -> SMT b (B.Expr b t)
+defConst e = do
+  v <- embedSMT $ B.defineVar Nothing e
+  embedSMT $ B.toBackend (Var v)
+
+declareVar :: B.Backend b => Repr t -> SMT b (B.Expr b t)
+declareVar tp = do
+  v <- embedSMT $ B.declareVar tp Nothing
+  embedSMT $ B.toBackend (Var v)
+
+declareVarNamed :: B.Backend b => Repr t -> String -> SMT b (B.Expr b t)
+declareVarNamed tp name = do
+  v <- embedSMT $ B.declareVar tp (Just name)
+  embedSMT $ B.toBackend (Var v)
+
+defineVar :: (B.Backend b) => B.Expr b t -> SMT b (B.Expr b t)
+defineVar e = do
+  re <- embedSMT $ B.defineVar Nothing e
+  embedSMT $ B.toBackend (Var re)
+
+defineVarNamed :: (B.Backend b) => String -> B.Expr b t -> SMT b (B.Expr b t)
+defineVarNamed name e = do
+  re <- embedSMT $ B.defineVar (Just name) e
+  embedSMT $ B.toBackend (Var re)
+
+constant :: (B.Backend b) => ConcreteValue t -> SMT b (B.Expr b t)
+constant v = do
+  val <- valueFromConcrete
+         (\(v::dt) f -> do
+             st <- get
+             let bdt = lookupDatatype (DTProxy::DTProxy dt) (datatypes st)
+             getConstructor v (B.bconstructors bdt) $
+               \con args -> f (B.bconRepr con) args
+         ) v
+  embedSMT $ B.toBackend (Const val)
+
+getUnsatCore :: B.Backend b => SMT b [B.ClauseId b]
+getUnsatCore = embedSMT B.getUnsatCore
+
+getInterpolant :: B.Backend b => SMT b (B.Expr b BoolType)
+getInterpolant = embedSMT B.interpolate
+
+getExpr :: (B.Backend b) => B.Expr b tp
+        -> SMT b (Expression
+                  (B.Var b)
+                  (B.QVar b)
+                  (B.Fun b)
+                  (B.Constr b)
+                  (B.Field b)
+                  (B.FunArg b)
+                  (B.LVar b)
+                  (B.Expr b) tp)
+getExpr e = do
+  st <- get
+  return $ B.fromBackend (backend st) e
+
+comment :: (B.Backend b) => String -> SMT b ()
+comment msg = embedSMT $ B.comment msg
+
+-- | Use the SMT solver to simplify a given expression.
+simplify :: B.Backend b => B.Expr b tp -> SMT b (B.Expr b tp)
+simplify e = embedSMT $ B.simplify e
