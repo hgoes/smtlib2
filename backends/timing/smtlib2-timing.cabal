@@ -1,5 +1,5 @@
 Name:           smtlib2-timing
-Version:        0.1
+Version:        1.0
 Author:         Henning Günther <guenther@forsyte.at>
 License:        GPL-3
 License-File:   LICENSE
@@ -7,7 +7,7 @@ Build-Type:     Simple
 Cabal-Version:  >=1.2
 
 Library
-  Build-Depends:        base >= 4,smtlib2 >= 0.1, time, mtl
+  Build-Depends:        base >= 4,smtlib2 >= 1.0 && < 1.1, time, mtl
   Extensions:		FlexibleInstances,MultiParamTypeClasses,FlexibleContexts,TypeFamilies,GADTs,DeriveDataTypeable
   GHC-Options: -fwarn-unused-imports
   Exposed-Modules:

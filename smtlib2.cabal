@@ -1,5 +1,5 @@
 Name:           smtlib2
-Version:        0.3
+Version:        1.0
 Author:         Henning Günther <guenther@forsyte.at>
 Maintainer:     guenther@forsyte.at
 Synopsis:       A type-safe interface to communicate with an SMT solver.

@@ -1,5 +1,5 @@
 Name:           smtlib2-debug
-Version:        0.3
+Version:        1.0
 Author:         Henning Günther <guenther@forsyte.at>
 License:        GPL-3
 License-File:   LICENSE
@@ -12,7 +12,7 @@ Flag Base4_8
   Manual: False
 
 Library
-  Build-Depends:        smtlib2 >= 0.3, smtlib2-pipe, ansi-terminal >= 0.5,
+  Build-Depends:        smtlib2 >= 1.0 && < 1.1, smtlib2-pipe >= 1.0 && < 1.1, ansi-terminal >= 0.5,
                         atto-lisp, mtl,containers,text, dependent-map >= 0.2
   if flag(Base4_8)
      Build-Depends: base >= 4.8 && < 5

@@ -1,12 +1,12 @@
 Name:           smtlib2-z3
-Version:        0.1
+Version:        1.0
 Author:         Henning Günther <guenther@forsyte.at>
 License:        GPL-3
 Build-Type:     Simple
 Cabal-Version:  >=1.8
 
 Library
-  Build-Depends:        base >= 4,smtlib2 >= 0.2,z3 >= 4,containers
+  Build-Depends:        base >= 4,smtlib2 >= 1.0 && < 1.1,z3 >= 4,containers
   Extensions:           TypeFamilies,DataKinds,ScopedTypeVariables
   Exposed-Modules:
     Language.SMTLib2.Z3
@@ -15,4 +15,4 @@ Test-Suite test-smtlib2-z3
   Type: detailed-0.9
   Test-Module: Z3Test
   Hs-Source-Dirs: test
-  Build-Depends: base >=4 && <5, smtlib2, smtlib2-z3, smtlib2-quickcheck, Cabal, cabal-test-quickcheck
+  Build-Depends: base >=4 && <5, smtlib2, smtlib2-z3==1.0, smtlib2-quickcheck >= 1.0, Cabal, cabal-test-quickcheck
