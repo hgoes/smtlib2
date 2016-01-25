@@ -14,8 +14,8 @@ import qualified Data.Map as Map
 import Data.Typeable
 import Data.Functor.Identity
 
-data Z3SolverState = Unconfigured
-                   | Configured Context
+data Z3SolverState = Unconfigured Z3Options
+                   | Configured Context Z3Options
                    | Spawned Context Solver
                    deriving Typeable
 
@@ -24,28 +24,46 @@ data Z3Solver = Z3Solver { solverState :: Z3SolverState
                          }
               deriving Typeable
 
+data Z3Options = Z3Options { randomSeed :: Word }
+
+defaultZ3Options :: Z3Options
+defaultZ3Options = Z3Options { randomSeed = 0 }
+
 z3Solver :: Z3Solver
-z3Solver = Z3Solver { solverState = Unconfigured
+z3Solver = Z3Solver { solverState = Unconfigured defaultZ3Options
                     , solverNxtVar = 0 }
+
+z3SolverWithOptions :: Z3Options -> Z3Solver
+z3SolverWithOptions opts = Z3Solver { solverState = Unconfigured opts
+                                    , solverNxtVar = 0 }
 
 getContext :: Z3Solver -> IO (Context,Z3Solver)
 getContext solv = case solverState solv of
-  Unconfigured -> do
+  Unconfigured opts -> do
     ctx <- withConfig mkContext
-    return (ctx,solv { solverState = Configured ctx })
-  Configured ctx -> return (ctx,solv)
+    return (ctx,solv { solverState = Configured ctx opts })
+  Configured ctx opts -> return (ctx,solv)
   Spawned ctx _ -> return (ctx,solv)
 
 getSolver :: Z3Solver -> IO (Context,Solver,Z3Solver)
 getSolver solv = case solverState solv of
-  Unconfigured -> do
+  Unconfigured opts -> do
     ctx <- withConfig mkContext
     solver <- mkSolver ctx
+    applyOptions ctx solver opts
     return (ctx,solver,solv { solverState = Spawned ctx solver })
-  Configured ctx -> do
+  Configured ctx opts -> do
     solver <- mkSolver ctx
+    applyOptions ctx solver opts
     return (ctx,solver,solv { solverState = Spawned ctx solver })
   Spawned ctx solver -> return (ctx,solver,solv)
+
+applyOptions :: Context -> Solver -> Z3Options -> IO ()
+applyOptions ctx solv opts = do
+  params <- mkParams ctx
+  seedSym <- mkStringSymbol ctx ":random-seed"
+  paramsSetUInt ctx params seedSym (randomSeed opts)
+  solverSetParams ctx solv params
 
 nextSymbol :: Z3Solver -> IO (Symbol,Z3Solver)
 nextSymbol solv = do
