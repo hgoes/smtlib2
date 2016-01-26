@@ -821,9 +821,9 @@ lispToFunction _ _ (L.Symbol "and") = return $ lispToLogicFunction And
 lispToFunction _ _ (L.Symbol "or") = return $ lispToLogicFunction Or
 lispToFunction _ _ (L.Symbol "xor") = return $ lispToLogicFunction XOr
 lispToFunction _ _ (L.Symbol "=>") = return $ lispToLogicFunction Implies
-lispToFunction _ _ (L.Symbol "to-real")
+lispToFunction _ _ (L.Symbol "to_real")
   = return $ ParsedFunction (const False) (\_ -> return $ AnyFunction ToReal)
-lispToFunction _ _ (L.Symbol "to-int")
+lispToFunction _ _ (L.Symbol "to_int")
   = return$ ParsedFunction (const False) (\_ -> return $ AnyFunction ToInt)
 lispToFunction _ sort (L.Symbol "ite") = case sort of
   Just (Sort tp)
