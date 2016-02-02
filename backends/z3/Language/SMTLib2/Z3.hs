@@ -147,8 +147,15 @@ instance Backend Z3Solver where
     cid <- mkFreshBoolVar ctx "cid"
     solverAssertAndTrack ctx solver nd cid
     return (cid,solv1)
-  checkSat _ _ solv = do
+  checkSat _ limit solv = do
     (ctx,solver,solv1) <- getSolver solv
+    params <- mkParams ctx
+    timeoutSym <- mkStringSymbol ctx ":timeout"
+    paramsSetUInt ctx params timeoutSym
+      (case limitTime limit of
+          Nothing -> maxBound
+          Just lim -> fromInteger lim)
+    solverSetParams ctx solver params
     res <- solverCheck ctx solver
     let res' = case res of
           Sat -> B.Sat
