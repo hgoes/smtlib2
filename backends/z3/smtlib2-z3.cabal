@@ -7,7 +7,7 @@ Cabal-Version:  >=1.8
 
 Library
   Build-Depends:        base >= 4,smtlib2 >= 1.0 && < 1.1,z3 >= 4,containers
-  Extensions:           TypeFamilies,DataKinds,ScopedTypeVariables
+  Extensions:           TypeFamilies,DataKinds,ScopedTypeVariables,RankNTypes
   Exposed-Modules:
     Language.SMTLib2.Z3
 

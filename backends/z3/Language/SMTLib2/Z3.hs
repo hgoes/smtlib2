@@ -7,12 +7,14 @@ import Language.SMTLib2.Internals.Type.Nat
 import Language.SMTLib2.Internals.Type.List (List(..))
 import qualified Language.SMTLib2.Internals.Type.List as List
 import Language.SMTLib2.Internals.Expression
+import qualified Language.SMTLib2.Internals.Interface as I
 
 import Z3.Base as Z3
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Typeable
 import Data.Functor.Identity
+import System.IO.Unsafe
 
 data Z3SolverState = Unconfigured Z3Options
                    | Configured Context Z3Options
@@ -92,6 +94,7 @@ instance Backend Z3Solver where
   type LVar Z3Solver = Z3Var
   type ClauseId Z3Solver = AST
   type Model Z3Solver = Z3.Model
+  type Proof Z3Solver = () -- TODO: Proof support not implemented yet
   setOption (SMTLogic log) solv = do
     (ctx,nsolv) <- getContext solv
     let logic = case log of
@@ -138,6 +141,9 @@ instance Backend Z3Solver where
     (ctx,solv1) <- getContext solv
     nd <- toZ3 ctx expr
     return (UntypedVar nd (getType expr),solv1)
+  fromBackend solv e = unsafePerformIO $ do
+    (ctx,_) <- getContext solv
+    fromZ3 ctx e
   assert (UntypedVar nd _) solv = do
     (ctx,solver,solv1) <- getSolver solv
     solverAssertCnstr ctx solver nd
@@ -222,13 +228,104 @@ toZ3 ctx (App fun args) = toZ3App ctx fun args
 --toZ3 ctx (AsArray fun
 toZ3 ctx e = error $ "toZ3: "++show e
 
-{-fromZ3 :: Context
+fromZ3 :: Context
        -> Z3Var tp
        -> IO (Expression Z3Var Z3Var Z3Fun Z3Con Z3Field Z3Var Z3Var (UntypedVar AST) tp)
-fromZ3 ctx (UntypedVar var tp) = do
+fromZ3 ctx v@(UntypedVar var tp) = do
   kind <- getAstKind ctx var
   case kind of
-    Z3_APP_AST -> -}
+    Z3_VAR_AST -> return (Var v)
+    Z3_APP_AST -> do
+      app <- toApp ctx var
+      func <- getAppDecl ctx app
+      sym <- getDeclName ctx func
+      symKind <- getSymbolKind ctx sym
+      case symKind of
+        Z3_INT_SYMBOL -> return (Var v)
+        Z3_STRING_SYMBOL -> do
+          symName <- getSymbolString ctx sym
+          args <- getAppArgs ctx app
+          case symName of
+            "true" -> case tp of
+              BoolRepr -> return $ I.ConstBool True
+            "false" -> case tp of
+              BoolRepr -> return $ I.ConstBool False
+            "and" -> case tp of
+              BoolRepr -> return $ I.AndLst (fmap (\v -> UntypedVar v BoolRepr) args)
+            "or" -> case tp of
+              BoolRepr -> return $ I.OrLst (fmap (\v -> UntypedVar v BoolRepr) args)
+            "not" -> case tp of
+              BoolRepr -> case args of
+                [x] -> return $ I.Not (UntypedVar x BoolRepr)
+            "=>" -> case tp of
+              BoolRepr -> return $ I.ImpliesLst (fmap (\v -> UntypedVar v BoolRepr) args)
+            "if" -> case args of
+              [c,x,y] -> return $ I.ITE (UntypedVar c BoolRepr) (UntypedVar x tp) (UntypedVar y tp)
+            "=" -> case tp of
+              BoolRepr -> case args of
+                x:_ -> do
+                  srt <- getSort ctx x
+                  z3Sort ctx srt $
+                    \rtp -> return $ I.EqLst (fmap (\v -> UntypedVar v rtp) args)
+            "<" -> case tp of
+              BoolRepr -> case args of
+                [x,y] -> do
+                  srt <- getSort ctx x
+                  z3Sort ctx srt $
+                    \rtp -> case rtp of
+                      IntRepr -> return ((UntypedVar x IntRepr) I.:<: (UntypedVar y IntRepr))
+            "<=" -> case tp of
+              BoolRepr -> case args of
+                [x,y] -> do
+                  srt <- getSort ctx x
+                  z3Sort ctx srt $
+                    \rtp -> case rtp of
+                      IntRepr -> return ((UntypedVar x IntRepr) I.:<=: (UntypedVar y IntRepr))
+            ">" -> case tp of
+              BoolRepr -> case args of
+                [x,y] -> do
+                  srt <- getSort ctx x
+                  z3Sort ctx srt $
+                    \rtp -> case rtp of
+                      IntRepr -> return ((UntypedVar x IntRepr) I.:>: (UntypedVar y IntRepr))
+            ">=" -> case tp of
+              BoolRepr -> case args of
+                [x,y] -> do
+                  srt <- getSort ctx x
+                  z3Sort ctx srt $
+                    \rtp -> case rtp of
+                      IntRepr -> return ((UntypedVar x IntRepr) I.:>=: (UntypedVar y IntRepr))
+            "+" -> case tp of
+              IntRepr -> return $ I.PlusLst (fmap (\v -> UntypedVar v IntRepr) args)
+            _ -> error $ "Translate symbol " ++ show symName
+    Z3_NUMERAL_AST -> do
+      str <- getNumeralString ctx var
+      case tp of
+        IntRepr -> return $ I.ConstInt (read str)
+        BitVecRepr bw -> return $ I.ConstBV (read str) bw
+        RealRepr -> return $ I.ConstReal (read str)
+    Z3_QUANTIFIER_AST -> error "Quantifier AST"
+    Z3_SORT_AST -> error "Sort AST"
+    Z3_FUNC_DECL_AST -> error "FuncDecl AST"
+    Z3_UNKNOWN_AST -> error "Unknown AST"
+
+z3Sort :: Context -> Sort -> (forall tp. Repr tp -> IO a) -> IO a
+z3Sort ctx s f = do
+  kind <- getSortKind ctx s
+  case kind of
+    Z3_BOOL_SORT -> f BoolRepr
+    Z3_INT_SORT -> f IntRepr
+    Z3_REAL_SORT -> f RealRepr
+    Z3_BV_SORT -> do
+      sz <- getBvSortSize ctx s
+      reifyNat (fromIntegral sz) $
+        \bw -> f (BitVecRepr bw)
+    Z3_ARRAY_SORT -> do
+      dom <- getArraySortDomain ctx s
+      range <- getArraySortRange ctx s
+      z3Sort ctx dom $
+        \dom' -> z3Sort ctx range $
+                 \range' -> f (ArrayRepr (dom' ::: Nil) range')
 
 untypedVar :: Z3Expr t -> AST
 untypedVar (UntypedVar x _) = x
