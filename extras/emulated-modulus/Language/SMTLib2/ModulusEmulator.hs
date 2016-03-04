@@ -97,6 +97,7 @@ instance (Backend b) => Backend (ModulusEmulator b) where
   type LVar (ModulusEmulator b) = LVar b
   type ClauseId (ModulusEmulator b) = ClauseId b
   type Model (ModulusEmulator b) = Model b
+  type Proof (ModulusEmulator b) = Proof b
   setOption opt = liftSMT (setOption opt)
   getInfo info = liftSMT (getInfo info)
   comment str = liftSMT (comment str)
@@ -126,6 +127,7 @@ instance (Backend b) => Backend (ModulusEmulator b) where
   getModel = liftSMT getModel
   modelEvaluate mdl e = liftSMT (modelEvaluate mdl e)
   getProof = liftSMT getProof
+  analyzeProof b p = analyzeProof (emulatedBackend b) p
   simplify e = liftSMT (simplify e)
   toBackend (App (ArithIntBin Mod) (x ::: y ::: Nil)) me
     = case fromBackend (emulatedBackend me) y of

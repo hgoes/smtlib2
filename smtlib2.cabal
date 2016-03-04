@@ -64,3 +64,5 @@ Library
                   Language.SMTLib2
                   Language.SMTLib2.Internals.Evaluate
                   Language.SMTLib2.Internals.Interface
+                  Language.SMTLib2.Internals.Proof
+                  Language.SMTLib2.Internals.Proof.Verify

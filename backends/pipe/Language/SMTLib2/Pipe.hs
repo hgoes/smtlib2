@@ -8,6 +8,7 @@ import Language.SMTLib2.Internals.Type.List (List(..))
 import qualified Language.SMTLib2.Internals.Type.List as List
 import Language.SMTLib2.Internals.Expression hiding (Fun,Field,Var,QVar,LVar)
 import qualified Language.SMTLib2.Internals.Expression as Expr
+import qualified Language.SMTLib2.Internals.Proof as P
 import Language.SMTLib2.Strategy as Strat
 
 import qualified Data.Text as T
@@ -22,6 +23,8 @@ import Data.GADT.Show
 #if !MIN_VERSION_base(4,8,0)
 import Data.Monoid
 #endif
+import Data.Foldable (foldlM)
+import Control.Monad.Except
 
 import System.Process
 import System.IO
@@ -68,6 +71,20 @@ type PipeField = UntypedField T.Text
 
 newtype PipeClauseId = PipeClauseId T.Text deriving (Show,Eq,Ord,Typeable)
 
+type PipeProofNode = P.Proof L.Lisp PipeExpr Int
+
+data PipeProof = PipeProof { proofNodes :: Map Int PipeProofNode
+                           , proofNode :: Int }
+
+instance Eq PipeProof where
+  (==) (PipeProof _ x) (PipeProof _ y) = x == y
+
+instance Ord PipeProof where
+  compare (PipeProof _ x) (PipeProof _ y) = compare x y
+
+instance Show PipeProof where
+  showsPrec p pr = showParen (p>10) $ showsPrec 0 (proofNode pr)
+
 instance GEq PipeExpr where
   geq (PipeExpr e1) (PipeExpr e2) = geq e1 e2
 
@@ -92,6 +109,7 @@ instance Backend SMTPipe where
   type LVar SMTPipe = PipeVar
   type ClauseId SMTPipe = PipeClauseId
   type Model SMTPipe = AssignmentModel SMTPipe
+  type Proof SMTPipe = PipeProof
   setOption opt b = do
     putRequest b $ renderSetOption opt
     return ((),b)
@@ -206,6 +224,9 @@ instance Backend SMTPipe where
     putRequest b renderGetProof
     l <- parseResponse b
     return (parseGetProof b l,b)
+  analyzeProof b pr = case Map.lookup (proofNode pr) (proofNodes pr) of
+    Just nd -> case nd of
+      P.Rule r args res -> P.Rule (show r) (fmap (\arg -> PipeProof (proofNodes pr) arg) args) res
   push b = do
     putRequest b (L.List [L.Symbol "push",L.Number $ L.I 1])
     return ((),b)
@@ -456,8 +477,8 @@ parseGetValue _ _ expr = error $ "smtlib2: Failed to parse get-value result: "++
 renderGetProof :: L.Lisp
 renderGetProof = L.List [L.Symbol "get-proof"]
 
-parseGetProof :: SMTPipe -> L.Lisp -> PipeExpr BoolType
-parseGetProof b resp = case runExcept $ lispToExprTyped b BoolRepr proof of
+parseGetProof :: SMTPipe -> L.Lisp -> PipeProof
+parseGetProof b resp = case runExcept $ parseProof b Map.empty Map.empty Map.empty proof of
   Right res -> res
   Left err -> error $ "smtlib2: Failed to parse proof: "++show resp++" ["++err++"]"
   where
@@ -469,6 +490,70 @@ parseGetProof b resp = case runExcept $ lispToExprTyped b BoolRepr proof of
     findProof [] = Nothing
     findProof ((L.List [L.Symbol "proof",p]):_) = Just p
     findProof (x:xs) = findProof xs
+
+parseProof :: SMTPipe
+           -> Map T.Text (PipeExpr BoolType)
+           -> Map T.Text Int
+           -> Map Int PipeProofNode
+           -> L.Lisp
+           -> LispParse PipeProof
+parseProof pipe exprs proofs nodes l = case l of
+  L.List [L.Symbol "let",L.List defs,body] -> do
+    (nexprs,nproofs,nnodes)
+      <- foldlM (\(exprs,proofs,nodes) def
+                 -> case def of
+                    L.List [L.Symbol name,def'] -> do
+                      res <- parseDef exprs proofs nodes def'
+                      case res of
+                        Left expr -> return (Map.insert name expr exprs,proofs,nodes)
+                        Right (proof,nnodes)
+                          -> return (exprs,Map.insert name proof proofs,nnodes)
+                ) (exprs,proofs,nodes) defs
+    parseProof pipe nexprs nproofs nnodes body
+  _ -> do
+    (res,nnodes) <- parseDefProof exprs proofs nodes l
+    return (PipeProof nnodes res)
+  where
+    exprParser = pipeParser pipe
+    exprParser' exprs = exprParser { parseRecursive = parseDefExpr' exprs
+                                   }
+    parseDefExpr' :: Map T.Text (PipeExpr BoolType) -> Maybe Sort -> L.Lisp
+                  -> (forall tp. PipeExpr tp -> LispParse a)
+                  -> LispParse a
+    parseDefExpr' exprs srt l@(L.Symbol name) res = case Map.lookup name exprs of
+      Just def -> res def
+      Nothing -> lispToExprWith (exprParser' exprs) srt l $
+                 \e -> res (PipeExpr e)
+    parseDefExpr' exprs srt l res = lispToExprWith (exprParser' exprs) srt l
+                                    (res.PipeExpr)
+    parseDefExpr :: Map T.Text (PipeExpr BoolType) -> L.Lisp
+                 -> LispParse (PipeExpr BoolType)
+    parseDefExpr exprs l = parseDefExpr' exprs (Just $ Sort BoolRepr) l $
+                           \e -> case getType e of
+                             BoolRepr -> return e
+                             _ -> throwError "let expression in proof is not bool"
+    parseDefProof exprs proofs nodes (L.List (rule:args)) = do
+      (args',res,nnodes) <- parseArgs nodes args
+      let sz = Map.size nnodes
+      return (sz,Map.insert sz (P.Rule rule args' res) nnodes)
+      where
+        parseArgs nodes [x] = case x of
+          L.List [L.Symbol "~",lhs,rhs] -> do
+            lhs' <- parseDefExpr exprs lhs
+            rhs' <- parseDefExpr exprs rhs
+            return ([],P.EquivSat lhs' rhs',nodes)
+          _ -> do
+            e <- parseDefExpr exprs x
+            return ([],P.ProofExpr e,nodes)
+        parseArgs nodes (x:xs) = do
+          (nd,nodes1) <- parseDefProof exprs proofs nodes x
+          (nds,res,nodes2) <- parseArgs nodes1 xs
+          return (nd:nds,res,nodes2)
+    parseDefProof exprs proofs nodes (L.Symbol sym) = case Map.lookup sym proofs of
+      Just pr -> return (pr,nodes)
+    parseDef exprs proofs nodes l
+      = (fmap Left $ parseDefExpr exprs l) `catchError`
+        (\_ -> fmap Right $ parseDefProof exprs proofs nodes l)
 
 parseGetModel :: SMTPipe -> L.Lisp -> LispParse (Model SMTPipe)
 parseGetModel b (L.List ((L.Symbol "model"):mdl)) = do

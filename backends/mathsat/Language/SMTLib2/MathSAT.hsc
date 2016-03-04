@@ -2,7 +2,7 @@ module Language.SMTLib2.MathSAT where
 
 #include <mathsat.h>
 
-import Language.SMTLib2.Internals.Backend hiding (setOption,getUnsatCore)
+import Language.SMTLib2.Internals.Backend hiding (setOption,getUnsatCore,Proof)
 import qualified Language.SMTLib2.Internals.Backend as B
 import Language.SMTLib2.Internals.Expression
 import Language.SMTLib2.Internals.Type hiding (Type)
@@ -68,6 +68,7 @@ instance Backend MathSATBackend where
   type LVar MathSATBackend = NoVar
   type ClauseId MathSATBackend = Int
   type Model MathSATBackend = AssignmentModel MathSATBackend
+  type Proof MathSATBackend = () -- TODO: Proof support not implemented yet
   setOption (SMTLogic logic) b = do
     case mathsatState b of
       NoConfig -> return ()

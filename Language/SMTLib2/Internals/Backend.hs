@@ -4,6 +4,7 @@ import Language.SMTLib2.Internals.Type hiding (Constr,Field)
 import Language.SMTLib2.Internals.Type.List (List(..))
 import qualified Language.SMTLib2.Internals.Type.List as List
 import Language.SMTLib2.Internals.Expression
+import qualified Language.SMTLib2.Internals.Proof as P
 import Language.SMTLib2.Strategy
 
 import Data.Typeable
@@ -39,6 +40,7 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
        GCompare (FunArg b),GShow (FunArg b),
        GCompare (LVar b),GShow (LVar b),
        Ord (ClauseId b),Show (ClauseId b),
+       Ord (Proof b),Show (Proof b),
        Show (Model b)) => Backend b where
   type SMTMonad b :: * -> *
   type Expr b :: Type -> *
@@ -51,6 +53,7 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
   type LVar b :: Type -> *
   type ClauseId b :: *
   type Model b :: *
+  type Proof b :: *
   setOption :: SMTOption -> SMTAction b ()
   getInfo :: SMTInfo i -> SMTAction b i
   comment :: String -> SMTAction b ()
@@ -71,7 +74,8 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
   getValue :: Expr b t -> SMTAction b (Value (Constr b) t)
   getModel :: SMTAction b (Model b)
   modelEvaluate :: Model b -> Expr b t -> SMTAction b (Value (Constr b) t)
-  getProof :: SMTAction b (Expr b BoolType)
+  getProof :: SMTAction b (Proof b)
+  analyzeProof :: b -> Proof b -> P.Proof String (Expr b) (Proof b)
   simplify :: Expr b t -> SMTAction b (Expr b t)
   toBackend :: Expression (Var b) (QVar b) (Fun b) (Constr b) (Field b) (FunArg b) (LVar b) (Expr b) t -> SMTAction b (Expr b t)
   fromBackend :: b -> Expr b t

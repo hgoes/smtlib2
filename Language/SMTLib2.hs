@@ -47,6 +47,8 @@ module Language.SMTLib2 (
   -- ** Interpolation
   assertPartition,B.Partition(..),
   getInterpolant,
+  -- ** Proofs
+  getProof,analyzeProof,
   -- ** Stack
   push,pop,stack,
   -- ** Models
@@ -71,6 +73,7 @@ import Language.SMTLib2.Internals.Type.List
 import Language.SMTLib2.Internals.Monad
 import Language.SMTLib2.Internals.Expression
 import Language.SMTLib2.Internals.Embed
+import qualified Language.SMTLib2.Internals.Proof as P
 import qualified Language.SMTLib2.Internals.Backend as B
 import Language.SMTLib2.Internals.TH
 import Language.SMTLib2.Strategy
@@ -193,3 +196,11 @@ comment msg = embedSMT $ B.comment msg
 -- | Use the SMT solver to simplify a given expression.
 simplify :: B.Backend b => B.Expr b tp -> SMT b (B.Expr b tp)
 simplify e = embedSMT $ B.simplify e
+
+getProof :: B.Backend b => SMT b (B.Proof b)
+getProof = embedSMT B.getProof
+
+analyzeProof :: B.Backend b => B.Proof b -> SMT b (P.Proof String (B.Expr b) (B.Proof b))
+analyzeProof pr = do
+  st <- get
+  return $ B.analyzeProof (backend st) pr

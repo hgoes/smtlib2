@@ -112,6 +112,7 @@ instance (Backend b) => Backend (DebugBackend b) where
   type LVar (DebugBackend b) = LVar b
   type ClauseId (DebugBackend b) = ClauseId b
   type Model (DebugBackend b) = Model b
+  type Proof (DebugBackend b) = Proof b
   setOption opt b = do
     b1 <- outputLisp b (renderSetOption opt)
     ((),nb) <- setOption opt (debugBackend' b1)
