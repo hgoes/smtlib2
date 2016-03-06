@@ -515,7 +515,7 @@ parseProof pipe exprs proofs nodes l = case l of
     return (PipeProof nnodes res)
   where
     exprParser = pipeParser pipe
-    exprParser' exprs = exprParser { parseRecursive = parseDefExpr' exprs
+    exprParser' exprs = exprParser { parseRecursive = \_ -> parseDefExpr' exprs
                                    }
     parseDefExpr' :: Map T.Text (PipeExpr BoolType) -> Maybe Sort -> L.Lisp
                   -> (forall tp. PipeExpr tp -> LispParse a)
@@ -557,28 +557,38 @@ parseProof pipe exprs proofs nodes l = case l of
 
 parseGetModel :: SMTPipe -> L.Lisp -> LispParse (Model SMTPipe)
 parseGetModel b (L.List ((L.Symbol "model"):mdl)) = do
-  assign <- mapM parseAssignment mdl
+  nb <- foldlM adapt b mdl
+  assign <- mapM (parseAssignment nb) mdl
   return $ AssignmentModel assign
   where
-    parser = pipeParser b
-    parseAssignment (L.List [L.Symbol "define-fun",L.Symbol fname,L.List args,rtp,body])
+    adapt b (L.List [L.Symbol "define-fun",L.Symbol fname,L.List args,rtp,body])
+      = case args of
+      [] -> do
+        srt@(Sort tp) <- lispToSort (pipeParser b) rtp
+        return $ b { vars = Map.insert fname (Var tp) (vars b) }
+      _ -> do
+        srt@(Sort tp) <- lispToSort (pipeParser b) rtp
+        withFunList b args $
+          \b' tps args'
+           -> return $ b { vars = Map.insert fname (Fun tps tp) (vars b) }
+    parseAssignment b (L.List [L.Symbol "define-fun",L.Symbol fname,L.List args,rtp,body])
       = case args of
         [] -> do
-          srt@(Sort tp) <- lispToSort parser rtp
+          srt@(Sort tp) <- lispToSort (pipeParser b) rtp
           expr <- lispToExprTyped b tp body
           return $ VarAssignment (UntypedVar fname tp) expr
         _ -> do
-          srt@(Sort tp) <- lispToSort parser rtp
+          srt@(Sort tp) <- lispToSort (pipeParser b) rtp
           withFunList b args $
             \b' tps args' -> do
               body' <- lispToExprTyped b' tp body
               return $ FunAssignment (UntypedFun fname tps tp) args' body'
-    parseAssignment lsp = throwE $ "Invalid model entry: "++show lsp
+    parseAssignment _ lsp = throwE $ "Invalid model entry: "++show lsp
     withFunList :: SMTPipe -> [L.Lisp]
                 -> (forall arg. SMTPipe -> List Repr arg -> List PipeVar arg -> LispParse a) -> LispParse a
     withFunList b [] f = f b Nil Nil
     withFunList b ((L.List [L.Symbol v,tp]):ls) f = do
-      Sort tp <- lispToSort parser tp
+      Sort tp <- lispToSort (pipeParser b) tp
       withFunList (b { vars = Map.insert v (FunArg tp) (vars b) }) ls $
         \b' tps args -> f b' (tp ::: tps) ((UntypedVar v tp) ::: args)
     withFunList _ lsp _ = throwE $ "Invalid fun args: "++show lsp
@@ -613,7 +623,8 @@ data LispParser (v :: Type -> *) (qv :: Type -> *) (fun :: ([Type],Type) -> *) (
                           -> (forall t. fv t -> LispParse a)
                           -> (forall t. lv t -> LispParse a)
                           -> LispParse a
-               , parseRecursive :: forall a. Maybe Sort -> L.Lisp
+               , parseRecursive :: forall a. LispParser v qv fun con field fv lv e
+                                -> Maybe Sort -> L.Lisp
                                 -> (forall t. e t -> LispParse a)
                                 -> LispParse a
                , registerQVar :: forall (t :: Type). T.Text -> Repr t
@@ -701,8 +712,8 @@ pipeParser st = parse
                                     Just (LVar tp)
                                       -> lv (UntypedVar name tp)
                                     _ -> throwE $ "Unknown variable "++show name
-                     , parseRecursive = \srt l res -> lispToExprWith parse srt l $
-                                                      \e -> res (PipeExpr e)
+                     , parseRecursive = \parse srt l res -> lispToExprWith parse srt l $
+                                                            \e -> res (PipeExpr e)
                      , registerQVar = \name tp
                                       -> (UntypedVar name tp,
                                           pipeParser (st { vars = Map.insert name (QVar tp)
@@ -739,17 +750,17 @@ lispToExprWith p hint (L.List [L.Symbol "_",L.Symbol "as-array",fsym]) res = do
               Just $ Sort el)
 lispToExprWith p hint (L.List [L.Symbol "forall",L.List args,body]) res
   = mkQuant p args $
-    \np args' -> parseRecursive np (Just (Sort BoolRepr)) body $
+    \np args' -> parseRecursive np np (Just (Sort BoolRepr)) body $
                  \body' -> case getType body' of
                  BoolRepr -> res (Quantification Forall args' body')
 lispToExprWith p hint (L.List [L.Symbol "exists",L.List args,body]) res
   = mkQuant p args $
-    \np args' -> parseRecursive np (Just (Sort BoolRepr)) body $
+    \np args' -> parseRecursive np np (Just (Sort BoolRepr)) body $
                  \body' -> case getType body' of
                  BoolRepr -> res (Quantification Exists args' body')
 lispToExprWith p hint (L.List [L.Symbol "let",L.List args,body]) res
   = mkLet p args $
-    \np args' -> parseRecursive np hint body $
+    \np args' -> parseRecursive np np hint body $
                  \body' -> res (Let args' body')
 lispToExprWith p hint (L.List (fun:args)) res = do
   parsed <- lispToFunction p hint fun
@@ -767,7 +778,7 @@ lispToExprWith p hint (L.List (fun:args)) res = do
   where
     matchList _ _ [] = return []
     matchList f i (e:es) = if f i
-                           then parseRecursive p Nothing e
+                           then parseRecursive p p Nothing e
                                 (\e' -> do
                                      rest <- matchList f (i+1) es
                                      return $ (Right (AnyExpr e')):rest)
@@ -785,7 +796,7 @@ lispToExprWith p hint (L.List (fun:args)) res = do
            Nothing -> throwE $ "Argument "++gshowsPrec 11 e' ""++" has wrong type."
         rs <- makeList p args es
         return (r ::: rs)
-      Left l -> parseRecursive p (Just $ Sort tp) l $
+      Left l -> parseRecursive p p (Just $ Sort tp) l $
                 \e' -> do
                   r <- case geq tp (getType e') of
                      Just Refl -> return e'
@@ -812,7 +823,7 @@ mkLet :: GetType e
          -> LispParse a
 mkLet p [] f = f p Nil
 mkLet p ((L.List [L.Symbol name,expr]):args) f
-  = parseRecursive p Nothing expr $
+  = parseRecursive p p Nothing expr $
     \expr' -> do
       let (lvar,np) = registerLetVar p name (getType expr')
       mkLet np args $ \p args -> f p ((LetBinding lvar expr') ::: args)
@@ -1184,6 +1195,9 @@ lispToReal (L.List [L.Symbol "/",v1,v2]) = do
   r1 <- lispToReal v1
   r2 <- lispToReal v2
   return $ r1 / r2
+lispToReal (L.List [L.Symbol "-",v]) = do
+  r <- lispToReal v
+  return $ -r
 lispToReal _ = Nothing
 
 lispToBitVec :: L.Lisp -> Maybe (Integer,Integer)

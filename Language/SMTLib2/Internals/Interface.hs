@@ -1,17 +1,19 @@
 module Language.SMTLib2.Internals.Interface
-       (Same(),IsSMTNumber(),AppList(),
+       (Same(),IsSMTNumber(),
         -- * Expressions
         pattern Var,
         -- ** Constants
         SMTType(),pattern ConstBool,pattern ConstInt,pattern ConstReal,pattern ConstBV,
         constant,asConstant,true,false,cbool,cint,creal,cbv,
         -- ** Functions
-        pattern Fun,
+        pattern Fun,fun,(<:>),nil,
         -- *** Equality
         pattern EqLst,pattern Eq,pattern (:==:),
         eq,(.==.),
         pattern DistinctLst,pattern Distinct,pattern (:/=:),
         distinct,(./=.),
+        -- *** Map
+        map',
         -- *** Comparison
         pattern Ord,pattern (:>=:),pattern (:>:),pattern (:<=:),pattern (:<:),
         ord,(.>=.),(.>.),(.<=.),(.<.),
@@ -37,6 +39,8 @@ module Language.SMTLib2.Internals.Interface
         -- *** Bitvectors
         pattern BVComp,pattern BVULE,pattern BVULT,pattern BVUGE,pattern BVUGT,pattern BVSLE,pattern BVSLT,pattern BVSGE,pattern BVSGT,bvcomp,bvule,bvult,bvuge,bvugt,bvsle,bvslt,bvsge,bvsgt,
         pattern BVBin,pattern BVAdd,pattern BVSub,pattern BVMul,pattern BVURem,pattern BVSRem,pattern BVUDiv,pattern BVSDiv,pattern BVSHL,pattern BVLSHR,pattern BVASHR,pattern BVXor,pattern BVAnd,pattern BVOr,bvbin,bvadd,bvsub,bvmul,bvurem,bvsrem,bvudiv,bvsdiv,bvshl,bvlshr,bvashr,bvxor,bvand,bvor,
+        pattern BVUn,pattern BVNot,pattern BVNeg,
+        bvun,bvnot,bvneg,
         pattern Concat,pattern Extract,concat',extract',
         -- *** Arrays
         pattern Select,pattern Store,pattern ConstArray,select,select1,store,store1,constArray,
@@ -48,13 +52,14 @@ import Language.SMTLib2.Internals.Type
 import Language.SMTLib2.Internals.Type.Nat
 import Language.SMTLib2.Internals.Type.List (List(..))
 import qualified Language.SMTLib2.Internals.Type.List as List
-import Language.SMTLib2.Internals.Expression hiding (Function(..),OrdOp(..),ArithOp(..),ArithOpInt(..),LogicOp(..),BVCompOp(..),BVBinOp(..),Const,Var,arith,plus,minus,mult,abs')
+import Language.SMTLib2.Internals.Expression hiding (Function(..),OrdOp(..),ArithOp(..),ArithOpInt(..),LogicOp(..),BVCompOp(..),BVBinOp(..),BVUnOp(..),Const,Var,arith,plus,minus,mult,abs')
 import qualified Language.SMTLib2.Internals.Expression as E
 import Language.SMTLib2.Internals.Embed
 
 import Data.Constraint
 import Data.Functor.Identity
 import Data.Ratio
+import Data.GADT.Compare
 
 -- Helper classes
 
@@ -124,7 +129,17 @@ instance HasMonad (e (tp::Type)) where
 instance HasMonad ((m :: * -> *) (e (tp::Type))) where
   type MatchMonad (m (e tp)) m' = m ~ m'
   type MonadResult (m (e tp)) = e tp
-  embedM x = x
+  embedM = id
+
+instance HasMonad (List e (tp::[Type])) where
+  type MatchMonad (List e tp) m = ()
+  type MonadResult (List e tp) = List e tp
+  embedM = return
+
+instance HasMonad (m (List e (tp::[Type]))) where
+  type MatchMonad (m (List e tp)) m' = m ~ m'
+  type MonadResult (m (List e tp)) = List e tp
+  embedM = id
 
 matchNumRepr :: NumRepr tp -> Dict (IsSMTNumber tp)
 matchNumRepr NumInt = Dict
@@ -311,6 +326,13 @@ pattern BVXor lhs rhs = BVBin E.BVXor lhs rhs
 pattern BVAnd lhs rhs = BVBin E.BVAnd lhs rhs
 pattern BVOr lhs rhs = BVBin E.BVOr lhs rhs
 
+MK_SIG((rtp ~ BitVecType bw),(GetType e),BVUn,E.BVUnOp SEP (e (BitVecType bw)),Expression v qv fun con field fv lv e rtp)
+pattern BVUn op x <- App (E.BVUn op _) (x ::: Nil) where
+  BVUn op x = App (E.BVUn op (getBW x)) (x ::: Nil)
+
+pattern BVNot x = BVUn E.BVNot x
+pattern BVNeg x = BVUn E.BVNeg x
+
 MK_SIG((rtp ~ val),(GetType e),Select,(e (ArrayType idx val)) SEP (List e idx),Expression v qv fun con field fv lv e rtp)
 pattern Select arr idx <- App (E.Select _ _) (arr ::: idx) where
   Select arr idx = case getType arr of
@@ -413,6 +435,26 @@ asConstant _ = Nothing
 MK_SIG((tp ~ rtp),(),Var,(v tp),Expression v qv fun con field fv lv e rtp)
 pattern Var x = E.Var x
 
+fun :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ List e args)
+    => EmFun m e '(args,res) -> a -> m (e res)
+fun fun args = do
+  args' <- embedM args
+  embed (App (E.Fun fun) args')
+{-# INLINEABLE fun #-}
+
+(<:>) :: (HasMonad a,MonadResult a ~ e tp,MatchMonad a m,Monad m)
+      => a -> m (List e tps) -> m (List e (tp ': tps))
+(<:>) x xs = do
+  x' <- embedM x
+  xs' <- xs
+  return (x' ::: xs')
+{-# INLINEABLE (<:>) #-}
+
+infixr 5 <:>
+
+nil :: Monad m => m (List e '[])
+nil = return Nil
+
 (.==.) :: (Embed m e,HasMonad a,HasMonad b,
            MatchMonad a m,MatchMonad b m,
            MonadResult a ~ e tp,MonadResult b ~ e tp)
@@ -435,6 +477,8 @@ pattern Var x = E.Var x
   embed $ App (E.Distinct tp (Succ (Succ Zero))) (lhs' ::: rhs' ::: Nil)
 {-# INLINEABLE (./=.) #-}
 
+infix 4 .==., ./=.
+
 eq :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e tp)
    => [a] -> m (e BoolType)
 eq [] = embed (E.Const (BoolValue True))
@@ -452,6 +496,18 @@ distinct xs = do
   tp <- embedTypeOf x
   allEqFromList xs' $ \n -> embed.(App (E.Distinct tp n))
 {-# INLINEABLE distinct #-}
+
+map' :: (Embed m e,HasMonad arg,MatchMonad arg m,MonadResult arg ~ List e (Lifted tps idx),
+         Unlift tps idx,GetType e,GetFunType (EmFun m e),GetFieldType (EmField m e),GetConType (EmConstr m e))
+     => E.Function (EmFun m e) (EmConstr m e) (EmField m e) '(tps,res)
+     -> arg
+     -> m (e (ArrayType idx res))
+map' f arg = do
+  arg' <- embedM arg
+  let (tps,res) = getFunType f
+      idx = unliftTypeWith (getTypes arg') tps
+  embed $ E.App (E.Map idx f) arg'
+{-# INLINEABLE map' #-}
 
 ord :: (Embed m e,IsSMTNumber tp,HasMonad a,HasMonad b,
         MatchMonad a m,MatchMonad b m,
@@ -475,6 +531,8 @@ ord op lhs rhs = do
 {-# INLINEABLE (.>.) #-}
 {-# INLINEABLE (.<=.) #-}
 {-# INLINEABLE (.<.) #-}
+
+infix 4 .>=.,.>.,.<=.,.<.
 
 arith :: (Embed m e,HasMonad a,MatchMonad a m,
           MonadResult a ~ e tp,IsSMTNumber tp)
@@ -512,6 +570,9 @@ mult = arith E.Mult
 {-# INLINEABLE (.+.) #-}
 {-# INLINEABLE (.-.) #-}
 {-# INLINEABLE (.*.) #-}
+
+infixl 6 .+.,.-.
+infixl 7 .*.
 
 neg :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e tp,IsSMTNumber tp)
     => a -> m (e tp)
@@ -599,6 +660,8 @@ mod' x y = do
 {-# INLINEABLE div' #-}
 {-# INLINEABLE mod' #-}
 
+infixl 7 `div'`, `rem'`, `mod'`
+
 (./.) :: (Embed m e,HasMonad a,HasMonad b,MatchMonad a m,MatchMonad b m,
           MonadResult a ~ e RealType,MonadResult b ~ e RealType)
       => a -> b -> m (e RealType)
@@ -607,6 +670,8 @@ mod' x y = do
   y' <- embedM y
   embed $ x' :/: y'
 {-# INLINEABLE (./.) #-}
+
+infixl 7 ./.
 
 instance Embed m e => Fractional (m (e RealType)) where
   (/) x y = do
@@ -655,6 +720,10 @@ implies xs = mapM embedM xs >>= embed.ImpliesLst
 {-# INLINEABLE (.&.) #-}
 {-# INLINEABLE (.|.) #-}
 {-# INLINEABLE (.=>.) #-}
+
+infixr 3 .&.
+infixr 2 .|.
+infixr 2 .=>.
 
 toReal :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e IntType)
        => a -> m (e RealType)
@@ -755,29 +824,34 @@ bvor = bvbin E.BVOr
 {-# INLINEABLE bvand #-}
 {-# INLINEABLE bvor #-}
 
-class AppList (lst::[Type]) where
-  type AppFun lst (e::Type -> *) (m :: * -> *) a
-  appList :: Monad m => (List e lst -> m a) -> AppFun lst e m a
+bvun :: forall m e a bw.
+        (Embed m e,HasMonad a,
+         MatchMonad a m,
+         MonadResult a ~ e (BitVecType bw))
+     => E.BVUnOp -> a -> m (e (BitVecType bw))
+bvun op x = do
+  (x' :: e (BitVecType bw)) <- embedM x
+  BitVecRepr bw <- embedTypeOf x'
+  embed $ App (E.BVUn op bw) (x' ::: Nil)
+{-# INLINEABLE bvun #-}
 
-instance AppList '[] where
-  type AppFun '[] e m a = m a
-  appList f = f Nil
+bvnot,bvneg :: (Embed m e,HasMonad a,
+                MatchMonad a m,
+                MonadResult a ~ e (BitVecType bw))
+            => a -> m (e (BitVecType bw))
+bvnot = bvun E.BVNot
+bvneg = bvun E.BVNeg
+{-# INLINEABLE bvnot #-}
+{-# INLINEABLE bvneg #-}
 
-instance AppList xs => AppList (x ': xs) where
-  type AppFun (x ': xs) e m a = m (e x) -> AppFun xs e m a
-  appList f x = appList (\xs -> do
-                            x' <- x
-                            f (x' ::: xs))
-
-select :: (Embed m e,AppList idx)
-       => m (e (ArrayType idx val)) -> AppFun idx e m (e val)
-select arr = appList (mkSelect arr)
-  where
-    mkSelect :: Embed m e => m (e (ArrayType idx val)) -> List e idx -> m (e val)
-    mkSelect arr idx = do
-      arr' <- arr
-      ArrayRepr idxTp elTp <- embedTypeOf arr'
-      embed (App (E.Select idxTp elTp) (arr' ::: idx))
+select :: (Embed m e,HasMonad arr,MatchMonad arr m,MonadResult arr ~ e (ArrayType idx el),
+           HasMonad i,MatchMonad i m,MonadResult i ~ List e idx)
+       => arr -> i -> m (e el)
+select arr idx = do
+  arr' <- embedM arr
+  idx' <- embedM idx
+  ArrayRepr idxTp elTp <- embedTypeOf arr'
+  embed (App (E.Select idxTp elTp) (arr' ::: idx'))
 {-# INLINEABLE select #-}
 
 select1 :: (Embed m e,HasMonad arr,HasMonad idx,
@@ -792,19 +866,16 @@ select1 arr idx = do
   embed $ App (E.Select (idxTp ::: Nil) elTp) (arr' ::: idx' ::: Nil)
 {-# INLINEABLE select1 #-}
 
-store :: (Embed m e,AppList idx)
-      => m (e (ArrayType idx val))
-      -> m (e val)
-      -> AppFun idx e m (e (ArrayType idx val))
-store arr nel = appList (mkStore arr nel)
-  where
-    mkStore :: Embed m e => m (e (ArrayType idx val)) -> m (e val) -> List e idx
-            -> m (e (ArrayType idx val))
-    mkStore arr nel idx = do
-      arr' <- arr
-      nel' <- nel
-      ArrayRepr idxTp elTp <- embedTypeOf arr'
-      embed (App (E.Store idxTp elTp) (arr' ::: nel' ::: idx))
+store :: (Embed m e,HasMonad arr,MatchMonad arr m,MonadResult arr ~ e (ArrayType idx el),
+          HasMonad i,MatchMonad i m,MonadResult i ~ List e idx,
+          HasMonad nel,MatchMonad nel m,MonadResult nel ~ e el)
+      => arr -> i -> nel -> m (e (ArrayType idx el))
+store arr idx nel = do
+  arr' <- embedM arr
+  idx' <- embedM idx
+  nel' <- embedM nel
+  ArrayRepr idxTp elTp <- embedTypeOf arr'
+  embed (App (E.Store idxTp elTp) (arr' ::: nel' ::: idx'))
 {-# INLINEABLE store #-}
 
 store1 :: (Embed m e,HasMonad arr,HasMonad idx,HasMonad el,

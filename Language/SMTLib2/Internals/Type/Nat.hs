@@ -74,6 +74,14 @@ nat n
     nat' 0 = [| Zero |]
     nat' n = [| Succ $(nat' (n-1)) |]
 
+natT :: (Num a,Ord a) => a -> TypeQ
+natT n
+  | n < 0 = error $ "natT: Can only use numbers >= 0."
+  | otherwise = natT' n
+  where
+    natT' 0 = [t| Z |]
+    natT' n = [t| S $(natT' (n-1)) |]
+
 instance Eq Nat where
   (==) Z Z = True
   (==) (S x) (S y) = x == y

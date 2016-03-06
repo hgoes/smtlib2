@@ -34,6 +34,10 @@ module Language.SMTLib2 (
   declare,declareVar,declareVarNamed,
   -- ** Defining variables
   define,defineVar,defineVarNamed,defConst,
+  -- ** Declaring functions
+  declareFun,declareFunNamed,
+  -- ** Defining functions
+  defineFun,defineFunNamed,
   -- ** Constants
   constant,ConcreteValue(..),
   -- ** Analyzation
@@ -70,6 +74,7 @@ module Language.SMTLib2 (
 import Language.SMTLib2.Internals.Type
 import Language.SMTLib2.Internals.Type.Nat
 import Language.SMTLib2.Internals.Type.List
+import qualified Language.SMTLib2.Internals.Type.List as List
 import Language.SMTLib2.Internals.Monad
 import Language.SMTLib2.Internals.Expression
 import Language.SMTLib2.Internals.Embed
@@ -158,6 +163,31 @@ defineVarNamed :: (B.Backend b) => String -> B.Expr b t -> SMT b (B.Expr b t)
 defineVarNamed name e = do
   re <- embedSMT $ B.defineVar (Just name) e
   embedSMT $ B.toBackend (Var re)
+
+declareFun :: B.Backend b => List Repr args -> Repr res -> SMT b (B.Fun b '(args,res))
+declareFun args res = embedSMT $ B.declareFun args res Nothing
+
+declareFunNamed :: B.Backend b => List Repr args -> Repr res -> String -> SMT b (B.Fun b '(args,res))
+declareFunNamed args res name = embedSMT $ B.declareFun args res (Just name)
+
+defineFun :: B.Backend b => List Repr args
+          -> (List (B.Expr b) args -> SMT b (B.Expr b res))
+          -> SMT b (B.Fun b '(args,res))
+defineFun tps f = do
+  args <- List.mapM (\tp -> embedSMT $ B.createFunArg tp Nothing) tps
+  args' <- List.mapM (embedSMT . B.toBackend . FVar) args
+  res <- f args'
+  embedSMT $ B.defineFun Nothing args res
+
+defineFunNamed :: B.Backend b => String
+               -> List Repr args
+               -> (List (B.Expr b) args -> SMT b (B.Expr b res))
+               -> SMT b (B.Fun b '(args,res))
+defineFunNamed name tps f = do
+  args <- List.mapM (\tp -> embedSMT $ B.createFunArg tp Nothing) tps
+  args' <- List.mapM (embedSMT . B.toBackend . FVar) args
+  res <- f args'
+  embedSMT $ B.defineFun (Just name) args res
 
 constant :: (B.Backend b) => ConcreteValue t -> SMT b (B.Expr b t)
 constant v = do

@@ -23,6 +23,20 @@ type family Lifted (tps :: [Type]) (idx :: [Type]) :: [Type] where
   Lifted '[] idx = '[]
   Lifted (tp ': tps) idx = (ArrayType idx tp) ': Lifted tps idx
 
+class Unlift (tps::[Type]) (idx::[Type]) where
+  unliftType :: List Repr (Lifted tps idx) -> (List Repr tps,List Repr idx)
+  unliftTypeWith :: List Repr (Lifted tps idx) -> List Repr tps -> List Repr idx
+
+instance Unlift '[tp] idx where
+  unliftType (ArrayRepr idx tp ::: Nil) = (tp ::: Nil,idx)
+  unliftTypeWith (ArrayRepr idx tp ::: Nil) (tp' ::: Nil) = idx
+
+instance Unlift (t2 ': ts) idx => Unlift (t1 ': t2 ': ts) idx where
+  unliftType (ArrayRepr idx tp ::: ts)
+    = let (tps,idx') = unliftType ts
+      in (tp ::: tps,idx)
+  unliftTypeWith (ArrayRepr idx tp ::: ts) (tp' ::: tps) = idx
+
 type family Fst (a :: (p,q)) :: p where
   Fst '(x,y) = x
 
@@ -502,5 +516,6 @@ asNumRepr IntRepr = Just NumInt
 asNumRepr RealRepr = Just NumReal
 asNumRepr _ = Nothing
 
---isOfType :: Typeable tp' => Repr tp -> p tp' -> Maybe (tp' :~: tp)
---isOfType BoolRepr (_::p tp') = eqT :: Maybe (tp' :~: BoolType)
+getTypes :: GetType e => List e tps -> List Repr tps
+getTypes Nil = Nil
+getTypes (x ::: xs) = getType x ::: getTypes xs
