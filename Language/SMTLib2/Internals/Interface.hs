@@ -1,5 +1,5 @@
 module Language.SMTLib2.Internals.Interface
-       (Same(),IsSMTNumber(),AppList(),
+       (Same(),IsSMTNumber(),AppList(),HasMonad(..),
         -- * Expressions
         pattern Var,
         -- ** Constants
