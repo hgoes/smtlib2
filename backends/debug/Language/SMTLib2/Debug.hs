@@ -106,6 +106,7 @@ outputLine b@(DebugBackend {}) isComment str = do
       when (debugUseColor b) $ liftIO $ hSetSGR (debugHandle b) [Reset,SetColor Foreground Dull Green]
       liftIO $ hPutStrLn (debugHandle b) str
   when (debugUseColor b) $ liftIO $ hSetSGR (debugHandle b) [Reset]
+  liftIO $ hFlush (debugHandle b)
   return $ b { debugLines = nline }
 
 outputResponse :: DebugBackend b -> String -> SMTMonad b ()
@@ -113,6 +114,7 @@ outputResponse b@(DebugBackend {}) str = do
   when (debugUseColor b) $ liftIO $ hSetSGR (debugHandle b) [Reset,SetColor Foreground Dull Blue]
   liftIO $ hPutStrLn (debugHandle b) str
   when (debugUseColor b) $ liftIO $ hSetSGR (debugHandle b) [Reset]
+  liftIO $ hFlush (debugHandle b)
 
 instance (Backend b) => Backend (DebugBackend b) where
   type SMTMonad (DebugBackend b) = SMTMonad b
