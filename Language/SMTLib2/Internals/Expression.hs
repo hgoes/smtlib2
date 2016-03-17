@@ -434,7 +434,9 @@ renderExprDefault :: (GetType qv,GShow v,GShow qv,GShow fun,GShow con,
                   => RenderMode
                   -> Expression v qv fun con field fv lv e tp
                   -> ShowS
-renderExprDefault m = renderExpr m gshows gshows gshows gshows gshows gshows gshows gshows
+renderExprDefault m
+  = renderExpr m (gshowsPrec 11) (gshowsPrec 11) (gshowsPrec 11) (gshowsPrec 11)
+  (gshowsPrec 11) (gshowsPrec 11) (gshowsPrec 11) (gshowsPrec 11)
 
 renderExpr :: (GetType qv) => RenderMode
            -> (forall tp. v tp -> ShowS)

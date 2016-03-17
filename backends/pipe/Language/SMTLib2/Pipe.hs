@@ -1306,8 +1306,11 @@ valueToLisp _ (RealValue n)
                     ,numToLisp $ numerator n
                     ,numToLisp $ denominator n]
 valueToLisp _ (BitVecValue n bw) = return $ L.List [L.Symbol "_"
-                                                   ,L.Symbol (T.pack $ "bv"++show n)
-                                                   ,L.Number $ L.I $ naturalToInteger bw]
+                                                   ,L.Symbol (T.pack $ "bv"++show rn)
+                                                   ,L.Number $ L.I bw']
+  where
+    bw' = naturalToInteger bw
+    rn = n `mod` 2^bw'
 valueToLisp f (ConstrValue con args) = do
   con' <- f con
   args' <- List.toList (valueToLisp f) args

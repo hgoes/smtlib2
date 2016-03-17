@@ -355,7 +355,7 @@ instance GShow con => Show (Value con tp) where
   showsPrec p (IntValue i) = showsPrec p i
   showsPrec p (RealValue i) = showsPrec p i
   showsPrec p (BitVecValue v n)
-    | bw `mod` 4 == 0 = let str = showHex v ""
+    | bw `mod` 4 == 0 = let str = showHex rv ""
                             exp_len = bw `div` 4
                             len = genericLength str
                         in showString "#x" .
@@ -364,14 +364,14 @@ instance GShow con => Show (Value con tp) where
     | otherwise = let str = showIntAtBase 2 (\x -> case x of
                                               0 -> '0'
                                               1 -> '1'
-                                            ) v ""
+                                            ) rv ""
                       len = genericLength str
                   in showString "#b" .
                      showString (genericReplicate (bw-len) '0') .
                      showString str
-
     where
       bw = naturalToInteger n
+      rv = v `mod` 2^bw
   showsPrec p (ConstrValue con args) = showParen (p>10) $
                                        showString "ConstrValue " .
                                        gshowsPrec 11 con.
@@ -386,7 +386,7 @@ instance Show (ConcreteValue t) where
   showsPrec p (IntValueC i) = showsPrec p i
   showsPrec p (RealValueC i) = showsPrec p i
   showsPrec p (BitVecValueC v n)
-    | bw `mod` 4 == 0 = let str = showHex v ""
+    | bw `mod` 4 == 0 = let str = showHex rv ""
                             exp_len = bw `div` 4
                             len = genericLength str
                         in showString "#x" .
@@ -395,13 +395,14 @@ instance Show (ConcreteValue t) where
     | otherwise = let str = showIntAtBase 2 (\x -> case x of
                                               0 -> '0'
                                               1 -> '1'
-                                            ) v ""
+                                            ) rv ""
                       len = genericLength str
                   in showString "#b" .
                      showString (genericReplicate (bw-len) '0') .
                      showString str
     where
       bw = naturalToInteger n
+      rv = v `mod` 2^bw
   showsPrec p (ConstrValueC val) = showsPrec p val
 
 instance GShow ConcreteValue where
