@@ -145,24 +145,16 @@ defConst e = do
   embedSMT $ B.toBackend (Var v)
 
 declareVar :: B.Backend b => Repr t -> SMT b (B.Expr b t)
-declareVar tp = do
-  v <- embedSMT $ B.declareVar tp Nothing
-  embedSMT $ B.toBackend (Var v)
+declareVar tp = declareVar' tp >>= embedSMT . B.toBackend . Var
 
 declareVarNamed :: B.Backend b => Repr t -> String -> SMT b (B.Expr b t)
-declareVarNamed tp name = do
-  v <- embedSMT $ B.declareVar tp (Just name)
-  embedSMT $ B.toBackend (Var v)
+declareVarNamed tp name = declareVarNamed' tp name >>= embedSMT . B.toBackend . Var
 
 defineVar :: (B.Backend b) => B.Expr b t -> SMT b (B.Expr b t)
-defineVar e = do
-  re <- embedSMT $ B.defineVar Nothing e
-  embedSMT $ B.toBackend (Var re)
+defineVar e = defineVar' e >>= embedSMT . B.toBackend . Var
 
 defineVarNamed :: (B.Backend b) => String -> B.Expr b t -> SMT b (B.Expr b t)
-defineVarNamed name e = do
-  re <- embedSMT $ B.defineVar (Just name) e
-  embedSMT $ B.toBackend (Var re)
+defineVarNamed name e = defineVarNamed' name e >>= embedSMT . B.toBackend . Var
 
 declareFun :: B.Backend b => List Repr args -> Repr res -> SMT b (B.Fun b '(args,res))
 declareFun args res = embedSMT $ B.declareFun args res Nothing

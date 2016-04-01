@@ -203,3 +203,15 @@ mkAbstr (ConstrValueC v) = do
     \con args -> do
       rargs <- List.mapM mkAbstr args
       return $ ConstrValue (bconRepr con) rargs
+
+defineVar' :: (B.Backend b) => B.Expr b t -> SMT b (B.Var b t)
+defineVar' e = embedSMT $ B.defineVar Nothing e
+
+defineVarNamed' :: (B.Backend b) => String -> B.Expr b t -> SMT b (B.Var b t)
+defineVarNamed' name e = embedSMT $ B.defineVar (Just name) e
+
+declareVar' :: B.Backend b => Repr t -> SMT b (B.Var b t)
+declareVar' tp = embedSMT $ B.declareVar tp Nothing
+
+declareVarNamed' :: B.Backend b => Repr t -> String -> SMT b (B.Var b t)
+declareVarNamed' tp name = embedSMT $ B.declareVar tp (Just name)
