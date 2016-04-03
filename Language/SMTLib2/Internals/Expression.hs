@@ -115,18 +115,46 @@ data LetBinding (v :: Type -> *) (e :: Type -> *) (t :: Type)
 data Quantifier = Forall | Exists deriving (Typeable,Eq,Ord,Show)
 
 data Expression (v :: Type -> *) (qv :: Type -> *) (fun :: ([Type],Type) -> *) (con :: ([Type],*) -> *) (field :: (*,Type) -> *) (fv :: Type -> *) (lv :: Type -> *) (e :: Type -> *) (res :: Type) where
+#if __GLASGOW_HASKELL__>=712
+  -- | Free variable.
+#endif
   Var :: v res -> Expression v qv fun con field fv lv e res
+#if __GLASGOW_HASKELL__>=712
+  -- | Quantified variable, i.e. a variable that's bound by a forall/exists quantor.
+#endif
   QVar :: qv res -> Expression v qv fun con field fv lv e res
+#if __GLASGOW_HASKELL__>=712
+  -- | A function argument variable. Only used in function bodies.
+#endif
   FVar :: fv res -> Expression v qv fun con field fv lv e res
+#if __GLASGOW_HASKELL__>=712
+  -- | A variable bound by a let binding.
+#endif
   LVar :: lv res -> Expression v qv fun con field fv lv e res
+#if __GLASGOW_HASKELL__>=712
+  -- | Function application
+#endif
   App :: Function fun con field '(arg,res)
       -> List e arg
       -> Expression v qv fun con field fv lv e res
+#if __GLASGOW_HASKELL__>=712
+  -- | Constant
+#endif
   Const :: Value con a -> Expression v qv fun con field fv lv e a
+#if __GLASGOW_HASKELL__>=712
+  -- | AsArray converts a function into an array by using the function
+  --   arguments as array indices and the return type as array element.
+#endif
   AsArray :: Function fun con field '(arg,res)
           -> Expression v qv fun con field fv lv e (ArrayType arg res)
+#if __GLASGOW_HASKELL__>=712
+  -- | Bind variables using a forall or exists quantor.
+#endif
   Quantification :: Quantifier -> List qv arg -> e BoolType
                  -> Expression v qv fun con field fv lv e BoolType
+#if __GLASGOW_HASKELL__>=712
+  -- | Bind variables to expressions.
+#endif
   Let :: List (LetBinding lv e) arg
       -> e res
       -> Expression v qv fun con field fv lv e res

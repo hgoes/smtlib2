@@ -11,6 +11,8 @@ import Data.List (genericLength,genericReplicate)
 import Data.GADT.Compare
 import Data.GADT.Show
 
+-- | Describes the kind of all SMT types.
+--   It is only used in promoted form, for a concrete representation see 'Repr'.
 data Type = BoolType
           | IntType
           | RealType
@@ -87,6 +89,8 @@ data ConcreteValue (a :: Type) where
 
 data AnyValue (con :: ([Type],*) -> *) = forall (t :: Type). AnyValue (Value con t)
 
+-- | A concrete representation of an SMT type.
+--   For aesthetic reasons, it's recommended to use the functions 'bool', 'int', 'real', 'bitvec' or 'array'.
 data Repr (t :: Type) where
   BoolRepr :: Repr BoolType
   IntRepr :: Repr IntType
@@ -126,6 +130,8 @@ class GetConType con where
 class GetFieldType field where
   getFieldType :: IsDatatype dt => field '(dt,tp) -> (Datatype '(DatatypeSig dt,dt),Repr tp)
 
+-- | A representation of the SMT Bool type.
+--   Holds the values 'Language.SMTLib2.Internals.Interface.true' or 'Language.SMTLib2.Internals.Interface.false'.
 bool :: Repr BoolType
 bool = BoolRepr
 
@@ -141,6 +147,7 @@ bitvec = BitVecRepr
 array :: List Repr idx -> Repr el -> Repr (ArrayType idx el)
 array = ArrayRepr
 
+-- | Get a concrete representation for a type.
 reifyType :: Type -> (forall tp. Repr tp -> a) -> a
 reifyType BoolType f = f BoolRepr
 reifyType IntType f = f IntRepr

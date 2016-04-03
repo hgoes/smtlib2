@@ -5,7 +5,7 @@ import Language.SMTLib2.Internals.Monad
 import Language.SMTLib2.Internals.Embed
 import Language.SMTLib2.Internals.Proof
 import Language.SMTLib2
-import Language.SMTLib2.Internals.Expression
+import qualified Language.SMTLib2.Internals.Expression as E
 
 import Data.GADT.Compare
 import Data.GADT.Show
@@ -22,19 +22,19 @@ verifyZ3Proof pr = do
     Right _ -> return ()
     Left err -> error $ "Error in proof: "++err
 
-verifyZ3Rule :: (Extract i e,GEq e,Monad m,GShow e)
+verifyZ3Rule :: (GetType e,Extract i e,GEq e,Monad m,GShow e)
              => i -> String -> [ProofResult e] -> ProofResult e -> ExceptT String m ()
 verifyZ3Rule _ "asserted" [] q = return ()
 verifyZ3Rule i "mp" [p,impl] q = case p of
   ProofExpr p' -> case q of
     ProofExpr q' -> case impl of
-      ProofExpr (extract i -> Just (App (Logic Implies (Succ (Succ Zero))) (rp ::: rq ::: Nil)))
+      ProofExpr (extract i -> Just (Implies (rp ::: rq ::: Nil)))
         -> case geq p' rp of
         Just Refl -> case geq q' rq of
           Just Refl -> return ()
           Nothing -> throwError "right hand side of implication doesn't match result"
         Nothing -> throwError "left hand side of implication doesn't match argument"
-      ProofExpr (extract i -> Just (App (Eq _ (Succ (Succ Zero))) (rp ::: rq ::: Nil)))
+      ProofExpr (extract i -> Just (Eq (rp ::: rq ::: Nil)))
         -> case geq p' rp of
         Just Refl -> case geq q' rq of
           Just Refl -> return ()
@@ -47,7 +47,7 @@ verifyZ3Rule i "reflexivity" [] res = case res of
   EquivSat e1 e2 -> case geq e1 e2 of
     Just Refl -> return ()
     Nothing -> throwError "arguments must be the same"
-  ProofExpr (extract i -> Just (App (Eq _ (Succ (Succ Zero))) (x ::: y ::: Nil)))
+  ProofExpr (extract i -> Just (Eq (x ::: y ::: Nil)))
     -> case geq x y of
     Just Refl -> return ()
     Nothing -> throwError "arguments must be the same"
@@ -60,17 +60,17 @@ verifyZ3Rule i "symmetry" [rel] res = case rel of
         Nothing -> throwError "argument mismatch"
       Nothing -> throwError "argument mismatch"
     _ -> throwError "argument mismatch"
-  ProofExpr (extract i -> Just (App r1 (x ::: y ::: Nil)))
+  ProofExpr (extract i -> Just (E.App r1 (x ::: y ::: Nil)))
     -> case res of
-    ProofExpr (extract i -> Just (App r2 (ry ::: rx ::: Nil)))
+    ProofExpr (extract i -> Just (E.App r2 (ry ::: rx ::: Nil)))
       -> case geq x rx of
       Just Refl -> case geq y ry of
         Just Refl -> case geq r1 r2 of
           Just Refl -> case r1 of
-            Eq _ _ -> return ()
-            Logic And _ -> return ()
-            Logic Or _ -> return ()
-            Logic XOr _ -> return ()
+            E.Eq _ _ -> return ()
+            E.Logic E.And _ -> return ()
+            E.Logic E.Or _ -> return ()
+            E.Logic E.XOr _ -> return ()
             _ -> throwError "relation is not symmetric"
           _ -> throwError "result must be the same relation"
         _ -> throwError "argument mismatch"
