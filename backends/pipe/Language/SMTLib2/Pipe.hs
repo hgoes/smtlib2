@@ -1229,7 +1229,7 @@ exprToLisp = runIdentity . exprToLispWith
              (\(UntypedVar v _) -> return $ L.Symbol v)
              (\(PipeExpr v) -> return $ exprToLisp v)
 
-exprToLispWith :: (Monad m,GetType v,GetType qv,GetFunType fun,GetConType con,GetFieldType field,GetType fv,GetType lv,GetType e)
+exprToLispWith :: (Monad m,GetType qv,GetFunType fun,GetConType con,GetFieldType field)
                => (forall (t' :: Type).
                    v t' -> m L.Lisp)                         -- ^ variables
                -> (forall (t' :: Type).
