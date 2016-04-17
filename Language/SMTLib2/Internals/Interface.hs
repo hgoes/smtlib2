@@ -6,7 +6,7 @@ module Language.SMTLib2.Internals.Interface
         SMTType(),pattern ConstBool,pattern ConstInt,pattern ConstReal,pattern ConstBV,
         constant,asConstant,true,false,cbool,cint,creal,cbv,
         -- ** Functions
-        pattern Fun,fun,(<:>),nil,
+        pattern Fun,fun,
         -- *** Equality
         pattern EqLst,pattern Eq,pattern (:==:),
         eq,(.==.),
@@ -45,7 +45,9 @@ module Language.SMTLib2.Internals.Interface
         -- *** Arrays
         pattern Select,pattern Store,pattern ConstArray,select,select1,store,store1,constArray,
         -- *** Misc
-        pattern Divisible,divisible
+        pattern Divisible,divisible,
+        -- * Lists
+        (.:.),nil
        ) where
 
 import Language.SMTLib2.Internals.Type
@@ -442,15 +444,15 @@ fun fun args = do
   embed (App (E.Fun fun) args')
 {-# INLINEABLE fun #-}
 
-(<:>) :: (HasMonad a,MonadResult a ~ e tp,MatchMonad a m,Monad m)
+(.:.) :: (HasMonad a,MonadResult a ~ e tp,MatchMonad a m,Monad m)
       => a -> m (List e tps) -> m (List e (tp ': tps))
-(<:>) x xs = do
+(.:.) x xs = do
   x' <- embedM x
   xs' <- xs
   return (x' ::: xs')
-{-# INLINEABLE (<:>) #-}
+{-# INLINEABLE (.:.) #-}
 
-infixr 5 <:>
+infixr 5 .:.
 
 nil :: Monad m => m (List e '[])
 nil = return Nil

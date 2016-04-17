@@ -49,7 +49,7 @@ module Language.SMTLib2 (
   -- *** Bitvector constants
   pattern ConstBV,cbv,
   -- ** Functions
-  pattern Fun,fun,(<:>),nil,
+  pattern Fun,fun,
   -- *** Equality
   pattern EqLst,pattern Eq,pattern (:==:),
   eq,(.==.),
@@ -115,7 +115,7 @@ module Language.SMTLib2 (
   -- ** Numbers
   Nat(..),Natural(..),nat,reifyNat,
   -- ** Lists
-  List(..),list,reifyList,list1,list2,list3,
+  List(..),list,reifyList,list1,list2,list3,(.:.),nil,
   -- * Misc
   comment,simplify
   ) where
