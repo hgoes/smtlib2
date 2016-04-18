@@ -33,7 +33,7 @@ module Language.SMTLib2 (
   -- ** Declaring variables
   declareVar,declareVarNamed,
   -- ** Defining variables
-  defineVar,defineVarNamed,defConst,
+  defineVar,defineVarNamed,
   -- ** Declaring functions
   declareFun,declareFunNamed,
   -- ** Defining functions
@@ -225,11 +225,6 @@ stack act = do
   pop
   return res
 
-defConst :: B.Backend b => B.Expr b t -> SMT b (B.Expr b t)
-defConst e = do
-  v <- embedSMT $ B.defineVar Nothing e
-  embedSMT $ B.toBackend (E.Var v)
-
 -- | Create a fresh variable of a given type.
 --
 --   Example:
@@ -351,13 +346,13 @@ defineFunNamed name tps f = do
 -- | Create a constant, for example an integer:
 --
 --   Example:
---
+-- 
 --   @
 -- do
---    x <- declareVar int
---    -- x is greater than 5
---    assert $ x .>. constant (IntValueC 5)
---  @
+--   x <- declareVar int
+--   -- x is greater than 5
+--   assert $ x .>. constant (IntValueC 5)
+--   @
 constant :: (B.Backend b) => ConcreteValue t -> SMT b (B.Expr b t)
 constant v = do
   val <- valueFromConcrete
@@ -389,6 +384,28 @@ constant v = do
 getUnsatCore :: B.Backend b => SMT b [B.ClauseId b]
 getUnsatCore = embedSMT B.getUnsatCore
 
+-- | After a `checkSat` query that returned 'Unsat', we can ask the SMT solver
+--   for a formula /C/ such that /A/ (the A-partition) and /(not C)/ is
+--   unsatisfiable while /B/ (the B-partition) and /C/ is unsatisfiable.
+--   Furthermore, /C/ will only mention variables that occur in both /A/ and
+--   /B/.
+--
+--   Example:
+--
+--   @
+-- do
+--   setOption (ProduceInterpolants True)
+--   p <- declareVar bool
+--   q <- declareVar bool
+--   r <- declareVar bool
+--   t <- declareVar bool
+--   assertPartition ((not' (p .&. q)) .=>. ((not' r) .&. q)) PartitionA
+--   assertPartition t PartitionB
+--   assertPartition r PartitionB
+--   assertPartition (not' p) PartitionB
+--   checkSat
+--   getInterpolant
+--   @
 getInterpolant :: B.Backend b => SMT b (B.Expr b BoolType)
 getInterpolant = embedSMT B.interpolate
 
@@ -406,6 +423,9 @@ getExpr e = do
   st <- get
   return $ B.fromBackend (backend st) e
 
+-- | Inject a comment into the SMT command stream.
+--   Only useful when using the /smtlib2-debug/ package to inspect the command
+--   stream.
 comment :: (B.Backend b) => String -> SMT b ()
 comment msg = embedSMT $ B.comment msg
 

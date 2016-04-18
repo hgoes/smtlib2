@@ -70,6 +70,7 @@ data Field a (t :: Type) = Field { fieldName :: String
                                  , fieldType :: Repr t
                                  , fieldGet :: a -> ConcreteValue t }
 
+-- | Values that can be used as constants in expressions.
 data Value (con :: ([Type],*) -> *) (a :: Type) where
   BoolValue :: Bool -> Value con BoolType
   IntValue :: Integer -> Value con IntType
@@ -80,6 +81,8 @@ data Value (con :: ([Type],*) -> *) (a :: Type) where
               -> List (Value con) arg
               -> Value con (DataType t)
 
+-- | Concrete values are like `Value`s, except that the SMT-specific
+--   constructors are replaced with the actual datatypes.
 data ConcreteValue (a :: Type) where
   BoolValueC :: Bool -> ConcreteValue BoolType
   IntValueC :: Integer -> ConcreteValue IntType
