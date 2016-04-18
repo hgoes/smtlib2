@@ -29,11 +29,11 @@ module Language.SMTLib2 (
   -- * Getting informations about the solver
   getInfo,B.SMTInfo(..),
   -- * Expressions
-  B.Expr(),expr,
+  B.Expr(),
   -- ** Declaring variables
-  declare,declareVar,declareVarNamed,
+  declareVar,declareVarNamed,
   -- ** Defining variables
-  define,defineVar,defineVarNamed,defConst,
+  defineVar,defineVarNamed,defConst,
   -- ** Declaring functions
   declareFun,declareFunNamed,
   -- ** Defining functions
@@ -129,12 +129,25 @@ import qualified Language.SMTLib2.Internals.Expression as E
 import Language.SMTLib2.Internals.Embed
 import qualified Language.SMTLib2.Internals.Proof as P
 import qualified Language.SMTLib2.Internals.Backend as B
-import Language.SMTLib2.Internals.TH hiding (and',or',xor')
 import Language.SMTLib2.Internals.Interface hiding (constant)
 import Language.SMTLib2.Strategy
 
 import Control.Monad.State.Strict
 
+-- | Set an option controlling the behaviour of the SMT solver.
+--   Many solvers require you to specify what kind of queries you'll ask them
+--   after the model is specified.
+--
+--   For example, when using interpolation, it is often required to do the
+--   following:
+--
+--   @
+-- do
+--   setOption (ProduceInterpolants True)
+--   -- Declare model
+--   interp <- getInterpolant
+--   -- Use interpolant
+--   @
 setOption :: B.Backend b => B.SMTOption -> SMT b ()
 setOption opt = embedSMT $ B.setOption opt
 
@@ -143,45 +156,68 @@ getInfo info = embedSMT $ B.getInfo info
 
 -- | Asserts a boolean expression to be true.
 --   A successive successful `checkSat` calls mean that the generated model is consistent with the assertion.
-assert :: B.Backend b => B.Expr b BoolType -> SMT b ()
-assert = embedSMT . B.assert
+assert :: (B.Backend b,HasMonad expr,MatchMonad expr (SMT b),MonadResult expr ~ B.Expr b BoolType)
+       => expr -> SMT b ()
+assert e = embedM e >>= embedSMT . B.assert
 
--- | Works like `assert`, but additionally allows the user to find the unsatisfiable core of a set of assignments using `getUnsatCore`.
-assertId :: B.Backend b => B.Expr b BoolType -> SMT b (B.ClauseId b)
-assertId = embedSMT . B.assertId
+-- | Works like `assert`, but additionally allows the user to find the
+--   unsatisfiable core of a set of assignments using `getUnsatCore`.
+assertId :: (B.Backend b,HasMonad expr,MatchMonad expr (SMT b),MonadResult expr ~ B.Expr b BoolType)
+         => expr -> SMT b (B.ClauseId b)
+assertId e = embedM e >>= embedSMT . B.assertId
 
-assertPartition :: B.Backend b => B.Expr b BoolType -> B.Partition -> SMT b ()
-assertPartition e p = embedSMT (B.assertPartition e p)
+-- | When using interpolation, use this function to specify if an assertion is
+--   part of the A-partition or the B-partition of the original formula.
+assertPartition :: (B.Backend b,HasMonad expr,MatchMonad expr (SMT b),
+                    MonadResult expr ~ B.Expr b BoolType)
+                => expr -> B.Partition -> SMT b ()
+assertPartition e p = do
+  e' <- embedM e
+  embedSMT (B.assertPartition e' p)
 
 -- | Checks if the set of asserted expressions is satisfiable.
 checkSat :: B.Backend b => SMT b B.CheckSatResult
 checkSat = embedSMT (B.checkSat Nothing noLimits)
 
+-- | The same as `checkSat`, but can specify an optional `Tactic` that is used
+--   to give hints to the SMT solver on how to solve the problem and limits on
+--   the amount of time and memory that the solver is allowed to use.
+--   If the limits are exhausted, the solver must return `Unknown`.
 checkSatWith :: B.Backend b => Maybe Tactic -> B.CheckSatLimits -> SMT b B.CheckSatResult
 checkSatWith tactic limits = embedSMT (B.checkSat tactic limits)
 
 noLimits :: B.CheckSatLimits
 noLimits = B.CheckSatLimits Nothing Nothing
 
-getValue :: (B.Backend b) => B.Expr b t -> SMT b (ConcreteValue t)
-getValue e = do
-  res <- embedSMT $ B.getValue e
-  mkConcr res
+-- | After a successful `checkSat` query, query the concrete value for a given
+--   expression that the SMT solver assigned to it.
+getValue :: (B.Backend b,HasMonad expr,MatchMonad expr (SMT b),
+             MonadResult expr ~ B.Expr b t)
+         => expr -> SMT b (ConcreteValue t)
+getValue e = embedM e >>= embedSMT . B.getValue >>= mkConcr
 
 -- | After a successful `checkSat` query, return a satisfying assignment that makes all asserted formula true.
 getModel :: B.Backend b => SMT b (B.Model b)
 getModel = embedSMT B.getModel
 
 -- | Evaluate an expression in a model, yielding a concrete value.
-modelEvaluate :: B.Backend b => B.Model b -> B.Expr b t -> SMT b (ConcreteValue t)
-modelEvaluate mdl e = do
-  res <- embedSMT $ B.modelEvaluate mdl e
-  mkConcr res
+modelEvaluate :: (B.Backend b,HasMonad expr,MatchMonad expr (SMT b),
+                  MonadResult expr ~ B.Expr b t)
+              => B.Model b -> expr -> SMT b (ConcreteValue t)
+modelEvaluate mdl e = embedM e >>= embedSMT . B.modelEvaluate mdl >>= mkConcr
 
-push,pop :: B.Backend b => SMT b ()
+-- | Push a fresh frame on the solver stack.
+--   All variable definitions and assertions made in a frame are forgotten when
+--   it is `pop`'ed.
+push :: B.Backend b => SMT b ()
 push = embedSMT B.push
+
+-- | Pop a frame from the solver stack.
+pop :: B.Backend b => SMT b ()
 pop = embedSMT B.pop
 
+-- | Perform an SMT action by executing it in a fresh stack frame. The frame is
+--   `pop`'ed once the action has been performed.
 stack :: B.Backend b => SMT b a -> SMT b a
 stack act = do
   push
@@ -194,43 +230,134 @@ defConst e = do
   v <- embedSMT $ B.defineVar Nothing e
   embedSMT $ B.toBackend (E.Var v)
 
-declareVar :: B.Backend b => Repr t -> SMT b (B.Expr b t)
+-- | Create a fresh variable of a given type.
+--
+--   Example:
+--
+--   @
+-- do
+--   -- Declare a single integer variable
+--   v <- declareVar int
+--   -- Use variable v
+--   @
+declareVar :: B.Backend b => Repr t -- ^ The type of the variable
+           -> SMT b (B.Expr b t)
 declareVar tp = declareVar' tp >>= embedSMT . B.toBackend . E.Var
 
-declareVarNamed :: B.Backend b => Repr t -> String -> SMT b (B.Expr b t)
+-- | Create a fresh variable (like `declareVar`), but also give it a name.
+--   Note that the name is a hint to the SMT solver that it may ignore.
+--
+--   Example:
+--
+--   @
+-- do
+--   -- Declare a single boolean variable called "x"
+--   x <- declareVarNamed bool "x"
+--   -- Use variable x
+--   @
+declareVarNamed :: B.Backend b => Repr t -- ^ Type of the variable
+                -> String                -- ^ Name of the variable
+                -> SMT b (B.Expr b t)
 declareVarNamed tp name = declareVarNamed' tp name >>= embedSMT . B.toBackend . E.Var
 
-defineVar :: (B.Backend b) => B.Expr b t -> SMT b (B.Expr b t)
-defineVar e = defineVar' e >>= embedSMT . B.toBackend . E.Var
+-- | Create a new variable that is defined by a given expression.
+--
+--   Example:
+--
+--   @
+-- do
+--   -- x is an integer
+--   x <- declareVar int
+--   -- y is defined to be x+5
+--   y <- defineVar $ x .+. cint 5
+--   -- Use x and y
+--   @
+defineVar :: (B.Backend b,HasMonad expr,MatchMonad expr (SMT b),
+              MonadResult expr ~ B.Expr b t)
+          => expr -- ^ The definition expression
+          -> SMT b (B.Expr b t)
+defineVar e = embedM e >>= defineVar' >>= embedSMT . B.toBackend . E.Var
 
-defineVarNamed :: (B.Backend b) => String -> B.Expr b t -> SMT b (B.Expr b t)
-defineVarNamed name e = defineVarNamed' name e >>= embedSMT . B.toBackend . E.Var
+-- | Create a new named variable that is defined by a given expression (like
+--   `defineVar`).
+defineVarNamed :: (B.Backend b,HasMonad expr,MatchMonad expr (SMT b),
+                   MonadResult expr ~ B.Expr b t)
+               => String -- ^ Name of the resulting variable
+               -> expr   -- ^ Definition of the variable
+               -> SMT b (B.Expr b t)
+defineVarNamed name e = embedM e >>= defineVarNamed' name >>= embedSMT . B.toBackend . E.Var
 
-declareFun :: B.Backend b => List Repr args -> Repr res -> SMT b (B.Fun b '(args,res))
+-- | Create a new uninterpreted function by specifying its signature.
+--
+--   Example:
+--   @
+-- do
+--   -- Create a function from (int,bool) to int
+--   f <- declareFun (int ::: bool ::: Nil) int
+--   -- Use f
+--   @
+declareFun :: B.Backend b
+           => List Repr args -- ^ Function argument types
+           -> Repr res       -- ^ Function result type
+           -> SMT b (B.Fun b '(args,res))
 declareFun args res = embedSMT $ B.declareFun args res Nothing
 
-declareFunNamed :: B.Backend b => List Repr args -> Repr res -> String -> SMT b (B.Fun b '(args,res))
+-- | Create a new uninterpreted function by specifying its signature (like
+--   `declareFun`), but also give it a name.
+declareFunNamed :: B.Backend b => List Repr args -- ^ Function argument types
+                -> Repr res                      -- ^ Function result type
+                -> String                        -- ^ Function name
+                -> SMT b (B.Fun b '(args,res))
 declareFunNamed args res name = embedSMT $ B.declareFun args res (Just name)
 
-defineFun :: B.Backend b => List Repr args
-          -> (List (B.Expr b) args -> SMT b (B.Expr b res))
+-- | Create a new interpreted function with a definition.
+--   Given a signature and a (haskell) function from the arguments to the
+--   resulting expression.
+--
+--   Example:
+--
+--   @
+-- do
+--   -- Create a function from (int,int) to int that calculates the maximum
+--   max <- defineFun (int ::: int ::: Nil) $
+--            \(x ::: y ::: Nil) -> ite (x .>. y) x y
+--   -- Use max function
+--   @
+defineFun :: (B.Backend b,HasMonad def,MatchMonad def (SMT b),
+              MonadResult def ~ B.Expr b res)
+          => List Repr args                -- ^ Function argument types
+          -> (List (B.Expr b) args -> def) -- ^ Function definition
           -> SMT b (B.Fun b '(args,res))
 defineFun tps f = do
   args <- List.mapM (\tp -> embedSMT $ B.createFunArg tp Nothing) tps
   args' <- List.mapM (embedSMT . B.toBackend . E.FVar) args
-  res <- f args'
+  res <- embedM $ f args'
   embedSMT $ B.defineFun Nothing args res
 
-defineFunNamed :: B.Backend b => String
+-- | Create a new interpreted function with a definition (like `defineFun`) but
+--   also give it a name.
+defineFunNamed :: (B.Backend b,HasMonad def,MatchMonad def (SMT b),
+                   MonadResult def ~ B.Expr b res)
+               => String
                -> List Repr args
-               -> (List (B.Expr b) args -> SMT b (B.Expr b res))
+               -> (List (B.Expr b) args -> def)
                -> SMT b (B.Fun b '(args,res))
 defineFunNamed name tps f = do
   args <- List.mapM (\tp -> embedSMT $ B.createFunArg tp Nothing) tps
   args' <- List.mapM (embedSMT . B.toBackend . E.FVar) args
-  res <- f args'
+  res <- embedM $ f args'
   embedSMT $ B.defineFun (Just name) args res
 
+-- | Create a constant, for example an integer:
+--
+--   Example:
+--
+--   @
+-- do
+--    x <- declareVar int
+--    -- x is greater than 5
+--    assert $ x .>. constant (IntValueC 5)
+--  @
 constant :: (B.Backend b) => ConcreteValue t -> SMT b (B.Expr b t)
 constant v = do
   val <- valueFromConcrete
@@ -242,6 +369,23 @@ constant v = do
          ) v
   embedSMT $ B.toBackend (E.Const val)
 
+-- | After a `checkSat` query that returned 'Unsat', we can ask the SMT solver
+--   for a subset of the assertions that are enough to make the specified
+--   problem unsatisfiable. These assertions have to be created using
+--   `assertId`.
+--
+--   Example:
+--
+-- > do
+-- >   setOption (ProduceUnsatCores True)
+-- >   x <- declareVar int
+-- >   y <- declareVar int
+-- >   cl1 <- assertId $ x .>. y
+-- >   cl2 <- assertId $ x .>. cint 5
+-- >   cl3 <- assertId $ y .>. x
+-- >   checkSat
+-- >   core <- getUnsatCore
+-- >   -- core will contain cl1 and cl3
 getUnsatCore :: B.Backend b => SMT b [B.ClauseId b]
 getUnsatCore = embedSMT B.getUnsatCore
 
