@@ -1,6 +1,5 @@
-#language: haskell
-#ghc: "7.10"
 sudo: false
+language: c
 
 cache:
   directories:
