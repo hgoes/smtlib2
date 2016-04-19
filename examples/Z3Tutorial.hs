@@ -35,8 +35,8 @@ example1 :: Backend b => SMT b (Maybe Integer)
 example1 = do
   a <- declareVar int
   f <- declareFun (int ::: bool ::: Nil) int
-  a .>. cint 10 >>= assert
-  fun f (a <:> true <:> nil) .<. cint 100 >>= assert
+  assert $ a .>. cint 10
+  assert $ fun f (a .:. true .:. nil) .<. cint 100
   res <- checkSat
   case res of
     Sat -> do
@@ -101,7 +101,7 @@ example5 = do
   b <- declareVar int
   a .>. cint 20 >>= assert
   b .>. a >>= assert
-  (fun f (cint 10 <:> nil)) .==. cint 1 >>= assert
+  assert $ (fun f (cint 10 .:. nil)) .==. cint 1
   r <- checkSat
   case r of
     Sat -> do
@@ -162,7 +162,7 @@ example13 = do
                   \(x ::: Nil) -> cbv 0 bw .==. bvand x (bvsub x (cbv 1 bw))
   a <- declareVarNamed (bitvec bw) "a"
   args <- sequence [ a .==. cbv n bw | n <- [0,1,2,4,8]]
-  not' (fun isPowerOfTwo (a <:> nil) .==. or' args) >>= assert
+  assert $ not' (fun isPowerOfTwo (a .:. nil) .==. or' args)
   checkSat
 
 example14 :: Backend b => SMT b (Maybe (List ConcreteValue [BitVecType $(natT 8),BitVecType $(natT 8)]))
@@ -193,7 +193,7 @@ example16 = do
   checkSat
   IntValueC va <- getValue a
   IntValueC vi <- getValue i
-  [expr| (not (= a 1)) |] >>= assert
+  assert $ not' (a .==. cint 1)
   r <- checkSat
   return (va,vi,r)
 
@@ -205,22 +205,22 @@ example17 = do
   c <- declareVar (array (int ::: Nil) bool)
   x <- declareVar int
   r1 <- stack $ do
-    not' (map' (SMT.Logic SMT.And $(nat 2)) (a <:> b <:> nil) .==.
+    not' (map' (SMT.Logic SMT.And $(nat 2)) (a .:. b .:. nil) .==.
           (map' SMT.Not ((map' (SMT.Logic SMT.Or $(nat 2))
-                          ((map' SMT.Not (b <:> nil)) <:>
-                           (map' SMT.Not (a <:> nil)) <:> nil)) <:> nil))) >>= assert
-    map' SMT.Not (a <:> nil) .==. b >>= assert
+                          ((map' SMT.Not (b .:. nil)) .:.
+                           (map' SMT.Not (a .:. nil)) .:. nil)) .:. nil))) >>= assert
+    map' SMT.Not (a .:. nil) .==. b >>= assert
     checkSat
   r2 <- stack $ do
-    select (map' (SMT.Logic SMT.And $(nat 2)) (a <:> b <:> nil)) (x <:> nil) .&.
-      not' (select a (x <:> nil)) >>= assert
+    select (map' (SMT.Logic SMT.And $(nat 2)) (a .:. b .:. nil)) (x .:. nil) .&.
+      not' (select a (x .:. nil)) >>= assert
     checkSat
   (r3,r4) <- stack $ do
-    select (map' (SMT.Logic SMT.Or $(nat 2)) (a <:> b <:> nil)) (x <:> nil) .&.
-      not' (select a (x <:> nil)) >>= assert
+    select (map' (SMT.Logic SMT.Or $(nat 2)) (a .:. b .:. nil)) (x .:. nil) .&.
+      not' (select a (x .:. nil)) >>= assert
     p <- checkSat
     mdl <- getModel
-    not' (select b (x <:> nil)) >>= assert
+    not' (select b (x .:. nil)) >>= assert
     q <- checkSat
     return (mdl,q)
   return (r1,r2,show r3,r4)
@@ -230,14 +230,14 @@ example18 :: Backend b => SMT b String
 example18 = do
   let a = array (int ::: int ::: Nil) int
   bagUnion <- defineFunNamed "bag-union" (a ::: a ::: Nil) $
-    \(x ::: y ::: Nil) -> map' (SMT.Arith Type.NumInt SMT.Plus $(nat 2)) (x <:> y <:> nil)
+    \(x ::: y ::: Nil) -> map' (SMT.Arith Type.NumInt SMT.Plus $(nat 2)) (x .:. y .:. nil)
   s1 <- declareVarNamed a "s1"
   s2 <- declareVarNamed a "s2"
   s3 <- declareVarNamed a "s3"
-  s3 .==. fun bagUnion (s1 <:> s2 <:> nil) >>= assert
-  select s1 (cint 0 <:> cint 0 <:> nil) .==. cint 5 >>= assert
-  select s2 (cint 0 <:> cint 0 <:> nil) .==. cint 3 >>= assert
-  select s2 (cint 1 <:> cint 2 <:> nil) .==. cint 4 >>= assert
+  s3 .==. fun bagUnion (s1 .:. s2 .:. nil) >>= assert
+  select s1 (cint 0 .:. cint 0 .:. nil) .==. cint 5 >>= assert
+  select s2 (cint 0 .:. cint 0 .:. nil) .==. cint 3 >>= assert
+  select s2 (cint 1 .:. cint 2 .:. nil) .==. cint 4 >>= assert
   checkSat
   fmap show getModel
   
