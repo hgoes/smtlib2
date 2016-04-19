@@ -114,7 +114,7 @@ module Language.SMTLib2 (
   registerDatatype,
   Type(..),Repr(..),GetType(..),reifyType,bool,int,real,bitvec,array,
   -- ** Numbers
-  Nat(..),Natural(..),nat,reifyNat,
+  Nat(..),Natural(..),nat,natT,reifyNat,
   -- ** Lists
   List(..),list,reifyList,list1,list2,list3,(.:.),nil,
   -- * Misc

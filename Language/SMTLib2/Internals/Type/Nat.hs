@@ -6,8 +6,10 @@ import Data.GADT.Compare
 import Data.GADT.Show
 import Language.Haskell.TH
 
+-- | Natural numbers on the type-level.
 data Nat = Z | S Nat deriving Typeable
 
+-- | A concrete representation of the 'Nat' type.
 data Natural (n::Nat) where
   Zero :: Natural Z
   Succ :: Natural n -> Natural (S n)
@@ -62,10 +64,22 @@ instance Eq (Natural n) where
 instance Ord (Natural n) where
   compare _ _ = EQ
 
+-- | Get a static representation for a dynamically created natural number.
+--
+--   Example:
+--
+-- >>> reifyNat (S (S Z)) show
+-- "2"
 reifyNat :: Nat -> (forall n. Natural n -> r) -> r
 reifyNat Z f = f Zero
 reifyNat (S n) f = reifyNat n $ \n' -> f (Succ n')
 
+-- | A template haskell function to create nicer looking numbers.
+--
+--   Example:
+--
+-- >>> :t $(nat 5)
+-- $(nat 5) :: Natural ('S ('S ('S ('S ('S 'Z)))))
 nat :: (Num a,Ord a) => a -> ExpQ
 nat n
   | n < 0 = error $ "nat: Can only use numbers >= 0."
@@ -74,6 +88,12 @@ nat n
     nat' 0 = [| Zero |]
     nat' n = [| Succ $(nat' (n-1)) |]
 
+-- | A template haskell function to create nicer looking number types.
+--
+--   Example:
+--
+-- >>> $(nat 5) :: Natural $(natT 5)
+-- 5
 natT :: (Num a,Ord a) => a -> TypeQ
 natT n
   | n < 0 = error $ "natT: Can only use numbers >= 0."
