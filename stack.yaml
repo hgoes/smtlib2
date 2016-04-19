@@ -1,0 +1,11 @@
+resolver: lts-5.13
+packages:
+  - .
+  - backends/pipe
+  - backends/debug
+  - backends/timing
+  - extras/emulated-modulus
+  - extras/quickcheck
+extra-deps:
+  - atto-lisp-0.2.2.2
+  - cabal-test-quickcheck-0.1.6

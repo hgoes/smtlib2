@@ -1,7 +1,11 @@
 #language: haskell
 #ghc: "7.10"
-language: c
 sudo: false
+
+cache:
+  directories:
+  - $HOME/.stack
+
 matrix:
   include:
     - env: CABALVER=1.22 GHCVER=7.10.3 HAPPYVER=1.19.5
@@ -15,12 +19,12 @@ matrix:
             - happy-1.19.5
 
 before_install:
+  # Download and unpack the stack executable
+  - mkdir -p ~/.local/bin
+  - export PATH=$HOME/.local/bin:$PATH
+  - travis_retry curl -L https://www.stackage.org/stack/linux-x86_64 | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
+  # Export GHC paths
   - export PATH=/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:/opt/happy/$HAPPYVER/bin:$PATH
 
-install:
-  - cabal --version
-  - echo "$(ghc --version) [$(ghc --print-project-git-commit-id 2> /dev/null || echo '?')]"
-  - travis_retry cabal update
-  - cabal install --only-dependencies --enable-tests --enable-benchmarks . ./extras/quickcheck ./backends/pipe ./backends/debug ./backends/timing
 script:
-  - cabal install --enable-tests -v2 . ./extras/quickcheck ./backends/pipe ./backends/debug ./backends/timing
+  - stack --no-terminal --skip-ghc-check test
