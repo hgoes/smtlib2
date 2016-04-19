@@ -20,6 +20,7 @@ Library
   GHC-Options: -fwarn-unused-imports
   Exposed-Modules:
     Language.SMTLib2.Pipe
+    Language.SMTLib2.Pipe.Internals
 
 Test-Suite test-smtlib2-pipe
   Type: detailed-0.9

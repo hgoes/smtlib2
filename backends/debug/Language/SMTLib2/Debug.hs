@@ -10,7 +10,7 @@ import Language.SMTLib2.Internals.Type hiding (Constr,Field)
 import Language.SMTLib2.Internals.Type.List (List(..))
 import qualified Language.SMTLib2.Internals.Type.List as List
 import Language.SMTLib2.Internals.Expression (Expression(Let),LetBinding(..))
-import Language.SMTLib2.Pipe
+import Language.SMTLib2.Pipe.Internals
 
 import qualified Data.AttoLisp as L
 import System.Console.ANSI
