@@ -15,6 +15,7 @@ import Text.Show
 
 type SMTAction b r = b -> SMTMonad b (r,b)
 
+-- | A backend represents a specific type of SMT solver.
 class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
        GetType (Expr b),GetType (Var b),GetType (QVar b),
        GetFunType (Fun b),
@@ -42,12 +43,19 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
        Ord (ClauseId b),Show (ClauseId b),
        Ord (Proof b),Show (Proof b),
        Show (Model b)) => Backend b where
+  -- | The monad in which the backend executes queries.
   type SMTMonad b :: * -> *
+  -- | The internal type of expressions.
   type Expr b :: Type -> *
+  -- | The internal type of variables.
   type Var b :: Type -> *
+  -- | The internal type of quantified variables.
   type QVar b :: Type -> *
+  -- | The internal type of user-defined functions.
   type Fun b :: ([Type],Type) -> *
+  -- | The internal type of user-defined datatype constructors.
   type Constr b :: ([Type],*) -> *
+  -- | The internal type of user-defined datatype field accessors.
   type Field b :: (*,Type) -> *
   type FunArg b :: Type -> *
   type LVar b :: Type -> *
@@ -140,6 +148,7 @@ data SMTOption
      | SMTLogic String
      deriving (Show,Eq,Ord)
 
+-- | Solver information query type. Used with `Language.SMTLib2.getInfo`.
 data SMTInfo i where
   SMTSolverName :: SMTInfo String
   SMTSolverVersion :: SMTInfo String

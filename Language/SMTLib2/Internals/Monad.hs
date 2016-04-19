@@ -16,7 +16,9 @@ import Control.Exception (onException)
 import Control.Applicative
 #endif
 
-newtype Backend b => SMT b a = SMT { runSMT :: StateT (SMTState b) (SMTMonad b) a }
+-- | The SMT monad is used to perform communication with the SMT solver. The
+--   type of solver is given by the /b/ parameter.
+newtype SMT b a = SMT { runSMT :: StateT (SMTState b) (SMTMonad b) a }
 
 data SMTState b = SMTState { backend :: !b
                            , datatypes :: !(DatatypeInfo (B.Constr b) (B.Field b)) }
@@ -40,8 +42,9 @@ instance Backend b => MonadState (SMTState b) (SMT b) where
 instance (Backend b,MonadIO (SMTMonad b)) => MonadIO (SMT b) where
   liftIO act = SMT (liftIO act)
 
-withBackend :: Backend b => SMTMonad b b
-            -> SMT b a
+-- | Execute an SMT action on a given backend.
+withBackend :: Backend b => SMTMonad b b -- ^ An action that creates a fresh backend.
+            -> SMT b a                   -- ^ The SMT action to perform.
             -> SMTMonad b a
 withBackend constr act = do
   b <- constr
@@ -49,6 +52,8 @@ withBackend constr act = do
   exit (backend nb)
   return res
 
+-- | Like `withBackend` but specialized to the 'IO' monad so exeptions can be
+--   handled by gracefully exiting the solver.
 withBackendExitCleanly :: (Backend b,SMTMonad b ~ IO) => IO b -> SMT b a -> IO a
 withBackendExitCleanly constr (SMT act) = do
   b <- constr

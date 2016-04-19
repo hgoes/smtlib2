@@ -1,27 +1,28 @@
 {- | Example usage: This program tries to find two numbers greater than zero which sum up to 5.
 
      @
+{-# LANGUAGE GADTs #-}
 import Language.SMTLib2
-import Language.SMTLib2.Solver
+import Language.SMTLib2.Pipe
 
-program :: SMT (Integer,Integer)
+program :: Backend b => SMT b (Integer,Integer)
 program = do
-  x <- var
-  y <- var
-  assert $ (plus [x,y]) .==. (constant 5)
-  assert $ x .>. (constant 0)
-  assert $ y .>. (constant 0)
+  x <- declareVar int
+  y <- declareVar int
+  assert $ x .+. y .==. cint 5
+  assert $ x .>. cint 0
+  assert $ y .>. cint 0
   checkSat
-  vx <- getValue x
-  vy <- getValue y
+  IntValueC vx <- getValue x
+  IntValueC vy <- getValue y
   return (vx,vy)
 
-main = withZ3 program >>= print
+main = withBackend (createPipe "z3" ["-smt2","-in"]) program >>= print
      @ -}
 module Language.SMTLib2 (
   -- * SMT Monad
   SMT(),
-  B.Backend(),
+  B.Backend(SMTMonad),
   withBackend,
   withBackendExitCleanly,
   -- * Setting options
@@ -49,7 +50,7 @@ module Language.SMTLib2 (
   -- *** Bitvector constants
   pattern ConstBV,cbv,
   -- ** Functions
-  pattern Fun,fun,
+  pattern Fun,app,fun,
   -- *** Equality
   pattern EqLst,pattern Eq,pattern (:==:),
   eq,(.==.),
@@ -90,7 +91,7 @@ module Language.SMTLib2 (
   -- *** Misc
   pattern Divisible,divisible,
   -- ** Analyzation
-  AnalyzedExpr(),analyze,getExpr,
+  getExpr,
   -- * Satisfiability
   assert,checkSat,checkSatWith,
   B.CheckSatResult(..),
@@ -126,7 +127,6 @@ import Language.SMTLib2.Internals.Type.List hiding (nil)
 import qualified Language.SMTLib2.Internals.Type.List as List
 import Language.SMTLib2.Internals.Monad
 import qualified Language.SMTLib2.Internals.Expression as E
-import Language.SMTLib2.Internals.Embed
 import qualified Language.SMTLib2.Internals.Proof as P
 import qualified Language.SMTLib2.Internals.Backend as B
 import Language.SMTLib2.Internals.Interface hiding (constant)
@@ -151,6 +151,14 @@ import Control.Monad.State.Strict
 setOption :: B.Backend b => B.SMTOption -> SMT b ()
 setOption opt = embedSMT $ B.setOption opt
 
+-- | Query the solver for information about itself.
+--
+--   Example:
+--
+-- > isZ3Solver :: Backend b => SMT b Bool
+-- > isZ3Solver = do
+-- >   name <- getInfo SMTSolverName
+-- >   return $ name=="Z3"
 getInfo :: B.Backend b => B.SMTInfo i -> SMT b i
 getInfo info = embedSMT $ B.getInfo info
 
@@ -285,6 +293,7 @@ defineVarNamed name e = embedM e >>= defineVarNamed' name >>= embedSMT . B.toBac
 -- | Create a new uninterpreted function by specifying its signature.
 --
 --   Example:
+--
 --   @
 -- do
 --   -- Create a function from (int,bool) to int
@@ -409,6 +418,19 @@ getUnsatCore = embedSMT B.getUnsatCore
 getInterpolant :: B.Backend b => SMT b (B.Expr b BoolType)
 getInterpolant = embedSMT B.interpolate
 
+-- | Convert an expression in the SMT solver-specific format into a more
+--   general, pattern-matchable format.
+--
+--   Example:
+--
+--   @
+-- isGE :: Backend b => Expr b tp -> SMT b Bool
+-- isGE e = do
+--   e' <- getExpr e
+--   case e' of
+--     _ :>=: _ -> return True
+--     _ -> return False
+--   @
 getExpr :: (B.Backend b) => B.Expr b tp
         -> SMT b (E.Expression
                   (B.Var b)
@@ -433,9 +455,13 @@ comment msg = embedSMT $ B.comment msg
 simplify :: B.Backend b => B.Expr b tp -> SMT b (B.Expr b tp)
 simplify e = embedSMT $ B.simplify e
 
+-- | After a `checkSat` query that returned 'Unsat', we can ask the solver for
+--   a proof that the given instance is indeed unsatisfiable.
 getProof :: B.Backend b => SMT b (B.Proof b)
 getProof = embedSMT B.getProof
 
+-- | Convert the solver-specific proof encoding into a more general,
+--   pattern-matchable format.
 analyzeProof :: B.Backend b => B.Proof b -> SMT b (P.Proof String (B.Expr b) (B.Proof b))
 analyzeProof pr = do
   st <- get

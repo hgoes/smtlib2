@@ -6,7 +6,7 @@ module Language.SMTLib2.Internals.Interface
         SMTType(),pattern ConstBool,pattern ConstInt,pattern ConstReal,pattern ConstBV,
         constant,asConstant,true,false,cbool,cint,creal,cbv,
         -- ** Functions
-        pattern Fun,fun,
+        pattern Fun,app,fun,
         -- *** Equality
         pattern EqLst,pattern Eq,pattern (:==:),
         eq,(.==.),
@@ -61,7 +61,6 @@ import Language.SMTLib2.Internals.Embed
 import Data.Constraint
 import Data.Functor.Identity
 import Data.Ratio
-import Data.GADT.Compare
 
 -- Helper classes
 
@@ -444,6 +443,17 @@ fun fun args = do
   embed (App (E.Fun fun) args')
 {-# INLINEABLE fun #-}
 
+-- | Create an expression by applying a function to a list of arguments.
+app :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ List e args)
+    => E.Function (EmFun m e) (EmConstr m e) (EmField m e) '(args,res)
+    -> a
+    -> m (e res)
+app f args = do
+  args' <- embedM args
+  embed (App f args')
+{-# INLINEABLE app #-}
+
+-- | Create a typed list by appending an element to the front of another list.
 (.:.) :: (HasMonad a,MonadResult a ~ e tp,MatchMonad a m,Monad m)
       => a -> m (List e tps) -> m (List e (tp ': tps))
 (.:.) x xs = do
@@ -454,9 +464,19 @@ fun fun args = do
 
 infixr 5 .:.
 
+-- | Create an empty list.
 nil :: Monad m => m (List e '[])
 nil = return Nil
 
+-- | Create a boolean expression that encodes that two expressions have the same
+--   value.
+--
+--   Example:
+--
+--   @
+-- is5 :: 'Language.SMTLib2.Backend' b => 'Language.SMTLib2.Expr' b 'IntType' -> 'Language.SMTLib2.SMT' b 'BoolType'
+-- is5 e = e `.==.` `cint` 5
+--   @
 (.==.) :: (Embed m e,HasMonad a,HasMonad b,
            MatchMonad a m,MatchMonad b m,
            MonadResult a ~ e tp,MonadResult b ~ e tp)
