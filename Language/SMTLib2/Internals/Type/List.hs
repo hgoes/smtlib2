@@ -61,6 +61,15 @@ type family Map (lst :: [a]) (f :: a -> b) :: [b] where
   Map '[] f = '[]
   Map (x ': xs) f = (f x) ': (Map xs f)
 
+-- | Strongly typed heterogenous lists.
+--
+--   A /List e '[tp1,tp2,tp3]/ contains 3 elements of types /e tp1/, /e tp2/ and
+--   /e tp3/ respectively.
+--
+--   As an example, the following list contains two types:
+--
+-- >>> int ::: bool ::: Nil :: List Repr '[IntType,BoolType]
+-- [IntRepr,BoolRepr]
 data List e (tp :: [a]) where
   Nil :: List e '[]
   (:::) :: e x -> List e xs -> List e (x ': xs)
@@ -83,6 +92,12 @@ list2 x1 x2 = x1 ::: x2 ::: Nil
 list3 :: e t1 -> e t2 -> e t3 -> List e '[t1,t2,t3]
 list3 x1 x2 x3 = x1 ::: x2 ::: x3 ::: Nil
 
+-- | Get a static representation of a dynamic list.
+--
+--   For example, to convert a list of strings into a list of types:
+--
+-- >>> reifyList (\name f -> case name of { "int" -> f int ; "bool" -> f bool }) ["bool","int"] show
+-- "[BoolRepr,IntRepr]"
 reifyList :: (forall r'. a -> (forall tp. e tp -> r') -> r')
           -> [a] -> (forall tp. List e tp -> r)
           -> r

@@ -116,7 +116,7 @@ module Language.SMTLib2 (
   -- ** Numbers
   Nat(..),Natural(..),nat,natT,reifyNat,
   -- ** Lists
-  List(..),list,reifyList,list1,list2,list3,(.:.),nil,
+  List(..),reifyList,(.:.),nil,
   -- * Misc
   comment,simplify
   ) where
