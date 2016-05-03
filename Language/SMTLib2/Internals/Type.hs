@@ -134,19 +134,34 @@ class GetFieldType field where
   getFieldType :: IsDatatype dt => field '(dt,tp) -> (Datatype '(DatatypeSig dt,dt),Repr tp)
 
 -- | A representation of the SMT Bool type.
---   Holds the values 'Language.SMTLib2.Internals.Interface.true' or 'Language.SMTLib2.Internals.Interface.false'.
+--   Holds the values 'Language.SMTLib2.true' or 'Language.SMTLib2.Internals.false'.
+--   Constants can be created using 'Language.SMTLib2.cbool'.
 bool :: Repr BoolType
 bool = BoolRepr
 
+-- | A representation of the SMT Int type.
+--   Holds the unbounded positive and negative integers.
+--   Constants can be created using 'Language.SMTLib2.cint'.
 int :: Repr IntType
 int = IntRepr
 
+-- | A representation of the SMT Real type.
+--   Holds positive and negative reals x/y where x and y are integers.
+--   Constants can be created using 'Language.SMTLib2.creal'.
 real :: Repr RealType
 real = RealRepr
 
-bitvec :: Natural bw -> Repr (BitVecType bw)
+-- | A representation of the SMT BitVec type.
+--   Holds bitvectors (a vector of booleans) of a certain bitwidth.
+--   Constants can be created using 'Language.SMTLib2.cbv'.
+bitvec :: Natural bw -- ^ The width of the bitvector
+       -> Repr (BitVecType bw)
 bitvec = BitVecRepr
 
+-- | A representation of the SMT Array type.
+--   Has a list of index types and an element type.
+--   Stores one value of the element type for each combination of the index types.
+--   Constants can be created using 'Language.SMTLib2.constArray'.
 array :: List Repr idx -> Repr el -> Repr (ArrayType idx el)
 array = ArrayRepr
 

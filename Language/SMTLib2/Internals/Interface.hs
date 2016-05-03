@@ -417,16 +417,30 @@ pattern Const v <- E.Const (fromSMTConst -> v) where
 constant :: (Embed m e,SMTType tp) => tp -> m (e (SMTReprType tp))
 constant x = embed $ E.Const (toSMTConst x)
 
+-- | Create a boolean constant expression.
 cbool :: Embed m e => Bool -> m (e BoolType)
 cbool x = embed $ E.Const (BoolValue x)
 
+-- | Create an integer constant expression.
 cint :: Embed m e => Integer -> m (e IntType)
 cint x = embed $ E.Const (IntValue x)
 
+-- | Create a real constant expression.
+--
+--   Example:
+--
+--   @
+-- import Data.Ratio
+--
+-- x = creal (5 % 4)
+--   @
 creal :: Embed m e => Rational -> m (e RealType)
 creal x = embed $ E.Const (RealValue x)
 
-cbv :: Embed m e => Integer -> Natural bw -> m (e (BitVecType bw))
+-- | Create a constant bitvector expression.
+cbv :: Embed m e => Integer -- ^ The value (negative values will be stored in two's-complement.
+    -> Natural bw -- ^ The bitwidth of the bitvector value.
+    -> m (e (BitVecType bw))
 cbv i bw = embed $ E.Const (BitVecValue i bw)
 
 asConstant :: SMTType tp => Expression v qv fun con field fv lv e (SMTReprType tp) -> Maybe tp
