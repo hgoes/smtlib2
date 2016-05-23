@@ -1,17 +1,15 @@
 {-# LANGUAGE QuasiQuotes,DataKinds,GADTs,RankNTypes,ScopedTypeVariables,KindSignatures,TemplateHaskell, FlexibleInstances,TypeFamilies #-}
 module Main where
 
-import Language.SMTLib2 hiding (nil)
+import Language.SMTLib2
 import Language.SMTLib2.Pipe (createPipe)
 import Language.SMTLib2.Debug (debugBackend)
-import Language.SMTLib2.Internals.Type.List (List(..))
 import qualified Language.SMTLib2.Internals.Type.List as List
-import Language.SMTLib2.Internals.Type.Nat
-import Language.SMTLib2.Internals.Interface
 import qualified Language.SMTLib2.Internals.Expression as SMT
 import qualified Language.SMTLib2.Internals.Type as Type
 
 import Data.Proxy
+import Data.GADT.Compare
 
 runExample :: (forall b. Backend b => SMT b r) -> IO r
 runExample ex = withBackend (fmap debugBackend $ createPipe "z3" ["-in","-smt2"]) ex
@@ -19,7 +17,7 @@ runExample ex = withBackend (fmap debugBackend $ createPipe "z3" ["-in","-smt2"]
 query :: (Backend b)
       => List Repr tps
       -> (List (Expr b) tps -> SMT b ())
-      -> SMT b (Maybe (List ConcreteValue tps))
+      -> SMT b (Maybe (List Value tps))
 query tps f = do
   args <- List.mapM declareVar tps
   f args
@@ -40,7 +38,7 @@ example1 = do
   res <- checkSat
   case res of
     Sat -> do
-      IntValueC v <- getValue a
+      IntValue v <- getValue a
       return $ Just v
     _ -> return Nothing
 
@@ -56,9 +54,9 @@ example2 = do
     r1 <- checkSat
     case r1 of
       Sat -> do
-        IntValueC vx <- getValue x
-        IntValueC vy <- getValue y
-        IntValueC vz <- getValue z
+        IntValue vx <- getValue x
+        IntValue vy <- getValue y
+        IntValue vz <- getValue z
         return (Just (vx,vy,vz))
       _ -> return Nothing
   q2 <- stack $ do
@@ -67,9 +65,9 @@ example2 = do
     r2 <- checkSat
     case r2 of
       Sat -> do
-        IntValueC vx <- getValue x
-        IntValueC vy <- getValue y
-        IntValueC vz <- getValue z
+        IntValue vx <- getValue x
+        IntValue vy <- getValue y
+        IntValue vz <- getValue z
         return (Just (vx,vy,vz))
       _ -> return Nothing
   return (q1,q2)
@@ -105,12 +103,12 @@ example5 = do
   r <- checkSat
   case r of
     Sat -> do
-      IntValueC ra <- getValue a
-      IntValueC rb <- getValue b
+      IntValue ra <- getValue a
+      IntValue rb <- getValue b
       return $ Just (ra,rb)
     _ -> return Nothing
 
-example6 :: Backend b => SMT b (Maybe (List ConcreteValue '[IntType,IntType,IntType,RealType,RealType]))
+example6 :: Backend b => SMT b (Maybe (List Value '[IntType,IntType,IntType,RealType,RealType]))
 example6 = query (int ::: int ::: int ::: real ::: real ::: Nil)
            (\(a ::: b ::: c ::: d ::: e ::: Nil) -> do
                a .>. b .+. cint 2 >>= assert
@@ -118,26 +116,26 @@ example6 = query (int ::: int ::: int ::: real ::: real ::: Nil)
                c .+. b .<=. cint 1000 >>= assert
                d .>=. e >>= assert)
 
-example7 :: Backend b => SMT b (Maybe (List ConcreteValue [IntType,IntType,IntType,RealType,RealType]))
+example7 :: Backend b => SMT b (Maybe (List Value [IntType,IntType,IntType,RealType,RealType]))
 example7 = query (int ::: int ::: int ::: real ::: real ::: Nil)
            (\(a ::: b ::: c ::: d ::: e ::: Nil) -> do
                e .>. toReal (a .+. b) .+. creal 2 >>= assert
                d .==. toReal c .+. creal 0.5 >>= assert
                a .>. b >>= assert)
 
-example8 :: Backend b => SMT b (Maybe (List ConcreteValue [RealType,RealType]))
+example8 :: Backend b => SMT b (Maybe (List Value [RealType,RealType]))
 example8 = query (real ::: real ::: Nil)
            (\(b ::: c ::: Nil) -> do
                mult [b,b,b] .+. (b .*. c) .==. creal 3.0 >>= assert)
 
-example9 :: Backend b => SMT b (Maybe (List ConcreteValue [RealType,RealType,RealType]))
+example9 :: Backend b => SMT b (Maybe (List Value [RealType,RealType,RealType]))
 example9 = query (real ::: real ::: real ::: Nil)
            (\(x ::: y ::: z ::: Nil) -> do
                x .*. x .==. x .*. creal 2 >>= assert
                x .*. y .==. x >>= assert
                (y .-. creal 1) .*. z .==. creal 1 >>= assert)
 
-example10 :: Backend b => SMT b (Maybe (List ConcreteValue [IntType,IntType,IntType,IntType,IntType,IntType,IntType,RealType,RealType]))
+example10 :: Backend b => SMT b (Maybe (List Value [IntType,IntType,IntType,IntType,IntType,IntType,IntType,RealType,RealType]))
 example10 = query (int ::: int ::: int ::: int ::: int ::: int ::: int ::: real ::: real ::: Nil)
             (\(a ::: r1 ::: r2 ::: r3 ::: r4 ::: r5 ::: r6 ::: b ::: c ::: Nil) -> do
                 a .==. cint 10 >>= assert
@@ -150,7 +148,7 @@ example10 = query (int ::: int ::: int ::: int ::: int ::: int ::: int ::: real 
                 b .>=. c ./. creal 3 >>= assert
                 c .>=. creal 20 >>= assert)
 
-example11 :: Backend b => SMT b (Maybe (List ConcreteValue '[BitVecType $(natT 64),BitVecType $(natT 64)]))
+example11 :: Backend b => SMT b (Maybe (List Value '[BitVecType $(natT 64),BitVecType $(natT 64)]))
 example11 = query (bitvec $(nat 64) ::: bitvec $(nat 64) ::: Nil)
             (\(x ::: y ::: Nil) -> do
                 not' (bvand (bvnot x) (bvnot y) .==. bvnot (bvor x y)) >>= assert)
@@ -165,7 +163,7 @@ example13 = do
   assert $ not' (fun isPowerOfTwo (a .:. nil) .==. or' args)
   checkSat
 
-example14 :: Backend b => SMT b (Maybe (List ConcreteValue [BitVecType $(natT 8),BitVecType $(natT 8)]))
+example14 :: Backend b => SMT b (Maybe (List Value [BitVecType $(natT 8),BitVecType $(natT 8)]))
 example14 = query (bitvec $(nat 8) ::: bitvec $(nat 8) ::: Nil)
             $ \(a ::: b ::: Nil) -> do
   not' (bvule a b .==. bvsle a b) >>= assert
@@ -179,8 +177,8 @@ example15 = do
   store1 a1 x y .==. a1 >>= assert
   --not' (x .==. y) >>= assert
   checkSat
-  IntValueC vx <- getValue x
-  IntValueC vy <- getValue y
+  IntValue vx <- getValue x
+  IntValue vy <- getValue y
   return (vx,vy)
 
 example16 :: Backend b => SMT b (Integer,Integer,CheckSatResult)
@@ -191,8 +189,8 @@ example16 = do
   all1 .==. constArray (int ::: Nil) (cint 1) >>= assert
   a .==. select1 all1 i >>= assert
   checkSat
-  IntValueC va <- getValue a
-  IntValueC vi <- getValue i
+  IntValue va <- getValue a
+  IntValue vi <- getValue i
   assert $ not' (a .==. cint 1)
   r <- checkSat
   return (va,vi,r)
@@ -243,34 +241,58 @@ example18 = do
   
 -- Datatypes
 
-{-data Pair t1 t2 = MkPair { first :: t1
-                         , second :: t2 } deriving (Eq,Ord,Show)
+data Pair t1 t2 (e :: Type -> *) = MkPair { first :: e t1
+                                        , second :: e t2 } deriving (Eq,Ord,Show)
 
-pairDt = Type.Datatype { Type.datatypeName = "Pair"
-                       , Type.constructors = Type.ConsCon mkPair Type.NoCon
-                       }
-  where
-    mkPair = Type.Constr { Type.conName = "MkPair"
-                         , Type.conFields = Type.Field { Type.fieldName = "first"
-                                                       , Type.fieldType = int
-                                                       , Type.fieldGet = IntValueC . first }
-                                            :::
-                                            Type.Field { Type.fieldName = "second"
-                                                       , Type.fieldType = int
-                                                       , Type.fieldGet = IntValueC . second }
-                                            ::: Nil
-                         , Type.construct = \(IntValueC x ::: IntValueC y ::: Nil)
-                                            -> MkPair x y
-                         , Type.conTest = \_ -> True }
+instance Type.IsDatatype (Pair IntType IntType) where
+  type Signature (Pair IntType IntType) = '[ '[IntType,IntType]]
+  data Constr (Pair IntType IntType) sig where
+    ConMkPair :: Type.Constr (Pair IntType IntType) [IntType,IntType]
+  data Field (Pair IntType IntType) tp where
+    First :: Type.Field (Pair IntType IntType) IntType
+    Second :: Type.Field (Pair IntType IntType) IntType
+  datatypeName _ = "Pair"
+  constructors = ConMkPair ::: Nil
+  constrName ConMkPair = "MkPair"
+  constrTest _ _ = True
+  constrFields ConMkPair = First ::: Second ::: Nil
+  constrApply (Type.ConApp ConMkPair (one ::: two ::: Nil)) = MkPair one two
+  constrGet (MkPair one two) = Type.ConApp ConMkPair (one ::: two ::: Nil)
+  fieldName First = "first"
+  fieldName Second = "second"
+  fieldType First = int
+  fieldType Second = int
+  fieldGet e First = first e
+  fieldGet e Second = second e
 
-instance Type.IsDatatype (Pair Integer Integer) where
-  type DatatypeSig (Pair Integer Integer) = '[ '[IntType,IntType]]
-  type TypeCollectionSig (Pair Integer Integer) = '[ '( '[ '[IntType,IntType]],Pair Integer Integer)]
-  getDatatype _ = pairDt
-  getTypeCollection _ = Type.ConsDts pairDt Type.NoDts
-  getConstructor (MkPair x y) (Type.ConsCon mkPair Type.NoCon) f
-    = f mkPair (IntValueC x ::: IntValueC y ::: Nil)
-  
-example19 :: Backend b => SMT b (Pair Integer Integer,Pair Integer Integer)
+instance GEq (Type.Constr (Pair IntType IntType)) where
+  geq ConMkPair ConMkPair = Just Refl
+
+instance GCompare (Type.Constr (Pair IntType IntType)) where
+  gcompare ConMkPair ConMkPair = GEQ
+
+instance GEq (Type.Field (Pair IntType IntType)) where
+  geq First First = Just Refl
+  geq Second Second = Just Refl
+  geq _ _ = Nothing
+
+instance GCompare (Type.Field (Pair IntType IntType)) where
+  gcompare First First = GEQ
+  gcompare First _ = GLT
+  gcompare _ First = GGT
+  gcompare Second Second = GEQ
+
+example19 :: Backend b => SMT b (Pair IntType IntType Value,Pair IntType IntType Value,CheckSatResult)
 example19 = do
-  registerDatatype (Proxy::Proxy (Pair Integer Integer)) -}
+  let dt = Proxy::Proxy (Pair IntType IntType)
+  registerDatatype dt
+  p1 <- declareVar (DataRepr dt)
+  p2 <- declareVar (DataRepr dt)
+  assert $ p1 .==. p2
+  assert $ (p1 .#. Second) .>. cint 20
+  checkSat
+  DataValue v1 <- getValue p1
+  DataValue v2 <- getValue p2
+  assert $ not' $ (p1 .#. First) .==. (p2 .#. First)
+  r <- checkSat
+  return (v1,v2,r)

@@ -76,8 +76,6 @@ nextSymbol solv = do
 type Z3Expr = UntypedVar AST
 type Z3Var = UntypedVar AST
 type Z3Fun = UntypedFun FuncDecl
-type Z3Con = UntypedCon Constructor
-type Z3Field = UntypedField FuncDecl
 
 instance Show Z3.Model where
   showsPrec _ _ = showString "Z3Model"
@@ -88,8 +86,6 @@ instance Backend Z3Solver where
   type Var Z3Solver = Z3Var
   type QVar Z3Solver = Z3Var
   type Fun Z3Solver = Z3Fun
-  type Constr Z3Solver = Z3Con
-  type Field Z3Solver = Z3Field
   type FunArg Z3Solver = Z3Var
   type LVar Z3Solver = Z3Var
   type ClauseId Z3Solver = AST
@@ -194,7 +190,7 @@ instance Backend Z3Solver where
     ne <- Z3.simplify ctx e
     return (UntypedVar ne tp,solv1)
 
-fromZ3Value :: Context -> Z3Expr t -> IO (Value Z3Con t)
+fromZ3Value :: Context -> Z3Expr t -> IO (Value t)
 fromZ3Value ctx (UntypedVar e tp) = case tp of
   BoolRepr -> do
     v <- getBool ctx e
@@ -220,7 +216,7 @@ typeToZ3 ctx (ArrayRepr (idx ::: Nil) el) = do
   mkArraySort ctx idx' el'
 
 toZ3 :: Context
-     -> Expression Z3Var Z3Var Z3Fun Z3Con Z3Field Z3Var Z3Var (UntypedVar AST) t
+     -> Expression Z3Var Z3Var Z3Fun Z3Var Z3Var (UntypedVar AST) t
      -> IO AST
 toZ3 ctx (Var (UntypedVar var tp)) = return var
 toZ3 ctx (Const val) = toZ3Const ctx val
@@ -230,7 +226,7 @@ toZ3 ctx e = error $ "toZ3: "++show e
 
 fromZ3 :: Context
        -> Z3Var tp
-       -> IO (Expression Z3Var Z3Var Z3Fun Z3Con Z3Field Z3Var Z3Var (UntypedVar AST) tp)
+       -> IO (Expression Z3Var Z3Var Z3Fun Z3Var Z3Var (UntypedVar AST) tp)
 fromZ3 ctx v@(UntypedVar var tp) = do
   kind <- getAstKind ctx var
   case kind of
@@ -330,7 +326,7 @@ z3Sort ctx s f = do
 untypedVar :: Z3Expr t -> AST
 untypedVar (UntypedVar x _) = x
 
-toZ3App :: Context -> Function Z3Fun Z3Con Z3Field '(sig,tp)
+toZ3App :: Context -> Function Z3Fun '(sig,tp)
         -> List (UntypedVar AST) sig
         -> IO AST
 toZ3App ctx (Eq tp n) args = mkEq' (runIdentity $ List.toList (\(UntypedVar v _) -> return v) args)
@@ -366,7 +362,7 @@ toZ3App ctx (Ord NumInt op) (lhs ::: rhs ::: Nil)
        Lt -> mkLt) ctx (untypedVar lhs) (untypedVar rhs)
 toZ3App ctx f _ = error $ "toZ3App: "++show f
 
-toZ3Const :: Context -> Value Z3Con t -> IO AST
+toZ3Const :: Context -> Value t -> IO AST
 toZ3Const ctx (BoolValue False) = mkFalse ctx
 toZ3Const ctx (BoolValue True) = mkTrue ctx
 toZ3Const ctx (IntValue v) = mkInteger ctx v

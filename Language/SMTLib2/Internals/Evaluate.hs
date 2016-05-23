@@ -2,6 +2,7 @@ module Language.SMTLib2.Internals.Evaluate where
 
 import Language.SMTLib2.Internals.Expression
 import Language.SMTLib2.Internals.Type hiding (Field)
+import qualified Language.SMTLib2.Internals.Type as Type
 import Language.SMTLib2.Internals.Type.Nat
 import Language.SMTLib2.Internals.Type.List
 import qualified Language.SMTLib2.Internals.Type.List as List
@@ -9,51 +10,50 @@ import qualified Language.SMTLib2.Internals.Type.List as List
 import Data.GADT.Compare
 import Data.List (genericLength)
 import Data.Bits
-import Data.Typeable
 import Data.Dependent.Map (DMap)
 import qualified Data.Dependent.Map as DMap
 import Data.Functor.Identity
 
-data EvalResult fun con field res where
-  ValueResult :: Value con res -> EvalResult fun con field res
-  ArrayResult :: ArrayModel fun con field idx el
-              -> EvalResult fun con field (ArrayType idx el)
+data EvalResult fun res where
+  ValueResult :: Value res -> EvalResult fun res
+  ArrayResult :: ArrayModel fun idx el
+              -> EvalResult fun (ArrayType idx el)
 
-data ArrayModel fun con field idx el where
-  ArrayConst :: EvalResult fun con field el
+data ArrayModel fun idx el where
+  ArrayConst :: EvalResult fun el
              -> List Repr idx
-             -> ArrayModel fun con field idx el
-  ArrayFun :: Function fun con field '(idx,res)
-           -> ArrayModel fun con field idx res
-  ArrayMap :: Function fun con field '(arg,res)
-           -> List (ArrayModel fun con field idx) arg
+             -> ArrayModel fun idx el
+  ArrayFun :: Function fun '(idx,res)
+           -> ArrayModel fun idx res
+  ArrayMap :: Function fun '(arg,res)
+           -> List (ArrayModel fun idx) arg
            -> List Repr idx
-           -> ArrayModel fun con field idx res
-  ArrayStore :: List (EvalResult fun con field) idx
-             -> EvalResult fun con field el
-             -> ArrayModel fun con field idx el
-             -> ArrayModel fun con field idx el
+           -> ArrayModel fun idx res
+  ArrayStore :: List (EvalResult fun) idx
+             -> EvalResult fun el
+             -> ArrayModel fun idx el
+             -> ArrayModel fun idx el
 
-type FunctionEval m fun con field
+type FunctionEval m fun
   = forall tps r. fun '(tps,r)
-    -> List (EvalResult fun con field) tps
-    -> m (EvalResult fun con field r)
+    -> List (EvalResult fun) tps
+    -> m (EvalResult fun r)
 
-type FieldEval m fun con field
+type FieldEval m fun
   = forall dt args tp. (IsDatatype dt)
-    => field '(dt,tp)
-    -> con '(args,dt)
-    -> List (Value con) args
-    -> m (EvalResult fun con field tp)
+    => Type.Field dt tp
+    -> Constr dt args
+    -> List Value args
+    -> m (EvalResult fun tp)
 
-evalResultType :: (GetFunType fun,GetConType con,GetFieldType field)
-               => EvalResult fun con field res -> Repr res
+evalResultType :: (GetFunType fun)
+               => EvalResult fun res -> Repr res
 evalResultType (ValueResult val) = valueType val
 evalResultType (ArrayResult mdl) = let (idx,el) = arrayModelType mdl
                                    in ArrayRepr idx el
 
-arrayModelType :: (GetFunType fun,GetConType con,GetFieldType field)
-               => ArrayModel fun con field idx res -> (List Repr idx,Repr res)
+arrayModelType :: (GetFunType fun)
+               => ArrayModel fun idx res -> (List Repr idx,Repr res)
 arrayModelType (ArrayConst res idx) = (idx,evalResultType res)
 arrayModelType (ArrayFun fun) = getFunType fun
 arrayModelType (ArrayMap fun args idx)
@@ -62,13 +62,12 @@ arrayModelType (ArrayMap fun args idx)
 arrayModelType (ArrayStore idx el mdl)
   = (runIdentity $ List.mapM (return.evalResultType) idx,evalResultType el)
 
-evaluateArray :: (Monad m,Typeable con,GCompare con,
-                  GetFunType fun,GetConType con,GetFieldType field)
-              => FunctionEval m fun con field
-              -> FieldEval m fun con field
-              -> ArrayModel fun con field idx el
-              -> List (EvalResult fun con field) idx
-              -> m (EvalResult fun con field el)
+evaluateArray :: (Monad m,GetFunType fun)
+              => FunctionEval m fun
+              -> FieldEval m fun
+              -> ArrayModel fun idx el
+              -> List (EvalResult fun) idx
+              -> m (EvalResult fun el)
 evaluateArray _ _ (ArrayConst c _) _ = return c
 evaluateArray f g (ArrayFun fun) arg = evaluateFun f g fun arg
 evaluateArray f g (ArrayMap fun args _) arg = do
@@ -91,24 +90,22 @@ typeNumElements (ArrayRepr idx el) = do
   return (product (rel:ridx))
 typeNumElements (DataRepr dt) = error "typeNumElements not implemented for datatypes"
 
-evalResultEq :: (Monad m,Typeable con,GCompare con,
-                 GetFunType fun,GetConType con,GetFieldType field)
-             => FunctionEval m fun con field
-             -> FieldEval m fun con field
-             -> EvalResult fun con field res
-             -> EvalResult fun con field res
+evalResultEq :: (Monad m,GetFunType fun)
+             => FunctionEval m fun
+             -> FieldEval m fun
+             -> EvalResult fun res
+             -> EvalResult fun res
              -> m Bool
 evalResultEq _ _ (ValueResult v1) (ValueResult v2) = return (v1 == v2)
 evalResultEq ev evf (ArrayResult m1) (ArrayResult m2)
   = arrayModelEq ev evf m1 m2 []
 
-arrayModelEq :: (Monad m,Typeable con,GCompare con,
-                 GetFunType fun,GetConType con,GetFieldType field)
-             => FunctionEval m fun con field
-             -> FieldEval m fun con field
-             -> ArrayModel fun con field idx t
-             -> ArrayModel fun con field idx t
-             -> [List (EvalResult fun con field) idx]
+arrayModelEq :: (Monad m,GetFunType fun)
+             => FunctionEval m fun
+             -> FieldEval m fun
+             -> ArrayModel fun idx t
+             -> ArrayModel fun idx t
+             -> [List (EvalResult fun) idx]
              -> m Bool
 arrayModelEq _ _ (ArrayFun _) _ _
   = error "Cannot decide array equality with arrays built from functions."
@@ -120,7 +117,7 @@ arrayModelEq _ _ _ (ArrayMap _ _ _) _
   = error "Cannot decide array equality with arrays built from functions."
 arrayModelEq ev evf (ArrayConst v1 _) (ArrayConst v2 _) _
   = evalResultEq ev evf v1 v2
-arrayModelEq ev evf (ArrayStore (idx::List (EvalResult fun con field) idx) el mdl) oth ign = do
+arrayModelEq ev evf (ArrayStore (idx::List (EvalResult fun) idx) el mdl) oth ign = do
   isIgn <- isIgnored idx ign
   if isIgn
     then arrayModelEq ev evf mdl oth ign
@@ -142,21 +139,20 @@ arrayModelEq ev evf (ArrayStore (idx::List (EvalResult fun con field) idx) el md
         else isIgnored idx is
 arrayModelEq ev evf m1 m2 ign = arrayModelEq ev evf m2 m1 ign
 
-evaluateExpr :: (Monad m,Typeable con,GCompare con,GCompare lv,
-                 GetFunType fun,GetConType con,GetFieldType field)
-             => (forall t. v t -> m (EvalResult fun con field t))
-             -> (forall t. qv t -> m (EvalResult fun con field t))
-             -> (forall t. fv t -> m (EvalResult fun con field t))
-             -> FunctionEval m fun con field
-             -> FieldEval m fun con field
+evaluateExpr :: (Monad m,GCompare lv,GetFunType fun)
+             => (forall t. v t -> m (EvalResult fun t))
+             -> (forall t. qv t -> m (EvalResult fun t))
+             -> (forall t. fv t -> m (EvalResult fun t))
+             -> FunctionEval m fun
+             -> FieldEval m fun
              -> (forall arg. Quantifier
                  -> List qv arg
                  -> e BoolType
-                 -> m (EvalResult fun con field BoolType))
-             -> DMap lv (EvalResult fun con field)
-             -> (forall t. DMap lv (EvalResult fun con field) -> e t -> m (EvalResult fun con field t))
-             -> Expression v qv fun con field fv lv e res
-             -> m (EvalResult fun con field res)
+                 -> m (EvalResult fun BoolType))
+             -> DMap lv (EvalResult fun)
+             -> (forall t. DMap lv (EvalResult fun) -> e t -> m (EvalResult fun t))
+             -> Expression v qv fun fv lv e res
+             -> m (EvalResult fun res)
 evaluateExpr fv _ _ _ _ _ _ _ (Var v) = fv v
 evaluateExpr _ fqv _ _ _ _ _ _ (QVar v) = fqv v
 evaluateExpr _ _ ffv _ _ _ _ _ (FVar v) = ffv v
@@ -177,19 +173,18 @@ evaluateExpr _ _ _ evf evr _ binds f (App fun args) = do
   rargs <- List.mapM (f binds) args
   evaluateFun evf evr fun rargs
 
-evaluateFun :: forall m fun con field arg res.
-            (Monad m,Typeable con,GCompare con,
-             GetFunType fun,GetConType con,GetFieldType field)
-            => FunctionEval m fun con field
-            -> FieldEval m fun con field
-            -> Function fun con field '(arg,res)
-            -> List (EvalResult fun con field) arg
-            -> m (EvalResult fun con field res)
+evaluateFun :: forall m fun arg res.
+            (Monad m,GetFunType fun)
+            => FunctionEval m fun
+            -> FieldEval m fun
+            -> Function fun '(arg,res)
+            -> List (EvalResult fun) arg
+            -> m (EvalResult fun res)
 evaluateFun ev _ (Fun f) arg = ev f arg
 evaluateFun ev evf (Eq tp n) args = isEq n tp args >>=
                                     return . ValueResult . BoolValue
   where
-    isEq :: Natural n -> Repr tp -> List (EvalResult fun con field) (AllEq tp n) -> m Bool
+    isEq :: Natural n -> Repr tp -> List (EvalResult fun) (AllEq tp n) -> m Bool
     isEq Zero _ Nil = return True
     isEq (Succ Zero) _ (_ ::: Nil) = return True
     isEq (Succ (Succ n)) tp (x ::: y ::: xs) = do
@@ -200,7 +195,7 @@ evaluateFun ev evf (Eq tp n) args = isEq n tp args >>=
 evaluateFun ev evf (Distinct tp n) args = isDistinct n tp args >>=
                                           return . ValueResult . BoolValue
   where
-    isDistinct :: Natural n -> Repr tp -> List (EvalResult fun con field) (AllEq tp n) -> m Bool
+    isDistinct :: Natural n -> Repr tp -> List (EvalResult fun) (AllEq tp n) -> m Bool
     isDistinct Zero _ Nil = return True
     isDistinct (Succ Zero) _ (_ ::: Nil) = return True
     isDistinct (Succ n) tp (x ::: xs) = do
@@ -208,8 +203,8 @@ evaluateFun ev evf (Distinct tp n) args = isDistinct n tp args >>=
       if neq
         then isDistinct n tp xs
         else return False
-    isNeq :: Natural n -> Repr tp -> EvalResult fun con field tp
-          -> List (EvalResult fun con field) (AllEq tp n) -> m Bool
+    isNeq :: Natural n -> Repr tp -> EvalResult fun tp
+          -> List (EvalResult fun) (AllEq tp n) -> m Bool
     isNeq Zero _ _ Nil = return True
     isNeq (Succ n) tp x (y ::: ys) = do
       eq <- evalResultEq ev evf x y
@@ -233,7 +228,7 @@ evaluateFun _ _ (Ord NumReal op) ((ValueResult (RealValue lhs)) ::: (ValueResult
 evaluateFun _ _ (Arith NumInt op n) args
   = return $ ValueResult $ IntValue $
     eval op $ fmap (\(ValueResult (IntValue v)) -> v)
-    (allEqToList n args :: [EvalResult fun con field IntType])
+    (allEqToList n args :: [EvalResult fun IntType])
   where
     eval Plus xs = sum xs
     eval Mult xs = product xs
@@ -243,7 +238,7 @@ evaluateFun _ _ (Arith NumInt op n) args
 evaluateFun _ _ (Arith NumReal op n) args
   = return $ ValueResult $ RealValue $
     eval op $ fmap (\(ValueResult (RealValue v)) -> v)
-    (allEqToList n args :: [EvalResult fun con field RealType])
+    (allEqToList n args :: [EvalResult fun RealType])
   where
     eval Plus xs = sum xs
     eval Mult xs = product xs
@@ -267,7 +262,7 @@ evaluateFun _ _ Not ((ValueResult (BoolValue x)) ::: Nil)
 evaluateFun _ _ (Logic op n) args
   = return $ ValueResult $ BoolValue $
     eval op $ fmap (\(ValueResult (BoolValue v)) -> v)
-    (allEqToList n args :: [EvalResult fun con field BoolType])
+    (allEqToList n args :: [EvalResult fun BoolType])
   where
     eval And = and
     eval Or = or

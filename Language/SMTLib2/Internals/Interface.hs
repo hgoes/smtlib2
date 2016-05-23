@@ -4,7 +4,7 @@ module Language.SMTLib2.Internals.Interface
         pattern Var,
         -- ** Constants
         SMTType(),pattern ConstBool,pattern ConstInt,pattern ConstReal,pattern ConstBV,
-        constant,asConstant,true,false,cbool,cint,creal,cbv,
+        constant,asConstant,true,false,cbool,cint,creal,cbv,cdt,
         -- ** Functions
         pattern Fun,app,fun,
         -- *** Equality
@@ -44,6 +44,8 @@ module Language.SMTLib2.Internals.Interface
         pattern Concat,pattern Extract,concat',extract',
         -- *** Arrays
         pattern Select,pattern Store,pattern ConstArray,select,select1,store,store1,constArray,
+        -- *** Datatypes
+        pattern Mk,mk,pattern Is,is,pattern (:#:),(.#.),
         -- *** Misc
         pattern Divisible,divisible,
         -- * Lists
@@ -107,7 +109,7 @@ allEqToSame' tp n lst = do
 
 class IsSMTNumber (tp :: Type) where
   smtNumRepr :: NumRepr tp
-  smtFromInteger :: Integer -> Value con tp
+  smtFromInteger :: Integer -> Value tp
 
 instance IsSMTNumber IntType where
   smtNumRepr = NumInt
@@ -159,81 +161,81 @@ matchNumRepr' r = (matchNumRepr r,r)
 #define MK_SIG(PROV,REQ,NAME,LHS,RHS) pattern PROV => NAME LHS :: REQ => RHS
 #endif
 
-MK_SIG((rtp ~ BoolType),(),ConstBool,Bool,Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType),(),ConstBool,Bool,Expression v qv fun fv lv e rtp)
 pattern ConstBool x = E.Const (BoolValue x)
 
-MK_SIG((rtp ~ IntType),(),ConstInt,Integer,Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ IntType),(),ConstInt,Integer,Expression v qv fun fv lv e rtp)
 pattern ConstInt x = E.Const (IntValue x)
 
-MK_SIG((rtp ~ RealType),(),ConstReal,Rational,Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ RealType),(),ConstReal,Rational,Expression v qv fun fv lv e rtp)
 pattern ConstReal x = E.Const (RealValue x)
 
-MK_SIG((rtp ~ BitVecType bw),(),ConstBV,Integer SEP (Natural bw),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BitVecType bw),(),ConstBV,Integer SEP (Natural bw),Expression v qv fun fv lv e rtp)
 pattern ConstBV x bw = E.Const (BitVecValue x bw)
 
 pattern Fun f arg = App (E.Fun f) arg
 
-MK_SIG((rtp ~ BoolType),(),EqLstP,(Repr tp) SEP [e tp],Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType),(),EqLstP,(Repr tp) SEP [e tp],Expression v qv fun fv lv e rtp)
 pattern EqLstP tp lst <- App (E.Eq tp n) (allEqToList n -> lst) where
    EqLstP tp lst = allEqFromList lst (\n -> App (E.Eq tp n))
 
-MK_SIG((rtp ~ BoolType),(GetType e),EqLst,[e tp],Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType),(GetType e),EqLst,[e tp],Expression v qv fun fv lv e rtp)
 pattern EqLst lst <- EqLstP _ lst where
   EqLst lst@(x:_) = EqLstP (getType x) lst
 
-MK_SIG((rtp ~ BoolType,Same tps),(GetType e),Eq,List e tps,Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType,Same tps),(GetType e),Eq,List e tps,Expression v qv fun fv lv e rtp)
 pattern Eq lst <- App (E.Eq tp n) (allEqToSame' tp n -> Just (Dict,lst)) where
   Eq lst = sameApp E.Eq lst
 
-MK_SIG((rtp ~ BoolType),(GetType e),(:==:),(e tp) SEP (e tp),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType),(GetType e),(:==:),(e tp) SEP (e tp),Expression v qv fun fv lv e rtp)
 pattern (:==:) x y <- App (E.Eq _ (Succ (Succ Zero))) (x ::: y ::: Nil) where
   (:==:) x y = App (E.Eq (getType x) (Succ (Succ Zero))) (x ::: y ::: Nil)
 
-MK_SIG((rtp ~ BoolType),(),DistinctLstP,(Repr tp) SEP [e tp],Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType),(),DistinctLstP,(Repr tp) SEP [e tp],Expression v qv fun fv lv e rtp)
 pattern DistinctLstP tp lst <- App (E.Distinct tp n) (allEqToList n -> lst) where
    DistinctLstP tp lst = allEqFromList lst (\n -> App (E.Distinct tp n))
 
-MK_SIG((rtp ~ BoolType),(GetType e),DistinctLst,[e tp],Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType),(GetType e),DistinctLst,[e tp],Expression v qv fun fv lv e rtp)
 pattern DistinctLst lst <- DistinctLstP _ lst where
   DistinctLst lst@(x:_) = DistinctLstP (getType x) lst
 
-MK_SIG((rtp ~ BoolType,Same tps),(GetType e),Distinct,List e tps,Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType,Same tps),(GetType e),Distinct,List e tps,Expression v qv fun fv lv e rtp)
 pattern Distinct lst <- App (E.Distinct tp n) (allEqToSame' tp n -> Just (Dict,lst)) where
   Distinct lst = sameApp E.Distinct lst
 
-MK_SIG((rtp ~ BoolType),(GetType e),(:/=:),(e tp) SEP (e tp),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType),(GetType e),(:/=:),(e tp) SEP (e tp),Expression v qv fun fv lv e rtp)
 pattern (:/=:) x y <- App (E.Distinct _ (Succ (Succ Zero))) (x ::: y ::: Nil) where
   (:/=:) x y = App (E.Distinct (getType x) (Succ (Succ Zero))) (x ::: y ::: Nil)
 
-MK_SIG((rtp ~ BoolType,IsSMTNumber tp),(),Ord,E.OrdOp SEP (e tp) SEP (e tp),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType,IsSMTNumber tp),(),Ord,E.OrdOp SEP (e tp) SEP (e tp),Expression v qv fun fv lv e rtp)
 pattern Ord op x y <- App (E.Ord (matchNumRepr -> Dict) op) (x ::: y ::: Nil) where
   Ord op x y = App (E.Ord smtNumRepr op) (x ::: y ::: Nil)
 
-MK_SIG((rtp ~ BoolType,IsSMTNumber tp),(),(:>=:),(e tp) SEP (e tp),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType,IsSMTNumber tp),(),(:>=:),(e tp) SEP (e tp),Expression v qv fun fv lv e rtp)
 pattern (:>=:) x y <- App (E.Ord (matchNumRepr -> Dict) E.Ge) (x ::: y ::: Nil) where
   (:>=:) x y = App (E.Ord smtNumRepr E.Ge) (x ::: y ::: Nil)
 
-MK_SIG((rtp ~ BoolType,IsSMTNumber tp),(),(:>:),(e tp) SEP (e tp),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType,IsSMTNumber tp),(),(:>:),(e tp) SEP (e tp),Expression v qv fun fv lv e rtp)
 pattern (:>:) x y <- App (E.Ord (matchNumRepr -> Dict) E.Gt) (x ::: y ::: Nil) where
   (:>:) x y = App (E.Ord smtNumRepr E.Gt) (x ::: y ::: Nil)
 
-MK_SIG((rtp ~ BoolType,IsSMTNumber tp),(),(:<=:),(e tp) SEP (e tp),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType,IsSMTNumber tp),(),(:<=:),(e tp) SEP (e tp),Expression v qv fun fv lv e rtp)
 pattern (:<=:) x y <- App (E.Ord (matchNumRepr -> Dict) E.Le) (x ::: y ::: Nil) where
   (:<=:) x y = App (E.Ord smtNumRepr E.Le) (x ::: y ::: Nil)
 
-MK_SIG((rtp ~ BoolType,IsSMTNumber tp),(),(:<:),(e tp) SEP (e tp),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType,IsSMTNumber tp),(),(:<:),(e tp) SEP (e tp),Expression v qv fun fv lv e rtp)
 pattern (:<:) x y <- App (E.Ord (matchNumRepr -> Dict) E.Lt) (x ::: y ::: Nil) where
   (:<:) x y = App (E.Ord smtNumRepr E.Lt) (x ::: y ::: Nil)
 
-MK_SIG((),(),ArithLstP,E.ArithOp SEP (NumRepr tp) SEP [e tp],Expression v qv fun con field fv lv e tp)
+MK_SIG((),(),ArithLstP,E.ArithOp SEP (NumRepr tp) SEP [e tp],Expression v qv fun fv lv e tp)
 pattern ArithLstP op tp lst <- App (E.Arith tp op n) (allEqToList n -> lst) where
   ArithLstP op tp lst = allEqFromList lst (\n -> App (E.Arith tp op n))
 
-MK_SIG((IsSMTNumber tp),(),ArithLst,E.ArithOp SEP [e tp],Expression v qv fun con field fv lv e tp)
+MK_SIG((IsSMTNumber tp),(),ArithLst,E.ArithOp SEP [e tp],Expression v qv fun fv lv e tp)
 pattern ArithLst op lst <- ArithLstP op (matchNumRepr -> Dict) lst where
   ArithLst op lst = ArithLstP op smtNumRepr lst
 
-MK_SIG((IsSMTNumber tp,Same tps,tp ~ SameType tps),(),Arith,E.ArithOp SEP (List e tps),Expression v qv fun con field fv lv e tp)
+MK_SIG((IsSMTNumber tp,Same tps,tp ~ SameType tps),(),Arith,E.ArithOp SEP (List e tps),Expression v qv fun fv lv e tp)
 pattern Arith op lst <- App (E.Arith (matchNumRepr' -> (Dict,tp)) op n)
                         (allEqToSame' (numRepr tp) n -> Just (Dict,lst)) where
   Arith op lst = App (E.Arith smtNumRepr op (List.length lst)) (sameToAllEq lst)
@@ -257,28 +259,28 @@ pattern Rem x y = App (E.ArithIntBin E.Rem) (x ::: y ::: Nil)
 
 pattern (:/:) x y = App E.Divide (x ::: y ::: Nil)
 
-MK_SIG((IsSMTNumber tp),(),Abs,e tp,Expression v qv fun con field fv lv e tp)
+MK_SIG((IsSMTNumber tp),(),Abs,e tp,Expression v qv fun fv lv e tp)
 pattern Abs x <- App (E.Abs (matchNumRepr -> Dict)) (x ::: Nil) where
   Abs x = App (E.Abs smtNumRepr) (x ::: Nil)
 
 pattern Not x = App E.Not (x ::: Nil)
 
-MK_SIG((rtp ~ BoolType),(),LogicLst,E.LogicOp SEP [e BoolType],Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType),(),LogicLst,E.LogicOp SEP [e BoolType],Expression v qv fun fv lv e rtp)
 pattern LogicLst op lst <- App (E.Logic op n) (allEqToList n -> lst) where
   LogicLst op lst = allEqFromList lst (\n -> App (E.Logic op n))
 
-MK_SIG((rtp ~ BoolType,Same tps,SameType tps ~ BoolType),(),Logic,E.LogicOp SEP (List e tps),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType,Same tps,SameType tps ~ BoolType),(),Logic,E.LogicOp SEP (List e tps),Expression v qv fun fv lv e rtp)
 pattern Logic op lst <- App (E.Logic op n) (allEqToSame' bool n -> Just (Dict,lst)) where
   Logic op lst = App (E.Logic op (List.length lst)) (sameToAllEq lst)
 
 pattern AndLst lst = LogicLst E.And lst
 pattern And lst = Logic E.And lst
-MK_SIG((rtp ~ BoolType),(),(:&:),(e BoolType) SEP (e BoolType),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType),(),(:&:),(e BoolType) SEP (e BoolType),Expression v qv fun fv lv e rtp)
 pattern (:&:) x y = App (E.Logic E.And (Succ (Succ Zero))) (x ::: y ::: Nil)
 
 pattern OrLst lst = LogicLst E.Or lst
 pattern Or lst = Logic E.Or lst
-MK_SIG((rtp ~ BoolType),(),(:|:),(e BoolType) SEP (e BoolType),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType),(),(:|:),(e BoolType) SEP (e BoolType),Expression v qv fun fv lv e rtp)
 pattern (:|:) x y = App (E.Logic E.Or (Succ (Succ Zero))) (x ::: y ::: Nil)
 
 pattern XOrLst lst = LogicLst E.XOr lst
@@ -286,17 +288,17 @@ pattern XOr lst = Logic E.XOr lst
 
 pattern ImpliesLst lst = LogicLst E.Implies lst
 pattern Implies lst = Logic E.Implies lst
-MK_SIG((rtp ~ BoolType),(),(:=>:),(e BoolType) SEP (e BoolType),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType),(),(:=>:),(e BoolType) SEP (e BoolType),Expression v qv fun fv lv e rtp)
 pattern (:=>:) x y = App (E.Logic E.Implies (Succ (Succ Zero))) (x ::: y ::: Nil)
 
 pattern ToReal x = App E.ToReal (x ::: Nil)
 pattern ToInt x = App E.ToInt (x ::: Nil)
 
-MK_SIG((),(GetType e),ITE,(e BoolType) SEP (e tp) SEP (e tp),Expression v qv fun con field fv lv e tp)
+MK_SIG((),(GetType e),ITE,(e BoolType) SEP (e tp) SEP (e tp),Expression v qv fun fv lv e tp)
 pattern ITE c ifT ifF <- App (E.ITE _) (c ::: ifT ::: ifF ::: Nil) where
   ITE c ifT ifF = App (E.ITE (getType ifT)) (c ::: ifT ::: ifF ::: Nil)
 
-MK_SIG((rtp ~ BoolType),(GetType e),BVComp,E.BVCompOp SEP (e (BitVecType bw)) SEP (e (BitVecType bw)),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType),(GetType e),BVComp,E.BVCompOp SEP (e (BitVecType bw)) SEP (e (BitVecType bw)),Expression v qv fun fv lv e rtp)
 pattern BVComp op lhs rhs <- App (E.BVComp op _) (lhs ::: rhs ::: Nil) where
   BVComp op lhs rhs = App (E.BVComp op (getBW lhs)) (lhs ::: rhs ::: Nil)
 
@@ -309,7 +311,7 @@ pattern BVSLT lhs rhs = BVComp E.BVSLT lhs rhs
 pattern BVSGE lhs rhs = BVComp E.BVSGE lhs rhs
 pattern BVSGT lhs rhs = BVComp E.BVSGT lhs rhs
 
-MK_SIG((rtp ~ BitVecType bw),(GetType e),BVBin,E.BVBinOp SEP (e (BitVecType bw)) SEP (e (BitVecType bw)),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BitVecType bw),(GetType e),BVBin,E.BVBinOp SEP (e (BitVecType bw)) SEP (e (BitVecType bw)),Expression v qv fun fv lv e rtp)
 pattern BVBin op lhs rhs <- App (E.BVBin op _) (lhs ::: rhs ::: Nil) where
   BVBin op lhs rhs = App (E.BVBin op (getBW lhs)) (lhs ::: rhs ::: Nil)
 
@@ -327,46 +329,51 @@ pattern BVXor lhs rhs = BVBin E.BVXor lhs rhs
 pattern BVAnd lhs rhs = BVBin E.BVAnd lhs rhs
 pattern BVOr lhs rhs = BVBin E.BVOr lhs rhs
 
-MK_SIG((rtp ~ BitVecType bw),(GetType e),BVUn,E.BVUnOp SEP (e (BitVecType bw)),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BitVecType bw),(GetType e),BVUn,E.BVUnOp SEP (e (BitVecType bw)),Expression v qv fun fv lv e rtp)
 pattern BVUn op x <- App (E.BVUn op _) (x ::: Nil) where
   BVUn op x = App (E.BVUn op (getBW x)) (x ::: Nil)
 
 pattern BVNot x = BVUn E.BVNot x
 pattern BVNeg x = BVUn E.BVNeg x
 
-MK_SIG((rtp ~ val),(GetType e),Select,(e (ArrayType idx val)) SEP (List e idx),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ val),(GetType e),Select,(e (ArrayType idx val)) SEP (List e idx),Expression v qv fun fv lv e rtp)
 pattern Select arr idx <- App (E.Select _ _) (arr ::: idx) where
   Select arr idx = case getType arr of
     ArrayRepr idxTp elTp -> App (E.Select idxTp elTp) (arr ::: idx)
 
-MK_SIG((rtp ~ ArrayType idx val),(GetType e),Store,(e (ArrayType idx val)) SEP (List e idx) SEP (e val),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ ArrayType idx val),(GetType e),Store,(e (ArrayType idx val)) SEP (List e idx) SEP (e val),Expression v qv fun fv lv e rtp)
 pattern Store arr idx el <- App (E.Store _ _) (arr ::: el ::: idx) where
   Store arr idx el = case getType arr of
     ArrayRepr idxTp elTp -> App (E.Store idxTp elTp) (arr ::: el ::: idx)
 
-MK_SIG((rtp ~ ArrayType idx val),(GetType e),ConstArray,(List Repr idx) SEP (e val),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ ArrayType idx val),(GetType e),ConstArray,(List Repr idx) SEP (e val),Expression v qv fun fv lv e rtp)
 pattern ConstArray idx el <- App (E.ConstArray idx _) (el ::: Nil) where
   ConstArray idx el = App (E.ConstArray idx (getType el)) (el ::: Nil)
 
-MK_SIG((rtp ~ BitVecType (n1+n2)),(GetType e),Concat,(e (BitVecType n1)) SEP (e (BitVecType n2)),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BitVecType (n1+n2)),(GetType e),Concat,(e (BitVecType n1)) SEP (e (BitVecType n2)),Expression v qv fun fv lv e rtp)
 pattern Concat lhs rhs <- App (E.Concat _ _) (lhs :::rhs ::: Nil) where
   Concat lhs rhs = case getType lhs of
     BitVecRepr n1 -> case getType rhs of
       BitVecRepr n2 -> App (E.Concat n1 n2) (lhs ::: rhs ::: Nil)
 
-MK_SIG((rtp ~ BitVecType len,((start + len) <= bw) ~ True),(GetType e),Extract,(Natural start) SEP (Natural len) SEP (e (BitVecType bw)),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BitVecType len,((start + len) <= bw) ~ True),(GetType e),Extract,(Natural start) SEP (Natural len) SEP (e (BitVecType bw)),Expression v qv fun fv lv e rtp)
 pattern Extract start len arg <- App (E.Extract _ start len) (arg ::: Nil) where
   Extract start len arg = case getType arg of
     BitVecRepr bw -> App (E.Extract bw start len) (arg ::: Nil)
 
-MK_SIG((rtp ~ BoolType),(),Divisible,Integer SEP (e IntType),Expression v qv fun con field fv lv e rtp)
+MK_SIG((rtp ~ BoolType),(),Divisible,Integer SEP (e IntType),Expression v qv fun fv lv e rtp)
 pattern Divisible n e = App (E.Divisible n) (e ::: Nil)
+
+pattern Mk con args = App (E.Constructor con) args
+pattern Is con e = App (E.Test con) (e ::: Nil)
+pattern (:#:) e field = App (E.Field field) (e ::: Nil)
+
 
 sameApp :: (Same tps,GetType e)
         => (Repr (SameType tps) -> Natural (List.Length tps)
-            -> E.Function fun con field '(AllEq (SameType tps) (List.Length tps),ret))
+            -> E.Function fun '(AllEq (SameType tps) (List.Length tps),ret))
         -> List e tps
-        -> Expression v qv fun con field fv lv e ret
+        -> Expression v qv fun fv lv e ret
 sameApp f lst = App (f (sameType $ runIdentity $
                         List.mapM (return.getType) lst
                        ) (List.length lst))
@@ -378,8 +385,8 @@ getBW e = case getType e of
 
 class SMTType t where
   type SMTReprType t :: Type
-  toSMTConst :: t -> Value con (SMTReprType t)
-  fromSMTConst :: Value con (SMTReprType t) -> t
+  toSMTConst :: t -> Value (SMTReprType t)
+  fromSMTConst :: Value (SMTReprType t) -> t
 
 instance SMTType Bool where
   type SMTReprType Bool = BoolType
@@ -407,11 +414,11 @@ instance SMTType (BitVec bw) where
 {- XXX: This doesn't work in 7.10. Test it when 8.0 is out.
 
 pattern Const :: (SMTType ctp,rtp ~ (SMTReprType ctp)) => ctp
-              -> Expression v qv fun con field fv lv e rtp
+              -> Expression v qv fun fv lv e rtp
 pattern Const v <- E.Const (fromSMTConst -> v) where
   Const v = E.Const (toSMTConst v) -}
 
---constant :: SMTType tp => tp -> Expression v qv fun con field fv lv e (SMTReprType tp)
+--constant :: SMTType tp => tp -> Expression v qv fun fv lv e (SMTReprType tp)
 --constant x = E.Const (toSMTConst x)
 
 constant :: (Embed m e,SMTType tp) => tp -> m (e (SMTReprType tp))
@@ -443,11 +450,15 @@ cbv :: Embed m e => Integer -- ^ The value (negative values will be stored in tw
     -> m (e (BitVecType bw))
 cbv i bw = embed $ E.Const (BitVecValue i bw)
 
-asConstant :: SMTType tp => Expression v qv fun con field fv lv e (SMTReprType tp) -> Maybe tp
+cdt :: (Embed m e,IsDatatype t) => t Value -> m (e (DataType t))
+cdt v = case constrGet v of
+  ConApp con args -> embed $ E.Const (ConstrValue con args)
+
+asConstant :: SMTType tp => Expression v qv fun fv lv e (SMTReprType tp) -> Maybe tp
 asConstant (E.Const v) = Just $ fromSMTConst v
 asConstant _ = Nothing
 
-MK_SIG((tp ~ rtp),(),Var,(v tp),Expression v qv fun con field fv lv e rtp)
+MK_SIG((tp ~ rtp),(),Var,(v tp),Expression v qv fun fv lv e rtp)
 pattern Var x = E.Var x
 
 fun :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ List e args)
@@ -459,7 +470,7 @@ fun fun args = do
 
 -- | Create an expression by applying a function to a list of arguments.
 app :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ List e args)
-    => E.Function (EmFun m e) (EmConstr m e) (EmField m e) '(args,res)
+    => E.Function (EmFun m e) '(args,res)
     -> a
     -> m (e res)
 app f args = do
@@ -534,8 +545,8 @@ distinct xs = do
 {-# INLINEABLE distinct #-}
 
 map' :: (Embed m e,HasMonad arg,MatchMonad arg m,MonadResult arg ~ List e (Lifted tps idx),
-         Unlift tps idx,GetType e,GetFunType (EmFun m e),GetFieldType (EmField m e),GetConType (EmConstr m e))
-     => E.Function (EmFun m e) (EmConstr m e) (EmField m e) '(tps,res)
+         Unlift tps idx,GetType e,GetFunType (EmFun m e))
+     => E.Function (EmFun m e) '(tps,res)
      -> arg
      -> m (e (ArrayType idx res))
 map' f arg = do
@@ -972,3 +983,24 @@ true = embed $ E.Const (BoolValue True)
 false = embed $ E.Const (BoolValue False)
 {-# INLINEABLE true #-}
 {-# INLINEABLE false #-}
+
+mk :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ List e sig,IsDatatype dt)
+   => Constr dt sig -> a -> m (e (DataType dt))
+mk con args = do
+  rargs <- embedM args
+  embed $ E.App (E.Constructor con) rargs
+{-# INLINEABLE mk #-}
+
+is :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e (DataType dt),IsDatatype dt)
+   => a -> Constr dt sig -> m (e BoolType)
+is e con = do
+  re <- embedM e
+  embed $ E.App (E.Test con) (re ::: Nil)
+{-# INLINEABLE is #-}
+
+(.#.) :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e (DataType dt),IsDatatype dt)
+      => a -> Field dt tp -> m (e tp)
+(.#.) e f = do
+  re <- embedM e
+  embed $ E.App (E.Field f) (re ::: Nil)
+{-# INLINEABLE (.#.) #-}

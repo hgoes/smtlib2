@@ -31,14 +31,12 @@ import qualified Data.Dependent.Map as DMap
 debugBackend :: (Backend b,MonadIO (SMTMonad b)) => b -> DebugBackend b
 debugBackend b = DebugBackend b stderr (Just 0) Nothing True
                  Map.empty DMap.empty DMap.empty DMap.empty
-                 DMap.empty DMap.empty DMap.empty DMap.empty
-                 Map.empty
+                 DMap.empty DMap.empty Map.empty emptyTypeRegistry
 
 namedDebugBackend :: (Backend b,MonadIO (SMTMonad b)) => String -> b -> DebugBackend b
 namedDebugBackend name b = DebugBackend b stderr (Just 0) (Just name) True
                            Map.empty DMap.empty DMap.empty DMap.empty
-                           DMap.empty DMap.empty DMap.empty DMap.empty
-                           Map.empty
+                           DMap.empty DMap.empty Map.empty emptyTypeRegistry
 
 debugBackend' :: (Backend b,MonadIO (SMTMonad b))
               => Bool -- ^ Display line number
@@ -50,8 +48,7 @@ debugBackend' :: (Backend b,MonadIO (SMTMonad b))
 debugBackend' lines color name h b
   = DebugBackend b h (if lines then Just 0 else Nothing) name color
     Map.empty DMap.empty DMap.empty DMap.empty
-    DMap.empty DMap.empty DMap.empty DMap.empty
-    Map.empty
+    DMap.empty DMap.empty Map.empty emptyTypeRegistry
 
 data DebugBackend (b :: *)
   = (Backend b,MonadIO (SMTMonad b))
@@ -64,11 +61,10 @@ data DebugBackend (b :: *)
                     , debugVars :: DMap (Var b) (UntypedVar T.Text)
                     , debugQVars :: DMap (QVar b) (UntypedVar T.Text)
                     , debugFuns :: DMap (Fun b) (UntypedFun T.Text)
-                    , debugCons :: DMap (Constr b) (UntypedCon T.Text)
-                    , debugFields :: DMap (Field b) (UntypedField T.Text)
                     , debugFVars :: DMap (FunArg b) (UntypedVar T.Text)
                     , debugLVars :: DMap (LVar b) (UntypedVar T.Text)
                     , debugCIds :: Map (ClauseId b) T.Text
+                    , debugDatatypes :: TypeRegistry T.Text T.Text T.Text
                     }
   deriving Typeable
 
@@ -122,8 +118,6 @@ instance (Backend b) => Backend (DebugBackend b) where
   type Var (DebugBackend b) = Var b
   type QVar (DebugBackend b) = QVar b
   type Fun (DebugBackend b) = Fun b
-  type Constr (DebugBackend b) = Constr b
-  type Field (DebugBackend b) = Field b
   type FunArg (DebugBackend b) = FunArg b
   type LVar (DebugBackend b) = LVar b
   type ClauseId (DebugBackend b) = ClauseId b
@@ -219,9 +213,8 @@ instance (Backend b) => Backend (DebugBackend b) where
     b1 <- outputLisp b (L.List [L.Symbol "get-value"
                                ,L.List [l]])
     (res,nb) <- getValue expr (debugBackend'' b1)
-    str <- valueToLisp (\con -> case DMap.lookup con (debugCons b1) of
-                                  Just (UntypedCon name _ _) -> return (L.Symbol name)
-                       ) res
+    str <- valueToLisp (\con -> case Map.lookup (AnyConstr con) (revConstructors $ debugDatatypes b1) of
+                          Just sym -> return $ L.Symbol sym) res
     outputResponse b1 (show str)
     return (res,b1 { debugBackend'' = nb })
   declareFun argtp rtp name b = do
@@ -232,41 +225,12 @@ instance (Backend b) => Backend (DebugBackend b) where
     return (rvar,b2 { debugBackend'' = nb
                     , debugFuns = DMap.insert rvar (UntypedFun sym argtp rtp) (debugFuns b2) })
   declareDatatypes coll b = do
-    b1 <- outputLisp b (renderDeclareDatatype coll)
-    (res,nb) <- declareDatatypes coll (debugBackend'' b1)
-    return (res,getVars res (b1 { debugBackend'' = nb }))
-    where
-      getVars :: Datatypes (BackendDatatype (Constr b) (Field b)) sigs
-              -> DebugBackend b
-              -> DebugBackend b
-      getVars NoDts b = b
-      getVars (ConsDts dt dts) b = getVars dts (getConsVars (bconstructors dt) b)
-
-      getConsVars :: IsDatatype dt
-                  => Constrs (BackendConstr (Constr b) (Field b)) sigs dt
-                  -> DebugBackend b
-                  -> DebugBackend b
-      getConsVars NoCon b = b
-      getConsVars (ConsCon con cons) b
-        = getConsVars cons $
-          getFieldVars (bconFields con) $
-          b { debugCons = DMap.insert (bconRepr con)
-                                      (UntypedCon (T.pack $ bconName con)
-                                       (runIdentity $ List.mapM (return . bfieldType) (bconFields con))
-                                       Proxy)
-                                      (debugCons b) }
-
-      getFieldVars :: IsDatatype dt
-                   => List (BackendField (Field b) dt) sig
-                   -> DebugBackend b
-                   -> DebugBackend b
-      getFieldVars Nil b = b
-      getFieldVars (f ::: fs) b
-        = getFieldVars fs $
-          b { debugFields = DMap.insert (bfieldRepr f)
-                                        (UntypedField (T.pack $ bfieldName f)
-                                         Proxy (bfieldType f))
-                                        (debugFields b) }
+    let (req,nnames,nreg) = renderDeclareDatatype (debugNames b) (debugDatatypes b) coll
+        b1 = b { debugNames = nnames
+               , debugDatatypes = nreg }
+    b2 <- outputLisp b1 req
+    (res,nb) <- declareDatatypes coll (debugBackend'' b2)
+    return (res,b2 { debugBackend'' = nb })
   createQVar tp name b = do
     let name' = case name of
           Just n -> n
@@ -343,12 +307,12 @@ renderExpr b expr
              Just (UntypedVar r _) -> return $ L.Symbol r)
     (\v -> case DMap.lookup v (debugFuns nb) of
              Just (UntypedFun r _ _) -> return $ L.Symbol r)
-    (\v -> case DMap.lookup v (debugCons nb) of
-             Just (UntypedCon r _ _) -> return $ L.Symbol r)
-    (\v -> case DMap.lookup v (debugCons nb) of
-             Just (UntypedCon r _ _) -> return $ L.Symbol $ T.append "is-" r)
-    (\v -> case DMap.lookup v (debugFields nb) of
-             Just (UntypedField r _ _) -> return $ L.Symbol r)
+    (\v -> case Map.lookup (AnyConstr v) (revConstructors $ debugDatatypes nb) of
+             Just sym -> return $ L.Symbol sym)
+    (\v -> case Map.lookup (AnyConstr v) (revConstructors $ debugDatatypes nb) of
+             Just sym -> return $ L.Symbol $ T.append "is-" sym)
+    (\v -> case Map.lookup (AnyField v) (revFields $ debugDatatypes nb) of
+             Just sym -> return $ L.Symbol sym)
     (\v -> case DMap.lookup v (debugFVars nb) of
              Just (UntypedVar r _) -> return $ L.Symbol r)
     (\v -> case DMap.lookup v (debugLVars nb) of

@@ -40,7 +40,7 @@ module Language.SMTLib2 (
   -- ** Defining functions
   defineFun,defineFunNamed,
   -- ** Constants
-  constant,ConcreteValue(..),
+  constant,Value(..),
   -- *** Boolean constants
   pattern ConstBool,cbool,true,false,
   -- *** Integer constants
@@ -88,6 +88,8 @@ module Language.SMTLib2 (
   pattern Concat,pattern Extract,concat',extract',
   -- *** Arrays
   pattern Select,pattern Store,pattern ConstArray,select,select1,store,store1,constArray,
+  -- *** Datatypes
+  pattern Mk,mk,pattern Is,is,pattern (:#:),(.#.),
   -- *** Misc
   pattern Divisible,divisible,
   -- ** Analyzation
@@ -201,8 +203,8 @@ noLimits = B.CheckSatLimits Nothing Nothing
 --   expression that the SMT solver assigned to it.
 getValue :: (B.Backend b,HasMonad expr,MatchMonad expr (SMT b),
              MonadResult expr ~ B.Expr b t)
-         => expr -> SMT b (ConcreteValue t)
-getValue e = embedM e >>= embedSMT . B.getValue >>= mkConcr
+         => expr -> SMT b (Value t)
+getValue e = embedM e >>= embedSMT . B.getValue
 
 -- | After a successful `checkSat` query, return a satisfying assignment that makes all asserted formula true.
 getModel :: B.Backend b => SMT b (B.Model b)
@@ -211,8 +213,8 @@ getModel = embedSMT B.getModel
 -- | Evaluate an expression in a model, yielding a concrete value.
 modelEvaluate :: (B.Backend b,HasMonad expr,MatchMonad expr (SMT b),
                   MonadResult expr ~ B.Expr b t)
-              => B.Model b -> expr -> SMT b (ConcreteValue t)
-modelEvaluate mdl e = embedM e >>= embedSMT . B.modelEvaluate mdl >>= mkConcr
+              => B.Model b -> expr -> SMT b (Value t)
+modelEvaluate mdl e = embedM e >>= embedSMT . B.modelEvaluate mdl
 
 -- | Push a fresh frame on the solver stack.
 --   All variable definitions and assertions made in a frame are forgotten when
@@ -362,16 +364,8 @@ defineFunNamed name tps f = do
 --   -- x is greater than 5
 --   assert $ x .>. constant (IntValueC 5)
 --   @
-constant :: (B.Backend b) => ConcreteValue t -> SMT b (B.Expr b t)
-constant v = do
-  val <- valueFromConcrete
-         (\(v::dt) f -> do
-             st <- get
-             let bdt = lookupDatatype (DTProxy::DTProxy dt) (datatypes st)
-             getConstructor v (B.bconstructors bdt) $
-               \con args -> f (B.bconRepr con) args
-         ) v
-  embedSMT $ B.toBackend (E.Const val)
+constant :: (B.Backend b) => Value t -> SMT b (B.Expr b t)
+constant v = embedSMT $ B.toBackend (E.Const v)
 
 -- | After a `checkSat` query that returned 'Unsat', we can ask the SMT solver
 --   for a subset of the assertions that are enough to make the specified
@@ -436,8 +430,6 @@ getExpr :: (B.Backend b) => B.Expr b tp
                   (B.Var b)
                   (B.QVar b)
                   (B.Fun b)
-                  (B.Constr b)
-                  (B.Field b)
                   (B.FunArg b)
                   (B.LVar b)
                   (B.Expr b) tp)

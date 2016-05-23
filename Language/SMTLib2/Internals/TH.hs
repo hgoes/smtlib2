@@ -459,23 +459,19 @@ toExpression bind (Atom name)
       Just res -> res
       Nothing -> THExpr { deriveType = QueryType [| embedTypeOf $(TH.varE (TH.mkName name)) |]
                         , getExpr' = [| return $(TH.varE (TH.mkName name)) |] }
-toExpression bind (List [List [Atom "is",Atom dt,Atom con],expr])
+toExpression bind (List [List [Atom "is",Atom con],expr])
   = THExpr { deriveType = DeterminedType BoolType
            , getExpr' = TH.appsE [[| (>>=) |]
                                  , toExpr bind expr
-                                 , [| embedConstrTest $(TH.litE $ TH.stringL con)
-                                      (Proxy:: Proxy $(TH.conT $ TH.mkName dt)) |] ] }
-toExpression bind (List [List [Atom "get",Atom dt,Atom con,Atom field,tp],expr])
-  = THExpr { deriveType = toType tp
+                                 , [| embed (App Test $(TH.litE $ TH.stringL con)) |] ] }
+toExpression bind (List [List [Atom "get",Atom field],expr])
+  = THExpr { deriveType = QueryType [| fieldType $(TH.litE $ TH.stringL field) |]
            , getExpr' = TH.appsE [[| (>>=) |]
                                  ,getExpr' $ toExpression bind expr
-                                 ,[| embedGetField $(TH.litE $ TH.stringL field)
-                                     $(TH.litE $ TH.stringL con)
-                                     (Proxy:: Proxy $(TH.conT $ TH.mkName dt))
-                                     $(liftTHType $ toType tp) |]] }
+                                 ,[| embed (App Field $(TH.litE $ TH.stringL field)) |]] }
 toExpression bind (List [Atom "const",HsExpr c])
-  = THExpr { deriveType = QueryType [| return (valueTypeC $(e)) |]
-           , getExpr' = TH.appE [| embedConst |] e }
+  = THExpr { deriveType = QueryType [| return (valueType $(e)) |]
+           , getExpr' = TH.appE [| embed . Const |] e }
   where
     e = case TH.parseExp c of
       Left err -> error $ "Failed to parse haskell expression: "++show c
@@ -776,30 +772,30 @@ distinct' (x:xs) = do
     \n args -> embed (App (Distinct tp n) args)
 
 arith' :: (Embed m e,SMTArith t) => ArithOp -> [e t] -> m (e t)
-arith' Plus [] = embedConst (arithFromInteger 0)
+arith' Plus [] = embed (Const (arithFromInteger 0))
 arith' Plus [x] = return x
-arith' Minus [] = embedConst (arithFromInteger 0)
-arith' Mult [] = embedConst (arithFromInteger 1)
+arith' Minus [] = embed (Const (arithFromInteger 0))
+arith' Mult [] = embed (Const (arithFromInteger 1))
 arith' Mult [x] = return x
 arith' op xs = allEqFromList xs $
                \n args -> embed (App (arith op n) args) 
 
 logic' :: (Embed m e) => LogicOp -> [e BoolType] -> m (e BoolType)
-logic' And [] = embedConst (BoolValueC True)
+logic' And [] = embed (Const (BoolValue True))
 logic' And [x] = return x
-logic' Or [] = embedConst (BoolValueC False)
+logic' Or [] = embed (Const (BoolValue False))
 logic' Or [x] = return x
 logic' op xs = allEqFromList xs $
                \n args -> embed (App (Logic op n) args)
 
 and' :: Embed m e => [e BoolType] -> m (e BoolType)
-and' [] = embedConst (BoolValueC True)
+and' [] = embed (Const (BoolValue True))
 and' [x] = return x
 and' xs = allEqFromList xs $
           \n args -> embed (App (Logic And n) args)
 
 or' :: Embed m e => [e BoolType] -> m (e BoolType)
-or' [] = embedConst (BoolValueC False)
+or' [] = embed (Const (BoolValue False))
 or' [x] = return x
 or' xs = allEqFromList xs $
          \n args -> embed (App (Logic Or n) args)
@@ -813,18 +809,18 @@ implies' xs = allEqFromList xs $
               \n args -> embed (App (Logic Implies n) args)
 
 plus' :: (Embed m e,SMTArith t) => [e t] -> m (e t)
-plus' [] = embedConst (arithFromInteger 0)
+plus' [] = embed (Const (arithFromInteger 0))
 plus' [x] = return x
 plus' xs = allEqFromList xs $
            \n args -> embed (App (plus n) args)
 
 minus' :: (Embed m e,SMTArith t) => [e t] -> m (e t)
-minus' [] = embedConst (arithFromInteger 0)
+minus' [] = embed (Const (arithFromInteger 0))
 minus' xs = allEqFromList xs $
             \n args -> embed (App (minus n) args)
 
 mult' :: (Embed m e,SMTArith t) => [e t] -> m (e t)
-mult' [] = embedConst (arithFromInteger 1)
+mult' [] = embed (Const (arithFromInteger 1))
 mult' [x] = return x
 mult' xs = allEqFromList xs $
            \n args -> embed (App (mult n) args)
@@ -852,8 +848,7 @@ toType (List [Atom "Array",List idx,el])
   where
     idx' = fmap toType idx
     el' = toType el
-toType (Atom name) = QueryType [| return $ DataRepr $ getDatatype
-                                  (Proxy::Proxy $(TH.conT $ TH.mkName name)) |]
+toType (Atom name) = QueryType [| return $ DataRepr (Proxy::Proxy $(TH.conT $ TH.mkName name)) |]
 
 thElementType :: THType -> THType
 thElementType (DeterminedType (ArrayType _ el)) = DeterminedType el
