@@ -62,8 +62,6 @@ instance Backend MathSATBackend where
   type Var MathSATBackend = UntypedVar Term
   type QVar MathSATBackend = NoVar
   type Fun MathSATBackend = UntypedFun Decl
-  type Constr MathSATBackend = NoCon
-  type Field MathSATBackend = NoField
   type FunArg MathSATBackend = NoVar
   type LVar MathSATBackend = NoVar
   type ClauseId MathSATBackend = Int
@@ -282,7 +280,7 @@ sortFromMSat env tp f = do
               error $ "smtlib2-mathsat: No support for type "++repr
 
 exprToMSat :: Env
-           -> Expression (UntypedVar Term) NoVar (UntypedFun Decl) NoCon NoField NoVar NoVar (UntypedVar Term) tp
+           -> Expression (UntypedVar Term) NoVar (UntypedFun Decl) NoVar NoVar (UntypedVar Term) tp
            -> IO Term
 exprToMSat env (Var (UntypedVar trm _)) = return trm
 exprToMSat env (QVar _) = error "smtlib2-mathsat: No support for quantification."
@@ -290,7 +288,7 @@ exprToMSat env (FVar _) = error "smtlib2-mathsat: No support for user-defined fu
 exprToMSat env (LVar _) = error "smtlib2-mathsat: No support for let-expressions."
 exprToMSat env (Const val) = valueToMSat val
   where
-    valueToMSat :: Value NoCon tp' -> IO Term
+    valueToMSat :: Value tp' -> IO Term
     valueToMSat (BoolValue True) = makeTrue env
     valueToMSat (BoolValue False) = makeFalse env
     valueToMSat (IntValue n) = makeNumber env (show n)
@@ -448,7 +446,7 @@ absToMSat env x = do
   makeTermITE env cond nx x
 
 exprFromMSat :: Env -> UntypedVar Term tp
-             -> IO (Expression (UntypedVar Term) NoVar (UntypedFun Decl) NoCon NoField NoVar NoVar (UntypedVar Term) tp)
+             -> IO (Expression (UntypedVar Term) NoVar (UntypedFun Decl) NoVar NoVar (UntypedVar Term) tp)
 exprFromMSat env (UntypedVar term tp) = do
   isC <- termIsConstant env term
   if isC
