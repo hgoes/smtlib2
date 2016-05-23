@@ -20,13 +20,13 @@ import Data.GADT.Show
 import Data.GADT.Compare
 import Control.Monad.State.Strict
 
-data ExprGen m b var qvar fun con field farg lvar e tp
-  = ExprGen ((forall t. Expression var qvar fun con field farg lvar e t
+data ExprGen m b var qvar fun farg lvar e tp
+  = ExprGen ((forall t. Expression var qvar fun farg lvar e t
               -> b -> m (e t,b))
              -> b
              -> m (e tp,b))
 
-type BackendExprGen b tp = ExprGen (B.SMTMonad b) b (B.Var b) (B.QVar b) (B.Fun b) (B.Constr b) (B.Field b) (B.FunArg b) (B.LVar b) (B.Expr b) tp
+type BackendExprGen b tp = ExprGen (B.SMTMonad b) b (B.Var b) (B.QVar b) (B.Fun b) (B.FunArg b) (B.LVar b) (B.Expr b) tp
 
 newtype VarSet v (tp :: Type) = VarSet (Set (v tp))
 
@@ -45,11 +45,11 @@ data AnyTypes = forall tps. AnyTypes (List Repr tps)
 
 data AnyNatural = forall n. AnyNatural (Natural n)
 
-data TestExpr var qvar fun con field farg lvar tp
-  = TestExpr (Expression var qvar fun con field farg lvar (TestExpr var qvar fun con field farg lvar) tp)
+data TestExpr var qvar fun farg lvar tp
+  = TestExpr (Expression var qvar fun farg lvar (TestExpr var qvar fun farg lvar) tp)
 
-type TestExprGen var qvar fun con field farg lvar tp
-  = ExprGen Identity () var qvar fun con field farg lvar (TestExpr var qvar fun con field farg lvar) tp
+type TestExprGen var qvar fun farg lvar tp
+  = ExprGen Identity () var qvar fun farg lvar (TestExpr var qvar fun farg lvar) tp
 
 emptyContext :: GenContext var qvar fun
 emptyContext = GenCtx { allVars = DMap.empty
@@ -82,16 +82,16 @@ roundTripTest ctx = do
   assert $ expr1 == expr3-}
 
 encodeTestExpr :: (B.Backend b)
-               => TestExpr (B.Var b) (B.QVar b) (B.Fun b) (B.Constr b) (B.Field b) (B.FunArg b) (B.LVar b) tp
+               => TestExpr (B.Var b) (B.QVar b) (B.Fun b) (B.FunArg b) (B.LVar b) tp
                -> b
                -> B.SMTMonad b (B.Expr b tp,b)
 encodeTestExpr e b = runStateT (encode' e) b
   where
     encode' :: (B.Backend b)
-            => TestExpr (B.Var b) (B.QVar b) (B.Fun b) (B.Constr b) (B.Field b) (B.FunArg b) (B.LVar b) tp
+            => TestExpr (B.Var b) (B.QVar b) (B.Fun b) (B.FunArg b) (B.LVar b) tp
             -> StateT b (B.SMTMonad b) (B.Expr b tp)
     encode' (TestExpr e) = do
-      e' <- mapExpr return return return return return return return encode' e
+      e' <- mapExpr return return return return return encode' e
       b <- get
       (ne,nb) <- lift $ B.toBackend e' b
       put nb
@@ -100,21 +100,21 @@ encodeTestExpr e b = runStateT (encode' e) b
 decodeTestExpr :: (B.Backend b)
                => B.Expr b tp
                -> b
-               -> TestExpr (B.Var b) (B.QVar b) (B.Fun b) (B.Constr b) (B.Field b) (B.FunArg b) (B.LVar b) tp
+               -> TestExpr (B.Var b) (B.QVar b) (B.Fun b) (B.FunArg b) (B.LVar b) tp
 decodeTestExpr e b
-  = TestExpr $ runIdentity $ mapExpr return return return return return return return
+  = TestExpr $ runIdentity $ mapExpr return return return return return
     (\e' -> return (decodeTestExpr e' b)) (B.fromBackend b e)
 
-genTestExpr :: (GetFunType fun,GetFieldType field,GetConType con)
+genTestExpr :: (GetFunType fun)
             => Repr tp -> GenContext var qvar fun
-            -> Gen (TestExpr var qvar fun con field farg lvar tp)
+            -> Gen (TestExpr var qvar fun farg lvar tp)
 genTestExpr tp ctx = do
   ExprGen egen <- genExpr tp ctx
   return $ fst $ runIdentity (egen (\e _ -> return (TestExpr e,())) ())
 
-genExpr :: (Monad m,GetFunType fun,GetFieldType field,GetConType con)
+genExpr :: (Monad m,GetFunType fun)
         => Repr t -> GenContext var qvar fun
-        -> Gen (ExprGen m b var qvar fun con field farg lvar e t)
+        -> Gen (ExprGen m b var qvar fun farg lvar e t)
 genExpr tp ctx = sized $ \sz -> if sz==0
                                 then oneof [ gen | Just gen <- [genVar tp
                                                                ,genQVar tp
@@ -135,7 +135,7 @@ genExpr tp ctx = sized $ \sz -> if sz==0
         else return $ elements [ ExprGen (\f -> f (QVar v))
                                | v <- Set.toList vs ]
     genConst :: (Monad m) => Repr t
-             -> Gen (ExprGen m b var qvar fun con field farg lvar e t)
+             -> Gen (ExprGen m b var qvar fun farg lvar e t)
     genConst tp = case tp of
       BoolRepr -> do
         val <- arbitrary
@@ -170,7 +170,7 @@ genExpr tp ctx = sized $ \sz -> if sz==0
 
 genFunction :: Repr tp
             -> GenContext var qvar fun
-            -> Gen (AnyFunction (Function fun con field) tp)
+            -> Gen (AnyFunction (Function fun) tp)
 genFunction tp ctx = oneof [ gen | Just gen <- [genFun
                                                ,genBuiltin tp] ]
   where
@@ -180,7 +180,7 @@ genFunction tp ctx = oneof [ gen | Just gen <- [genFun
         then Nothing
         else return $ elements [ AnyFunction (Fun f)
                                | AnyFunction f <- Set.toList funs ]
-    genBuiltin :: Repr t -> Maybe (Gen (AnyFunction (Function fun con field) t))
+    genBuiltin :: Repr t -> Maybe (Gen (AnyFunction (Function fun) t))
     genBuiltin tp = case tp of
       BoolRepr -> Just $ oneof
                   [do
@@ -296,21 +296,21 @@ withAllEqLen tp n f
   = withAllEqLen tp (n-1) $
     \tps -> f (tp ::: tps)
 
-instance (GShow var,GShow qvar,GShow fun,GShow con,GShow field,GShow farg,GShow lvar)
-         => GShow (TestExpr var qvar fun con field farg lvar) where
+instance (GShow var,GShow qvar,GShow fun,GShow farg,GShow lvar)
+         => GShow (TestExpr var qvar fun farg lvar) where
   gshowsPrec n (TestExpr e) = gshowsPrec n e
 
-instance (GShow var,GShow qvar,GShow fun,GShow con,GShow field,GShow farg,GShow lvar)
-         => Show (TestExpr var qvar fun con field farg lvar tp) where
+instance (GShow var,GShow qvar,GShow fun,GShow farg,GShow lvar)
+         => Show (TestExpr var qvar fun farg lvar tp) where
   showsPrec = gshowsPrec
 
 instance Show AnyType where
   show (AnyType tp) = show tp
 
-instance (GEq var,GEq qvar,GEq fun,GEq con,GEq field,GEq farg,GEq lvar)
-         => GEq (TestExpr var qvar fun con field farg lvar) where
+instance (GEq var,GEq qvar,GEq fun,GEq farg,GEq lvar)
+         => GEq (TestExpr var qvar fun farg lvar) where
   geq (TestExpr x) (TestExpr y) = geq x y
 
-instance (GEq var,GEq qvar,GEq fun,GEq con,GEq field,GEq farg,GEq lvar)
-         => Eq (TestExpr var qvar fun con field farg lvar tp) where
+instance (GEq var,GEq qvar,GEq fun,GEq farg,GEq lvar)
+         => Eq (TestExpr var qvar fun farg lvar tp) where
   (==) (TestExpr x) (TestExpr y) = x==y
