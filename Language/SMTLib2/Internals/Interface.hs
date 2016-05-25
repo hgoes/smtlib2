@@ -3,7 +3,7 @@ module Language.SMTLib2.Internals.Interface
         -- * Expressions
         pattern Var,
         -- ** Constants
-        SMTType(),pattern ConstBool,pattern ConstInt,pattern ConstReal,pattern ConstBV,
+        pattern ConstBool,pattern ConstInt,pattern ConstReal,pattern ConstBV,
         constant,asConstant,true,false,cbool,cint,creal,cbv,cdt,
         -- ** Functions
         pattern Fun,app,fun,
@@ -62,7 +62,6 @@ import Language.SMTLib2.Internals.Embed
 
 import Data.Constraint
 import Data.Functor.Identity
-import Data.Ratio
 
 -- Helper classes
 
@@ -383,34 +382,6 @@ getBW :: GetType e => e (BitVecType bw) -> Natural bw
 getBW e = case getType e of
   BitVecRepr bw -> bw
 
-class SMTType t where
-  type SMTReprType t :: Type
-  toSMTConst :: t -> Value (SMTReprType t)
-  fromSMTConst :: Value (SMTReprType t) -> t
-
-instance SMTType Bool where
-  type SMTReprType Bool = BoolType
-  toSMTConst = BoolValue
-  fromSMTConst (BoolValue x) = x
-
-instance SMTType Integer where
-  type SMTReprType Integer = IntType
-  toSMTConst = IntValue
-  fromSMTConst (IntValue x) = x
-
-instance SMTType (Ratio Integer) where
-  type SMTReprType (Ratio Integer) = RealType
-  toSMTConst = RealValue
-  fromSMTConst (RealValue x) = x
-
-data BitVec bw = BitVec { bitVecValue :: Integer
-                        , bitVecWidth :: Natural bw } deriving (Eq,Ord,Show)
-
-instance SMTType (BitVec bw) where
-  type SMTReprType (BitVec bw) = BitVecType bw
-  toSMTConst (BitVec val sz) = BitVecValue val sz
-  fromSMTConst (BitVecValue val sz) = BitVec val sz
-
 {- XXX: This doesn't work in 7.10. Test it when 8.0 is out.
 
 pattern Const :: (SMTType ctp,rtp ~ (SMTReprType ctp)) => ctp
@@ -421,8 +392,18 @@ pattern Const v <- E.Const (fromSMTConst -> v) where
 --constant :: SMTType tp => tp -> Expression v qv fun fv lv e (SMTReprType tp)
 --constant x = E.Const (toSMTConst x)
 
-constant :: (Embed m e,SMTType tp) => tp -> m (e (SMTReprType tp))
-constant x = embed $ E.Const (toSMTConst x)
+-- | Create a constant, for example an integer:
+--
+--   Example:
+-- 
+--   @
+-- do
+--   x <- declareVar int
+--   -- x is greater than 5
+--   assert $ x .>. constant (IntValue 5)
+--   @
+constant :: (Embed m e) => Value tp -> m (e tp)
+constant x = embed $ E.Const x
 
 -- | Create a boolean constant expression.
 cbool :: Embed m e => Bool -> m (e BoolType)
@@ -454,8 +435,8 @@ cdt :: (Embed m e,IsDatatype t) => t Value -> m (e (DataType t))
 cdt v = case constrGet v of
   ConApp con args -> embed $ E.Const (ConstrValue con args)
 
-asConstant :: SMTType tp => Expression v qv fun fv lv e (SMTReprType tp) -> Maybe tp
-asConstant (E.Const v) = Just $ fromSMTConst v
+asConstant :: Expression v qv fun fv lv e tp -> Maybe (Value tp)
+asConstant (E.Const v) = Just v
 asConstant _ = Nothing
 
 MK_SIG((tp ~ rtp),(),Var,(v tp),Expression v qv fun fv lv e rtp)

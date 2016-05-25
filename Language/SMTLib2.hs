@@ -131,7 +131,7 @@ import Language.SMTLib2.Internals.Monad
 import qualified Language.SMTLib2.Internals.Expression as E
 import qualified Language.SMTLib2.Internals.Proof as P
 import qualified Language.SMTLib2.Internals.Backend as B
-import Language.SMTLib2.Internals.Interface hiding (constant)
+import Language.SMTLib2.Internals.Interface
 import Language.SMTLib2.Strategy
 
 import Control.Monad.State.Strict
@@ -353,19 +353,6 @@ defineFunNamed name tps f = do
   args' <- List.mapM (embedSMT . B.toBackend . E.FVar) args
   res <- embedM $ f args'
   embedSMT $ B.defineFun (Just name) args res
-
--- | Create a constant, for example an integer:
---
---   Example:
--- 
---   @
--- do
---   x <- declareVar int
---   -- x is greater than 5
---   assert $ x .>. constant (IntValueC 5)
---   @
-constant :: (B.Backend b) => Value t -> SMT b (B.Expr b t)
-constant v = embedSMT $ B.toBackend (E.Const v)
 
 -- | After a `checkSat` query that returned 'Unsat', we can ask the SMT solver
 --   for a subset of the assertions that are enough to make the specified
