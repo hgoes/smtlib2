@@ -415,6 +415,9 @@ instance GCompare Value where
     GLT -> GLT
     GGT -> GGT
 
+instance Ord (Value t) where
+  compare = defaultCompare
+
 instance GEq Repr where
   geq BoolRepr BoolRepr = Just Refl
   geq IntRepr IntRepr = Just Refl
