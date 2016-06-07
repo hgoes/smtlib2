@@ -68,7 +68,7 @@ data Function (fun :: ([Type],Type) -> *) (sig :: ([Type],Type)) where
   Constructor :: IsDatatype dt => Constr dt sig
               -> Function fun '(sig,DataType dt)
   Test :: IsDatatype dt => Constr dt sig -> Function fun '( '[DataType dt],BoolType)
-  Field :: IsDatatype dt => Type.Field dt t -> Function fun '( '[DataType dt],t)
+  Field :: IsDatatype dt => Type.Field dt sig t -> Function fun '( '[DataType dt],t)
   Divisible :: Integer -> Function fun '( '[IntType],BoolType)
 
 data AnyFunction (fun :: ([Type],Type) -> *) where
@@ -235,9 +235,10 @@ functionType _ (ConstArray idx el) = return (el ::: Nil,ArrayRepr idx el)
 functionType _ (Concat bw1 bw2) = return (BitVecRepr bw1 ::: BitVecRepr bw2 ::: Nil,
                                           BitVecRepr (naturalAdd bw1 bw2))
 functionType _ (Extract bw start len) = return (BitVecRepr bw ::: Nil,BitVecRepr len)
-functionType _ (Constructor (con :: Constr dt sig)) = return (constrSig con,DataRepr (Proxy::Proxy dt))
-functionType _ (Test (con :: Constr dt sig)) = return (DataRepr (Proxy::Proxy dt) ::: Nil,BoolRepr)
-functionType _ (Field (field :: Type.Field dt tp)) = return (DataRepr (Proxy::Proxy dt) ::: Nil,fieldType field)
+functionType _ (Constructor con) = return (constrSig con,DataRepr (constrDatatype con))
+functionType _ (Test con) = return (DataRepr (constrDatatype con) ::: Nil,BoolRepr)
+functionType _ (Field field)
+  = return (DataRepr (constrDatatype $ fieldConstr field) ::: Nil,fieldType field)
 functionType _ (Divisible _) = return (IntRepr ::: Nil,BoolRepr)
 
 expressionType :: (Monad m,Functor m)
@@ -808,7 +809,7 @@ instance GEq fun => GEq (Function fun) where
     Refl <- geq len1 len2
     return Refl
   geq (Constructor (c1 :: Constr dt1 sig1)) (Constructor (c2 :: Constr dt2 sig2)) = do
-    Refl <- eqT :: Maybe (dt1 :~: dt2)
+    Refl <- eqT :: Maybe (Datatype dt1 :~: Datatype dt2)
     Refl <- geq c1 c2
     return Refl
   geq (Test c1) (Test c2) = do

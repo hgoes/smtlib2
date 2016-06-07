@@ -980,7 +980,7 @@ is e con = do
 {-# INLINEABLE is #-}
 
 (.#.) :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e (DataType dt),IsDatatype dt)
-      => a -> Field dt tp -> m (e tp)
+      => a -> Field dt sig tp -> m (e tp)
 (.#.) e f = do
   re <- embedM e
   embed $ E.App (E.Field f) (re ::: Nil)

@@ -4,7 +4,6 @@ import Language.SMTLib2.Internals.Backend as B
 import Language.SMTLib2.Internals.Type
 
 import Control.Monad.State.Strict
-import Data.Typeable
 import Control.Exception (onException)
 #if !MIN_VERSION_base(4,8,0)
 import Control.Applicative
@@ -75,7 +74,7 @@ embedSMT' act = SMT $ do
   nb <- lift $ act (backend b)
   put (b { backend = nb })
 
-registerDatatype :: (Backend b,IsDatatype dt) => Proxy dt -> SMT b ()
+registerDatatype :: (Backend b,IsDatatype dt) => Datatype dt -> SMT b ()
 registerDatatype pr = do
   st <- get
   if Set.member (datatypeName pr) (datatypes st)

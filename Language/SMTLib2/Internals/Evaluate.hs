@@ -41,7 +41,7 @@ type FunctionEval m fun
 
 type FieldEval m fun
   = forall dt args tp. (IsDatatype dt)
-    => Type.Field dt tp
+    => Type.Field dt args tp
     -> Constr dt args
     -> List Value args
     -> m (EvalResult fun tp)
@@ -337,7 +337,7 @@ evaluateFun _ _ (Test con) ((ValueResult (ConstrValue con' _)) ::: Nil)
   = return $ ValueResult $ BoolValue $ case geq con con' of
   Just Refl -> True
   Nothing -> False
-evaluateFun _ ev (Field f) ((ValueResult (ConstrValue con args)) ::: Nil)
-  = ev f con args
+--evaluateFun _ ev (Field f) ((ValueResult (ConstrValue con args)) ::: Nil)
+--  = ev f con args
 evaluateFun _ _ (Divisible n) ((ValueResult (IntValue i)) ::: Nil)
   = return $ ValueResult $ BoolValue $ i `mod` n == 0

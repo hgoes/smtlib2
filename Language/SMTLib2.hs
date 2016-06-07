@@ -114,7 +114,7 @@ module Language.SMTLib2 (
   modelEvaluate,
   -- * Types
   registerDatatype,
-  Type(..),Repr(..),GetType(..),reifyType,bool,int,real,bitvec,array,
+  Type(..),Repr(..),GetType(..),reifyType,bool,int,real,bitvec,array,dt,
   -- ** Numbers
   Nat(..),Natural(..),nat,natT,reifyNat,
   -- ** Lists

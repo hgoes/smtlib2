@@ -49,7 +49,7 @@ Library
              TemplateHaskell
              QuasiQuotes
              AllowAmbiguousTypes
-  GHC-Options: -fwarn-unused-imports
+  GHC-Options: -fwarn-unused-imports -fprint-explicit-kinds
   Exposed-Modules:
                   Language.SMTLib2.Internals.Backend
                   Language.SMTLib2.Internals.Embed
