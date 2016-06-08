@@ -351,12 +351,12 @@ renderDeclareDatatype names reg dts
   = (renderDeclareDatatype' str,nnames,nreg)
   where
     ((nnames,nreg),str) = mapAccumL mkDt (names,reg) dts
-    mkDt (names,reg) dt'@(AnyDatatype (dt::Proxy dt))
+    mkDt (names,reg) dt'@(AnyDatatype dt)
       = let (name,names1) = genName' names (datatypeName dt)
             reg1 = reg { allDatatypes = Map.insert name dt' (allDatatypes reg)
                        , revDatatypes = Map.insert dt' name (revDatatypes reg) }
             (cons,(names2,reg2)) = runState (List.toList (mkCon dt)
-                                             (constructors::List (Type.Constr dt) (Type.Signature dt))) (names1,reg1)
+                                             (constructors dt)) (names1,reg1)
         in ((names2,reg2),(name,cons))
     mkCon dt con = do
       (names,reg) <- get
@@ -578,10 +578,10 @@ data LispParser (v :: Type -> *) (qv :: Type -> *) (fun :: ([Type],Type) -> *) (
                                -> (forall args res. fun '(args,res) -> a)
                                -> (forall args res. (IsDatatype res) => Type.Constr res args -> a) -- constructor
                                -> (forall args res. (IsDatatype res) => Type.Constr res args -> a) -- constructor test
-                               -> (forall t res. (IsDatatype t) => Type.Field t res -> a)
+                               -> (forall t args res. (IsDatatype t) => Type.Field t args res -> a)
                                -> LispParse a
                , parseDatatype :: forall a. T.Text
-                               -> (forall t. IsDatatype t => Proxy t -> a)
+                               -> (forall t. IsDatatype t => Type.Datatype t -> a)
                                -> LispParse a
                , parseVar :: forall a. Maybe Sort -> T.Text
                           -> (forall t. v t -> LispParse a)
@@ -1130,7 +1130,7 @@ lispToConstrConstant b sym = do
       return (AnyValue (ConstrValue con args'))
     Nothing -> throwE $ "Invalid constructor "++show constr
   where
-    makeList :: IsDatatype dt => List (Type.Field dt) arg -> [L.Lisp] -> LispParse (List Value arg)
+    makeList :: IsDatatype dt => List (Type.Field dt csig) arg -> [L.Lisp] -> LispParse (List Value arg)
     makeList Nil [] = return Nil
     makeList Nil _  = throwE $ "Too many arguments to constructor."
     makeList (p ::: args) (l:ls) = do
@@ -1203,11 +1203,11 @@ exprToLispWith :: (Monad m,GetType qv,GetFunType fun)
                -> (forall (arg :: [Type]) (res :: Type).
                    fun '(arg,res) -> m L.Lisp) -- ^ functions
                -> (forall (arg :: [Type]) (dt :: (Type -> *) -> *). IsDatatype dt =>
-                   Type.Constr dt arg -> m L.Lisp)    -- ^ constructor
+                   Type.Constr dt arg -> m L.Lisp)     -- ^ constructor
                -> (forall (arg :: [Type]) (dt :: (Type -> *) -> *). IsDatatype dt =>
-                   Type.Constr dt arg -> m L.Lisp)    -- ^ constructor tests
-               -> (forall (dt :: (Type -> *) -> *) (res :: Type). IsDatatype dt =>
-                   Type.Field dt res -> m L.Lisp)      -- ^ field accesses
+                   Type.Constr dt arg -> m L.Lisp)     -- ^ constructor tests
+               -> (forall (dt :: (Type -> *) -> *) args (res :: Type). IsDatatype dt =>
+                   Type.Field dt args res -> m L.Lisp) -- ^ field accesses
                -> (forall t.
                    fv t -> m L.Lisp)                                              -- ^ function variables
                -> (forall t.
@@ -1309,8 +1309,8 @@ functionSymbol :: (Monad m,GetFunType fun)
                       Type.Constr dt arg' -> m L.Lisp)    -- ^ How to render constructor applications
                   -> (forall (arg' :: [Type]) (dt :: (Type -> *) -> *). IsDatatype dt =>
                       Type.Constr dt arg' -> m L.Lisp)    -- ^ How to render constructor tests
-                  -> (forall (dt :: (Type -> *) -> *) (res' :: Type). IsDatatype dt =>
-                      Type.Field dt res' -> m L.Lisp)          -- ^ How to render field acceses
+                  -> (forall (dt :: (Type -> *) -> *) arg' (res' :: Type). IsDatatype dt =>
+                      Type.Field dt arg' res' -> m L.Lisp)          -- ^ How to render field acceses
                   -> Function fun '(arg,res) -> m L.Lisp
 functionSymbol f _ _ _ (Expr.Fun g) = f g
 functionSymbol _ _ _ _ (Expr.Eq _ _) = return $ L.Symbol "="
@@ -1390,8 +1390,8 @@ functionSymbolWithSig :: (Monad m,GetFunType fun)
                           Type.Constr dt arg' -> m L.Lisp)    -- ^ How to render constructor applications
                       -> (forall (arg' :: [Type]) (dt :: (Type -> *) -> *). IsDatatype dt =>
                           Type.Constr dt arg' -> m L.Lisp)    -- ^ How to render constructor tests
-                      -> (forall (dt :: (Type -> *) -> *) (res' :: Type). IsDatatype dt =>
-                          Type.Field dt res' -> m L.Lisp)          -- ^ How to render field acceses
+                      -> (forall (dt :: (Type -> *) -> *) arg' (res' :: Type). IsDatatype dt =>
+                          Type.Field dt arg' res' -> m L.Lisp)          -- ^ How to render field acceses
                       -> Function fun '(arg,res) -> m L.Lisp
 functionSymbolWithSig f g h i j = do
   sym <- functionSymbol f g h i j

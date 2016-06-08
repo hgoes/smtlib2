@@ -7,7 +7,6 @@ module Language.SMTLib2.Debug
 
 import Language.SMTLib2.Internals.Backend
 import Language.SMTLib2.Internals.Type hiding (Constr,Field)
-import Language.SMTLib2.Internals.Type.List (List(..))
 import qualified Language.SMTLib2.Internals.Type.List as List
 import Language.SMTLib2.Internals.Expression (Expression(Let),LetBinding(..))
 import Language.SMTLib2.Pipe.Internals
@@ -20,7 +19,6 @@ import Control.Monad (when)
 import Data.Foldable
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Proxy
 import qualified Data.Text as T
 import Data.Functor.Identity
 import Data.Typeable
