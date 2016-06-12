@@ -470,18 +470,10 @@ createSMTPipe :: String -- ^ Path to the binary of the SMT solver
               -> [String] -- ^ Command line arguments to be passed to the SMT solver
               -> IO SMTPipe
 createSMTPipe solver args = do
-  let cmd = CreateProcess { cmdspec = RawCommand solver args
-                          , cwd = Nothing
-                          , env = Nothing
-                          , std_in = CreatePipe
-                          , std_out = CreatePipe
-                          , std_err = Inherit
-                          , close_fds = False
-                          , create_group = True
-#if MIN_VERSION_process(1,2,0)
-                          , delegate_ctlc = False
-#endif
-                          }
+  let cmd = (proc solver args) { std_in = CreatePipe
+                               , std_out = CreatePipe
+                               , std_err = Inherit
+                               , create_group = True }
   (Just hin,Just hout,_,handle) <- createProcess cmd
   return $ SMTPipe { channelIn = hin
                    , channelOut = hout
