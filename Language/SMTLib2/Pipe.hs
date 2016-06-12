@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE ViewPatterns, ImpredicativeTypes #-}
 module Language.SMTLib2.Pipe
        (SMTPipe(),
         FunctionParser(..),
@@ -317,7 +317,7 @@ handleRequest pipe SMTGetProof = do
     Just (Just x) -> return (x,pipe)
     _ -> error $ "smtlib2: Couldn't parse proof "++show res
   where
-    findProof [] = Nothing
+    findProof [] = Nothing :: Maybe L.Lisp
     findProof ((L.List [L.Symbol "proof",proof]):_) = Just proof
     findProof (x:xs) = findProof xs
 handleRequest pipe SMTGetUnsatCore = do
@@ -378,7 +378,7 @@ handleRequest pipe SMTGetModel = do
         Just rtp' -> let argMp = Map.fromList [ (name,(i,sort))
                                               | (i,(name,sort)) <- zip [0..] args' ]
                          funId = case unescapeName (T.unpack fname) of
-                           Nothing -> Nothing
+                           Nothing -> Nothing :: Maybe Integer
                            Just (Right idx) -> Just idx
                            Just (Left name) -> case Map.lookup name (namedVars $ smtState pipe) of
                              Just idx -> Just idx
@@ -1272,7 +1272,7 @@ mapParser = FunctionParser v
               ,fun]) rec dts
 #ifdef SMTLIB2_WITH_CONSTRAINTS
       = case parseFun rec fun rec dts of
-        Nothing -> Nothing
+        Nothing -> Nothing :: Maybe FunctionParser'
         Just (DefinedParser _ ret_sig parse)
           -> Just $ OverloadedParser
             { sortConstraint = const True
