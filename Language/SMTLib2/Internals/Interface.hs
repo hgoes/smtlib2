@@ -152,7 +152,10 @@ matchNumRepr' r = (matchNumRepr r,r)
 
 -- Patterns
 
-#if __GLASGOW_HASKELL__ >= 710
+#if __GLASGOW_HASKELL__ >= 800
+#define SEP ->
+#define MK_SIG(PROV,REQ,NAME,LHS,RHS) pattern NAME :: REQ => PROV => LHS -> RHS
+#elif __GLASGOW_HASKELL__ >= 710
 #define SEP ->
 #define MK_SIG(PROV,REQ,NAME,LHS,RHS) pattern NAME :: PROV => REQ => LHS -> RHS
 #else
@@ -241,16 +244,16 @@ pattern Arith op lst <- App (E.Arith (matchNumRepr' -> (Dict,tp)) op n)
 
 pattern PlusLst lst = ArithLst E.Plus lst
 pattern Plus lst = Arith E.Plus lst
-pattern (:+:) x y = Plus (x ::: y ::: Nil)
+pattern (:+:) x y = Arith E.Plus (x ::: y ::: Nil)
 
 pattern MinusLst lst = ArithLst E.Minus lst
 pattern Minus lst = Arith E.Minus lst
-pattern (:-:) x y = Minus (x ::: y ::: Nil)
+pattern (:-:) x y = Arith E.Minus (x ::: y ::: Nil)
 pattern Neg x = Arith E.Minus (x ::: Nil)
 
 pattern MultLst lst = ArithLst E.Mult lst
 pattern Mult lst = Arith E.Mult lst
-pattern (:*:) x y = Mult (x ::: y ::: Nil)
+pattern (:*:) x y = Arith E.Mult (x ::: y ::: Nil)
 
 pattern Div x y = App (E.ArithIntBin E.Div) (x ::: y ::: Nil)
 pattern Mod x y = App (E.ArithIntBin E.Mod) (x ::: y ::: Nil)
@@ -367,7 +370,6 @@ pattern Mk con args = App (E.Constructor con) args
 pattern Is con e = App (E.Test con) (e ::: Nil)
 pattern (:#:) e field = App (E.Field field) (e ::: Nil)
 
-
 sameApp :: (Same tps,GetType e)
         => (Repr (SameType tps) -> Natural (List.Length tps)
             -> E.Function fun '(AllEq (SameType tps) (List.Length tps),ret))
@@ -381,16 +383,6 @@ sameApp f lst = App (f (sameType $ runIdentity $
 getBW :: GetType e => e (BitVecType bw) -> Natural bw
 getBW e = case getType e of
   BitVecRepr bw -> bw
-
-{- XXX: This doesn't work in 7.10. Test it when 8.0 is out.
-
-pattern Const :: (SMTType ctp,rtp ~ (SMTReprType ctp)) => ctp
-              -> Expression v qv fun fv lv e rtp
-pattern Const v <- E.Const (fromSMTConst -> v) where
-  Const v = E.Const (toSMTConst v) -}
-
---constant :: SMTType tp => tp -> Expression v qv fun fv lv e (SMTReprType tp)
---constant x = E.Const (toSMTConst x)
 
 -- | Create a constant, for example an integer:
 --
