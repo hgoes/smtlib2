@@ -152,7 +152,10 @@ matchNumRepr' r = (matchNumRepr r,r)
 
 -- Patterns
 
-#if __GLASGOW_HASKELL__ >= 710
+#if __GLASGOW_HASKELL__ >= 800
+#define SEP ->
+#define MK_SIG(PROV,REQ,NAME,LHS,RHS) pattern NAME :: REQ => PROV => LHS -> RHS
+#elif __GLASGOW_HASKELL__ >= 710
 #define SEP ->
 #define MK_SIG(PROV,REQ,NAME,LHS,RHS) pattern NAME :: PROV => REQ => LHS -> RHS
 #else
