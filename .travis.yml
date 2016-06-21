@@ -7,16 +7,24 @@ cache:
 
 matrix:
   include:
-    - env: CABALVER=1.22 GHCVER=7.10.3 HAPPYVER=1.19.5
+    - env: CABALVER=1.24 GHCVER=7.10.3 HAPPYVER=1.19.5
       addons:
         apt:
           sources:
             - hvr-ghc
           packages:
             - ghc-7.10.3
-            - cabal-install-1.22
+            - cabal-install-1.24
             - happy-1.19.5
-
+    - env: CABALVER=1.24 GHCVER=8.0.2 HAPPYVER=1.19.5
+      addons:
+        apt:
+          sources:
+            - hvr-ghc
+          packages:
+            - ghc-8.0.2
+            - cabal-install-1.24
+            - happy-1.19.5
 before_install:
   # Download and unpack the stack executable
   - mkdir -p ~/.local/bin
