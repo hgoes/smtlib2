@@ -21,7 +21,7 @@ main = withBackend (createPipe "z3" ["-smt2","-in"]) program >>= print
      @ -}
 module Language.SMTLib2 (
   -- * SMT Monad
-  SMT(),
+  SMT(),Embed(),
   B.Backend(SMTMonad),
   withBackend,
   withBackendExitCleanly,
@@ -132,6 +132,7 @@ import qualified Language.SMTLib2.Internals.Expression as E
 import qualified Language.SMTLib2.Internals.Proof as P
 import qualified Language.SMTLib2.Internals.Backend as B
 import Language.SMTLib2.Internals.Interface
+import Language.SMTLib2.Internals.Embed
 import Language.SMTLib2.Strategy
 
 import Control.Monad.State.Strict
