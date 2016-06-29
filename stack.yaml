@@ -6,6 +6,7 @@ packages:
   - backends/timing
   - extras/emulated-modulus
   - extras/quickcheck
+  - extras/composite
 extra-deps:
   - atto-lisp-0.2.2.2
   - cabal-test-quickcheck-0.1.6
