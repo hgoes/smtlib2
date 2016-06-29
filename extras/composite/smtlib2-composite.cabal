@@ -1,0 +1,44 @@
+Name:           smtlib2-composite
+Version:        1.0
+Author:         Henning Günther <guenther@forsyte.at>
+Maintainer:     guenther@forsyte.at
+Synopsis:       High-level datastructures for SMTLib2
+Stability:      provisional
+Category:       SMT, Formal Methods, Theorem Provers, Symbolic Computation
+License:        GPL-3
+License-File:   LICENSE
+Build-Type:     Simple
+Cabal-Version:  >=1.6
+
+Source-Repository head
+  Type:         git
+  Location:     https://github.com/hguenther/smtlib2.git
+
+Library
+  Build-Depends: smtlib2 >= 1.0 && < 1.1, base, dependent-sum, dependent-map, mtl, containers, template-haskell
+  Exposed-Modules:
+                  Language.SMTLib2.Composite
+                  Language.SMTLib2.Composite.Class
+                  Language.SMTLib2.Composite.Expression
+                  Language.SMTLib2.Composite.Null
+                  Language.SMTLib2.Composite.Singleton
+                  Language.SMTLib2.Composite.List
+                  Language.SMTLib2.Composite.Maybe
+                  Language.SMTLib2.Composite.Either
+                  Language.SMTLib2.Composite.Map
+                  Language.SMTLib2.Composite.Tuple
+                  Language.SMTLib2.Composite.Array
+                  Language.SMTLib2.Composite.Data
+  Extensions:
+    RankNTypes
+    KindSignatures
+    ScopedTypeVariables
+    DataKinds
+    TypeFamilies
+    FlexibleContexts
+    TypeSynonymInstances
+    FlexibleInstances
+    MultiParamTypeClasses
+    EmptyDataDecls
+    GADTs
+    TemplateHaskell
