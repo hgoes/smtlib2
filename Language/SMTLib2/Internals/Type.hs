@@ -717,7 +717,7 @@ instance IsNatural bw => Bits (Value (BitVecType bw)) where
   rotateR (BitVecValue x bw) i = BitVecValue ((rotateR x i) `mod` 2^(naturalToInteger bw)) bw
   popCount (BitVecValue x _) = popCount x
 
-#if MIN_VERSION_BASE(4,7,0)
+#if MIN_VERSION_base(4,7,0)
 instance IsNatural bw => FiniteBits (Value (BitVecType bw)) where
-  finiteBitSize (BitVecValue _ bw) = naturalToInteger bw
+  finiteBitSize (BitVecValue _ bw) = fromInteger $ naturalToInteger bw
 #endif
