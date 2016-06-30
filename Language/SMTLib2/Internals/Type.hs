@@ -17,6 +17,7 @@ import qualified Data.Set as Set
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe
+import Data.Bits
 
 -- | Describes the kind of all SMT types.
 --   It is only used in promoted form, for a concrete representation see 'Repr'.
@@ -584,3 +585,139 @@ getTypes :: GetType e => List e tps -> List Repr tps
 getTypes Nil = Nil
 getTypes (x ::: xs) = getType x ::: getTypes xs
 
+instance Enum (Value BoolType) where
+  succ (BoolValue x) = BoolValue (succ x)
+  pred (BoolValue x) = BoolValue (pred x)
+  toEnum i = BoolValue (toEnum i)
+  fromEnum (BoolValue x) = fromEnum x
+  enumFrom (BoolValue x) = fmap BoolValue (enumFrom x)
+  enumFromThen (BoolValue x) (BoolValue y) = fmap BoolValue (enumFromThen x y)
+  enumFromTo (BoolValue x) (BoolValue y) = fmap BoolValue (enumFromTo x y)
+  enumFromThenTo (BoolValue x) (BoolValue y) (BoolValue z) = fmap BoolValue (enumFromThenTo x y z)
+
+instance Bounded (Value BoolType) where
+  minBound = BoolValue False
+  maxBound = BoolValue True
+
+instance Num (Value IntType) where
+  (+) (IntValue x) (IntValue y) = IntValue (x+y)
+  (-) (IntValue x) (IntValue y) = IntValue (x-y)
+  (*) (IntValue x) (IntValue y) = IntValue (x*y)
+  negate (IntValue x) = IntValue (negate x)
+  abs (IntValue x) = IntValue (abs x)
+  signum (IntValue x) = IntValue (signum x)
+  fromInteger = IntValue
+
+instance Enum (Value IntType) where
+  succ (IntValue x) = IntValue (succ x)
+  pred (IntValue x) = IntValue (pred x)
+  toEnum i = IntValue (toEnum i)
+  fromEnum (IntValue x) = fromEnum x
+  enumFrom (IntValue x) = fmap IntValue (enumFrom x)
+  enumFromThen (IntValue x) (IntValue y) = fmap IntValue (enumFromThen x y)
+  enumFromTo (IntValue x) (IntValue y) = fmap IntValue (enumFromTo x y)
+  enumFromThenTo (IntValue x) (IntValue y) (IntValue z) = fmap IntValue (enumFromThenTo x y z)
+
+instance Real (Value IntType) where
+  toRational (IntValue x) = toRational x
+
+instance Num (Value RealType) where
+  (+) (RealValue x) (RealValue y) = RealValue (x+y)
+  (-) (RealValue x) (RealValue y) = RealValue (x-y)
+  (*) (RealValue x) (RealValue y) = RealValue (x*y)
+  negate (RealValue x) = RealValue (negate x)
+  abs (RealValue x) = RealValue (abs x)
+  signum (RealValue x) = RealValue (signum x)
+  fromInteger = RealValue . fromInteger
+
+instance Real (Value RealType) where
+  toRational (RealValue x) = x
+
+instance Fractional (Value RealType) where
+  (/) (RealValue x) (RealValue y) = RealValue (x/y)
+  recip (RealValue x) = RealValue (recip x)
+  fromRational = RealValue
+
+instance RealFrac (Value RealType) where
+  properFraction (RealValue x) = let (p,q) = properFraction x
+                                 in (p,RealValue q)
+  truncate (RealValue x) = truncate x
+  round (RealValue x) = round x
+  ceiling (RealValue x) = ceiling x
+  floor (RealValue x) = floor x
+
+withBW :: IsNatural bw => (Natural bw -> Value (BitVecType bw)) -> Value (BitVecType bw)
+withBW f = f getNatural
+
+instance IsNatural bw => Num (Value (BitVecType bw)) where
+  (+) (BitVecValue x bw) (BitVecValue y _) = BitVecValue ((x+y) `mod` (2^(naturalToInteger bw))) bw
+  (-) (BitVecValue x bw) (BitVecValue y _) = BitVecValue ((x-y) `mod` (2^(naturalToInteger bw))) bw
+  (*) (BitVecValue x bw) (BitVecValue y _) = BitVecValue ((x*y) `mod` (2^(naturalToInteger bw))) bw
+  negate (BitVecValue x bw) = BitVecValue (if x==0
+                                           then 0
+                                           else 2^(naturalToInteger bw)-x) bw
+  abs = id
+  signum (BitVecValue x bw) = BitVecValue (if x==0 then 0 else 1) bw
+  fromInteger x = withBW $ \bw -> BitVecValue (x `mod` (2^(naturalToInteger bw))) bw
+
+instance IsNatural bw => Enum (Value (BitVecType bw)) where
+  succ (BitVecValue i bw)
+    | i < 2^(naturalToInteger bw) - 1 = BitVecValue (i+1) bw
+    | otherwise = error "Prelude.succ: Maximum value reached for bitvector value."
+  pred (BitVecValue i bw)
+    | i > 0 = BitVecValue (i-1) bw
+    | otherwise = error "Prelude.succ: Minimum value reached for bitvector value."
+  toEnum i = withBW $ \bw -> let i' = toInteger i
+                             in if i >= 0 && i < 2^(naturalToInteger bw)
+                                then BitVecValue i' bw
+                                else error "Prelude.toEnum: argument out of range for bitvector value."
+  fromEnum (BitVecValue i _) = fromInteger i
+  enumFrom (BitVecValue x bw) = [ BitVecValue i bw | i <- [x..2^(naturalToInteger bw)-1] ]
+  enumFromThen (BitVecValue x bw) (BitVecValue y _) = [ BitVecValue i bw | i <- [x,y..2^(naturalToInteger bw)-1] ]
+  enumFromTo (BitVecValue x bw) (BitVecValue y _) = [ BitVecValue i bw | i <- [x..y] ]
+  enumFromThenTo (BitVecValue x bw) (BitVecValue y _) (BitVecValue z _)
+    = [ BitVecValue i bw | i <- [x,y..z] ]
+
+instance IsNatural bw => Bounded (Value (BitVecType bw)) where
+  minBound = withBW $ \bw -> BitVecValue 0 bw
+  maxBound = withBW $ \bw -> BitVecValue (2^(naturalToInteger bw)-1) bw
+
+instance IsNatural bw => Bits (Value (BitVecType bw)) where
+  (.&.) (BitVecValue x bw) (BitVecValue y _) = BitVecValue (x .&. y) bw
+  (.|.) (BitVecValue x bw) (BitVecValue y _) = BitVecValue (x .|. y) bw
+  xor (BitVecValue x bw) (BitVecValue y _)
+    = BitVecValue ((x .|. max) `xor` (y .|. max)) bw
+    where
+      max = bit $ fromInteger $ naturalToInteger bw
+  complement (BitVecValue x bw) = BitVecValue (2^(naturalToInteger bw)-1-x) bw
+  shift (BitVecValue x bw) i = BitVecValue ((x `shift` i) `mod` (2^(naturalToInteger bw))) bw
+  rotate (BitVecValue x bw) i = BitVecValue ((x `rotate` i) `mod` (2^(naturalToInteger bw))) bw
+  zeroBits = withBW $ \bw -> BitVecValue 0 bw
+  bit n = withBW $ \bw -> if toInteger n < naturalToInteger bw && n >= 0
+                          then BitVecValue (bit n) bw
+                          else BitVecValue 0 bw
+  setBit (BitVecValue x bw) i = if toInteger i < naturalToInteger bw && i >= 0
+                                then BitVecValue (setBit x i) bw
+                                else BitVecValue x bw
+  clearBit (BitVecValue x bw) i = if toInteger i < naturalToInteger bw && i >= 0
+                                  then BitVecValue (clearBit x i) bw
+                                  else BitVecValue x bw
+  complementBit (BitVecValue x bw) i = if toInteger i < naturalToInteger bw && i >= 0
+                                       then BitVecValue (complementBit x i) bw
+                                       else BitVecValue x bw
+  testBit (BitVecValue x _) i = testBit x i
+#if MIN_VERSION_base(4,7,0)
+  bitSizeMaybe (BitVecValue _ bw) = Just (fromInteger $ naturalToInteger bw)
+#endif
+  bitSize (BitVecValue _ bw) = fromInteger $ naturalToInteger bw
+  isSigned _ = False
+  shiftL (BitVecValue x bw) i = BitVecValue ((shiftL x i) `mod` 2^(naturalToInteger bw)) bw
+  shiftR (BitVecValue x bw) i = BitVecValue ((shiftR x i) `mod` 2^(naturalToInteger bw)) bw
+  rotateL (BitVecValue x bw) i = BitVecValue ((rotateL x i) `mod` 2^(naturalToInteger bw)) bw
+  rotateR (BitVecValue x bw) i = BitVecValue ((rotateR x i) `mod` 2^(naturalToInteger bw)) bw
+  popCount (BitVecValue x _) = popCount x
+
+#if MIN_VERSION_BASE(4,7,0)
+instance IsNatural bw => FiniteBits (Value (BitVecType bw)) where
+  finiteBitSize (BitVecValue _ bw) = naturalToInteger bw
+#endif

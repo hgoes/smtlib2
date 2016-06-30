@@ -237,3 +237,12 @@ instance GCompare Natural where
 
 instance GShow Natural where
   gshowsPrec = showsPrec
+
+class IsNatural n where
+  getNatural :: Natural n
+
+instance IsNatural Z where
+  getNatural = Zero
+
+instance IsNatural n => IsNatural (S n) where
+  getNatural = Succ getNatural
