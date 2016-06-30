@@ -16,3 +16,11 @@ instance Composite a => Composite (CompMaybe a) where
     nv <- foldExprs f v
     return (CompMaybe (Just nv))
   accessComposite r (CompMaybe (Just v)) = accessComposite r v
+
+instance CompositeExtract a => CompositeExtract (CompMaybe a) where
+  type CompExtract (CompMaybe a) = Maybe (CompExtract a)
+  compExtract f (CompMaybe v) = case v of
+    Nothing -> return Nothing
+    Just c -> do
+      res <- compExtract f c
+      return (Just res)

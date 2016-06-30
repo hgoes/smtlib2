@@ -44,6 +44,14 @@ instance (Composite a,Composite b) => Composite (CompTuple2 a b) where
   revType (_::Proxy (CompTuple2 a b)) (a,_) (RevTuple2_1 r) = revType (Proxy::Proxy a) a r
   revType (_::Proxy (CompTuple2 a b)) (_,b) (RevTuple2_2 r) = revType (Proxy::Proxy b) b r
 
+instance (CompositeExtract a,CompositeExtract b)
+  => CompositeExtract (CompTuple2 a b) where
+  type CompExtract (CompTuple2 a b) = (CompExtract a,CompExtract b)
+  compExtract f (CompTuple2 a b) = do
+    va <- compExtract f a
+    vb <- compExtract f b
+    return (va,vb)
+
 instance (Composite a,Composite b,Composite c) => Composite (CompTuple3 a b c) where
   type CompDescr (CompTuple3 a b c) = (CompDescr a,CompDescr b,CompDescr c)
   type RevComp (CompTuple3 a b c) = RevTuple3 a b c
@@ -64,6 +72,15 @@ instance (Composite a,Composite b,Composite c) => Composite (CompTuple3 a b c) w
   revType (_::Proxy (CompTuple3 a b c)) (a,_,_) (RevTuple3_1 r) = revType (Proxy::Proxy a) a r
   revType (_::Proxy (CompTuple3 a b c)) (_,b,_) (RevTuple3_2 r) = revType (Proxy::Proxy b) b r
   revType (_::Proxy (CompTuple3 a b c)) (_,_,c) (RevTuple3_3 r) = revType (Proxy::Proxy c) c r
+
+instance (CompositeExtract a,CompositeExtract b,CompositeExtract c)
+  => CompositeExtract (CompTuple3 a b c) where
+  type CompExtract (CompTuple3 a b c) = (CompExtract a,CompExtract b,CompExtract c)
+  compExtract f (CompTuple3 a b c) = do
+    va <- compExtract f a
+    vb <- compExtract f b
+    vc <- compExtract f c
+    return (va,vb,vc)
 
 instance (Composite a,Composite b) => Show (RevTuple2 a b tp) where
   showsPrec p (RevTuple2_1 r) = showParen (p>10) $

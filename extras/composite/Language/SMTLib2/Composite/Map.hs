@@ -38,6 +38,10 @@ instance (Show k,Ord k,Composite a) => Composite (CompMap k a) where
   accessComposite (RevMap k r) (CompMap mp) = case Map.lookup k mp of
     Just el -> accessComposite r el
 
+instance (Show k,Ord k,CompositeExtract a) => CompositeExtract (CompMap k a) where
+  type CompExtract (CompMap k a) = Map k (CompExtract a)
+  compExtract f (CompMap mp) = mapM (compExtract f) mp
+
 instance (Show k,Composite a) => Show (RevMap k a tp) where
   showsPrec p (RevMap k r)
     = showParen (p>10) $ showString "RevMap " . showsPrec 11 k . showChar ' ' . gshowsPrec 11 r

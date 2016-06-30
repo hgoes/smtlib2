@@ -26,6 +26,17 @@ instance (Composite a,Composite b) => Composite (CompEither a b) where
   accessComposite (RevLeft r) (CompEither (Left x)) = accessComposite r x
   accessComposite (RevRight r) (CompEither (Right x)) = accessComposite r x
 
+instance (CompositeExtract a,CompositeExtract b)
+  => CompositeExtract (CompEither a b) where
+  type CompExtract (CompEither a b) = Either (CompExtract a) (CompExtract b)
+  compExtract f (CompEither v) = case v of
+    Left l -> do
+      res <- compExtract f l
+      return (Left res)
+    Right r -> do
+      res <- compExtract f r
+      return (Right res)
+
 instance (Composite a,Composite b) => Show (RevEither a b tp) where
   showsPrec p (RevLeft r) = showParen (p>10) $
     showString "left " . gshowsPrec 11 r

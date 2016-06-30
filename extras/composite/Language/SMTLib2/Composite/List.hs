@@ -21,6 +21,10 @@ instance Composite a => Composite (CompList a) where
   accessComposite (RevList n r) (CompList lst)
     = accessComposite r (genericIndex lst n)
 
+instance CompositeExtract a => CompositeExtract (CompList a) where
+  type CompExtract (CompList a) = [CompExtract a]
+  compExtract f (CompList xs) = mapM (compExtract f) xs
+
 instance Composite a => Show (RevList a tp) where
   showsPrec p (RevList n r)
     = showParen (p>10) $ showString "RevList " .

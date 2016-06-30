@@ -19,5 +19,9 @@ instance Composite (Comp tp) where
   createComposite f tp = fmap Comp (f tp Refl)
   revType _ tp Refl = tp
 
+instance CompositeExtract (Comp tp) where
+  type CompExtract (Comp tp) = Value tp
+  compExtract f (Comp e) = f e
+
 instance GShow e => Show (Comp tp e) where
   showsPrec p (Comp e) = gshowsPrec p e

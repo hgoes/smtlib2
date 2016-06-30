@@ -18,6 +18,10 @@ instance Ord val => Composite (NoComp val) where
   accessComposite _ _ = error "accessComposite called for NoComp"
   createComposite _ _ = return NoComp
 
+instance Ord val => CompositeExtract (NoComp val) where
+  type CompExtract (NoComp val) = ()
+  compExtract _ _ = return ()
+
 instance GShow NoRev where
   gshowsPrec _ _ = error "gshowsPrec called for NoRev"
 instance GEq NoRev where

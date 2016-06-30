@@ -1,5 +1,6 @@
 module Language.SMTLib2.Composite
   (Composite(..),
+   CompositeExtract(..),
    -- * Expressions
    CompositeExpr(..),
    createRevComp,
@@ -48,3 +49,8 @@ import Language.SMTLib2.Composite.List
 import Language.SMTLib2.Composite.Map
 import Language.SMTLib2.Composite.Array
 import Language.SMTLib2.Composite.Data
+
+import Language.SMTLib2 hiding (select,store)
+
+extract :: (Backend b,CompositeExtract c) => c (Expr b) -> SMT b (CompExtract c)
+extract = compExtract getValue
