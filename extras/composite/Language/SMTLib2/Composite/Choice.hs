@@ -1,5 +1,12 @@
 {-# LANGUAGE DataKinds,GADTs,TypeFamilies,ExistentialQuantification,ScopedTypeVariables,RankNTypes #-}
-module Language.SMTLib2.Composite.Choice where
+module Language.SMTLib2.Composite.Choice
+  (Choice(),
+   -- * Encodings
+   ChoiceEncoding(),
+   boolEncoding,intEncoding,bvEncoding,dtEncoding,
+   -- * Functions
+   selectChoice,change,isChosen,initial,choiceITE,choiceInvariant
+  ) where
 
 import Language.SMTLib2.Composite.Class
 import Language.SMTLib2
@@ -147,16 +154,24 @@ selectedValue (ChoiceValue mp v) = case [ k | (k,v') <- Map.toList mp, v==v' ] o
   [x] -> x
   _ -> error "Choice: More than one value selected."
 
-select :: (Ord a,Embed m e,GetType e) => a -> Choice a e -> m (Choice a e)
-select x (ChoiceBool mp) = do
+selectChoice :: (Ord a,Embed m e,GetType e) => a -> Choice a e -> m (Choice a e)
+selectChoice x (ChoiceBool mp) = do
   t <- true
   nmp <- sequence $ fmap (const false) mp
   return $ ChoiceBool $ Map.insert x t nmp
-select x (ChoiceValue mp v) = case Map.lookup x mp of
+selectChoice x (ChoiceValue mp v) = case Map.lookup x mp of
   Just repr -> do
     c <- constant repr
     return (ChoiceValue mp c)
-  Nothing -> error "select: No representative for value."
+  Nothing -> error "selectChoice: No representative for value."
+
+isChosen :: (Ord a,Embed m e,GetType e) => a -> Choice a e -> m (e BoolType)
+isChosen v (ChoiceBool mp) = case Map.lookup v mp of
+  Just cond -> return cond
+  Nothing -> error "Language.SMTLib2.Composite.Choice.isChosen: No representative for value."
+isChosen v (ChoiceValue mp e) = case Map.lookup v mp of
+  Just val -> e .==. constant val
+  Nothing -> error "Language.SMTLib2.Composite.Choice.isChosen: No representative for value."
 
 change :: (Ord a,Embed m e,GetType e) => (a -> a) -> Choice a e -> m (Choice a e)
 change f (ChoiceBool mp) = do
