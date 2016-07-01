@@ -28,6 +28,7 @@ Library
                   Language.SMTLib2.Composite.Map
                   Language.SMTLib2.Composite.Tuple
                   Language.SMTLib2.Composite.Array
+                  Language.SMTLib2.Composite.Array.Bounded
                   Language.SMTLib2.Composite.Data
                   Language.SMTLib2.Composite.Choice
   Extensions:
@@ -43,3 +44,4 @@ Library
     EmptyDataDecls
     GADTs
     TemplateHaskell
+    StandaloneDeriving
