@@ -31,6 +31,7 @@ Library
                   Language.SMTLib2.Composite.Array.Bounded
                   Language.SMTLib2.Composite.Data
                   Language.SMTLib2.Composite.Choice
+                  Language.SMTLib2.Composite.Ranged
   Extensions:
     RankNTypes
     KindSignatures
