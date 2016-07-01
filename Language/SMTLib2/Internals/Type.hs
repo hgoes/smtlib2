@@ -585,6 +585,28 @@ getTypes :: GetType e => List e tps -> List Repr tps
 getTypes Nil = Nil
 getTypes (x ::: xs) = getType x ::: getTypes xs
 
+-- | Determine the number of elements a type contains.
+--   'Nothing' means the type has infinite elements.
+typeSize :: Repr tp -> Maybe Integer
+typeSize BoolRepr = Just 2
+typeSize IntRepr = Nothing
+typeSize RealRepr = Nothing
+typeSize (BitVecRepr bw) = Just $ 2^(naturalToInteger bw)
+typeSize (ArrayRepr idx el) = do
+  idxSz <- List.toList typeSize idx
+  elSz <- typeSize el
+  return $ product (elSz:idxSz)
+typeSize (DataRepr dt) = do
+  conSz <- List.toList constrSize (constructors dt)
+  return $ sum conSz
+  where
+    constrSize :: IsDatatype dt => Constr dt sig -> Maybe Integer
+    constrSize con = do
+      fieldSz <- List.toList fieldSize (constrFields con)
+      return $ product fieldSz
+    fieldSize :: IsDatatype dt => Field dt csig tp -> Maybe Integer
+    fieldSize field = typeSize $ fieldType field
+
 instance Enum (Value BoolType) where
   succ (BoolValue x) = BoolValue (succ x)
   pred (BoolValue x) = BoolValue (pred x)
