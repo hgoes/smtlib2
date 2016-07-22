@@ -16,13 +16,15 @@ data RevArrayBounded idx c tp where
   RevLowerBound :: RevArrayBounded idx c idx
   RevUpperBound :: RevArrayBounded idx c idx
 
-data CompArrayBoundedDescr idx c = CompArrayBoundedDescr { boundedArrayDescr :: CompDescr (CompArray '[idx] c)
-                                                         , constantLowerBound :: Maybe (Value idx)
-                                                         , constantUpperBound :: Maybe (Value idx)
-                                                         }
+data CompArrayBoundedDescr idx c
+  = CompArrayBoundedDescr { boundedArrayDescr :: CompDescr (CompArray '[idx] c)
+                          , constantLowerBound :: Maybe (Value idx)
+                          , constantUpperBound :: Maybe (Value idx)
+                          }
 
 deriving instance Composite c => Eq (CompArrayBoundedDescr idx c)
 deriving instance Composite c => Ord (CompArrayBoundedDescr idx c)
+deriving instance Show (CompDescr c) => Show (CompArrayBoundedDescr idx c)
 
 instance Composite c => Composite (CompArrayBounded idx c) where
   type CompDescr (CompArrayBounded idx c) = CompArrayBoundedDescr idx c
