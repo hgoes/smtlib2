@@ -29,6 +29,7 @@ Library
                   Language.SMTLib2.Composite.Tuple
                   Language.SMTLib2.Composite.Array
                   Language.SMTLib2.Composite.Array.Bounded
+                  Language.SMTLib2.Composite.Array.Composite
                   Language.SMTLib2.Composite.Data
                   Language.SMTLib2.Composite.Choice
                   Language.SMTLib2.Composite.Ranged
