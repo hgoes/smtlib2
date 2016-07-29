@@ -4,6 +4,7 @@ module Language.SMTLib2.Composite.Ranged
   (Ranged(..),
    -- * Range
    Range(..),
+   rangeType,
    unionRange,
    rangeFixpoint,
    isConst,
@@ -21,10 +22,13 @@ module Language.SMTLib2.Composite.Ranged
 import Language.SMTLib2.Composite.Class
 import Language.SMTLib2
 import Data.GADT.Compare
+import Data.List (sortBy)
+import Data.Ord (comparing)
 
 newtype Ranged (tp :: Type) e = Ranged { getRanged :: e tp }
 
--- | Invariant: The range elements are sorted ascending.
+-- | The boolean states if the range starts included (True) or not (False).
+--   Invariant: The range elements are sorted ascending.
 type IntRange = (Bool,[Integer])
 
 -- | Describes the allowed values that an expression may have.
@@ -268,3 +272,151 @@ intersectionIntRange' (xl:xu:xs) (yl:yu:ys)
                   EQ -> intersectionIntRange' xs ys
                   LT -> intersectionIntRange' xs (xu:yu:ys)
                   GT -> intersectionIntRange' (yu:xu:xs) ys
+
+rangeType :: Range tp -> Repr tp
+rangeType (BoolRange _ _) = bool
+rangeType (IntRange _) = int
+rangeType (BitVecRange bw _ _) = bitvec bw
+
+-- To support easier manipulation of ranges, we introduce the Bounds type:
+
+--type Bounds = Maybe (Maybe Integer,[(Integer,Integer)],Maybe Integer)
+
+data InfInteger = NegInfinity | NormalInt Integer | PosInfinity deriving (Eq,Ord,Show)
+
+type Bounds = [(InfInteger,InfInteger)]
+
+instance Num InfInteger where
+  fromInteger = NormalInt
+  (+) (NormalInt x) (NormalInt y) = NormalInt $ x+y
+  (+) NegInfinity PosInfinity = error "Adding positive and negative infinity undefined."
+  (+) PosInfinity NegInfinity = error "Adding positive and negative infinity undefined."
+  (+) PosInfinity _ = PosInfinity
+  (+) NegInfinity _ = NegInfinity
+  (+) _ PosInfinity = PosInfinity
+  (+) _ NegInfinity = NegInfinity
+  (-) (NormalInt x) (NormalInt y) = NormalInt $ x-y
+  (-) NegInfinity NegInfinity = error "Subtracting negative infinity from negative infinity undefined."
+  (-) PosInfinity PosInfinity = error "Subtracting positive infinity from positity infinity undefined."
+  (-) NegInfinity _ = NegInfinity
+  (-) PosInfinity _ = PosInfinity
+  (-) _ NegInfinity = PosInfinity
+  (-) _ PosInfinity = NegInfinity
+  (*) (NormalInt x) (NormalInt y) = NormalInt $ x*y
+  (*) (NormalInt 0) _ = NormalInt 0
+  (*) _ (NormalInt 0) = NormalInt 0
+  (*) PosInfinity y = if y > NormalInt 0
+                      then PosInfinity
+                      else NegInfinity
+  (*) x PosInfinity = if x > NormalInt 0
+                      then PosInfinity
+                      else NegInfinity
+  (*) NegInfinity y = if y < NormalInt 0
+                      then PosInfinity
+                      else NegInfinity
+  (*) x NegInfinity = if x < NormalInt 0
+                      then PosInfinity
+                      else NegInfinity
+  negate (NormalInt x) = NormalInt $ negate x
+  negate NegInfinity = PosInfinity
+  negate PosInfinity = NegInfinity
+  abs (NormalInt x) = NormalInt $ abs x
+  abs _ = PosInfinity
+  signum (NormalInt x) = NormalInt $ signum x
+  signum PosInfinity = NormalInt 1
+  signum NegInfinity = NormalInt (-1)
+
+-- | Convert an int range to a (canonicalized) bounds.
+toBounds :: IntRange -> Bounds
+toBounds (True,[]) = [(NegInfinity,PosInfinity)]
+toBounds (True,x:xs) = (NegInfinity,NormalInt x):toBounds' xs
+toBounds (False,xs) = toBounds' xs
+
+toBounds' :: [Integer] -> Bounds
+toBounds' [] = []
+toBounds' [lower] = [(NormalInt lower,PosInfinity)]
+toBounds' (lower:upper:xs) = (NormalInt lower,NormalInt upper):toBounds' xs
+
+-- | Convert bounds to an int range.
+fromBounds :: Bounds -> IntRange
+fromBounds xs = case mergeBounds $ sortBy (comparing fst) xs of
+  [(NegInfinity,PosInfinity)] -> (True,[])
+  (NegInfinity,NormalInt upper):rest -> (True,upper:fromBounds' rest)
+  ys -> (False,fromBounds' ys)
+  where
+    mergeBounds :: Bounds -> Bounds
+    mergeBounds [] = []
+    mergeBounds [x] = [x]
+    mergeBounds ((lower1,upper1):(lower2,upper2):rest)
+      | lower1 > upper1   = mergeBounds ((lower2,upper2):rest)
+      | lower2 > upper2   = mergeBounds ((lower1,upper1):rest)
+      | upper1 < lower2-1 = (lower1,upper1):mergeBounds ((lower2,upper2):rest)
+      | otherwise         = mergeBounds ((lower1,max upper1 upper2):rest)
+
+    fromBounds' :: Bounds -> [Integer]
+    fromBounds' [] = []
+    fromBounds' [(NormalInt lower,PosInfinity)] = [lower]
+    fromBounds' ((NormalInt lower,NormalInt upper):rest)
+      = lower:upper:fromBounds' rest
+
+addBounds :: Bounds -> Bounds -> Bounds
+addBounds xs ys = [ (l1+l2,u1+u2)
+                  | (l1,u1) <- xs, (l2,u2) <- ys ]
+
+subBounds :: Bounds -> Bounds -> Bounds
+subBounds xs ys = [ (l1-u2,u1-l2)
+                  | (l1,u1) <- xs, (l2,u2) <- ys ]
+
+multBounds :: Bounds -> Bounds -> Bounds
+multBounds xs ys = [ (minimum mults,maximum mults)
+                   | (l1,u1) <- xs, (l2,u2) <- ys
+                   , let mults = [ x1*x2 | x1 <- [l1,u1], x2 <- [l2,u2] ] ]
+
+negBounds :: Bounds -> Bounds
+negBounds xs = [ (-u,-l) | (l,u) <- xs ]
+
+absBounds :: Bounds -> Bounds
+absBounds = fmap f
+  where
+    f (l,u) = if l < 0
+              then if u <= 0
+                   then (-u,-l)
+                   else (0,max u (-l))
+              else (l,u)
+
+signumBounds :: Bounds -> Bounds
+signumBounds xs = if neg
+                  then if zero
+                       then if pos
+                            then [(NormalInt (-1),NormalInt 1)]
+                            else [(NormalInt (-1),NormalInt 0)]
+                       else if pos
+                            then [(NormalInt (-1),NormalInt (-1)),
+                                  (NormalInt 1,NormalInt 1)]
+                            else [(NormalInt (-1),NormalInt (-1))]
+                  else if zero
+                       then if pos
+                            then [(NormalInt 0,NormalInt 1)]
+                            else [(NormalInt 0,NormalInt 0)]
+                       else if pos
+                            then [(NormalInt 1,NormalInt 1)]
+                            else []
+  where
+    neg = not $ null [ l | (l,_) <- xs, l < 0 ]
+    zero = not $ null [ l | (l,u) <- xs, l <= 0, u >= 0 ]
+    pos = not $ null [ u | (_,u) <- xs, u > 0 ]
+
+instance Num (Range IntType) where
+  fromInteger x = IntRange (False,[x,x])
+  (+) (IntRange r1) (IntRange r2)
+    = IntRange $ fromBounds $ addBounds (toBounds r1) (toBounds r2)
+  (-) (IntRange r1) (IntRange r2)
+    = IntRange $ fromBounds $ subBounds (toBounds r1) (toBounds r2)
+  (*) (IntRange r1) (IntRange r2)
+    = IntRange $ fromBounds $ multBounds (toBounds r1) (toBounds r2)
+  negate (IntRange r)
+    = IntRange $ fromBounds $ negBounds $ toBounds r
+  abs (IntRange r)
+    = IntRange $ fromBounds $ absBounds $ toBounds r
+  signum (IntRange r)
+    = IntRange $ fromBounds $ signumBounds $ toBounds r
