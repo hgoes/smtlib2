@@ -616,7 +616,8 @@ abs' x = do
   embed $ Abs x'
 {-# INLINEABLE abs' #-}
 
-instance (Embed m e) => Num (m (e IntType)) where
+-- TODO: The following instances cause overlap:
+{-instance (Embed m e) => Num (m (e IntType)) where
   fromInteger x = embed $ E.Const $ smtFromInteger x
   (+) x y = do
     x' <- x
@@ -666,7 +667,7 @@ instance (Embed m e) => Num (m (e RealType)) where
     ltZero <- embed $ x' :<: zero
     gtZero <- embed $ x' :>: zero
     cond1 <- embed $ App (E.ITE real) (ltZero ::: negOne ::: zero ::: Nil)
-    embed $ App (E.ITE real) (gtZero ::: one ::: cond1 ::: Nil)
+    embed $ App (E.ITE real) (gtZero ::: one ::: cond1 ::: Nil) -}
 
 rem',div',mod' :: (Embed m e,HasMonad a,HasMonad b,
                    MatchMonad a m,MatchMonad b m,
@@ -701,12 +702,13 @@ infixl 7 `div'`, `rem'`, `mod'`
 
 infixl 7 ./.
 
-instance Embed m e => Fractional (m (e RealType)) where
+-- TODO: The following instances cause overlap:
+{- instance Embed m e => Fractional (m (e RealType)) where
   (/) x y = do
     x' <- x
     y' <- y
     embed $ x' :/: y'
-  fromRational r = embed $ E.Const $ RealValue r
+  fromRational r = embed $ E.Const $ RealValue r -}
 
 not' :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e BoolType)
      => a -> m (e BoolType)
