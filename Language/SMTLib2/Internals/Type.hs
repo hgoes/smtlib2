@@ -682,13 +682,23 @@ instance IsNatural bw => Num (Value (BitVecType bw)) where
   signum (BitVecValue x bw) = BitVecValue (if x==0 then 0 else 1) bw
   fromInteger x = withBW $ \bw -> BitVecValue (x `mod` (2^(naturalToInteger bw))) bw
 
+-- | Get the smallest bitvector value that is bigger than the given one.
+--   Also known as the successor.
+bvSucc :: Value (BitVecType bw) -> Value (BitVecType bw)
+bvSucc (BitVecValue i bw)
+  | i < 2^(naturalToInteger bw) - 1 = BitVecValue (i+1) bw
+  | otherwise = error "bvSucc: tried to take `succ' of maxBound"
+
+-- | Get the largest bitvector value that is smaller than the given one.
+--   Also known as the predecessor.
+bvPred :: Value (BitVecType bw) -> Value (BitVecType bw)
+bvPred (BitVecValue i bw)
+  | i > 0 = BitVecValue (i-1) bw
+  | otherwise = error "bvPred: tried to take `pred' of minBound"
+
 instance IsNatural bw => Enum (Value (BitVecType bw)) where
-  succ (BitVecValue i bw)
-    | i < 2^(naturalToInteger bw) - 1 = BitVecValue (i+1) bw
-    | otherwise = error "Prelude.succ: Maximum value reached for bitvector value."
-  pred (BitVecValue i bw)
-    | i > 0 = BitVecValue (i-1) bw
-    | otherwise = error "Prelude.succ: Minimum value reached for bitvector value."
+  succ = bvSucc
+  pred = bvPred
   toEnum i = withBW $ \bw -> let i' = toInteger i
                              in if i >= 0 && i < 2^(naturalToInteger bw)
                                 then BitVecValue i' bw
