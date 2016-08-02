@@ -643,6 +643,19 @@ instance Enum (Value IntType) where
 instance Real (Value IntType) where
   toRational (IntValue x) = toRational x
 
+instance Integral (Value IntType) where
+  quot (IntValue x) (IntValue y) = IntValue $ quot x y
+  rem (IntValue x) (IntValue y) = IntValue $ rem x y
+  div (IntValue x) (IntValue y) = IntValue $ div x y
+  mod (IntValue x) (IntValue y) = IntValue $ mod x y
+  quotRem (IntValue x) (IntValue y) = (IntValue q,IntValue r)
+    where
+      (q,r) = quotRem x y
+  divMod (IntValue x) (IntValue y) = (IntValue d,IntValue m)
+    where
+      (d,m) = divMod x y
+  toInteger (IntValue x) = x
+
 instance Num (Value RealType) where
   (+) (RealValue x) (RealValue y) = RealValue (x+y)
   (-) (RealValue x) (RealValue y) = RealValue (x-y)
