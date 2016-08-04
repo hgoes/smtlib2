@@ -5,7 +5,7 @@ module Language.SMTLib2.Composite.Choice
    ChoiceEncoding(),
    boolEncoding,intEncoding,bvEncoding,dtEncoding,
    -- * Functions
-   selectChoice,change,isChosen,initial,choiceITE,choiceInvariant
+   unionEncoding,selectChoice,change,isChosen,initial,choiceITE,choiceInvariant
   ) where
 
 import Language.SMTLib2.Composite.Class
@@ -20,7 +20,8 @@ import qualified Data.Map as Map
 import Control.Monad.Identity
 import Data.Typeable
 
-data Choice a e = ChoiceBool (Map a (e BoolType))
+data Choice a e = ChoiceSingleton a
+                | ChoiceBool (Map a (e BoolType))
                 | forall t. ChoiceValue (Map a (Value t)) (e t)
 
 data ChoiceEncoding a = BooleanEncoding (Map a ())
@@ -121,8 +122,11 @@ instance Ord a => GCompare (RevChoice a) where
 instance (Show a,Ord a) => Composite (Choice a) where
   type CompDescr (Choice a) = ChoiceEncoding a
   type RevComp (Choice a) = RevChoice a
-  compositeType (BooleanEncoding mp) = ChoiceBool (fmap (const bool) mp)
+  compositeType (BooleanEncoding mp) = case Map.keys mp of
+    [x] -> ChoiceSingleton x
+    _ -> ChoiceBool (fmap (const bool) mp)
   compositeType (ValueEncoding tp mp) = ChoiceValue mp tp
+  foldExprs _ (ChoiceSingleton x) = return (ChoiceSingleton x)
   foldExprs f (ChoiceBool mp) = fmap ChoiceBool $ sequence $ Map.mapWithKey (\k -> f (RevChoiceBool k)) mp
   foldExprs f (ChoiceValue mp v) = do
     nv <- f (RevChoiceValue (getType v)) v
@@ -131,7 +135,9 @@ instance (Show a,Ord a) => Composite (Choice a) where
   accessComposite (RevChoiceValue tp) (ChoiceValue _ e) = case geq tp (getType e) of
     Just Refl -> Just e
     Nothing -> Nothing
-  createComposite f (BooleanEncoding mp) = fmap ChoiceBool $ sequence $ Map.mapWithKey (\k _ -> f bool (RevChoiceBool k)) mp
+  createComposite f (BooleanEncoding mp) = case Map.keys mp of
+    [x] -> return (ChoiceSingleton x)
+    _ -> fmap ChoiceBool $ sequence $ Map.mapWithKey (\k _ -> f bool (RevChoiceBool k)) mp
   createComposite f (ValueEncoding tp mp) = do
     v <- f tp (RevChoiceValue tp)
     return (ChoiceValue mp v)
@@ -145,6 +151,7 @@ instance (Show a,Ord a) => CompositeExtract (Choice a) where
     return $ selectedValue ch'
 
 selectedValue :: Choice a Value -> a
+selectedValue (ChoiceSingleton x) = x
 selectedValue (ChoiceBool mp) = case [ k | (k,BoolValue True) <- Map.toList mp ] of
   [] -> error "Choice: No value selected."
   [x] -> x
@@ -155,6 +162,7 @@ selectedValue (ChoiceValue mp v) = case [ k | (k,v') <- Map.toList mp, v==v' ] o
   _ -> error "Choice: More than one value selected."
 
 selectChoice :: (Ord a,Embed m e,GetType e) => a -> Choice a e -> m (Choice a e)
+selectChoice x (ChoiceSingleton _) = return (ChoiceSingleton x)
 selectChoice x (ChoiceBool mp) = do
   t <- true
   nmp <- sequence $ fmap (const false) mp
@@ -166,6 +174,7 @@ selectChoice x (ChoiceValue mp v) = case Map.lookup x mp of
   Nothing -> error "selectChoice: No representative for value."
 
 isChosen :: (Ord a,Embed m e,GetType e) => a -> Choice a e -> m (e BoolType)
+isChosen v (ChoiceSingleton x) = cbool (v==x)
 isChosen v (ChoiceBool mp) = case Map.lookup v mp of
   Just cond -> return cond
   Nothing -> error "Language.SMTLib2.Composite.Choice.isChosen: No representative for value."
@@ -174,6 +183,7 @@ isChosen v (ChoiceValue mp e) = case Map.lookup v mp of
   Nothing -> error "Language.SMTLib2.Composite.Choice.isChosen: No representative for value."
 
 change :: (Ord a,Embed m e,GetType e) => (a -> a) -> Choice a e -> m (Choice a e)
+change f (ChoiceSingleton x) = return (ChoiceSingleton (f x))
 change f (ChoiceBool mp) = do
   nmp <- mapM or'' conds
   return $ ChoiceBool nmp
@@ -207,6 +217,9 @@ initial (ValueEncoding tp mp) x = case Map.lookup x mp of
   Nothing -> error "initial: No representative for value."
 
 choiceITE :: (Ord a,Embed m e,GetType e) => e BoolType -> Choice a e -> Choice a e -> m (Choice a e)
+choiceITE cond (ChoiceSingleton x) (ChoiceSingleton y) = do
+  ncond <- not' cond
+  return $ ChoiceBool (Map.fromList [(x,cond),(y,ncond)])
 choiceITE cond (ChoiceBool x) (ChoiceBool y) = do
   z <- sequence $ Map.mergeWithKey (\_ x y -> Just (ite cond x y)) (fmap (cond .&.)) (fmap ((not' cond) .&.)) x y
   return (ChoiceBool z)
@@ -214,8 +227,16 @@ choiceITE cond (ChoiceValue mp x) (ChoiceValue _ y) = case geq (getType x) (getT
   Just Refl -> do
     z <- ite cond x y
     return (ChoiceValue mp z)
+choiceITE cond (ChoiceSingleton x) (ChoiceBool y) = do
+  z <- mapM ((not' cond) .&.) y
+  return (ChoiceBool $ Map.insert x cond z)
+choiceITE cond (ChoiceBool x) (ChoiceSingleton y) = do
+  z <- mapM (cond .&.) x
+  ncond <- not' cond
+  return (ChoiceBool $ Map.insert y ncond z)
 
 choiceInvariant :: (Embed m e,GetType e) => Choice a e -> m (e BoolType)
+choiceInvariant (ChoiceSingleton x) = true
 choiceInvariant (ChoiceBool mp) = do
   conj <- mapM (\xs -> case xs of
                   [] -> true
@@ -241,3 +262,11 @@ choiceInvariant (ChoiceValue mp v) = case typeSize (getType v) of
         [] -> true
         [x] -> return x
         _ -> or' xs
+
+unionEncoding :: ChoiceEncoding a -> ChoiceEncoding a -> ChoiceEncoding a
+unionEncoding (BoolEncoding mp1) (BoolEncoding mp2) = BoolEncoding $ Map.union mp1 mp2
+unionEncoding (ChoiceValue tp1 mp1) (ChoiceEncoding tp2 mp2) = case geq tp1 tp2 of
+  Just Refl -> ChoiceValue tp1 (Map.unionWith (\r1 r2 -> if r1 == r2
+                                                         then r1
+                                                         else error $ "Choice.unionEncoding: Incompatible value encodings."
+                                              ) mp1 mp2)
