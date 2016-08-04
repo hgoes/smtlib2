@@ -263,10 +263,10 @@ choiceInvariant (ChoiceValue mp v) = case typeSize (getType v) of
         [x] -> return x
         _ -> or' xs
 
-unionEncoding :: ChoiceEncoding a -> ChoiceEncoding a -> ChoiceEncoding a
-unionEncoding (BoolEncoding mp1) (BoolEncoding mp2) = BoolEncoding $ Map.union mp1 mp2
-unionEncoding (ChoiceValue tp1 mp1) (ChoiceEncoding tp2 mp2) = case geq tp1 tp2 of
-  Just Refl -> ChoiceValue tp1 (Map.unionWith (\r1 r2 -> if r1 == r2
-                                                         then r1
-                                                         else error $ "Choice.unionEncoding: Incompatible value encodings."
-                                              ) mp1 mp2)
+unionEncoding :: Ord a => ChoiceEncoding a -> ChoiceEncoding a -> ChoiceEncoding a
+unionEncoding (BooleanEncoding mp1) (BooleanEncoding mp2) = BooleanEncoding $ Map.union mp1 mp2
+unionEncoding (ValueEncoding tp1 mp1) (ValueEncoding tp2 mp2) = case geq tp1 tp2 of
+  Just Refl -> ValueEncoding tp1 (Map.unionWith (\r1 r2 -> if r1 == r2
+                                                           then r1
+                                                           else error $ "Choice.unionEncoding: Incompatible value encodings."
+                                                ) mp1 mp2)
