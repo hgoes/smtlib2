@@ -12,6 +12,7 @@ module Language.SMTLib2.Composite.Ranged
    fullRange,
    emptyRange,
    isEmptyRange,
+   lowerBound,upperBound,
    singletonRange,
    ltRange,leqRange,gtRange,geqRange,
    betweenRange,
@@ -301,6 +302,32 @@ rangeFixpoint (BitVecRange bw r1) (BitVecRange _ r2)
     fixEnd (x:xs) [y] = fixEnd xs [y]
     fixEnd [x] (y:ys) = y:fixEnd [x] ys
     fixEnd (_:xs) (y:ys) = y:fixEnd xs ys
+
+lowerBound :: Range tp -> Maybe (Inf (Value tp))
+lowerBound (BoolRange f t)
+  | f = Just (Regular (BoolValue False))
+  | t = Just (Regular (BoolValue True))
+  | otherwise = Nothing
+lowerBound (IntRange (True,_)) = Just NegInfinity
+lowerBound (IntRange (False,[])) = Nothing
+lowerBound (IntRange (False,l:_)) = Just (Regular (IntValue l))
+lowerBound (BitVecRange _ []) = Nothing
+lowerBound (BitVecRange bw ((l,_):_)) = Just (Regular (BitVecValue l bw))
+
+upperBound :: Range tp -> Maybe (Inf (Value tp))
+upperBound (BoolRange f t)
+  | t = Just (Regular (BoolValue True))
+  | f = Just (Regular (BoolValue False))
+  | otherwise = Nothing
+upperBound (IntRange (False,[])) = Nothing
+upperBound (IntRange (True,[])) = Just PosInfinity
+upperBound (IntRange (incl,rng)) = upper incl rng
+  where
+    upper False [l] = Just PosInfinity
+    upper True [u] = Just (Regular (IntValue u))
+    upper incl (_:xs) = upper (not incl) xs
+upperBound (BitVecRange _ []) = Nothing
+upperBound (BitVecRange bw xs) = Just (Regular (BitVecValue (snd $ last xs) bw))
 
 intRangeIncludes :: Integer -> IntRange -> Bool
 intRangeIncludes _ (incl,[]) = incl
