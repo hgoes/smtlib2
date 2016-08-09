@@ -246,3 +246,8 @@ instance IsNatural Z where
 
 instance IsNatural n => IsNatural (S n) where
   getNatural = Succ getNatural
+
+deriveIsNatural :: Natural n -> Dict (IsNatural n)
+deriveIsNatural Zero = Dict
+deriveIsNatural (Succ n) = case deriveIsNatural n of
+  Dict -> Dict
