@@ -684,15 +684,30 @@ instance RealFrac (Value RealType) where
 withBW :: IsNatural bw => (Natural bw -> Value (BitVecType bw)) -> Value (BitVecType bw)
 withBW f = f getNatural
 
-instance IsNatural bw => Num (Value (BitVecType bw)) where
-  (+) (BitVecValue x bw) (BitVecValue y _) = BitVecValue ((x+y) `mod` (2^(naturalToInteger bw))) bw
-  (-) (BitVecValue x bw) (BitVecValue y _) = BitVecValue ((x-y) `mod` (2^(naturalToInteger bw))) bw
-  (*) (BitVecValue x bw) (BitVecValue y _) = BitVecValue ((x*y) `mod` (2^(naturalToInteger bw))) bw
-  negate (BitVecValue x bw) = BitVecValue (if x==0
+bvAdd :: Value (BitVecType bw) -> Value (BitVecType bw) -> Value (BitVecType bw)
+bvAdd (BitVecValue x bw) (BitVecValue y _) = BitVecValue ((x+y) `mod` (2^(naturalToInteger bw))) bw
+
+bvSub :: Value (BitVecType bw) -> Value (BitVecType bw) -> Value (BitVecType bw)
+bvSub (BitVecValue x bw) (BitVecValue y _) = BitVecValue ((x-y) `mod` (2^(naturalToInteger bw))) bw
+
+bvMul :: Value (BitVecType bw) -> Value (BitVecType bw) -> Value (BitVecType bw)
+bvMul (BitVecValue x bw) (BitVecValue y _) = BitVecValue ((x*y) `mod` (2^(naturalToInteger bw))) bw
+
+bvNegate :: Value (BitVecType bw) -> Value (BitVecType bw)
+bvNegate (BitVecValue x bw) = BitVecValue (if x==0
                                            then 0
                                            else 2^(naturalToInteger bw)-x) bw
+
+bvSignum :: Value (BitVecType bw) -> Value (BitVecType bw)
+bvSignum (BitVecValue x bw) = BitVecValue (if x==0 then 0 else 1) bw
+
+instance IsNatural bw => Num (Value (BitVecType bw)) where
+  (+) = bvAdd
+  (-) = bvSub
+  (*) = bvMul
+  negate = bvNegate
   abs = id
-  signum (BitVecValue x bw) = BitVecValue (if x==0 then 0 else 1) bw
+  signum = bvSignum
   fromInteger x = withBW $ \bw -> BitVecValue (x `mod` (2^(naturalToInteger bw))) bw
 
 -- | Get the smallest bitvector value that is bigger than the given one.
@@ -766,3 +781,19 @@ instance IsNatural bw => Bits (Value (BitVecType bw)) where
 instance IsNatural bw => FiniteBits (Value (BitVecType bw)) where
   finiteBitSize (BitVecValue _ bw) = fromInteger $ naturalToInteger bw
 #endif
+
+instance IsNatural bw => Real (Value (BitVecType bw)) where
+  toRational (BitVecValue x _) = toRational x
+
+instance IsNatural bw => Integral (Value (BitVecType bw)) where
+  quot (BitVecValue x bw) (BitVecValue y _) = BitVecValue (quot x y) bw
+  rem (BitVecValue x bw) (BitVecValue y _) = BitVecValue (rem x y) bw
+  div (BitVecValue x bw) (BitVecValue y _) = BitVecValue (div x y) bw
+  mod (BitVecValue x bw) (BitVecValue y _) = BitVecValue (mod x y) bw
+  quotRem (BitVecValue x bw) (BitVecValue y _) = (BitVecValue q bw,BitVecValue r bw)
+    where
+      (q,r) = quotRem x y
+  divMod (BitVecValue x bw) (BitVecValue y _) = (BitVecValue d bw,BitVecValue m bw)
+    where
+      (d,m) = divMod x y
+  toInteger (BitVecValue x _) = x
