@@ -23,6 +23,7 @@ Library
                   Language.SMTLib2.Composite.Null
                   Language.SMTLib2.Composite.Singleton
                   Language.SMTLib2.Composite.List
+                  Language.SMTLib2.Composite.List.Dynamic
                   Language.SMTLib2.Composite.Maybe
                   Language.SMTLib2.Composite.Either
                   Language.SMTLib2.Composite.Map
