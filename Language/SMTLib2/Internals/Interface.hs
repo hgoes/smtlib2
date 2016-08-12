@@ -244,16 +244,16 @@ pattern Arith op lst <- App (E.Arith (matchNumRepr' -> (Dict,tp)) op n)
 
 pattern PlusLst lst = ArithLst E.Plus lst
 pattern Plus lst = Arith E.Plus lst
-pattern (:+:) x y = Plus (x ::: y ::: Nil)
+pattern (:+:) x y = Arith E.Plus (x ::: y ::: Nil)
 
 pattern MinusLst lst = ArithLst E.Minus lst
 pattern Minus lst = Arith E.Minus lst
-pattern (:-:) x y = Minus (x ::: y ::: Nil)
+pattern (:-:) x y = Arith E.Minus (x ::: y ::: Nil)
 pattern Neg x = Arith E.Minus (x ::: Nil)
 
 pattern MultLst lst = ArithLst E.Mult lst
 pattern Mult lst = Arith E.Mult lst
-pattern (:*:) x y = Mult (x ::: y ::: Nil)
+pattern (:*:) x y = Arith E.Mult (x ::: y ::: Nil)
 
 pattern Div x y = App (E.ArithIntBin E.Div) (x ::: y ::: Nil)
 pattern Mod x y = App (E.ArithIntBin E.Mod) (x ::: y ::: Nil)
@@ -369,7 +369,6 @@ pattern Divisible n e = App (E.Divisible n) (e ::: Nil)
 pattern Mk con args = App (E.Constructor con) args
 pattern Is con e = App (E.Test con) (e ::: Nil)
 pattern (:#:) e field = App (E.Field field) (e ::: Nil)
-
 
 sameApp :: (Same tps,GetType e)
         => (Repr (SameType tps) -> Natural (List.Length tps)
