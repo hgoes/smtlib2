@@ -384,16 +384,6 @@ getBW :: GetType e => e (BitVecType bw) -> Natural bw
 getBW e = case getType e of
   BitVecRepr bw -> bw
 
-{- XXX: This doesn't work in 7.10. Test it when 8.0 is out.
-
-pattern Const :: (SMTType ctp,rtp ~ (SMTReprType ctp)) => ctp
-              -> Expression v qv fun fv lv e rtp
-pattern Const v <- E.Const (fromSMTConst -> v) where
-  Const v = E.Const (toSMTConst v) -}
-
---constant :: SMTType tp => tp -> Expression v qv fun fv lv e (SMTReprType tp)
---constant x = E.Const (toSMTConst x)
-
 -- | Create a constant, for example an integer:
 --
 --   Example:
