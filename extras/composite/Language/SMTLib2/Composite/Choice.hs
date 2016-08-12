@@ -3,9 +3,9 @@ module Language.SMTLib2.Composite.Choice
   (Choice(),
    -- * Encodings
    ChoiceEncoding(),
-   boolEncoding,intEncoding,bvEncoding,dtEncoding,
+   boolEncoding,intEncoding,bvEncoding,dtEncoding,possibleChoices,unionEncoding,
    -- * Functions
-   unionEncoding,selectChoice,change,isChosen,initial,choiceITE,choiceInvariant
+   selectChoice,change,isChosen,initial,choiceITE,choiceInvariant
   ) where
 
 import Language.SMTLib2.Composite.Class
@@ -65,6 +65,11 @@ dtEncoding dtName els
      in do
     registerDatatype tp'
     return $ ValueEncoding (DataRepr tp') (Map.fromList vals)
+
+-- | Get all the values represented by this encoding.
+possibleChoices :: Ord a => ChoiceEncoding a -> [a]
+possibleChoices (BooleanEncoding mp) = Map.keys mp
+possibleChoices (ValueEncoding _ mp) = Map.keys mp
 
 instance Eq a => Eq (ChoiceEncoding a) where
   (==) (BooleanEncoding mp1) (BooleanEncoding mp2) = mp1==mp2
