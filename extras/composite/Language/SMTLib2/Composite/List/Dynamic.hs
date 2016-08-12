@@ -171,5 +171,25 @@ push (DynamicList tp arr sz) el = do
   return (DynamicListIndex sz,DynamicList tp narr nsz)
   where
     next :: Embed m e => Repr tp -> e tp -> m (e tp)
-    next IntRepr x = x .+. (constant 1)
+    next IntRepr x = x .+. cint 1
     next (BitVecRepr bw) x = bvadd x (cbv 1 bw)
+
+popDescr :: Composite c => CompDynListDescr c -> CompDynListDescr c
+popDescr (StaticListDescr lst) = StaticListDescr $ dropLast lst
+  where
+    dropLast [x] = []
+    dropLast (x:xs) = x:dropLast xs
+popDescr (DynamicListDescr d) = DynamicListDescr d
+
+pop :: (Composite c,Embed m e,GetType e) => CompDynList c e -> m (CompDynList c e)
+pop (StaticList (CompList lst)) = return $ StaticList $ CompList $ dropLast lst
+  where
+    dropLast [x] = []
+    dropLast (x:xs) = x:dropLast xs
+pop (DynamicList tp arr sz) = do
+  nsz <- prev tp sz
+  return (DynamicList tp arr sz)
+  where
+    prev :: Embed m e => Repr tp -> e tp -> m (e tp)
+    prev IntRepr x = x .-. cint 1
+    prev (BitVecRepr bw) x = bvsub x (cbv 1 bw)
