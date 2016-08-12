@@ -17,6 +17,8 @@ import Data.GADT.Show
 import Data.GADT.Compare
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Set (Set)
+import qualified Data.Set as Set
 import Control.Monad.Identity
 import Data.Typeable
 
@@ -67,9 +69,9 @@ dtEncoding dtName els
     return $ ValueEncoding (DataRepr tp') (Map.fromList vals)
 
 -- | Get all the values represented by this encoding.
-possibleChoices :: Ord a => ChoiceEncoding a -> [a]
-possibleChoices (BooleanEncoding mp) = Map.keys mp
-possibleChoices (ValueEncoding _ mp) = Map.keys mp
+possibleChoices :: Ord a => ChoiceEncoding a -> Set a
+possibleChoices (BooleanEncoding mp) = Map.keysSet mp
+possibleChoices (ValueEncoding _ mp) = Map.keysSet mp
 
 instance Eq a => Eq (ChoiceEncoding a) where
   (==) (BooleanEncoding mp1) (BooleanEncoding mp2) = mp1==mp2
