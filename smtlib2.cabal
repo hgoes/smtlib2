@@ -20,7 +20,7 @@ Flag Base4_8
   Manual: False
   
 Library
-  Build-Depends: constraints, mtl, containers, template-haskell, haskell-src-meta, dependent-sum, dependent-map
+  Build-Depends: constraints, mtl, containers, template-haskell, dependent-sum, dependent-map
   if flag(Base4_8)
      Build-Depends: base >= 4.8 && < 5
   else
@@ -48,7 +48,6 @@ Library
              ViewPatterns
              TemplateHaskell
              QuasiQuotes
-             AllowAmbiguousTypes
   GHC-Options: -fwarn-unused-imports -fprint-explicit-kinds
   Exposed-Modules:
                   Language.SMTLib2.Internals.Backend
@@ -59,7 +58,6 @@ Library
                   Language.SMTLib2.Internals.Type.Nat
                   Language.SMTLib2.Internals.Type.List
                   Language.SMTLib2.Internals.Type.Struct
-                  Language.SMTLib2.Internals.TH
                   Language.SMTLib2.Strategy
                   Language.SMTLib2
                   Language.SMTLib2.Internals.Evaluate

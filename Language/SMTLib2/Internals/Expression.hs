@@ -160,8 +160,7 @@ data Expression (v :: Type -> *) (qv :: Type -> *) (fun :: ([Type],Type) -> *) (
       -> e res
       -> Expression v qv fun fv lv e res
 
-instance (GEq fun,GEq con,GEq field)
-         => Eq (Function fun sig) where
+instance GEq fun => Eq (Function fun sig) where
   (==) = defaultEq
 
 class SMTOrd (t :: Type) where
