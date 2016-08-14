@@ -21,31 +21,55 @@ makeComposite name dname rname par' cons = do
   i1 <- TH.dataD (TH.cxt []) name'
     ((fmap (TH.PlainTV . TH.mkName) par)++
      [TH.KindedTV e (TH.appK (TH.appK TH.arrowK (TH.conK ''Type)) TH.starK)])
+#if MIN_VERSION_template_haskell(2,11,0)
+    Nothing
+#endif
     [ TH.recC (TH.mkName con)
       [ TH.varStrictType (TH.mkName field)
         (TH.strictType TH.notStrict
          (TH.appT (tp (TH.conT name') (fmap (TH.varT . TH.mkName) par)) (TH.varT e)))
       | (field,_,_,tp) <- fields]
-    | (con,_,fields) <- cons ] []
+    | (con,_,fields) <- cons ]
+#if MIN_VERSION_template_haskell(2,11,0)
+    (TH.cxt [])
+#else
+    []
+#endif
   i2 <- TH.dataD (TH.cxt []) (TH.mkName dname)
     (fmap (TH.PlainTV . TH.mkName) par)
+#if MIN_VERSION_template_haskell(2,11,0)
+    Nothing
+#endif
     [ TH.recC (TH.mkName dcon)
       [ TH.varStrictType (TH.mkName dfield)
         (TH.strictType TH.notStrict
          (TH.appT (TH.conT ''CompDescr) (tp (TH.conT name') (fmap (TH.varT . TH.mkName) par))))
       | (_,dfield,_,tp) <- fields ]
     | (_,dcon,fields) <- cons     
-    ] []
+    ]
+#if MIN_VERSION_template_haskell(2,11,0)
+    (TH.cxt [])
+#else
+    []
+#endif
   i3 <- TH.dataD (TH.cxt []) (TH.mkName rname)
     ((fmap (TH.PlainTV . TH.mkName) par)++
      [TH.PlainTV $ TH.mkName "tp"])
+#if MIN_VERSION_template_haskell(2,11,0)
+    Nothing
+#endif
     [ TH.normalC (TH.mkName rev)
       [TH.strictType TH.notStrict
        (TH.appT (TH.appT (TH.conT ''RevComp)
                  (tp (TH.conT name') (fmap (TH.varT . TH.mkName) par)))
         (TH.varT $ TH.mkName "tp"))]
     | (_,_,fields) <- cons
-    , (_,_,rev,tp) <- fields ] []
+    , (_,_,rev,tp) <- fields ]
+#if MIN_VERSION_template_haskell(2,11,0)
+    (TH.cxt [])
+#else
+    []
+#endif
   let lpar = length par
       revs = concat $ fmap (\(_,_,fields)
                             -> fmap (\(_,_,rev,_) -> TH.mkName rev) fields

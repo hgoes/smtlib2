@@ -74,7 +74,7 @@ instance (Composite a,d ~ CompDescr a) => Embed (Reader d) (CompositeExpr a) whe
   embed e = do
     descr <- ask
     return (CompositeExpr descr e)
-  embedQuantifier _ _ = error "CompositeExpr does not support quantifier"
+  embedQuantifier _ _ _ = error "CompositeExpr does not support quantifier"
   embedTypeOf = return.getType
 
 instance Composite a => Extract () (CompositeExpr a) where
