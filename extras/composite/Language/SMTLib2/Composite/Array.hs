@@ -52,10 +52,10 @@ instance Composite c => GCompare (RevArray i c) where
     GLT -> GLT
     GGT -> GGT
 
-select :: (Composite c,Embed m e,GetType e) => CompArray i c e -> List e i -> m (c e)
+select :: (Composite c,Embed m e,Monad m,GetType e) => CompArray i c e -> List e i -> m (c e)
 select (CompArray c) i = foldExprs (\_ (Arrayed e) -> SMT.select e i) c
 
-store :: (Composite c,Embed m e,GetType e) => CompArray i c e -> List e i -> c e -> m (CompArray i c e)
+store :: (Composite c,Embed m e,Monad m,GetType e) => CompArray i c e -> List e i -> c e -> m (CompArray i c e)
 store (CompArray c) i el = do
   nc <- foldExprs (\rev (Arrayed arr) -> case accessComposite rev el of
                       Just nel -> do

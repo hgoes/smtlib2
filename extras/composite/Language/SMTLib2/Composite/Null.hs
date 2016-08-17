@@ -20,7 +20,7 @@ instance Ord val => Composite (NoComp val) where
 
 instance Ord val => CompositeExtract (NoComp val) where
   type CompExtract (NoComp val) = ()
-  compExtract _ _ = return ()
+  compExtract _ _ = pure ()
 
 instance GShow NoRev where
   gshowsPrec _ _ = error "gshowsPrec called for NoRev"

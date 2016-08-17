@@ -74,12 +74,12 @@ instance (Composite idx,Composite c) => GCompare (RevCompositeArray idx c) where
     GLT -> GLT
     GGT -> GGT
 
-select :: (Composite idx,Composite c,Embed m e,GetType e) => CompositeArray idx c e -> idx e -> m (c e)
+select :: (Composite idx,Composite c,Embed m e,Monad m,GetType e) => CompositeArray idx c e -> idx e -> m (c e)
 select (CompositeArray ilst arr) idx = case allFields idx of
   AnyList ilst' -> case geq ilst (runIdentity $ List.mapM (return.getType) ilst') of
     Just Refl -> Array.select arr ilst'
 
-store :: (Composite idx,Composite c,Embed m e,GetType e) => CompositeArray idx c e -> idx e -> c e -> m (CompositeArray idx c e)
+store :: (Composite idx,Composite c,Embed m e,Monad m,GetType e) => CompositeArray idx c e -> idx e -> c e -> m (CompositeArray idx c e)
 store (CompositeArray ilst arr) idx el = case allFields idx of
   AnyList ilst' -> case geq ilst (runIdentity $ List.mapM (return.getType) ilst') of
     Just Refl -> do

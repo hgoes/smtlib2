@@ -169,39 +169,28 @@ selectedValue (ChoiceValue mp v) = case [ k | (k,v') <- Map.toList mp, v==v' ] o
   _ -> error "Choice: More than one value selected."
 
 selectChoice :: (Ord a,Embed m e,GetType e) => a -> Choice a e -> m (Choice a e)
-selectChoice x (ChoiceSingleton _) = return (ChoiceSingleton x)
-selectChoice x (ChoiceBool mp) = do
-  t <- true
-  nmp <- sequence $ fmap (const false) mp
-  return $ ChoiceBool $ Map.insert x t nmp
+selectChoice x (ChoiceSingleton _) = pure (ChoiceSingleton x)
+selectChoice x (ChoiceBool mp)
+  = (\t nmp -> ChoiceBool $ Map.insert x t nmp) <$> true <*> traverse (const false) mp
 selectChoice x (ChoiceValue mp v) = case Map.lookup x mp of
-  Just repr -> do
-    c <- constant repr
-    return (ChoiceValue mp c)
+  Just repr -> ChoiceValue mp <$> constant repr
   Nothing -> error "selectChoice: No representative for value."
 
 isChosen :: (Ord a,Embed m e,GetType e) => a -> Choice a e -> m (e BoolType)
 isChosen v (ChoiceSingleton x) = cbool (v==x)
 isChosen v (ChoiceBool mp) = case Map.lookup v mp of
-  Just cond -> return cond
+  Just cond -> pure cond
   Nothing -> error "Language.SMTLib2.Composite.Choice.isChosen: No representative for value."
 isChosen v (ChoiceValue mp e) = case Map.lookup v mp of
   Just val -> e .==. constant val
   Nothing -> error "Language.SMTLib2.Composite.Choice.isChosen: No representative for value."
 
 change :: (Ord a,Embed m e,GetType e) => (a -> a) -> Choice a e -> m (Choice a e)
-change f (ChoiceSingleton x) = return (ChoiceSingleton (f x))
-change f (ChoiceBool mp) = do
-  nmp <- mapM or'' conds
-  return $ ChoiceBool nmp
+change f (ChoiceSingleton x) = pure (ChoiceSingleton (f x))
+change f (ChoiceBool mp) = ChoiceBool <$> traverse or' conds
   where
     conds = Map.foldrWithKey' (\k c -> Map.insertWith (++) (f k) [c]) Map.empty mp
-    or'' [] = false
-    or'' [x] = return x
-    or'' xs = or' xs
-change f (ChoiceValue mp v) = do
-  nv <- mkITE (Map.toList conds)
-  return (ChoiceValue mp nv)
+change f (ChoiceValue mp v) = ChoiceValue mp <$> mkITE (Map.toList conds)
   where
     conds = Map.foldrWithKey (\k repr -> Map.insertWith (++) (f k) [v .==. constant repr]) Map.empty mp
     mkITE [(k,_)] = case Map.lookup k mp of
@@ -214,48 +203,29 @@ change f (ChoiceValue mp v) = do
                    (mkITE xs)
 
 initial :: (Ord a,Embed m e) => ChoiceEncoding a -> a -> m (Choice a e)
-initial (BooleanEncoding _) x = do
-  t <- true
-  return $ ChoiceBool (Map.singleton x t)
+initial (BooleanEncoding _) x = ChoiceBool . Map.singleton x <$> true
 initial (ValueEncoding tp mp) x = case Map.lookup x mp of
-  Just repr -> do
-    v <- constant repr
-    return (ChoiceValue mp v)
+  Just repr -> ChoiceValue mp <$> constant repr
   Nothing -> error "initial: No representative for value."
 
 choiceITE :: (Ord a,Embed m e,GetType e) => e BoolType -> Choice a e -> Choice a e -> m (Choice a e)
-choiceITE cond (ChoiceSingleton x) (ChoiceSingleton y) = do
-  ncond <- not' cond
-  return $ ChoiceBool (Map.fromList [(x,cond),(y,ncond)])
-choiceITE cond (ChoiceBool x) (ChoiceBool y) = do
-  z <- sequence $ Map.mergeWithKey (\_ x y -> Just (ite cond x y)) (fmap (cond .&.)) (fmap ((not' cond) .&.)) x y
-  return (ChoiceBool z)
+choiceITE cond (ChoiceSingleton x) (ChoiceSingleton y)
+  = (\ncond -> ChoiceBool (Map.fromList [(x,cond),(y,ncond)])) <$> not' cond
+choiceITE cond (ChoiceBool x) (ChoiceBool y)
+  = ChoiceBool <$> (sequenceA $ Map.mergeWithKey (\_ x y -> Just (ite cond x y)) (fmap (cond .&.)) (fmap ((not' cond) .&.)) x y)
 choiceITE cond (ChoiceValue mp x) (ChoiceValue _ y) = case geq (getType x) (getType y) of
-  Just Refl -> do
-    z <- ite cond x y
-    return (ChoiceValue mp z)
-choiceITE cond (ChoiceSingleton x) (ChoiceBool y) = do
-  z <- mapM ((not' cond) .&.) y
-  return (ChoiceBool $ Map.insert x cond z)
-choiceITE cond (ChoiceBool x) (ChoiceSingleton y) = do
-  z <- mapM (cond .&.) x
-  ncond <- not' cond
-  return (ChoiceBool $ Map.insert y ncond z)
+  Just Refl -> ChoiceValue mp <$> ite cond x y
+choiceITE cond (ChoiceSingleton x) (ChoiceBool y)
+  = ChoiceBool . Map.insert x cond <$> traverse ((not' cond) .&.) y
+choiceITE cond (ChoiceBool x) (ChoiceSingleton y)
+  = (\z ncond -> ChoiceBool $ Map.insert y ncond z) <$> traverse (cond .&.) x <*> not' cond
 
 choiceInvariant :: (Embed m e,GetType e) => Choice a e -> m (e BoolType)
 choiceInvariant (ChoiceSingleton x) = true
-choiceInvariant (ChoiceBool mp) = do
-  conj <- mapM (\xs -> case xs of
-                  [] -> true
-                  [x] -> x
-                  _ -> and' xs
-              ) $ oneOf (Map.elems mp)
-  case conj of
-    [] -> true
-    [x] -> return x
-    _ -> or' conj
+choiceInvariant (ChoiceBool mp)
+  = or' $ fmap and' $ oneOf (Map.elems mp)
   where
-    oneOf (x:xs) = ((return x):fmap not' xs):(fmap (not' x:) (oneOf xs))
+    oneOf (x:xs) = (pure x:fmap not' xs):(fmap (not' x:) (oneOf xs))
     oneOf [] = [[]]
 choiceInvariant (ChoiceValue mp v) = case typeSize (getType v) of
   Nothing -> restr
@@ -263,12 +233,7 @@ choiceInvariant (ChoiceValue mp v) = case typeSize (getType v) of
              then true
              else restr
   where
-    restr = do
-      xs <- mapM (\repr -> v .==. constant repr) (Map.elems mp)
-      case xs of
-        [] -> true
-        [x] -> return x
-        _ -> or' xs
+    restr = or' $ fmap (\repr -> v .==. constant repr) (Map.elems mp)
 
 unionEncoding :: Ord a => ChoiceEncoding a -> ChoiceEncoding a -> ChoiceEncoding a
 unionEncoding (BooleanEncoding mp1) (BooleanEncoding mp2) = BooleanEncoding $ Map.union mp1 mp2

@@ -98,7 +98,7 @@ selectDescr union arr idx = foldl1 union $ select' (singletonRange 0) arr
            then rest
            else descr:rest
 
-select :: (Embed m e,GetType e,Composite c,Num (Value tp),Num (Range tp))
+select :: (Embed m e,Monad m,GetType e,Composite c,Num (Value tp),Num (Range tp))
        => (e BoolType -> c e -> c e -> m (c e)) -- ^ If-then-else
        -> (e tp -> e tp -> m (e tp)) -- ^ Addition
        -> (e tp -> e tp -> m (e tp)) -- ^ Subtraction
@@ -161,7 +161,7 @@ storeDescr union arr idx el = store' (singletonRange 0) arr
            then (Just len,descr):narr
            else (Just len,union descr el):narr
 
-store :: (Embed m e,GetType e,Composite c,Num (Value tp),Num (Range tp))
+store :: (Embed m e,Monad m,GetType e,Composite c,Num (Value tp),Num (Range tp))
       => (e BoolType -> c e -> c e -> m (c e)) -- ^ If-then-else
       -> (e tp -> e tp -> m (e tp)) -- ^ Addition
       -> (e tp -> e tp -> m (e tp)) -- ^ Subtraction
@@ -204,7 +204,7 @@ lastDescr :: [(Maybe (Range tp),c)] -> c
 lastDescr [(_,descr)] = descr
 lastDescr (d:ds) = lastDescr ds
 
-last :: (Embed m e,GetType e,Composite c) => (e idx -> m (e idx)) -- ^ Successor
+last :: (Embed m e,Monad m,GetType e,Composite c) => (e idx -> m (e idx)) -- ^ Successor
      -> CompArraySectioned idx c e
      -> m (c e)
 last succ (CompList lst) = last' lst
@@ -222,7 +222,7 @@ lengthDescr = length' 0
     length' cur ((Just len,_):rest) = length' (cur+len) rest
     length' cur ((Nothing,_):rest) = length' (cur+1) rest
 
-length :: (Embed m e,Num (Value tp)) => (e tp -> e tp -> m (e tp)) -- ^ Addition
+length :: (Embed m e,Monad m,Num (Value tp)) => (e tp -> e tp -> m (e tp)) -- ^ Addition
        -> CompArraySectioned tp c e
        -> m (Ranged tp e)
 length add (CompList lst) = do

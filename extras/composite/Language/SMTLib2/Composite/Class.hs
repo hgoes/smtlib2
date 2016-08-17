@@ -34,7 +34,7 @@ class (Ord (CompDescr arg),GCompare (RevComp arg),GShow (RevComp arg))
 
 class Composite arg => CompositeExtract arg where
   type CompExtract arg
-  compExtract :: (Embed m e,GetType e) => (forall tp. e tp -> m (Value tp)) -> arg e -> m (CompExtract arg)
+  compExtract :: (Embed m e,Monad m,GetType e) => (forall tp. e tp -> m (Value tp)) -> arg e -> m (CompExtract arg)
 
 defaultUnion :: (Composite arg,Monad m,GetType a,GetType b)
              => (forall t. RevComp arg t -> Maybe (a t) -> Maybe (b t) -> m (c t))
@@ -45,7 +45,7 @@ defaultUnion :: (Composite arg,Monad m,GetType a,GetType b)
 defaultUnion f descr x y
   = createComposite (\_ rev -> f rev (accessComposite rev x) (accessComposite rev y)) descr
 
-defaultEq :: (Composite arg,Embed m e,GetType e)
+defaultEq :: (Composite arg,Embed m e,Monad m,GetType e)
           => CompDescr arg
           -> arg e
           -> arg e

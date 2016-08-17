@@ -13,7 +13,7 @@ import Data.GADT.Compare
 
 type EmbedExpr m e tp = Expression (EmVar m e) (EmQVar m e) (EmFun m e) (EmFunArg m e) (EmLVar m e) e tp
 
-class (Monad m,
+class (Applicative m,
        GCompare (EmVar m e),
        GCompare (EmQVar m e),
        GCompare (EmFun m e),
@@ -25,13 +25,13 @@ class (Monad m,
   type EmFun m e :: ([Type],Type) -> *
   type EmFunArg m e :: Type -> *
   type EmLVar m e :: Type -> *
-  embed :: EmbedExpr m e tp
+  embed :: m (EmbedExpr m e tp)
         -> m (e tp)
   embedQuantifier :: Quantifier
                   -> List Repr arg
                   -> (forall m e. Embed m e => List (EmQVar m e) arg -> m (e BoolType))
                   -> m (e BoolType)
-  embedTypeOf :: e tp -> m (Repr tp)
+  embedTypeOf :: m (e tp -> Repr tp)
 
 class (GCompare (ExVar i e),
        GCompare (ExQVar i e),
@@ -52,12 +52,14 @@ instance (Backend b,e ~ Expr b) => Embed (SMT b) e where
   type EmFun (SMT b) e = Fun b
   type EmFunArg (SMT b) e = FunArg b
   type EmLVar (SMT b) e = LVar b
-  embed = embedSMT . toBackend
+  embed x = do
+    rx <- x
+    embedSMT (toBackend rx)
   embedQuantifier quant tps f = do
     args <- List.mapM (\tp -> embedSMT (createQVar tp Nothing)) tps
     body <- f args
     embedSMT $ toBackend (Quantification quant args body)
-  embedTypeOf e = return $ getType e
+  embedTypeOf = pure getType
 
 newtype BackendInfo b = BackendInfo b
 
@@ -90,9 +92,11 @@ instance (GCompare var,GetType var,
   type EmFun Identity (SMTExpr var qvar fun farg lvar) = fun
   type EmFunArg Identity (SMTExpr var qvar fun farg lvar) = farg
   type EmLVar Identity (SMTExpr var qvar fun farg lvar) = lvar
-  embed e = return (SMTExpr e)
+  embed e = do
+    re <- e
+    return $ SMTExpr re
   embedQuantifier quant tps f = return $ SMTQuant quant tps (runIdentity . f)
-  embedTypeOf = return . getType
+  embedTypeOf = pure getType
 
 instance (GetType var,GetType qvar,GetFunType fun,GetType farg,GetType lvar)
          => GetType (SMTExpr var qvar fun farg lvar) where

@@ -47,10 +47,10 @@ instance (Composite a,Composite b) => Composite (CompTuple2 a b) where
 instance (CompositeExtract a,CompositeExtract b)
   => CompositeExtract (CompTuple2 a b) where
   type CompExtract (CompTuple2 a b) = (CompExtract a,CompExtract b)
-  compExtract f (CompTuple2 a b) = do
-    va <- compExtract f a
-    vb <- compExtract f b
-    return (va,vb)
+  compExtract f (CompTuple2 a b)
+    = (\va vb -> (va,vb)) <$>
+      compExtract f a <*>
+      compExtract f b
 
 instance (Composite a,Composite b,Composite c) => Composite (CompTuple3 a b c) where
   type CompDescr (CompTuple3 a b c) = (CompDescr a,CompDescr b,CompDescr c)

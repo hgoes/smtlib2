@@ -129,11 +129,28 @@ instance GCompare e => Ord (DynListIndex e) where
     GGT -> GT
     GEQ -> EQ
 
+unionDescr :: (CompDescr c -> CompDescr c -> CompDescr c)
+           -> CompDynListDescr c
+           -> CompDynListDescr c
+           -> CompDynListDescr c
+unionDescr f (StaticListDescr lst1) (StaticListDescr lst2)
+  = StaticListDescr $ union lst1 lst2
+  where
+    union [] ys = ys
+    union xs [] = xs
+    union (x:xs) (y:ys) = f x y:union xs ys
+unionDescr f (DynamicListDescr (idx,d1)) (DynamicListDescr (_,d2))
+  = DynamicListDescr (idx,f d1 d2)
+unionDescr f (StaticListDescr lst1) (DynamicListDescr (idx,d2))
+  = DynamicListDescr (idx,foldl f d2 lst1)
+unionDescr f (DynamicListDescr (idx,d1)) (StaticListDescr lst2)
+  = DynamicListDescr (idx,foldl f d1 lst2)
+
 selectDescr :: Composite c => CompDynListDescr c -> DynListIndex Repr -> CompDescr c
 selectDescr (StaticListDescr lst) (StaticListIndex i) = lst `genericIndex` i
 selectDescr (DynamicListDescr (_,c)) _ = c
 
-select :: (Composite c,Embed m e,GetType e) => CompDynList c e -> DynListIndex e -> m (c e)
+select :: (Composite c,Embed m e,Monad m,GetType e) => CompDynList c e -> DynListIndex e -> m (c e)
 select (StaticList (CompList lst)) (StaticListIndex i) = return $ lst `genericIndex` i
 select (DynamicList tp arr _) (DynamicListIndex i) = case geq tp (getType i) of
   Just Refl -> Array.select arr (i ::: Nil)
@@ -146,7 +163,7 @@ storeDescr _ (StaticListDescr lst) (StaticListIndex i) el = StaticListDescr (ins
     insert n el (x:xs) = x:insert (n-1) el xs
 storeDescr f (DynamicListDescr (i,d)) _ el = DynamicListDescr (i,f d el)
 
-store :: (Composite c,Embed m e,GetType e) => CompDynList c e -> DynListIndex e -> c e -> m (CompDynList c e)
+store :: (Composite c,Embed m e,Monad m,GetType e) => CompDynList c e -> DynListIndex e -> c e -> m (CompDynList c e)
 store (StaticList (CompList lst)) (StaticListIndex i) el = return $ StaticList $ CompList $ insert i el lst
   where
     insert 0 el (_:xs) = el:xs
@@ -162,7 +179,7 @@ pushDescr :: Composite c => (CompDescr c -> CompDescr c -> CompDescr c)
 pushDescr _ (StaticListDescr lst) el = (StaticListIndex $ genericLength lst,StaticListDescr $ lst++[el])
 pushDescr f (DynamicListDescr (i:::Nil,d)) el = (DynamicListIndex i,DynamicListDescr (i:::Nil,f d el))
 
-push :: (Composite c,Embed m e,GetType e) => CompDynList c e -> c e -> m (DynListIndex e,CompDynList c e)
+push :: (Composite c,Embed m e,Monad m,GetType e) => CompDynList c e -> c e -> m (DynListIndex e,CompDynList c e)
 push (StaticList (CompList lst)) el
   = return (StaticListIndex $ genericLength lst,StaticList $ CompList $ lst++[el])
 push (DynamicList tp arr sz) el = do
@@ -181,7 +198,7 @@ popDescr (StaticListDescr lst) = StaticListDescr $ dropLast lst
     dropLast (x:xs) = x:dropLast xs
 popDescr (DynamicListDescr d) = DynamicListDescr d
 
-pop :: (Composite c,Embed m e,GetType e) => CompDynList c e -> m (CompDynList c e)
+pop :: (Composite c,Embed m e,Monad m,GetType e) => CompDynList c e -> m (CompDynList c e)
 pop (StaticList (CompList lst)) = return $ StaticList $ CompList $ dropLast lst
   where
     dropLast [x] = []

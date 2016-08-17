@@ -121,12 +121,12 @@ instance IsSMTNumber RealType where
 class HasMonad a where
   type MatchMonad a (m :: * -> *) :: Constraint
   type MonadResult a :: *
-  embedM :: (Monad m,MatchMonad a m) => a -> m (MonadResult a)
+  embedM :: (Applicative m,MatchMonad a m) => a -> m (MonadResult a)
 
 instance HasMonad (e (tp::Type)) where
   type MatchMonad (e tp) m = ()
   type MonadResult (e tp) = e tp
-  embedM = return
+  embedM = pure
 
 instance HasMonad ((m :: * -> *) (e (tp::Type))) where
   type MatchMonad (m (e tp)) m' = m ~ m'
@@ -136,7 +136,7 @@ instance HasMonad ((m :: * -> *) (e (tp::Type))) where
 instance HasMonad (List e (tp::[Type])) where
   type MatchMonad (List e tp) m = ()
   type MonadResult (List e tp) = List e tp
-  embedM = return
+  embedM = pure
 
 instance HasMonad (m (List e (tp::[Type]))) where
   type MatchMonad (m (List e tp)) m' = m ~ m'
@@ -395,15 +395,15 @@ getBW e = case getType e of
 --   assert $ x .>. constant (IntValue 5)
 --   @
 constant :: (Embed m e) => Value tp -> m (e tp)
-constant x = embed $ E.Const x
+constant x = embed $ pure $ E.Const x
 
 -- | Create a boolean constant expression.
 cbool :: Embed m e => Bool -> m (e BoolType)
-cbool x = embed $ E.Const (BoolValue x)
+cbool x = embed $ pure $ E.Const (BoolValue x)
 
 -- | Create an integer constant expression.
 cint :: Embed m e => Integer -> m (e IntType)
-cint x = embed $ E.Const (IntValue x)
+cint x = embed $ pure $ E.Const (IntValue x)
 
 -- | Create a real constant expression.
 --
@@ -415,17 +415,17 @@ cint x = embed $ E.Const (IntValue x)
 -- x = creal (5 % 4)
 --   @
 creal :: Embed m e => Rational -> m (e RealType)
-creal x = embed $ E.Const (RealValue x)
+creal x = embed $ pure $ E.Const (RealValue x)
 
 -- | Create a constant bitvector expression.
 cbv :: Embed m e => Integer -- ^ The value (negative values will be stored in two's-complement.
     -> Natural bw -- ^ The bitwidth of the bitvector value.
     -> m (e (BitVecType bw))
-cbv i bw = embed $ E.Const (BitVecValue i bw)
+cbv i bw = embed $ pure $ E.Const (BitVecValue i bw)
 
 cdt :: (Embed m e,IsDatatype t) => t Value -> m (e (DataType t))
 cdt v = case constrGet v of
-  ConApp con args -> embed $ E.Const (ConstrValue con args)
+  ConApp con args -> embed $ pure $ E.Const (ConstrValue con args)
 
 asConstant :: Expression v qv fun fv lv e tp -> Maybe (Value tp)
 asConstant (E.Const v) = Just v
@@ -436,9 +436,7 @@ pattern Var x = E.Var x
 
 fun :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ List e args)
     => EmFun m e '(args,res) -> a -> m (e res)
-fun fun args = do
-  args' <- embedM args
-  embed (App (E.Fun fun) args')
+fun fun args = embed $ App (E.Fun fun) <$> embedM args
 {-# INLINEABLE fun #-}
 
 -- | Create an expression by applying a function to a list of arguments.
@@ -446,25 +444,20 @@ app :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ List e args)
     => E.Function (EmFun m e) '(args,res)
     -> a
     -> m (e res)
-app f args = do
-  args' <- embedM args
-  embed (App f args')
+app f args = embed $ App f <$> embedM args
 {-# INLINEABLE app #-}
 
 -- | Create a typed list by appending an element to the front of another list.
-(.:.) :: (HasMonad a,MonadResult a ~ e tp,MatchMonad a m,Monad m)
+(.:.) :: (HasMonad a,MonadResult a ~ e tp,MatchMonad a m,Applicative m)
       => a -> m (List e tps) -> m (List e (tp ': tps))
-(.:.) x xs = do
-  x' <- embedM x
-  xs' <- xs
-  return (x' ::: xs')
+(.:.) x xs = (:::) <$> embedM x <*> xs
 {-# INLINEABLE (.:.) #-}
 
 infixr 5 .:.
 
 -- | Create an empty list.
-nil :: Monad m => m (List e '[])
-nil = return Nil
+nil :: Applicative m => m (List e '[])
+nil = pure Nil
 
 -- | Create a boolean expression that encodes that two expressions have the same
 --   value.
@@ -479,42 +472,40 @@ nil = return Nil
            MatchMonad a m,MatchMonad b m,
            MonadResult a ~ e tp,MonadResult b ~ e tp)
        => a -> b -> m (e BoolType)
-(.==.) lhs rhs = do
-  lhs' <- embedM lhs
-  rhs' <- embedM rhs
-  tp <- embedTypeOf lhs'
-  embed $ App (E.Eq tp (Succ (Succ Zero))) (lhs' ::: rhs' ::: Nil)
+(.==.) lhs rhs
+  = embed $ (\lhs' rhs' tp -> App (E.Eq (tp lhs') (Succ (Succ Zero))) (lhs' ::: rhs' ::: Nil)) <$>
+    (embedM lhs) <*>
+    (embedM rhs) <*>
+    embedTypeOf
 {-# INLINEABLE (.==.) #-}
 
 (./=.) :: (Embed m e,HasMonad a,HasMonad b,
            MatchMonad a m,MatchMonad b m,
            MonadResult a ~ e tp,MonadResult b ~ e tp)
        => a -> b -> m (e BoolType)
-(./=.) lhs rhs = do
-  lhs' <- embedM lhs
-  rhs' <- embedM rhs
-  tp <- embedTypeOf lhs'
-  embed $ App (E.Distinct tp (Succ (Succ Zero))) (lhs' ::: rhs' ::: Nil)
+(./=.) lhs rhs
+  = embed $ (\lhs' rhs' tp -> App (E.Distinct (tp lhs') (Succ (Succ Zero))) (lhs' ::: rhs' ::: Nil)) <$>
+    (embedM lhs) <*>
+    (embedM rhs) <*>
+    embedTypeOf
 {-# INLINEABLE (./=.) #-}
 
 infix 4 .==., ./=.
 
 eq :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e tp)
    => [a] -> m (e BoolType)
-eq [] = embed (E.Const (BoolValue True))
-eq xs = do
-  xs'@(x:_) <- mapM embedM xs
-  tp <- embedTypeOf x
-  allEqFromList xs' $ \n -> embed.(App (E.Eq tp n))
+eq [] = embed $ pure $ E.Const (BoolValue True)
+eq xs = embed $ (\xs' tp -> allEqFromList xs' $ \n -> App (E.Eq (tp $ head xs') n)) <$>
+        (traverse embedM xs) <*>
+        embedTypeOf
 {-# INLINEABLE eq #-}
 
 distinct :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e tp)
          => [a] -> m (e BoolType)
-distinct [] = embed (E.Const (BoolValue True))
-distinct xs = do
-  xs'@(x:_) <- mapM embedM xs
-  tp <- embedTypeOf x
-  allEqFromList xs' $ \n -> embed.(App (E.Distinct tp n))
+distinct [] = embed $ pure $ E.Const (BoolValue True)
+distinct xs = embed $ (\xs' tp -> allEqFromList xs' $ \n -> App (E.Distinct (tp $ head xs') n)) <$>
+              (traverse embedM xs) <*>
+              embedTypeOf
 {-# INLINEABLE distinct #-}
 
 map' :: (Embed m e,HasMonad arg,MatchMonad arg m,MonadResult arg ~ List e (Lifted tps idx),
@@ -522,21 +513,17 @@ map' :: (Embed m e,HasMonad arg,MatchMonad arg m,MonadResult arg ~ List e (Lifte
      => E.Function (EmFun m e) '(tps,res)
      -> arg
      -> m (e (ArrayType idx res))
-map' f arg = do
-  arg' <- embedM arg
-  let (tps,res) = getFunType f
-      idx = unliftTypeWith (getTypes arg') tps
-  embed $ E.App (E.Map idx f) arg'
+map' f arg = embed $ (\arg' -> let (tps,res) = getFunType f
+                                   idx = unliftTypeWith (getTypes arg') tps
+                               in E.App (E.Map idx f) arg') <$>
+             (embedM arg)
 {-# INLINEABLE map' #-}
 
 ord :: (Embed m e,IsSMTNumber tp,HasMonad a,HasMonad b,
         MatchMonad a m,MatchMonad b m,
         MonadResult a ~ e tp,MonadResult b ~ e tp)
     => E.OrdOp -> a -> b -> m (e BoolType)
-ord op lhs rhs = do
-  lhs' <- embedM lhs
-  rhs' <- embedM rhs
-  embed $ Ord op lhs' rhs'
+ord op lhs rhs = embed $ Ord op <$> embedM lhs <*> embedM rhs
 {-# INLINEABLE ord #-}
 
 (.>=.),(.>.),(.<=.),(.<.) :: (Embed m e,IsSMTNumber tp,HasMonad a,HasMonad b,
@@ -557,7 +544,7 @@ infix 4 .>=.,.>.,.<=.,.<.
 arith :: (Embed m e,HasMonad a,MatchMonad a m,
           MonadResult a ~ e tp,IsSMTNumber tp)
       => E.ArithOp -> [a] -> m (e tp)
-arith op xs = mapM embedM xs >>= embed.(ArithLst op)
+arith op xs = embed $ ArithLst op <$> traverse embedM xs
 {-# INLINEABLE arith #-}
 
 plus,minus,mult :: (Embed m e,HasMonad a,MatchMonad a m,
@@ -575,18 +562,9 @@ mult = arith E.Mult
                       MonadResult a ~ e tp,MonadResult b ~ e tp,
                       IsSMTNumber tp)
                   => a -> b -> m (e tp)
-(.+.) x y = do
-  x' <- embedM x
-  y' <- embedM y
-  embed $ x' :+: y'
-(.-.) x y = do
-  x' <- embedM x
-  y' <- embedM y
-  embed $ x' :-: y'
-(.*.) x y = do
-  x' <- embedM x
-  y' <- embedM y
-  embed $ x' :*: y'
+(.+.) x y = embed $ (:+:) <$> embedM x <*> embedM y
+(.-.) x y = embed $ (:-:) <$> embedM x <*> embedM y
+(.*.) x y = embed $ (:*:) <$> embedM x <*> embedM y
 {-# INLINEABLE (.+.) #-}
 {-# INLINEABLE (.-.) #-}
 {-# INLINEABLE (.*.) #-}
@@ -596,16 +574,12 @@ infixl 7 .*.
 
 neg :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e tp,IsSMTNumber tp)
     => a -> m (e tp)
-neg x = do
-  x' <- embedM x
-  embed $ Neg x'
+neg x = embed $ Neg <$> embedM x
 {-# INLINEABLE neg #-}
 
 abs' :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e tp,IsSMTNumber tp)
      => a -> m (e tp)
-abs' x = do
-  x' <- embedM x
-  embed $ Abs x'
+abs' x = embed $ Abs <$> embedM x
 {-# INLINEABLE abs' #-}
 
 -- TODO: The following instances cause overlap:
@@ -665,18 +639,9 @@ rem',div',mod' :: (Embed m e,HasMonad a,HasMonad b,
                    MatchMonad a m,MatchMonad b m,
                    MonadResult a ~ e IntType,MonadResult b ~ e IntType)
                => a -> b -> m (e IntType)
-rem' x y = do
-  x' <- embedM x
-  y' <- embedM y
-  embed $ Rem x' y'
-div' x y = do
-  x' <- embedM x
-  y' <- embedM y
-  embed $ Div x' y'
-mod' x y = do
-  x' <- embedM x
-  y' <- embedM y
-  embed $ Mod x' y'
+rem' x y = embed $ Rem <$> embedM x <*> embedM y
+div' x y = embed $ Div <$> embedM x <*> embedM y
+mod' x y = embed $ Mod <$> embedM x <*> embedM y
 {-# INLINEABLE rem' #-}
 {-# INLINEABLE div' #-}
 {-# INLINEABLE mod' #-}
@@ -686,10 +651,7 @@ infixl 7 `div'`, `rem'`, `mod'`
 (./.) :: (Embed m e,HasMonad a,HasMonad b,MatchMonad a m,MatchMonad b m,
           MonadResult a ~ e RealType,MonadResult b ~ e RealType)
       => a -> b -> m (e RealType)
-(./.) x y = do
-  x' <- embedM x
-  y' <- embedM y
-  embed $ x' :/: y'
+(./.) x y = embed $ (:/:) <$> embedM x <*> embedM y
 {-# INLINEABLE (./.) #-}
 
 infixl 7 ./.
@@ -704,20 +666,24 @@ infixl 7 ./.
 
 not' :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e BoolType)
      => a -> m (e BoolType)
-not' x = embedM x >>= embed.Not
+not' x = embed $ Not <$> embedM x
 {-# INLINEABLE not' #-}
 
 logic :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e BoolType)
       => E.LogicOp -> [a] -> m (e BoolType)
-logic op lst = mapM embedM lst >>= embed.(LogicLst op)
+logic op lst = embed $ LogicLst op <$> traverse embedM lst
 {-# INLINEABLE logic #-}
 
 and',or',xor',implies :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e BoolType)
                       => [a] -> m (e BoolType)
-and' xs = mapM embedM xs >>= embed.AndLst
-or' xs = mapM embedM xs >>= embed.OrLst
-xor' xs = mapM embedM xs >>= embed.XOrLst
-implies xs = mapM embedM xs >>= embed.ImpliesLst
+and' [] = true
+and' [x] = embedM x
+and' xs = embed $ AndLst <$> traverse embedM xs
+or' [] = false
+or' [x] = embedM x
+or' xs = embed $ OrLst <$> traverse embedM xs
+xor' xs = embed $ XOrLst <$> traverse embedM xs
+implies xs = embed $ ImpliesLst <$> traverse embedM xs
 {-# INLINEABLE and' #-}
 {-# INLINEABLE or' #-}
 {-# INLINEABLE xor' #-}
@@ -727,18 +693,9 @@ implies xs = mapM embedM xs >>= embed.ImpliesLst
                        MatchMonad a m,MatchMonad b m,
                        MonadResult a ~ e BoolType,MonadResult b ~ e BoolType)
                    => a -> b -> m (e BoolType)
-(.&.) x y = do
-  x' <- embedM x
-  y' <- embedM y
-  embed (x' :&: y')
-(.|.) x y = do
-  x' <- embedM x
-  y' <- embedM y
-  embed (x' :|: y')
-(.=>.) x y = do
-  x' <- embedM x
-  y' <- embedM y
-  embed (x' :=>: y')
+(.&.) x y = embed $ (:&:) <$> embedM x <*> embedM y
+(.|.) x y = embed $ (:|:) <$> embedM x <*> embedM y
+(.=>.) x y = embed $ (:=>:) <$> embedM x <*> embedM y
 {-# INLINEABLE (.&.) #-}
 {-# INLINEABLE (.|.) #-}
 {-# INLINEABLE (.=>.) #-}
@@ -749,24 +706,23 @@ infixr 2 .=>.
 
 toReal :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e IntType)
        => a -> m (e RealType)
-toReal x = embedM x >>= embed.ToReal
+toReal x = embed $ ToReal <$> embedM x
 {-# INLINEABLE toReal #-}
 
 toInt :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e RealType)
       => a -> m (e IntType)
-toInt x = embedM x >>= embed.ToInt
+toInt x = embed $ ToInt <$> embedM x
 {-# INLINEABLE toInt #-}
 
 ite :: (Embed m e,HasMonad a,HasMonad b,HasMonad c,
         MatchMonad a m,MatchMonad b m,MatchMonad c m,
         MonadResult a ~ e BoolType,MonadResult b ~ e tp,MonadResult c ~ e tp)
     => a -> b -> c -> m (e tp)
-ite c ifT ifF = do
-  c' <- embedM c
-  ifT' <- embedM ifT
-  ifF' <- embedM ifF
-  tp <- embedTypeOf ifT'
-  embed $ App (E.ITE tp) (c' ::: ifT' ::: ifF' ::: Nil)
+ite c ifT ifF = embed $ (\c' ifT' ifF' tp -> App (E.ITE (tp ifT')) (c' ::: ifT' ::: ifF' ::: Nil)) <$>
+                embedM c <*>
+                embedM ifT <*>
+                embedM ifF <*>
+                embedTypeOf
 {-# INLINEABLE ite #-}
 
 bvcomp :: forall m e a b bw.
@@ -774,11 +730,11 @@ bvcomp :: forall m e a b bw.
            MatchMonad a m,MatchMonad b m,
            MonadResult a ~ e (BitVecType bw),MonadResult b ~ e (BitVecType bw))
        => E.BVCompOp -> a -> b -> m (e BoolType)
-bvcomp op x y = do
-  (x' :: e (BitVecType bw)) <- embedM x
-  (y' :: e (BitVecType bw)) <- embedM y
-  BitVecRepr bw <- embedTypeOf x'
-  embed $ App (E.BVComp op bw) (x' ::: y' ::: Nil)
+bvcomp op x y = embed $ (\x' y' tp -> case tp x' of
+                            BitVecRepr bw -> App (E.BVComp op bw) (x' ::: y' ::: Nil)) <$>
+                embedM x <*>
+                embedM y <*>
+                embedTypeOf
 {-# INLINEABLE bvcomp #-}
 
 bvule,bvult,bvuge,bvugt,bvsle,bvslt,bvsge,bvsgt :: (Embed m e,HasMonad a,HasMonad b,
@@ -807,11 +763,11 @@ bvbin :: forall m e a b bw.
           MatchMonad a m,MatchMonad b m,
           MonadResult a ~ e (BitVecType bw),MonadResult b ~ e (BitVecType bw))
       => E.BVBinOp -> a -> b -> m (e (BitVecType bw))
-bvbin op x y = do
-  (x' :: e (BitVecType bw)) <- embedM x
-  (y' :: e (BitVecType bw)) <- embedM y
-  BitVecRepr bw <- embedTypeOf x'
-  embed $ App (E.BVBin op bw) (x' ::: y' ::: Nil)
+bvbin op x y = embed $ (\x' y' tp -> case tp x' of
+                         BitVecRepr bw -> App (E.BVBin op bw) (x' ::: y' ::: Nil)) <$>
+               embedM x <*>
+               embedM y <*>
+               embedTypeOf
 {-# INLINEABLE bvbin #-}
 
 bvadd,bvsub,bvmul,bvurem,bvsrem,bvudiv,bvsdiv,bvshl,bvlshr,bvashr,bvxor,bvand,bvor
@@ -851,10 +807,10 @@ bvun :: forall m e a bw.
          MatchMonad a m,
          MonadResult a ~ e (BitVecType bw))
      => E.BVUnOp -> a -> m (e (BitVecType bw))
-bvun op x = do
-  (x' :: e (BitVecType bw)) <- embedM x
-  BitVecRepr bw <- embedTypeOf x'
-  embed $ App (E.BVUn op bw) (x' ::: Nil)
+bvun op x = embed $ (\x' tp -> case tp x' of
+                        BitVecRepr bw -> App (E.BVUn op bw) (x' ::: Nil)) <$>
+            embedM x <*>
+            embedTypeOf
 {-# INLINEABLE bvun #-}
 
 bvnot,bvneg :: (Embed m e,HasMonad a,
@@ -869,11 +825,11 @@ bvneg = bvun E.BVNeg
 select :: (Embed m e,HasMonad arr,MatchMonad arr m,MonadResult arr ~ e (ArrayType idx el),
            HasMonad i,MatchMonad i m,MonadResult i ~ List e idx)
        => arr -> i -> m (e el)
-select arr idx = do
-  arr' <- embedM arr
-  idx' <- embedM idx
-  ArrayRepr idxTp elTp <- embedTypeOf arr'
-  embed (App (E.Select idxTp elTp) (arr' ::: idx'))
+select arr idx = embed $ (\arr' idx' tp -> case tp arr' of
+                             ArrayRepr idxTp elTp -> App (E.Select idxTp elTp) (arr' ::: idx')) <$>
+                 embedM arr <*>
+                 embedM idx <*>
+                 embedTypeOf
 {-# INLINEABLE select #-}
 
 select1 :: (Embed m e,HasMonad arr,HasMonad idx,
@@ -881,23 +837,19 @@ select1 :: (Embed m e,HasMonad arr,HasMonad idx,
             MonadResult arr ~ e (ArrayType '[idx'] el),
             MonadResult idx ~ e idx')
         => arr -> idx -> m (e el)
-select1 arr idx = do
-  arr' <- embedM arr
-  idx' <- embedM idx
-  ArrayRepr (idxTp ::: Nil) elTp <- embedTypeOf arr'
-  embed $ App (E.Select (idxTp ::: Nil) elTp) (arr' ::: idx' ::: Nil)
+select1 arr idx = select arr (idx .:. nil)
 {-# INLINEABLE select1 #-}
 
 store :: (Embed m e,HasMonad arr,MatchMonad arr m,MonadResult arr ~ e (ArrayType idx el),
           HasMonad i,MatchMonad i m,MonadResult i ~ List e idx,
           HasMonad nel,MatchMonad nel m,MonadResult nel ~ e el)
       => arr -> i -> nel -> m (e (ArrayType idx el))
-store arr idx nel = do
-  arr' <- embedM arr
-  idx' <- embedM idx
-  nel' <- embedM nel
-  ArrayRepr idxTp elTp <- embedTypeOf arr'
-  embed (App (E.Store idxTp elTp) (arr' ::: nel' ::: idx'))
+store arr idx nel = embed $ (\arr' idx' nel' tp -> case tp arr' of
+                                ArrayRepr idxTp elTp -> App (E.Store idxTp elTp) (arr' ::: nel' ::: idx')) <$>
+                    embedM arr <*>
+                    embedM idx <*>
+                    embedM nel <*>
+                    embedTypeOf
 {-# INLINEABLE store #-}
 
 store1 :: (Embed m e,HasMonad arr,HasMonad idx,HasMonad el,
@@ -906,21 +858,15 @@ store1 :: (Embed m e,HasMonad arr,HasMonad idx,HasMonad el,
            MonadResult idx ~ e idx',
            MonadResult el ~ e el')
         => arr -> idx -> el -> m (e (ArrayType '[idx'] el'))
-store1 arr idx el = do
-  arr' <- embedM arr
-  idx' <- embedM idx
-  el' <- embedM el
-  ArrayRepr (idxTp ::: Nil) elTp <- embedTypeOf arr'
-  embed $ App (E.Store (idxTp ::: Nil) elTp) (arr' ::: el' ::: idx' ::: Nil)
+store1 arr idx el = store arr (idx .:. nil) el
 {-# INLINEABLE store1 #-}
 
 constArray :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e tp)
            => List Repr idx -> a
            -> m (e (ArrayType idx tp))
-constArray idx el = do
-  el' <- embedM el
-  tp <- embedTypeOf el'
-  embed (App (E.ConstArray idx tp) (el' ::: Nil))
+constArray idx el = embed $ (\el' tp -> App (E.ConstArray idx (tp el')) (el' ::: Nil)) <$>
+                    embedM el <*>
+                    embedTypeOf
 {-# INLINEABLE constArray #-}
 
 concat' :: forall m e a b n1 n2.
@@ -928,12 +874,19 @@ concat' :: forall m e a b n1 n2.
             MatchMonad a m,MatchMonad b m,
             MonadResult a ~ e (BitVecType n1),MonadResult b ~ e (BitVecType n2))
         => a -> b -> m (e (BitVecType (n1 + n2)))
-concat' x y = do
-  (x'::e (BitVecType n1)) <- embedM x
-  (y'::e (BitVecType n2)) <- embedM y
-  BitVecRepr bw1 <- embedTypeOf x'
-  BitVecRepr bw2 <- embedTypeOf y'
-  embed $ App (E.Concat bw1 bw2) (x' ::: y' ::: Nil)
+concat' x y = embed $ f <$>
+              embedM x <*>
+              embedM y <*>
+              embedTypeOf <*>
+              embedTypeOf
+  where
+    f :: e (BitVecType n1) -> e (BitVecType n2)
+      -> (e (BitVecType n1) -> Repr (BitVecType n1))
+      -> (e (BitVecType n2) -> Repr (BitVecType n2))
+      -> Expression v qv fun fv lv e (BitVecType (n1 + n2))
+    f x' y' tp1 tp2 = case tp1 x' of
+      BitVecRepr bw1 -> case tp2 y' of
+        BitVecRepr bw2 -> App (E.Concat bw1 bw2) (x' ::: y' ::: Nil)
 {-# INLINEABLE concat' #-}
 
 extract' :: forall m e a bw start len.
@@ -942,40 +895,39 @@ extract' :: forall m e a bw start len.
              ((start + len) <= bw) ~ True)
          => Natural start -> Natural len -> a
          -> m (e (BitVecType len))
-extract' start len arg = do
-  (arg'::e (BitVecType bw)) <- embedM arg
-  BitVecRepr bw <- embedTypeOf arg'
-  embed (App (E.Extract bw start len) (arg' ::: Nil))
+extract' start len arg = embed $ f <$> embedM arg <*> embedTypeOf
+  where
+    f :: e (BitVecType bw) -> (e (BitVecType bw) -> Repr (BitVecType bw))
+      -> Expression v qv fun fv lv e (BitVecType len)
+    f arg' tp = case tp arg' of
+      BitVecRepr bw -> App (E.Extract bw start len) (arg' ::: Nil)
 {-# INLINEABLE extract' #-}
 
 divisible :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e IntType)
           => Integer -> a -> m (e BoolType)
-divisible n x = embedM x >>= embed.(Divisible n)
+divisible n x = embed $ Divisible n <$> embedM x
 {-# INLINEABLE divisible #-}
 
 true,false :: Embed m e => m (e BoolType)
-true = embed $ E.Const (BoolValue True)
-false = embed $ E.Const (BoolValue False)
+true = embed $ pure $ E.Const (BoolValue True)
+false = embed $ pure $ E.Const (BoolValue False)
 {-# INLINEABLE true #-}
 {-# INLINEABLE false #-}
 
 mk :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ List e sig,IsDatatype dt)
    => Constr dt sig -> a -> m (e (DataType dt))
-mk con args = do
-  rargs <- embedM args
-  embed $ E.App (E.Constructor con) rargs
+mk con args = embed $ E.App (E.Constructor con) <$>
+              embedM args
 {-# INLINEABLE mk #-}
 
 is :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e (DataType dt),IsDatatype dt)
    => a -> Constr dt sig -> m (e BoolType)
-is e con = do
-  re <- embedM e
-  embed $ E.App (E.Test con) (re ::: Nil)
+is e con = embed $ E.App (E.Test con) . (::: Nil) <$>
+           embedM e
 {-# INLINEABLE is #-}
 
 (.#.) :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e (DataType dt),IsDatatype dt)
       => a -> Field dt sig tp -> m (e tp)
-(.#.) e f = do
-  re <- embedM e
-  embed $ E.App (E.Field f) (re ::: Nil)
+(.#.) e f = embed $ E.App (E.Field f) . (::: Nil) <$>
+            embedM e
 {-# INLINEABLE (.#.) #-}

@@ -12,7 +12,7 @@ data RevMap k a tp = RevMap k (RevComp a tp)
 
 newtype CompMap k a (e :: Type -> *) = CompMap { compMap :: Map k (a e) } deriving Show
 
-mapITE :: (Ord k,Embed m e) => (e BoolType -> a e -> a e -> m (a e))
+mapITE :: (Ord k,Embed m e,Monad m) => (e BoolType -> a e -> a e -> m (a e))
        -> e BoolType
        -> CompMap k a e
        -> CompMap k a e

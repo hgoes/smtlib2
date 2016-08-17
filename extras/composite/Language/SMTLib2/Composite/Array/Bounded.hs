@@ -117,7 +117,7 @@ consDescr f c descr
                                    Just l -> Just (l-1)
                                    Nothing -> Nothing }
 
-cons :: (Composite c,Embed m e,GetType e,Num (Value idx),Num (m (e idx))) => c e
+cons :: (Composite c,Embed m e,Monad m,GetType e,Num (Value idx),Num (m (e idx))) => c e
      -> CompArrayBounded idx c e
      -> m (e idx,CompArrayBounded idx c e)
 cons x xs = case lowerBound xs of
@@ -143,7 +143,7 @@ snocDescr f c descr
                                    Just u -> Just (u+1)
                                    Nothing -> Nothing }
 
-snoc :: (Composite c,Embed m e,GetType e,Num (Value idx),Num (m (e idx))) => c e
+snoc :: (Composite c,Embed m e,Monad m,GetType e,Num (Value idx),Num (m (e idx))) => c e
      -> CompArrayBounded idx c e
      -> m (e idx,CompArrayBounded idx c e)
 snoc x xs = case upperBound xs of
@@ -158,10 +158,10 @@ snoc x xs = case upperBound xs of
     return (l,xs { boundedArray = narr
                  , upperBound = Right nl })
 
-select :: (Embed m e,GetType e,Composite c) => CompArrayBounded idx c e -> e idx -> m (c e)
+select :: (Embed m e,Monad m,GetType e,Composite c) => CompArrayBounded idx c e -> e idx -> m (c e)
 select arr idx = Array.select (boundedArray arr) (idx ::: Nil)
 
-store :: (Embed m e,GetType e,Composite c) => CompArrayBounded idx c e -> e idx -> c e -> m (CompArrayBounded idx c e)
+store :: (Embed m e,Monad m,GetType e,Composite c) => CompArrayBounded idx c e -> e idx -> c e -> m (CompArrayBounded idx c e)
 store arr idx el = do
   narr <- Array.store (boundedArray arr) (idx ::: Nil) el
   return arr { boundedArray = narr }

@@ -175,9 +175,8 @@ intersectionRange (BitVecRange bw x) (BitVecRange _ y)
           GT -> intersectionBV ((u2,u1):r1) r2
 
 rangedITE :: Embed m e => e BoolType -> Ranged tp e -> Ranged tp e -> m (Ranged tp e)
-rangedITE c (Ranged ifT) (Ranged ifF) = do
-  res <- ite c ifT ifF
-  return $ Ranged res
+rangedITE c (Ranged ifT) (Ranged ifF)
+  = Ranged <$> ite (pure c) (pure ifT) (pure ifF)
 
 rangedConst :: Value tp -> Range tp
 rangedConst (BoolValue b) = BoolRange (not b) b
@@ -197,29 +196,17 @@ rangeInvariant :: Embed m e => Range tp -> e tp -> m (e BoolType)
 rangeInvariant (BoolRange True True) _ = true
 rangeInvariant (BoolRange False False) _ = false
 rangeInvariant (BoolRange True False) e = not' e
-rangeInvariant (BoolRange False True) e = return e
+rangeInvariant (BoolRange False True) e = pure e
 rangeInvariant (IntRange r) e = rangeInvariant' (\isLE c -> if isLE then e .<=. cint c else e .>=. cint c) r
-rangeInvariant (BitVecRange bw r) e = do
-  conds <- mapM (\(lower,upper) -> do
-                    lowerCond <- if lower==0
-                                 then return []
-                                 else do
-                      cond <- e `bvuge` cbv lower bw
-                      return [cond]
-                    upperCond <- if upper==2^bw'-1
-                                 then return []
-                                 else do
-                      cond <- e `bvule` cbv upper bw
-                      return [cond]
-                    case lowerCond++upperCond of
-                      [] -> true
-                      [c] -> return c
-                      xs -> and' xs
-                ) r
-  case conds of
-    [] -> false
-    [c] -> return c
-    xs -> or' xs
+rangeInvariant (BitVecRange bw r) e
+  = or' $ fmap (\(lower,upper)
+                 -> and' $ (if lower==0
+                             then []
+                             else [e `bvuge` cbv lower bw])++
+                    (if upper==2^bw'-1
+                      then []
+                      else [e `bvule` cbv upper bw])
+               ) r
   where
     bw' = naturalToInteger bw
 
@@ -228,27 +215,17 @@ rangeInvariant' :: Embed m e => (Bool -> Integer -> m (e BoolType)) -- ^ First p
                 -> m (e BoolType)
 rangeInvariant' f (c,xs) = if c then case xs of
   [] -> true
-  x:xs' -> do
-    conj <- mk xs'
-    el <- f True x
-    case conj of
-      [] -> return el
-      _  -> or' (el:conj)
-  else do
-  conj <- mk xs
-  case conj of
+  x:xs' -> case mk xs' of
+    [] -> f True x
+    conj -> or' (f True x:conj)
+  else case mk xs of
     [] -> false
-    [x] -> return x
-    _ -> or' conj
+    [x] -> x
+    conj -> or' conj
   where
-    mk (l:u:xs) = do
-      e <- (f False l) .&. (f True u)
-      es <- mk xs
-      return (e:es)
-    mk [l] = do
-      e <- f False l
-      return [e]
-    mk [] = return []
+    mk (l:u:xs) = ((f False l) .&. (f True u)) : mk xs
+    mk [l] = [f False l]
+    mk [] = []
 
 lowerIntBound :: IntRange -> Maybe (Integer,Bool)
 lowerIntBound (incl,x:xs) = Just (x,incl)

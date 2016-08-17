@@ -30,14 +30,14 @@ instance Composite a => GetType (CompositeExpr a) where
       (return.getType) (return.getFunType) (return.getType)
       (return.getType) (return.getType) e
 
-createRevComp :: (Composite arg,Embed m e,GetType e)
+createRevComp :: (Composite arg,Embed m e,Monad m,GetType e)
               => (forall t. Repr t -> RevComp arg t -> m (EmVar m e t))
               -> CompDescr arg
               -> m (arg e,DMap (EmVar m e) (RevComp arg))
 createRevComp f descr
   = runStateT (createComposite (\tp rev -> do
                                    v <- lift (f tp rev)
-                                   e <- lift (embed (E.Var v))
+                                   e <- lift (embed $ pure $ E.Var v)
                                    modify (DMap.insert v rev)
                                    return e
                                ) descr
@@ -72,10 +72,11 @@ instance (Composite a,d ~ CompDescr a) => Embed (Reader d) (CompositeExpr a) whe
   type EmFunArg (Reader d) (CompositeExpr a) = E.NoVar
   type EmLVar (Reader d) (CompositeExpr a) = E.NoVar
   embed e = do
+    re <- e
     descr <- ask
-    return (CompositeExpr descr e)
+    return (CompositeExpr descr re)
   embedQuantifier _ _ _ = error "CompositeExpr does not support quantifier"
-  embedTypeOf = return.getType
+  embedTypeOf = return getType
 
 instance Composite a => Extract () (CompositeExpr a) where
   type ExVar () (CompositeExpr a) = RevComp a
@@ -94,7 +95,7 @@ mkCompExpr f descr
                   arg <- createComposite (\_ rev -> return (CompositeExpr descr (E.Var rev))) descr
                   f arg) descr
 
-concretizeExpr :: (Embed m e,Composite arg,GetType e)
+concretizeExpr :: (Embed m e,Monad m,Composite arg,GetType e)
                => arg e
                -> CompositeExpr arg tp
                -> m (e tp)
@@ -104,11 +105,11 @@ concretizeExpr arg (CompositeExpr _ (E.Var rev)) = case accessComposite rev arg 
 concretizeExpr arg (CompositeExpr _ (E.App fun args)) = do
   nfun <- E.mapFunction undefined fun
   nargs <- List.mapM (concretizeExpr arg) args
-  embed (E.App nfun nargs)
-concretizeExpr arg (CompositeExpr _ (E.Const c)) = embed (E.Const c)
+  embed $ pure $ E.App nfun nargs
+concretizeExpr arg (CompositeExpr _ (E.Const c)) = embed $ pure $ E.Const c
 concretizeExpr arg (CompositeExpr _ (E.AsArray fun)) = do
   nfun <- E.mapFunction undefined fun
-  embed (E.AsArray nfun)
+  embed $ pure $ E.AsArray nfun
 
 relativizeExpr :: (Backend b,Composite arg)
                => CompDescr arg
