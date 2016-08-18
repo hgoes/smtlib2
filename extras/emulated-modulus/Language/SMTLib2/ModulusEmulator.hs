@@ -5,13 +5,15 @@ module Language.SMTLib2.ModulusEmulator
 
 import Language.SMTLib2.Internals.Backend
 import Language.SMTLib2.Internals.Expression
+import Language.SMTLib2.Internals.Proof (mapProof)
 import Language.SMTLib2.Internals.Type hiding (Constr,Field)
 import Language.SMTLib2.Internals.Type.Nat
 import Language.SMTLib2.Internals.Type.List (List(..))
 
 import Data.Foldable
-import Data.Typeable (gcast)
 import Data.GADT.Compare
+import Data.GADT.Show
+import Data.Functor.Identity
 
 data ModulusEmulator b = ModulusEmulator { emulatedBackend :: b
                                          , emulations :: [Emulation b]
@@ -85,9 +87,14 @@ flushAssertions interp me = case addAssertions me of
     return (me { emulatedBackend = b2
                , addAssertions = Just [] })
 
+deriving instance Backend b => GShow (Expr (ModulusEmulator b))
+deriving instance Backend b => GEq (Expr (ModulusEmulator b))
+deriving instance Backend b => GCompare (Expr (ModulusEmulator b))
+deriving instance Backend b => GetType (Expr (ModulusEmulator b))
+
 instance (Backend b) => Backend (ModulusEmulator b) where
   type SMTMonad (ModulusEmulator b) = SMTMonad b
-  type Expr (ModulusEmulator b) = Expr b
+  newtype Expr (ModulusEmulator b) tp = ModulusExpr (Expr b tp)
   type Var (ModulusEmulator b) = Var b
   type QVar (ModulusEmulator b) = QVar b
   type Fun (ModulusEmulator b) = Fun b
@@ -104,30 +111,30 @@ instance (Backend b) => Backend (ModulusEmulator b) where
   declareVar tp name = liftSMT (declareVar tp name)
   createQVar tp name = liftSMT (createQVar tp name)
   createFunArg tp name = liftSMT (createFunArg tp name)
-  defineVar name body = liftSMT (defineVar name body)
+  defineVar name (ModulusExpr body) = liftSMT (defineVar name body)
   declareFun arg tp name = liftSMT (declareFun arg tp name)
-  defineFun name args body = liftSMT (defineFun name args body)
-  assert expr me = do
+  defineFun name args (ModulusExpr body) = liftSMT (defineFun name args body)
+  assert (ModulusExpr expr) me = do
     ((),me1) <- liftSMT (assert expr) me
     me2 <- flushAssertions Nothing me1
     return ((),me2)
-  assertId expr me = do
+  assertId (ModulusExpr expr) me = do
     (cl,me1) <- liftSMT (assertId expr) me
     me2 <- flushAssertions Nothing me1
     return (cl,me2)
-  assertPartition expr p me = do
+  assertPartition (ModulusExpr expr) p me = do
     ((),me1) <- liftSMT (assertPartition expr p) me
     me2 <- flushAssertions (Just p) me1
     return ((),me2)
   checkSat tactic limits = liftSMT (checkSat tactic limits)
   getUnsatCore = liftSMT getUnsatCore
-  getValue e = liftSMT (getValue e)
+  getValue (ModulusExpr e) = liftSMT (getValue e)
   getModel = liftSMT getModel
-  modelEvaluate mdl e = liftSMT (modelEvaluate mdl e)
+  modelEvaluate mdl (ModulusExpr e) = liftSMT (modelEvaluate mdl e)
   getProof = liftSMT getProof
-  analyzeProof b p = analyzeProof (emulatedBackend b) p
-  simplify e = liftSMT (simplify e)
-  toBackend (App (ArithIntBin Mod) (x ::: y ::: Nil)) me
+  analyzeProof b = mapProof ModulusExpr . analyzeProof (emulatedBackend b)
+  simplify (ModulusExpr e) = mapAction ModulusExpr $ liftSMT (simplify e)
+  toBackend (App (ArithIntBin Mod) (ModulusExpr x ::: ModulusExpr y ::: Nil)) me
     = case fromBackend (emulatedBackend me) y of
     Const (IntValue y') -> do
       (resVar,b1) <- declareVar IntRepr Nothing (emulatedBackend me)
@@ -135,37 +142,39 @@ instance (Backend b) => Backend (ModulusEmulator b) where
       (res,b3) <- if y'>=0
                   then return (resE,b2)
                   else toBackend (App (Arith NumInt Minus (Succ Zero)) (resE ::: Nil)) b2
-      return (res,addEmulation (EmulatedMod resVar resE y' y x)
-                  (me { emulatedBackend = b3 }))
-  toBackend (App (ArithIntBin Rem) (x ::: y ::: Nil)) me
+      return (ModulusExpr res,addEmulation (EmulatedMod resVar resE y' y x)
+                              (me { emulatedBackend = b3 }))
+  toBackend (App (ArithIntBin Rem) (ModulusExpr x ::: ModulusExpr y ::: Nil)) me
     = case fromBackend (emulatedBackend me) y of
     Const (IntValue y') -> do
       (resVar,b1) <- declareVar IntRepr Nothing (emulatedBackend me)
       (resE,b2) <- toBackend (Var resVar) b1
-      return (resE,addEmulation (EmulatedMod resVar resE y' y x)
-                   (me { emulatedBackend = b2 }))
-  toBackend (App (ArithIntBin Div) (x ::: y ::: Nil)) me = do
+      return (ModulusExpr resE,addEmulation (EmulatedMod resVar resE y' y x)
+                               (me { emulatedBackend = b2 }))
+  toBackend (App (ArithIntBin Div) (ModulusExpr x ::: ModulusExpr y ::: Nil)) me = do
     (resVar,b1) <- declareVar IntRepr Nothing (emulatedBackend me)
     (diffVar,b2) <- declareVar IntRepr Nothing b1
     (resE,b3) <- toBackend (Var resVar) b2
-    return (resE,addEmulation (EmulatedDiv resVar x y diffVar)
-                 (me { emulatedBackend = b3 }))
-  toBackend e me = liftSMT (toBackend e) me
-  fromBackend me e = case fromBackend (emulatedBackend me) e of
+    return (ModulusExpr resE,addEmulation (EmulatedDiv resVar x y diffVar)
+                             (me { emulatedBackend = b3 }))
+  toBackend e me = mapAction ModulusExpr
+                   (liftSMT (toBackend $ runIdentity $ mapExpr return return return return return (\(ModulusExpr e) -> return e) e))
+                   me
+  fromBackend me (ModulusExpr e) = case fromBackend (emulatedBackend me) e of
     Var v -> case [ (modE,expr,refl) | EmulatedMod res resE mod modE expr <- emulations me
-                                    , Just refl <- [geq v res] ] of
-             (cmod,expr,Refl):_ -> App (ArithIntBin Mod) (expr ::: cmod ::: Nil)
-             [] -> case [ (expr,div,diff,refl) | EmulatedDiv res expr div diff <- emulations me
-                                               , Just refl <- [geq v res] ] of
-                   (expr,div,diff,Refl):_ -> App (ArithIntBin Div) (expr ::: div ::: Nil)
-                   [] -> case [ (res,expr,div,refl)
-                              | EmulatedDiv res expr div diff <- emulations me
-                              , Just refl <- [geq v diff] ] of
-                     (res,expr,div,Refl):_ -> App (ArithIntBin Mod) (expr ::: div ::: Nil)
-                     [] -> Var v
-    res -> res
+                                     , Just refl <- [geq v res] ] of
+               (cmod,expr,Refl):_ -> App (ArithIntBin Mod) (ModulusExpr expr ::: ModulusExpr cmod ::: Nil)
+               [] -> case [ (expr,div,diff,refl) | EmulatedDiv res expr div diff <- emulations me
+                                                 , Just refl <- [geq v res] ] of
+                       (expr,div,diff,Refl):_ -> App (ArithIntBin Div) (ModulusExpr expr ::: ModulusExpr div ::: Nil)
+                       [] -> case [ (res,expr,div,refl)
+                                  | EmulatedDiv res expr div diff <- emulations me
+                                  , Just refl <- [geq v diff] ] of
+                         (res,expr,div,Refl):_ -> App (ArithIntBin Mod) (ModulusExpr expr ::: ModulusExpr div ::: Nil)
+                         [] -> Var v
+    res -> runIdentity $ mapExpr return return return return return (return . ModulusExpr) res
   declareDatatypes tps = liftSMT (declareDatatypes tps)
-  interpolate = liftSMT interpolate
+  interpolate = mapAction ModulusExpr (liftSMT interpolate)
   exit = liftSMT exit
   
 liftSMT :: Backend b => SMTAction b r -> SMTAction (ModulusEmulator b) r
