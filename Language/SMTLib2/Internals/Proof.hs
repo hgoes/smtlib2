@@ -77,6 +77,12 @@ renderProofResult f (ProofExpr e) = f e
 renderProofResult f (EquivSat lhs rhs)
   = showString "(~ " . f lhs . showChar ' ' . f rhs . showChar ')'
 
+mapProof :: (forall tp. e tp -> e' tp) -> Proof r e p -> Proof r e' p
+mapProof f (Rule rule args res) = Rule rule args (mapResult res)
+  where
+    mapResult (ProofExpr e) = ProofExpr (f e)
+    mapResult (EquivSat e1 e2) = EquivSat (f e1) (f e2)
+
 instance GShow e => Show (ProofResult e) where
   showsPrec p (ProofExpr e) = gshowsPrec p e
   showsPrec p (EquivSat lhs rhs)

@@ -9,7 +9,7 @@ Library
   Extensions: 		ForeignFunctionInterface,CApiFFI,CPP,
                         GeneralizedNewtypeDeriving,MultiParamTypeClasses,
                         GADTs,ScopedTypeVariables,FlexibleInstances,TypeFamilies,
-                        DataKinds,RankNTypes,TypeOperators
+                        DataKinds,RankNTypes,TypeOperators,StandaloneDeriving
   Extra-Libraries:	mathsat, stdc++
   C-Sources:            helper.c
   Includes:             helper.h

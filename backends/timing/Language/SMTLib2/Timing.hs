@@ -4,9 +4,15 @@ module Language.SMTLib2.Timing
        where
 
 import Language.SMTLib2.Internals.Backend
+import Language.SMTLib2.Internals.Type (GetType)
+import Language.SMTLib2.Internals.Proof (mapProof)
+import Language.SMTLib2.Internals.Expression (mapExpr)
 import Data.Time.Clock
 import Control.Monad.Trans
 import Data.Typeable
+import Data.GADT.Show
+import Data.GADT.Compare
+import Data.Functor.Identity
 
 timingBackend :: (Backend b,MonadIO (SMTMonad b))
               => (NominalDiffTime -> SMTMonad b ())
@@ -27,9 +33,14 @@ withTiming act (TimingBackend b rep) = do
   rep (diffUTCTime timeAfter timeBefore)
   return (res,TimingBackend nb rep)
 
-instance (Backend b) => Backend (TimingBackend b) where
+deriving instance Backend b => GShow (Expr (TimingBackend b))
+deriving instance Backend b => GEq (Expr (TimingBackend b))
+deriving instance Backend b => GCompare (Expr (TimingBackend b))
+deriving instance Backend b => GetType (Expr (TimingBackend b))
+
+instance Backend b => Backend (TimingBackend b) where
   type SMTMonad (TimingBackend b) = SMTMonad b
-  type Expr (TimingBackend b) = Expr b
+  newtype Expr (TimingBackend b) tp = TimingExpr (Expr b tp)
   type Var (TimingBackend b) = Var b
   type QVar (TimingBackend b) = QVar b
   type Fun (TimingBackend b) = Fun b
@@ -46,22 +57,24 @@ instance (Backend b) => Backend (TimingBackend b) where
   declareVar tp = withTiming . declareVar tp
   createQVar tp = withTiming . createQVar tp
   createFunArg tp = withTiming . createFunArg tp
-  defineVar name expr = withTiming (defineVar name expr)
-  defineFun name args body = withTiming (defineFun name args body)
+  defineVar name (TimingExpr expr) = withTiming (defineVar name expr)
+  defineFun name args (TimingExpr body) = withTiming (defineFun name args body)
   declareFun arg tp = withTiming . declareFun arg tp
-  assert = withTiming . assert
-  assertId = withTiming . assertId
-  assertPartition expr part = withTiming (assertPartition expr part)
+  assert (TimingExpr e) = withTiming (assert e)
+  assertId (TimingExpr e) = withTiming (assertId e)
+  assertPartition (TimingExpr expr) part = withTiming (assertPartition expr part)
   checkSat tact limit = withTiming (checkSat tact limit)
   getUnsatCore = withTiming getUnsatCore
-  getValue = withTiming . getValue
+  getValue (TimingExpr e) = withTiming (getValue e)
   getModel = withTiming getModel
-  modelEvaluate mdl e = withTiming (modelEvaluate mdl e)
+  modelEvaluate mdl (TimingExpr e) = withTiming (modelEvaluate mdl e)
   getProof = withTiming getProof
-  analyzeProof b = analyzeProof (timingBackend' b)
-  simplify = withTiming . simplify
-  toBackend = withTiming . toBackend
-  fromBackend b = fromBackend (timingBackend' b)
+  analyzeProof b = mapProof TimingExpr . analyzeProof (timingBackend' b)
+  simplify (TimingExpr e) = mapAction TimingExpr $ withTiming (simplify e)
+  toBackend e = mapAction TimingExpr $ withTiming
+                (toBackend $ runIdentity $ mapExpr return return return return return (\(TimingExpr e) -> return e) e)
+  fromBackend b (TimingExpr e) = runIdentity $ mapExpr return return return return return (return . TimingExpr) $
+                                 fromBackend (timingBackend' b) e
   declareDatatypes = withTiming . declareDatatypes
-  interpolate = withTiming interpolate
+  interpolate = mapAction TimingExpr $ withTiming interpolate
   exit = withTiming exit

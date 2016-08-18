@@ -6,8 +6,9 @@ Build-Type:     Simple
 Cabal-Version:  >=1.8
 
 Library
-  Build-Depends:        base >= 4,smtlib2 >= 1.0 && < 1.1,z3 >= 4,containers
-  Extensions:           TypeFamilies,DataKinds,ScopedTypeVariables,RankNTypes
+  Build-Depends:        base >= 4,smtlib2 >= 1.0 && < 1.1,z3 >= 4,containers,dependent-sum
+  Extensions:           TypeFamilies,DataKinds,ScopedTypeVariables,RankNTypes,
+                        StandaloneDeriving,FlexibleInstances,GeneralizedNewtypeDeriving
   Exposed-Modules:
     Language.SMTLib2.Z3
 

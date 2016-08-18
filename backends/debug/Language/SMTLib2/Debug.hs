@@ -8,7 +8,7 @@ module Language.SMTLib2.Debug
 import Language.SMTLib2.Internals.Backend
 import Language.SMTLib2.Internals.Type hiding (Constr,Field)
 import qualified Language.SMTLib2.Internals.Type.List as List
-import Language.SMTLib2.Internals.Expression (Expression(Let),LetBinding(..))
+import Language.SMTLib2.Internals.Expression (Expression(Let),LetBinding(..),mapExpr)
 import Language.SMTLib2.Pipe.Internals
 
 import qualified Data.AttoLisp as L
@@ -22,6 +22,8 @@ import qualified Data.Map as Map
 import qualified Data.Text as T
 import Data.Functor.Identity
 import Data.Typeable
+import Data.GADT.Show
+import Data.GADT.Compare
 
 import Data.Dependent.Map (DMap)
 import qualified Data.Dependent.Map as DMap
@@ -110,9 +112,14 @@ outputResponse b@(DebugBackend {}) str = do
   when (debugUseColor b) $ liftIO $ hSetSGR (debugHandle b) [Reset]
   liftIO $ hFlush (debugHandle b)
 
+deriving instance Backend b => GShow (Expr (DebugBackend b))
+deriving instance Backend b => GEq (Expr (DebugBackend b))
+deriving instance Backend b => GCompare (Expr (DebugBackend b))
+deriving instance Backend b => GetType (Expr (DebugBackend b))
+
 instance (Backend b) => Backend (DebugBackend b) where
   type SMTMonad (DebugBackend b) = SMTMonad b
-  type Expr (DebugBackend b) = Expr b
+  newtype Expr (DebugBackend b) t = DebugExpr (Expr b t)
   type Var (DebugBackend b) = Var b
   type QVar (DebugBackend b) = QVar b
   type Fun (DebugBackend b) = Fun b
@@ -140,7 +147,7 @@ instance (Backend b) => Backend (DebugBackend b) where
     return (rvar,b2 { debugBackend'' = nb
                     , debugVars = DMap.insertWith const rvar
                                   (UntypedVar sym tp) (debugVars b2) })
-  defineFun name args body b = do
+  defineFun name args (DebugExpr body) b = do
     let (sym,req,nnames) = renderDefineFun
                            (\fv -> case DMap.lookup fv (debugFVars b) of
                              Just (UntypedVar n _) -> L.Symbol n)
@@ -163,15 +170,17 @@ instance (Backend b) => Backend (DebugBackend b) where
                  , debugNames = nnames
                  , debugFVars = DMap.insert fv (UntypedVar name'' tp) (debugFVars b) })
   toBackend expr b = do
-    (expr',nb) <- toBackend expr (debugBackend'' b)
-    return (expr',b { debugBackend'' = nb })
-  fromBackend b = fromBackend (debugBackend'' b)
-  assert expr b = do
+    (expr',nb) <- toBackend (runIdentity $ mapExpr return return return return return (\(DebugExpr e) -> return e) expr)
+                  (debugBackend'' b)
+    return (DebugExpr expr',b { debugBackend'' = nb })
+  fromBackend b (DebugExpr e) = runIdentity $ mapExpr return return return return return (return.DebugExpr) $
+                                fromBackend (debugBackend'' b) e
+  assert (DebugExpr expr) b = do
     let l = renderExpr b expr
     b1 <- outputLisp b (L.List [L.Symbol "assert",l])
     ((),nb) <- assert expr (debugBackend'' b1)
     return ((),b1 { debugBackend'' = nb })
-  assertPartition expr part b = do
+  assertPartition (DebugExpr expr) part b = do
     let l = renderExpr b expr
     b1 <- outputLisp b (L.List [L.Symbol "assert"
                                ,L.List [L.Symbol "!"
@@ -182,7 +191,7 @@ instance (Backend b) => Backend (DebugBackend b) where
                                                PartitionB -> "partB")]])
     ((),nb) <- assertPartition expr part (debugBackend'' b1)
     return ((),b1 { debugBackend'' = nb })
-  assertId expr b = do
+  assertId (DebugExpr expr) b = do
     let l = renderExpr b expr
         (name,nnames) = genName' (debugNames b) "cid"
         b1 = b { debugNames = nnames }
@@ -197,7 +206,7 @@ instance (Backend b) => Backend (DebugBackend b) where
     b1 <- outputLisp b (L.List [L.Symbol "get-interpolant",L.List [L.Symbol "partA"]])
     (res,nb) <- interpolate (debugBackend'' b)
     outputResponse b1 (show $ renderExpr b1 res)
-    return (res,b1 { debugBackend'' = nb })
+    return (DebugExpr res,b1 { debugBackend'' = nb })
   checkSat tactic limits b = do
     b1 <- outputLisp b (renderCheckSat tactic limits)
     (res,nb) <- checkSat tactic limits (debugBackend'' b)
@@ -206,7 +215,7 @@ instance (Backend b) => Backend (DebugBackend b) where
       Unsat -> "unsat"
       Unknown -> "unknown"
     return (res,b1 { debugBackend'' = nb })
-  getValue expr b = do
+  getValue (DebugExpr expr) b = do
     let l = renderExpr b expr
     b1 <- outputLisp b (L.List [L.Symbol "get-value"
                                ,L.List [l]])
@@ -252,7 +261,7 @@ instance (Backend b) => Backend (DebugBackend b) where
     b1 <- outputLisp b (L.List [L.Symbol "pop"])
     ((),nb) <- pop (debugBackend'' b1)
     return ((),b1 { debugBackend'' = nb })
-  defineVar name expr b = do
+  defineVar name (DebugExpr expr) b = do
     let l = renderExpr b expr
         tp = getType expr
         (sym,req,nnames) = renderDefineVar (debugNames b) tp name l
@@ -275,7 +284,7 @@ instance (Backend b) => Backend (DebugBackend b) where
     let b2 = b1 { debugBackend'' = nb }
     outputResponse b2 (show mdl)
     return (mdl,b2)
-  modelEvaluate mdl e b = do
+  modelEvaluate mdl (DebugExpr e) b = do
     (res,nb) <- modelEvaluate mdl e (debugBackend'' b)
     return (res,b { debugBackend'' = nb })
   getProof b = do
@@ -284,13 +293,13 @@ instance (Backend b) => Backend (DebugBackend b) where
     let b2 = b1 { debugBackend'' = nb }
     outputResponse b2 (show proof)
     return (proof,b2)
-  simplify expr b = do
+  simplify (DebugExpr expr) b = do
     let l = renderExpr b expr
     b1 <- outputLisp b (L.List [L.Symbol "simplify",l])
     (res,nb) <- simplify expr (debugBackend'' b1)
     let b2 = b1 { debugBackend'' = nb }
     outputResponse b2 (show $ renderExpr b2 res)
-    return (res,b2)
+    return (DebugExpr res,b2)
   comment msg b = do
     b1 <- outputLine b True msg
     return ((),b1)

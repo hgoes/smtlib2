@@ -15,6 +15,8 @@ import qualified Data.Map as Map
 import Data.Typeable
 import Data.Functor.Identity
 import System.IO.Unsafe
+import Data.GADT.Show
+import Data.GADT.Compare
 
 data Z3SolverState = Unconfigured Z3Options
                    | Configured Context Z3Options
@@ -80,9 +82,20 @@ type Z3Fun = UntypedFun FuncDecl
 instance Show Z3.Model where
   showsPrec _ _ = showString "Z3Model"
 
+deriving instance GShow (Expr Z3Solver)
+deriving instance GEq (Expr Z3Solver)
+deriving instance GCompare (Expr Z3Solver)
+deriving instance GetType (Expr Z3Solver)
+
+getAST :: Expr Z3Solver tp -> AST
+getAST (Z3Expr (UntypedVar ast _)) = ast
+
+mkExpr :: AST -> Repr tp -> Expr Z3Solver tp
+mkExpr ast tp = Z3Expr (UntypedVar ast tp)
+
 instance Backend Z3Solver where
   type SMTMonad Z3Solver = IO
-  type Expr Z3Solver = UntypedVar AST
+  newtype Expr Z3Solver tp = Z3Expr (UntypedVar AST tp)
   type Var Z3Solver = Z3Var
   type QVar Z3Solver = Z3Var
   type Fun Z3Solver = Z3Fun
@@ -132,22 +145,22 @@ instance Backend Z3Solver where
     decl <- mkFuncDecl ctx sym [] rtp
     var <- mkApp ctx decl []
     return (UntypedVar var tp,solv2)
-  defineVar name expr solv = return (expr,solv)
+  defineVar name (Z3Expr expr) solv = return (expr,solv)
   toBackend expr solv = do
     (ctx,solv1) <- getContext solv
     nd <- toZ3 ctx expr
-    return (UntypedVar nd (getType expr),solv1)
+    return (mkExpr nd (getType expr),solv1)
   fromBackend solv e = unsafePerformIO $ do
     (ctx,_) <- getContext solv
     fromZ3 ctx e
-  assert (UntypedVar nd _) solv = do
+  assert e solv = do
     (ctx,solver,solv1) <- getSolver solv
-    solverAssertCnstr ctx solver nd
+    solverAssertCnstr ctx solver (getAST e)
     return ((),solv1)
-  assertId (UntypedVar nd _) solv = do
+  assertId e solv = do
     (ctx,solver,solv1) <- getSolver solv
     cid <- mkFreshBoolVar ctx "cid"
-    solverAssertAndTrack ctx solver nd cid
+    solverAssertAndTrack ctx solver (getAST e) cid
     return (cid,solv1)
   checkSat _ limit solv = do
     (ctx,solver,solv1) <- getSolver solv
@@ -168,7 +181,7 @@ instance Backend Z3Solver where
     (ctx,solver,solv1) <- getSolver solv
     core <- solverGetUnsatCore ctx solver
     return (core,solv1)
-  getValue (UntypedVar v tp) solv = do
+  getValue (Z3Expr (UntypedVar v tp)) solv = do
     (ctx,solver,solv1) <- getSolver solv
     mdl <- solverGetModel ctx solver
     res <- modelEval ctx mdl v True
@@ -185,10 +198,10 @@ instance Backend Z3Solver where
     solverPop ctx solver 1
     return ((),solv1)
   exit solv = return ((),solv)
-  simplify (UntypedVar e tp) solv = do
+  simplify (Z3Expr (UntypedVar e tp)) solv = do
     (ctx,solv1) <- getContext solv
     ne <- Z3.simplify ctx e
-    return (UntypedVar ne tp,solv1)
+    return (mkExpr ne tp,solv1)
 
 fromZ3Value :: Context -> Z3Expr t -> IO (Value t)
 fromZ3Value ctx (UntypedVar e tp) = case tp of
@@ -216,7 +229,7 @@ typeToZ3 ctx (ArrayRepr (idx ::: Nil) el) = do
   mkArraySort ctx idx' el'
 
 toZ3 :: Context
-     -> Expression Z3Var Z3Var Z3Fun Z3Var Z3Var (UntypedVar AST) t
+     -> Expression Z3Var Z3Var Z3Fun Z3Var Z3Var (Expr Z3Solver) t
      -> IO AST
 toZ3 ctx (Var (UntypedVar var tp)) = return var
 toZ3 ctx (Const val) = toZ3Const ctx val
@@ -225,9 +238,9 @@ toZ3 ctx (App fun args) = toZ3App ctx fun args
 toZ3 ctx e = error $ "toZ3: "++show e
 
 fromZ3 :: Context
-       -> Z3Var tp
-       -> IO (Expression Z3Var Z3Var Z3Fun Z3Var Z3Var (UntypedVar AST) tp)
-fromZ3 ctx v@(UntypedVar var tp) = do
+       -> Expr Z3Solver tp
+       -> IO (Expression Z3Var Z3Var Z3Fun Z3Var Z3Var (Expr Z3Solver) tp)
+fromZ3 ctx (Z3Expr v@(UntypedVar var tp)) = do
   kind <- getAstKind ctx var
   case kind of
     Z3_VAR_AST -> return (Var v)
@@ -247,52 +260,52 @@ fromZ3 ctx v@(UntypedVar var tp) = do
             "false" -> case tp of
               BoolRepr -> return $ I.ConstBool False
             "and" -> case tp of
-              BoolRepr -> return $ I.AndLst (fmap (\v -> UntypedVar v BoolRepr) args)
+              BoolRepr -> return $ I.AndLst (fmap (\v -> mkExpr v BoolRepr) args)
             "or" -> case tp of
-              BoolRepr -> return $ I.OrLst (fmap (\v -> UntypedVar v BoolRepr) args)
+              BoolRepr -> return $ I.OrLst (fmap (\v -> mkExpr v BoolRepr) args)
             "not" -> case tp of
               BoolRepr -> case args of
-                [x] -> return $ I.Not (UntypedVar x BoolRepr)
+                [x] -> return $ I.Not (mkExpr x BoolRepr)
             "=>" -> case tp of
-              BoolRepr -> return $ I.ImpliesLst (fmap (\v -> UntypedVar v BoolRepr) args)
+              BoolRepr -> return $ I.ImpliesLst (fmap (\v -> mkExpr v BoolRepr) args)
             "if" -> case args of
-              [c,x,y] -> return $ I.ITE (UntypedVar c BoolRepr) (UntypedVar x tp) (UntypedVar y tp)
+              [c,x,y] -> return $ I.ITE (mkExpr c BoolRepr) (mkExpr x tp) (mkExpr y tp)
             "=" -> case tp of
               BoolRepr -> case args of
                 x:_ -> do
                   srt <- getSort ctx x
                   z3Sort ctx srt $
-                    \rtp -> return $ I.EqLst (fmap (\v -> UntypedVar v rtp) args)
+                    \rtp -> return $ I.EqLst (fmap (\v -> mkExpr v rtp) args)
             "<" -> case tp of
               BoolRepr -> case args of
                 [x,y] -> do
                   srt <- getSort ctx x
                   z3Sort ctx srt $
                     \rtp -> case rtp of
-                      IntRepr -> return ((UntypedVar x IntRepr) I.:<: (UntypedVar y IntRepr))
+                      IntRepr -> return ((mkExpr x IntRepr) I.:<: (mkExpr y IntRepr))
             "<=" -> case tp of
               BoolRepr -> case args of
                 [x,y] -> do
                   srt <- getSort ctx x
                   z3Sort ctx srt $
                     \rtp -> case rtp of
-                      IntRepr -> return ((UntypedVar x IntRepr) I.:<=: (UntypedVar y IntRepr))
+                      IntRepr -> return ((mkExpr x IntRepr) I.:<=: (mkExpr y IntRepr))
             ">" -> case tp of
               BoolRepr -> case args of
                 [x,y] -> do
                   srt <- getSort ctx x
                   z3Sort ctx srt $
                     \rtp -> case rtp of
-                      IntRepr -> return ((UntypedVar x IntRepr) I.:>: (UntypedVar y IntRepr))
+                      IntRepr -> return ((mkExpr x IntRepr) I.:>: (mkExpr y IntRepr))
             ">=" -> case tp of
               BoolRepr -> case args of
                 [x,y] -> do
                   srt <- getSort ctx x
                   z3Sort ctx srt $
                     \rtp -> case rtp of
-                      IntRepr -> return ((UntypedVar x IntRepr) I.:>=: (UntypedVar y IntRepr))
+                      IntRepr -> return ((mkExpr x IntRepr) I.:>=: (mkExpr y IntRepr))
             "+" -> case tp of
-              IntRepr -> return $ I.PlusLst (fmap (\v -> UntypedVar v IntRepr) args)
+              IntRepr -> return $ I.PlusLst (fmap (\v -> mkExpr v IntRepr) args)
             _ -> error $ "Translate symbol " ++ show symName
     Z3_NUMERAL_AST -> do
       str <- getNumeralString ctx var
@@ -327,9 +340,9 @@ untypedVar :: Z3Expr t -> AST
 untypedVar (UntypedVar x _) = x
 
 toZ3App :: Context -> Function Z3Fun '(sig,tp)
-        -> List (UntypedVar AST) sig
+        -> List (Expr Z3Solver) sig
         -> IO AST
-toZ3App ctx (Eq tp n) args = mkEq' (runIdentity $ List.toList (\(UntypedVar v _) -> return v) args)
+toZ3App ctx (Eq tp n) args = mkEq' (runIdentity $ List.toList (return.getAST) args)
   where
     mkEq' [] = mkTrue ctx
     mkEq' [x] = mkTrue ctx
@@ -337,29 +350,29 @@ toZ3App ctx (Eq tp n) args = mkEq' (runIdentity $ List.toList (\(UntypedVar v _)
     mkEq' (x:xs) = do
       lst <- mapM (mkEq ctx x) xs
       mkAnd ctx lst
-toZ3App ctx Not ((UntypedVar x _) ::: Nil) = mkNot ctx x
-toZ3App ctx (Logic And _) args = mkAnd ctx $ runIdentity $ List.toList (return.untypedVar) args
-toZ3App ctx (Logic Or _) args = mkOr ctx $ runIdentity $ List.toList (return.untypedVar) args
-toZ3App ctx (Logic Implies _) (lhs ::: rhs ::: Nil) = mkImplies ctx (untypedVar lhs) (untypedVar rhs)
-toZ3App ctx (Select _ _) (arr ::: idx ::: Nil) = mkSelect ctx (untypedVar arr) (untypedVar idx)
+toZ3App ctx Not (x ::: Nil) = mkNot ctx (getAST x)
+toZ3App ctx (Logic And _) args = mkAnd ctx $ runIdentity $ List.toList (return.getAST) args
+toZ3App ctx (Logic Or _) args = mkOr ctx $ runIdentity $ List.toList (return.getAST) args
+toZ3App ctx (Logic Implies _) (lhs ::: rhs ::: Nil) = mkImplies ctx (getAST lhs) (getAST rhs)
+toZ3App ctx (Select _ _) (arr ::: idx ::: Nil) = mkSelect ctx (getAST arr) (getAST idx)
 toZ3App ctx (Store _ _) (arr ::: val ::: idx ::: Nil)
-  = mkStore ctx (untypedVar arr) (untypedVar idx) (untypedVar val)
+  = mkStore ctx (getAST arr) (getAST idx) (getAST val)
 toZ3App ctx (ConstArray (idx ::: Nil) el) (arg ::: Nil) = do
   srt <- typeToZ3 ctx idx
-  mkConstArray ctx srt (untypedVar arg)
-toZ3App ctx (Arith NumInt Plus _) args = mkAdd ctx $ runIdentity $ List.toList (return.untypedVar) args
-toZ3App ctx (Arith NumInt Minus _) args = mkSub ctx $ runIdentity $ List.toList (return.untypedVar) args
-toZ3App ctx (Arith NumInt Mult _) args = mkMul ctx $ runIdentity $ List.toList (return.untypedVar) args
-toZ3App ctx (ArithIntBin Div) (x ::: y ::: Nil) = mkDiv ctx (untypedVar x) (untypedVar y)
-toZ3App ctx (ArithIntBin Mod) (x ::: y ::: Nil) = mkMod ctx (untypedVar x) (untypedVar y)
-toZ3App ctx (ArithIntBin Rem) (x ::: y ::: Nil) = mkRem ctx (untypedVar x) (untypedVar y)
-toZ3App ctx (ITE _) (cond ::: ifT ::: ifF ::: Nil) = mkIte ctx (untypedVar cond) (untypedVar ifT) (untypedVar ifF)
+  mkConstArray ctx srt (getAST arg)
+toZ3App ctx (Arith NumInt Plus _) args = mkAdd ctx $ runIdentity $ List.toList (return.getAST) args
+toZ3App ctx (Arith NumInt Minus _) args = mkSub ctx $ runIdentity $ List.toList (return.getAST) args
+toZ3App ctx (Arith NumInt Mult _) args = mkMul ctx $ runIdentity $ List.toList (return.getAST) args
+toZ3App ctx (ArithIntBin Div) (x ::: y ::: Nil) = mkDiv ctx (getAST x) (getAST y)
+toZ3App ctx (ArithIntBin Mod) (x ::: y ::: Nil) = mkMod ctx (getAST x) (getAST y)
+toZ3App ctx (ArithIntBin Rem) (x ::: y ::: Nil) = mkRem ctx (getAST x) (getAST y)
+toZ3App ctx (ITE _) (cond ::: ifT ::: ifF ::: Nil) = mkIte ctx (getAST cond) (getAST ifT) (getAST ifF)
 toZ3App ctx (Ord NumInt op) (lhs ::: rhs ::: Nil)
   = (case op of
        Ge -> mkGe
        Gt -> mkGt
        Le -> mkLe
-       Lt -> mkLt) ctx (untypedVar lhs) (untypedVar rhs)
+       Lt -> mkLt) ctx (getAST lhs) (getAST rhs)
 toZ3App ctx f _ = error $ "toZ3App: "++show f
 
 toZ3Const :: Context -> Value t -> IO AST

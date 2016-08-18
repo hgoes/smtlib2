@@ -46,12 +46,12 @@ class (GCompare (ExVar i e),
   extract :: i -> e tp
           -> Maybe (Expression (ExVar i e) (ExQVar i e) (ExFun i e) (ExFunArg i e) (ExLVar i e) e tp)
 
-instance (Backend b,e ~ Expr b) => Embed (SMT b) e where
-  type EmVar (SMT b) e = Var b
-  type EmQVar (SMT b) e = QVar b
-  type EmFun (SMT b) e = Fun b
-  type EmFunArg (SMT b) e = FunArg b
-  type EmLVar (SMT b) e = LVar b
+instance (Backend b) => Embed (SMT b) (Expr b) where
+  type EmVar (SMT b) (Expr b) = Var b
+  type EmQVar (SMT b) (Expr b) = QVar b
+  type EmFun (SMT b) (Expr b) = Fun b
+  type EmFunArg (SMT b) (Expr b) = FunArg b
+  type EmLVar (SMT b) (Expr b) = LVar b
   embed x = do
     rx <- x
     embedSMT (toBackend rx)
@@ -63,12 +63,12 @@ instance (Backend b,e ~ Expr b) => Embed (SMT b) e where
 
 newtype BackendInfo b = BackendInfo b
 
-instance (Backend b,e ~ Expr b) => Extract (BackendInfo b) e where
-  type ExVar (BackendInfo b) e = Var b
-  type ExQVar (BackendInfo b) e = QVar b
-  type ExFun (BackendInfo b) e = Fun b
-  type ExFunArg (BackendInfo b) e = FunArg b
-  type ExLVar (BackendInfo b) e = LVar b
+instance (Backend b) => Extract (BackendInfo b) (Expr b) where
+  type ExVar (BackendInfo b) (Expr b) = Var b
+  type ExQVar (BackendInfo b) (Expr b) = QVar b
+  type ExFun (BackendInfo b) (Expr b) = Fun b
+  type ExFunArg (BackendInfo b) (Expr b) = FunArg b
+  type ExLVar (BackendInfo b) (Expr b) = LVar b
   extract (BackendInfo b) e = Just (fromBackend b e)
 
 data SMTExpr var qvar fun farg lvar tp where

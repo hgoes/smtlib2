@@ -15,6 +15,11 @@ import Text.Show
 
 type SMTAction b r = b -> SMTMonad b (r,b)
 
+mapAction :: Backend b => (r -> r') -> SMTAction b r -> SMTAction b r'
+mapAction f act b = do
+  (r,nb) <- act b
+  return (f r,nb)
+
 -- | A backend represents a specific type of SMT solver.
 class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
        GetType (Expr b),GetType (Var b),GetType (QVar b),
@@ -40,7 +45,7 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
   -- | The monad in which the backend executes queries.
   type SMTMonad b :: * -> *
   -- | The internal type of expressions.
-  type Expr b :: Type -> *
+  data Expr b :: Type -> *
   -- | The internal type of variables.
   type Var b :: Type -> *
   -- | The internal type of quantified variables.

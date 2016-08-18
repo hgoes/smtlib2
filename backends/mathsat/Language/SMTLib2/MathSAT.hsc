@@ -22,6 +22,7 @@ import Data.Foldable
 import Data.Typeable
 import Data.Maybe (mapMaybe)
 import System.IO.Unsafe
+import Data.GADT.Show
 import Data.GADT.Compare
 import Data.Constraint
 
@@ -56,9 +57,14 @@ data MathSATVar = ConstVar Term
                 | Uninterpreted Decl
                 | DefinedFun (Env -> [Term] -> IO Term) 
 
+deriving instance GShow (Expr MathSATBackend)
+deriving instance GEq (Expr MathSATBackend)
+deriving instance GCompare (Expr MathSATBackend)
+deriving instance GetType (Expr MathSATBackend)
+
 instance Backend MathSATBackend where
   type SMTMonad MathSATBackend = IO
-  type Expr MathSATBackend = UntypedVar Term
+  newtype Expr MathSATBackend tp = MathSATExpr (UntypedVar Term tp)
   type Var MathSATBackend = UntypedVar Term
   type QVar MathSATBackend = NoVar
   type Fun MathSATBackend = UntypedFun Decl
@@ -90,17 +96,17 @@ instance Backend MathSATBackend where
   getInfo SMTSolverVersion b = do
     vers <- getVersion
     return (vers,b)
-  assert (UntypedVar e _) b = do
+  assert (MathSATExpr (UntypedVar e _)) b = do
     (env,nb) <- getEnv b
     assertFormula env e
     return ((),nb)
-  assertId (UntypedVar e _) b = do
+  assertId (MathSATExpr (UntypedVar e _)) b = do
     (env,nb) <- getEnv b
     assertFormula env e
     let cid = Map.size (mathsatCoreMapping nb)
     return (cid,nb { mathsatCoreMapping = Map.insert e cid
                                           (mathsatCoreMapping nb) })
-  assertPartition (UntypedVar e _) part b = do
+  assertPartition (MathSATExpr (UntypedVar e _)) part b = do
     (grpA,grpB,env,nb) <- getRunning b
     setITPGroup env (case part of
                       PartitionA -> grpA
@@ -127,7 +133,7 @@ instance Backend MathSATBackend where
     if succ
       then return ((),nb)
       else error "smtlib2-mathsat: Failed to pop."
-  defineVar _ e b = return (e,b)
+  defineVar _ (MathSATExpr e) b = return (e,b)
   declareVar tp name b = do
     (env,nb) <- getEnv b
     rtp <- sortToMSat tp env
@@ -160,10 +166,10 @@ instance Backend MathSATBackend where
       withSig :: (Proxy arg -> Proxy t -> IO (UntypedFun Decl '(arg,t),MathSATBackend))
               -> IO (UntypedFun Decl '(arg,t),MathSATBackend)
       withSig f = f Proxy Proxy
-  getValue (UntypedVar trm tp) b = do
+  getValue (MathSATExpr (UntypedVar trm tp)) b = do
     (env,nb) <- getEnv b
     resTerm <- getModelValue env trm
-    res <- exprFromMSat env (UntypedVar resTerm tp)
+    res <- exprFromMSat env (mkExpr resTerm tp)
     case res of
       Const val -> return (val,nb)
   getUnsatCore b = do
@@ -178,7 +184,7 @@ instance Backend MathSATBackend where
     res <- getInterpolant env [grpA]
     case res of
       Nothing -> error "smtlib2-mathsat: Couldn't get interpolant."
-      Just interp -> return (UntypedVar interp BoolRepr,nb)
+      Just interp -> return (MathSATExpr $ UntypedVar interp BoolRepr,nb)
   comment _ b = return ((),b)
   exit b = case mathsatState b of
     NoConfig -> return ((),b)
@@ -191,7 +197,7 @@ instance Backend MathSATBackend where
   toBackend expr b = do
     (env,nb) <- getEnv b
     res <- exprToMSat env expr
-    return (UntypedVar res (getType expr),nb)
+    return (mkExpr res (getType expr),nb)
   fromBackend b trm = unsafePerformIO $ do
     (env,nb) <- getEnv b
     exprFromMSat env trm
@@ -279,8 +285,11 @@ sortFromMSat env tp f = do
               repr <- typeRepr tp
               error $ "smtlib2-mathsat: No support for type "++repr
 
+getTerm :: Expr MathSATBackend tp -> Term
+getTerm (MathSATExpr (UntypedVar v _)) = v
+
 exprToMSat :: Env
-           -> Expression (UntypedVar Term) NoVar (UntypedFun Decl) NoVar NoVar (UntypedVar Term) tp
+           -> Expression (UntypedVar Term) NoVar (UntypedFun Decl) NoVar NoVar (Expr MathSATBackend) tp
            -> IO Term
 exprToMSat env (Var (UntypedVar trm _)) = return trm
 exprToMSat env (QVar _) = error "smtlib2-mathsat: No support for quantification."
@@ -299,7 +308,7 @@ exprToMSat env (Const val) = valueToMSat val
 exprToMSat env (Quantification _ _ _) = error "smtlib2-mathsat: No support for quantification."
 exprToMSat env (Let _ _) = error "smtlib2-mathsat: No support for let-expressions."
 exprToMSat env (App (Logic op n) args) = do
-  let args' = fmap (\(UntypedVar v _::UntypedVar Term BoolType) -> v) $ allEqToList n args
+  let args' = fmap (\(v::Expr MathSATBackend BoolType) -> getTerm v) $ allEqToList n args
   case args' of
     [] -> case op of
       Or -> makeFalse env
@@ -319,69 +328,69 @@ exprToMSat env (App (Logic op n) args) = do
                        nx <- makeNot env x
                        makeOr env nx y
                    ) x xs
-exprToMSat env (App Not ((UntypedVar x _) ::: Nil)) = makeNot env x
-exprToMSat env (App (Eq (tp::Repr tp) n) xs) = case allEqToList n xs :: [UntypedVar Term tp] of
+exprToMSat env (App Not (x ::: Nil)) = makeNot env (getTerm x)
+exprToMSat env (App (Eq (tp::Repr tp) n) xs) = case allEqToList n xs :: [Expr MathSATBackend tp] of
   [] -> makeTrue env
   [_] -> makeTrue env
-  (UntypedVar x _):xs -> case tp of
+  x:xs -> case tp of
     BoolRepr -> case xs of
-      [UntypedVar y _] -> makeIFF env x y
-      (UntypedVar y _):rest -> do
-        fst <- makeIFF env x y
-        foldlM (\cur (UntypedVar v _) -> do
-                   eq <- makeIFF env x v
+      [y] -> makeIFF env (getTerm x) (getTerm y)
+      y:rest -> do
+        fst <- makeIFF env (getTerm x) (getTerm y)
+        foldlM (\cur v -> do
+                   eq <- makeIFF env (getTerm x) (getTerm v)
                    makeAnd env cur eq
                ) fst rest
     _ -> case xs of
-      [UntypedVar y _] -> makeEqual env x y
-      (UntypedVar y _):rest -> do
-        fst <- makeEqual env x y
-        foldlM (\cur (UntypedVar v _) -> do
-                   eq <- makeEqual env x v
+      [y] -> makeEqual env (getTerm x) (getTerm y)
+      y:rest -> do
+        fst <- makeEqual env (getTerm x) (getTerm y)
+        foldlM (\cur v -> do
+                   eq <- makeEqual env (getTerm x) (getTerm v)
                    makeAnd env cur eq
                ) fst rest
-exprToMSat env (App (Ord NumInt op) ((UntypedVar x _) ::: (UntypedVar y _) ::: Nil))
-  = ordToMSat env op x y
-exprToMSat env (App (Ord NumReal op) ((UntypedVar x _) ::: (UntypedVar y _) ::: Nil))
-  = ordToMSat env op x y
+exprToMSat env (App (Ord NumInt op) (x ::: y ::: Nil))
+  = ordToMSat env op (getTerm x) (getTerm y)
+exprToMSat env (App (Ord NumReal op) (x ::: y ::: Nil))
+  = ordToMSat env op (getTerm x) (getTerm y)
 exprToMSat env (App (Arith NumInt op n) args)
-  = arithToMSat env op (fmap (\(UntypedVar x _::UntypedVar Term IntType) -> x) $
+  = arithToMSat env op (fmap (\(x::Expr MathSATBackend IntType) -> getTerm x) $
                         allEqToList n args)
 exprToMSat env (App (Arith NumReal op n) args)
-  = arithToMSat env op (fmap (\(UntypedVar x _::UntypedVar Term RealType) -> x) $
+  = arithToMSat env op (fmap (\(x::Expr MathSATBackend RealType) -> getTerm x) $
                         allEqToList n args)
-exprToMSat env (App (Abs NumInt) ((UntypedVar x _) ::: Nil))
-  = absToMSat env x
-exprToMSat env (App (Abs NumReal) ((UntypedVar x _) ::: Nil))
-  = absToMSat env x
-exprToMSat env (App (ITE tp) ((UntypedVar cond _) ::: (UntypedVar ifT _) ::: (UntypedVar ifF _) ::: Nil))
+exprToMSat env (App (Abs NumInt) (x ::: Nil))
+  = absToMSat env (getTerm x)
+exprToMSat env (App (Abs NumReal) (x ::: Nil))
+  = absToMSat env (getTerm x)
+exprToMSat env (App (ITE tp) (cond ::: ifT ::: ifF ::: Nil))
   = case tp of
   BoolRepr -> do
-    ncond <- makeNot env cond
-    t1 <- makeAnd env cond ifT
-    t2 <- makeAnd env ncond ifF
+    ncond <- makeNot env (getTerm cond)
+    t1 <- makeAnd env (getTerm cond) (getTerm ifT)
+    t2 <- makeAnd env ncond (getTerm ifF)
     makeOr env t1 t2
-  _ -> makeTermITE env cond ifT ifF
+  _ -> makeTermITE env (getTerm cond) (getTerm ifT) (getTerm ifF)
 exprToMSat env (App (Fun _) _) = error "smtlib2-mathsat: No support for user-defined functions."
-exprToMSat env (App (Select _ _) ((UntypedVar arr _) ::: (UntypedVar idx _) ::: Nil))
-  = makeArrayRead env arr idx
-exprToMSat env (App (Store _ _) ((UntypedVar arr _) ::: (UntypedVar el _) ::: (UntypedVar idx _) ::: Nil))
-  = makeArrayWrite env arr idx el
-exprToMSat env (App (ConstArray idx tp) ((UntypedVar el _) ::: Nil)) = do
+exprToMSat env (App (Select _ _) (arr ::: idx ::: Nil))
+  = makeArrayRead env (getTerm arr) (getTerm idx)
+exprToMSat env (App (Store _ _) (arr ::: el ::: idx ::: Nil))
+  = makeArrayWrite env (getTerm arr) (getTerm idx) (getTerm el)
+exprToMSat env (App (ConstArray idx tp) (el ::: Nil)) = do
     srt <- sortToMSat (ArrayRepr idx tp) env
-    makeArrayConst env srt el
-exprToMSat env (App ToReal ((UntypedVar x _) ::: Nil)) = return x
-exprToMSat env (App ToInt ((UntypedVar x _) ::: Nil)) = makeFloor env x
-exprToMSat env (App (BVComp op _) ((UntypedVar x _) ::: (UntypedVar y _) ::: Nil)) = case op of
-  BVULE -> makeBVULEQ env x y
-  BVULT -> makeBVULT env x y
-  BVUGE -> makeBVULEQ env y x
-  BVUGT -> makeBVULT env y x
-  BVSLE -> makeBVSLEQ env x y
-  BVSLT -> makeBVSLT env x y
-  BVSGE -> makeBVSLEQ env y x
-  BVSGT -> makeBVSLT env y x
-exprToMSat env (App (BVBin op _) ((UntypedVar x _) ::: (UntypedVar y _) ::: Nil))
+    makeArrayConst env srt (getTerm el)
+exprToMSat env (App ToReal (x ::: Nil)) = return (getTerm x)
+exprToMSat env (App ToInt (x ::: Nil)) = makeFloor env (getTerm x)
+exprToMSat env (App (BVComp op _) (x ::: y ::: Nil)) = case op of
+  BVULE -> makeBVULEQ env (getTerm x) (getTerm y)
+  BVULT -> makeBVULT env (getTerm x) (getTerm y)
+  BVUGE -> makeBVULEQ env (getTerm y) (getTerm x)
+  BVUGT -> makeBVULT env (getTerm y) (getTerm x)
+  BVSLE -> makeBVSLEQ env (getTerm x) (getTerm y)
+  BVSLT -> makeBVSLT env (getTerm x) (getTerm y)
+  BVSGE -> makeBVSLEQ env (getTerm y) (getTerm x)
+  BVSGT -> makeBVSLT env (getTerm y) (getTerm x)
+exprToMSat env (App (BVBin op _) (x ::: y ::: Nil))
   = (case op of
       BVAdd -> makeBVPlus
       BVSub -> makeBVMinus
@@ -395,20 +404,20 @@ exprToMSat env (App (BVBin op _) ((UntypedVar x _) ::: (UntypedVar y _) ::: Nil)
       BVASHR -> makeBVASHR
       BVXor -> makeBVXor
       BVAnd -> makeBVAnd
-      BVOr -> makeBVOr) env x y
-exprToMSat env (App (BVUn op _) ((UntypedVar x _) ::: Nil)) = case op of
-  BVNot -> makeBVNot env x
-  BVNeg -> makeBVNeg env x
-exprToMSat env (App (Concat _ _) ((UntypedVar x _) ::: (UntypedVar y _) ::: Nil))
-  = makeBVConcat env x y
-exprToMSat env (App f@(Extract bw start len) ((UntypedVar x _) ::: Nil))
-  = makeBVExtract env (fromIntegral (start'+len'-1)) (fromIntegral start') x
+      BVOr -> makeBVOr) env (getTerm x) (getTerm y)
+exprToMSat env (App (BVUn op _) (x ::: Nil)) = case op of
+  BVNot -> makeBVNot env (getTerm x)
+  BVNeg -> makeBVNeg env (getTerm x)
+exprToMSat env (App (Concat _ _) (x ::: y ::: Nil))
+  = makeBVConcat env (getTerm x) (getTerm y)
+exprToMSat env (App f@(Extract bw start len) (x ::: Nil))
+  = makeBVExtract env (fromIntegral (start'+len'-1)) (fromIntegral start') (getTerm x)
   where
     start' = naturalToInteger start
     len' = naturalToInteger len
-exprToMSat env (App (Divisible n) ((UntypedVar x _) ::: Nil)) = do
+exprToMSat env (App (Divisible n) (x ::: Nil)) = do
   y <- makeNumber env "0"
-  makeCongruence env (show n) x y
+  makeCongruence env (show n) (getTerm x) y
 exprToMSat env expr = error $ "smtlib2-mathsat: No support for expression "++show expr
 
 ordToMSat :: Env -> OrdOp -> Term -> Term -> IO Term
@@ -445,9 +454,12 @@ absToMSat env x = do
   cond <- makeLEQ env x zero
   makeTermITE env cond nx x
 
-exprFromMSat :: Env -> UntypedVar Term tp
-             -> IO (Expression (UntypedVar Term) NoVar (UntypedFun Decl) NoVar NoVar (UntypedVar Term) tp)
-exprFromMSat env (UntypedVar term tp) = do
+mkExpr :: Term -> Repr tp -> Expr MathSATBackend tp
+mkExpr trm tp = MathSATExpr (UntypedVar trm tp)
+
+exprFromMSat :: Env -> Expr MathSATBackend tp
+             -> IO (Expression (UntypedVar Term) NoVar (UntypedFun Decl) NoVar NoVar (Expr MathSATBackend) tp)
+exprFromMSat env (MathSATExpr (UntypedVar term tp)) = do
   isC <- termIsConstant env term
   if isC
     then do
@@ -471,9 +483,9 @@ exprFromMSat env (UntypedVar term tp) = do
           cond <- termGetArg term 0
           ifT <- termGetArg term 1
           ifF <- termGetArg term 2
-          return $ App (ITE tp) ((UntypedVar cond BoolRepr) :::
-                                 (UntypedVar ifT tp) :::
-                                 (UntypedVar ifF tp) :::
+          return $ App (ITE tp) ((mkExpr cond bool) :::
+                                 (mkExpr ifT tp) :::
+                                 (mkExpr ifF tp) :::
                                  Nil)
         #{const MSAT_TAG_ARRAY_READ} -> do
           arr <- termGetArg term 0
@@ -481,8 +493,8 @@ exprFromMSat env (UntypedVar term tp) = do
           tp' <- termGetType idx
           sortFromMSat env tp' $
             \idxTp -> return (App (Select (idxTp ::: Nil) tp)
-                              ((UntypedVar arr (ArrayRepr (idxTp ::: Nil) tp)) :::
-                               (UntypedVar idx idxTp) :::
+                              ((mkExpr arr (ArrayRepr (idxTp ::: Nil) tp)) :::
+                               (mkExpr idx idxTp) :::
                                Nil))
         _ -> case tp of
           BoolRepr -> case tag of
@@ -492,25 +504,25 @@ exprFromMSat env (UntypedVar term tp) = do
               lhs <- termGetArg term 0
               rhs <- termGetArg term 1
               return $ App (Logic And (Succ (Succ Zero)))
-                ((UntypedVar lhs BoolRepr) :::
-                 (UntypedVar rhs BoolRepr) :::
+                ((mkExpr lhs BoolRepr) :::
+                 (mkExpr rhs BoolRepr) :::
                  Nil)
             #{const MSAT_TAG_OR} -> do
               lhs <- termGetArg term 0
               rhs <- termGetArg term 1
               return $ App (Logic Or (Succ (Succ Zero)))
-                ((UntypedVar lhs BoolRepr) :::
-                 (UntypedVar rhs BoolRepr) :::
+                ((mkExpr lhs BoolRepr) :::
+                 (mkExpr rhs BoolRepr) :::
                   Nil)
             #{const MSAT_TAG_NOT} -> do
               x <- termGetArg term 0
-              return $ App Not ((UntypedVar x BoolRepr) ::: Nil)
+              return $ App Not ((mkExpr x BoolRepr) ::: Nil)
             #{const MSAT_TAG_IFF} -> do
               lhs <- termGetArg term 0
               rhs <- termGetArg term 1
               return $ App (Eq BoolRepr (Succ (Succ Zero)))
-                ((UntypedVar lhs BoolRepr) :::
-                 (UntypedVar rhs BoolRepr) :::
+                ((mkExpr lhs BoolRepr) :::
+                 (mkExpr rhs BoolRepr) :::
                   Nil)
             #{const MSAT_TAG_LEQ} -> do
               lhs <- termGetArg term 0
@@ -518,11 +530,11 @@ exprFromMSat env (UntypedVar term tp) = do
               tp <- termGetType lhs
               isRat <- isRationalType env tp
               if isRat
-                then return $ App (Ord NumReal Le) ((UntypedVar lhs RealRepr) :::
-                                                    (UntypedVar rhs RealRepr) :::
+                then return $ App (Ord NumReal Le) ((mkExpr lhs RealRepr) :::
+                                                    (mkExpr rhs RealRepr) :::
                                                      Nil)
-                else return $ App (Ord NumInt Le) ((UntypedVar lhs IntRepr) :::
-                                                   (UntypedVar rhs IntRepr) :::
+                else return $ App (Ord NumInt Le) ((mkExpr lhs IntRepr) :::
+                                                   (mkExpr rhs IntRepr) :::
                                                     Nil)
             #{const MSAT_TAG_EQ} -> do
               lhs <- termGetArg term 0
@@ -530,8 +542,8 @@ exprFromMSat env (UntypedVar term tp) = do
               tp <- termGetType lhs
               sortFromMSat env tp $
                 \tp' -> return $ App (Eq tp' (Succ (Succ Zero)))
-                        ((UntypedVar lhs tp') :::
-                         (UntypedVar rhs tp') :::
+                        ((mkExpr lhs tp') :::
+                         (mkExpr rhs tp') :::
                           Nil)
             #{const MSAT_TAG_INT_MOD_CONGR} -> do
               modulus <- termIsCongruence env term
@@ -540,7 +552,7 @@ exprFromMSat env (UntypedVar term tp) = do
               n1 <- makeNumber env "-1"
               nrhs <- makeTimes env n1 rhs
               diff <- makePlus env lhs nrhs
-              return $ App (Divisible (read modulus)) ((UntypedVar diff IntRepr) ::: Nil)
+              return $ App (Divisible (read modulus)) ((mkExpr diff IntRepr) ::: Nil)
             #{const MSAT_TAG_BV_ULT} -> do
               lhs <- termGetArg term 0
               rhs <- termGetArg term 1
@@ -548,8 +560,8 @@ exprFromMSat env (UntypedVar term tp) = do
               Just sz <- isBVType env tp
               reifyNat (fromIntegral sz) $
                 \bw -> return $ App (BVComp BVULT bw)
-                       ((UntypedVar lhs (BitVecRepr bw)) :::
-                        (UntypedVar rhs (BitVecRepr bw)) :::
+                       ((mkExpr lhs (BitVecRepr bw)) :::
+                        (mkExpr rhs (BitVecRepr bw)) :::
                          Nil)
             #{const MSAT_TAG_BV_SLT} -> do
               lhs <- termGetArg term 0
@@ -558,8 +570,8 @@ exprFromMSat env (UntypedVar term tp) = do
               Just sz <- isBVType env tp
               reifyNat (fromIntegral sz) $
                 \bw -> return $ App (BVComp BVSLT bw)
-                       ((UntypedVar lhs (BitVecRepr bw)) :::
-                        (UntypedVar rhs (BitVecRepr bw)) :::
+                       ((mkExpr lhs (BitVecRepr bw)) :::
+                        (mkExpr rhs (BitVecRepr bw)) :::
                          Nil)
             #{const MSAT_TAG_BV_ULE} -> do
               lhs <- termGetArg term 0
@@ -568,8 +580,8 @@ exprFromMSat env (UntypedVar term tp) = do
               Just sz <- isBVType env tp
               reifyNat (fromIntegral sz) $
                 \bw -> return $ App (BVComp BVULE bw)
-                       ((UntypedVar lhs (BitVecRepr bw)) :::
-                        (UntypedVar rhs (BitVecRepr bw)) :::
+                       ((mkExpr lhs (BitVecRepr bw)) :::
+                        (mkExpr rhs (BitVecRepr bw)) :::
                          Nil)
             #{const MSAT_TAG_BV_SLE} -> do
               lhs <- termGetArg term 0
@@ -578,41 +590,41 @@ exprFromMSat env (UntypedVar term tp) = do
               Just sz <- isBVType env tp
               reifyNat (fromIntegral sz) $
                 \bw -> return $ App (BVComp BVSLE bw)
-                       ((UntypedVar lhs (BitVecRepr bw)) :::
-                        (UntypedVar rhs (BitVecRepr bw)) :::
+                       ((mkExpr lhs (BitVecRepr bw)) :::
+                        (mkExpr rhs (BitVecRepr bw)) :::
                         Nil)
           IntRepr -> case tag of
             #{const MSAT_TAG_PLUS} -> do
               lhs <- termGetArg term 0
               rhs <- termGetArg term 1
               return $ App (Arith NumInt Plus (Succ (Succ Zero)))
-                ((UntypedVar lhs IntRepr) :::
-                 (UntypedVar rhs IntRepr) :::
+                ((mkExpr lhs IntRepr) :::
+                 (mkExpr rhs IntRepr) :::
                   Nil)
             #{const MSAT_TAG_TIMES} -> do
               lhs <- termGetArg term 0
               rhs <- termGetArg term 1
               return $ App (Arith NumInt Mult (Succ (Succ Zero)))
-                ((UntypedVar lhs IntRepr) :::
-                 (UntypedVar rhs IntRepr) :::
+                ((mkExpr lhs IntRepr) :::
+                 (mkExpr rhs IntRepr) :::
                  Nil)
             #{const MSAT_TAG_FLOOR} -> do
               arg <- termGetArg term 0
-              return $ App ToInt ((UntypedVar arg RealRepr) ::: Nil)
+              return $ App ToInt ((mkExpr arg RealRepr) ::: Nil)
           RealRepr -> case tag of
             #{const MSAT_TAG_PLUS} -> do
               lhs <- termGetArg term 0
               rhs <- termGetArg term 1
               return $ App (Arith NumReal Plus (Succ (Succ Zero)))
-                ((UntypedVar lhs RealRepr) :::
-                 (UntypedVar rhs RealRepr) :::
+                ((mkExpr lhs RealRepr) :::
+                 (mkExpr rhs RealRepr) :::
                   Nil)
             #{const MSAT_TAG_TIMES} -> do
               lhs <- termGetArg term 0
               rhs <- termGetArg term 1
               return $ App (Arith NumReal Mult (Succ (Succ Zero)))
-                ((UntypedVar lhs RealRepr) :::
-                 (UntypedVar rhs RealRepr) :::
+                ((mkExpr lhs RealRepr) :::
+                 (mkExpr rhs RealRepr) :::
                  Nil)
           BitVecRepr bw -> case tag of
             #{const MSAT_TAG_BV_CONCAT} -> do
@@ -626,8 +638,8 @@ exprFromMSat env (UntypedVar term tp) = do
                 \bw1 -> reifyNat (fromIntegral szR) $
                         \bw2 -> case geq bw (naturalAdd bw1 bw2) of
                         Just Refl -> return $ App (Concat bw1 bw2)
-                                     ((UntypedVar lhs (BitVecRepr bw1)) :::
-                                      (UntypedVar rhs (BitVecRepr bw2)) :::
+                                     ((mkExpr lhs (BitVecRepr bw1)) :::
+                                      (mkExpr rhs (BitVecRepr bw2)) :::
                                       Nil)
             #{const MSAT_TAG_BV_EXTRACT} -> do
               Just (msb,lsb) <- termIsBVExtract env term
@@ -637,59 +649,59 @@ exprFromMSat env (UntypedVar term tp) = do
                 \start -> reifyNat (fromIntegral sz) $
                           \rsz -> case naturalLEQ (naturalAdd start bw) rsz of
                           Just Dict -> return $ App (Extract rsz start bw)
-                                       ((UntypedVar arg (BitVecRepr rsz)) ::: Nil)
+                                       ((mkExpr arg (BitVecRepr rsz)) ::: Nil)
             #{const MSAT_TAG_BV_NOT} -> do
               arg <- termGetArg term 0
-              return $ App (BVUn BVNot bw) ((UntypedVar arg (BitVecRepr bw)) ::: Nil)
+              return $ App (BVUn BVNot bw) ((mkExpr arg (BitVecRepr bw)) ::: Nil)
             #{const MSAT_TAG_BV_AND} -> do
               lhs <- termGetArg term 0
               rhs <- termGetArg term 1
-              return $ App (BVBin BVAnd bw) ((UntypedVar lhs (BitVecRepr bw)) :::
-                                             (UntypedVar rhs (BitVecRepr bw)) :::
+              return $ App (BVBin BVAnd bw) ((mkExpr lhs (BitVecRepr bw)) :::
+                                             (mkExpr rhs (BitVecRepr bw)) :::
                                              Nil)
             #{const MSAT_TAG_BV_OR} -> do
               lhs <- termGetArg term 0
               rhs <- termGetArg term 1
-              return $ App (BVBin BVOr bw) ((UntypedVar lhs (BitVecRepr bw)) :::
-                                            (UntypedVar rhs (BitVecRepr bw)) :::
+              return $ App (BVBin BVOr bw) ((mkExpr lhs (BitVecRepr bw)) :::
+                                            (mkExpr rhs (BitVecRepr bw)) :::
                                             Nil)
             #{const MSAT_TAG_BV_XOR} -> do
               lhs <- termGetArg term 0
               rhs <- termGetArg term 1
-              return $ App (BVBin BVXor bw) ((UntypedVar lhs (BitVecRepr bw)) :::
-                                             (UntypedVar rhs (BitVecRepr bw)) :::
+              return $ App (BVBin BVXor bw) ((mkExpr lhs (BitVecRepr bw)) :::
+                                             (mkExpr rhs (BitVecRepr bw)) :::
                                              Nil)
             #{const MSAT_TAG_BV_COMP} -> do
               lhs <- termGetArg term 0
               rhs <- termGetArg term 1
               narg <- makeBVXor env lhs rhs
-              return $ App (BVUn BVNot bw) ((UntypedVar narg (BitVecRepr bw)) ::: Nil)
+              return $ App (BVUn BVNot bw) ((mkExpr narg (BitVecRepr bw)) ::: Nil)
             #{const MSAT_TAG_BV_NEG} -> do
               arg <- termGetArg term 0
-              return $ App (BVUn BVNeg bw) ((UntypedVar arg (BitVecRepr bw)) ::: Nil)
+              return $ App (BVUn BVNeg bw) ((mkExpr arg (BitVecRepr bw)) ::: Nil)
             #{const MSAT_TAG_BV_ADD} -> do
               lhs <- termGetArg term 0
               rhs <- termGetArg term 1
-              return $ App (BVBin BVAdd bw) ((UntypedVar lhs (BitVecRepr bw)) :::
-                                             (UntypedVar rhs (BitVecRepr bw)) :::
+              return $ App (BVBin BVAdd bw) ((mkExpr lhs (BitVecRepr bw)) :::
+                                             (mkExpr rhs (BitVecRepr bw)) :::
                                              Nil)
             #{const MSAT_TAG_BV_SUB} -> do
               lhs <- termGetArg term 0
               rhs <- termGetArg term 1
-              return $ App (BVBin BVSub bw) ((UntypedVar lhs (BitVecRepr bw)) :::
-                                             (UntypedVar rhs (BitVecRepr bw)) :::
+              return $ App (BVBin BVSub bw) ((mkExpr lhs (BitVecRepr bw)) :::
+                                             (mkExpr rhs (BitVecRepr bw)) :::
                                              Nil)
             #{const MSAT_TAG_BV_MUL} -> do
               lhs <- termGetArg term 0
               rhs <- termGetArg term 1
-              return $ App (BVBin BVMul bw) ((UntypedVar lhs (BitVecRepr bw)) :::
-                                             (UntypedVar rhs (BitVecRepr bw)) :::
+              return $ App (BVBin BVMul bw) ((mkExpr lhs (BitVecRepr bw)) :::
+                                             (mkExpr rhs (BitVecRepr bw)) :::
                                              Nil)
             #{const MSAT_TAG_BV_UDIV} -> do
               lhs <- termGetArg term 0
               rhs <- termGetArg term 1
-              return $ App (BVBin BVUDiv bw) ((UntypedVar lhs (BitVecRepr bw)) :::
-                                              (UntypedVar rhs (BitVecRepr bw)) :::
+              return $ App (BVBin BVUDiv bw) ((mkExpr lhs (BitVecRepr bw)) :::
+                                              (mkExpr rhs (BitVecRepr bw)) :::
                                               Nil)
             #{const MSAT_TAG_BV_ROL} -> error "smtlib2-mathsat: No support for rotate-left."
             #{const MSAT_TAG_BV_ROR} -> error "smtlib2-mathsat: No support for rotate-right."
@@ -701,14 +713,14 @@ exprFromMSat env (UntypedVar term tp) = do
               idx <- termGetArg term 1
               el <- termGetArg term 2
               return $ App (Store (idxTp ::: Nil) elTp)
-                ((UntypedVar arr tp) :::
-                 (UntypedVar el elTp) :::
-                 (UntypedVar idx idxTp) :::
+                ((mkExpr arr tp) :::
+                 (mkExpr el elTp) :::
+                 (mkExpr idx idxTp) :::
                  Nil)
             #{const MSAT_TAG_ARRAY_CONST} -> do
               el <- termGetArg term 0
               return $ App (ConstArray (idxTp ::: Nil) elTp)
-                ((UntypedVar el elTp) ::: Nil)
+                ((mkExpr el elTp) ::: Nil)
 
 foreign import ccall "mathsat.h msat_free"
   free :: Ptr a -> IO ()

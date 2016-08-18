@@ -62,13 +62,12 @@ data RevVar = forall (t::Type). Var !(Repr t)
 data InterpolationMode = Z3Interpolation [T.Text] [T.Text]
                        | MathSATInterpolation
 
-newtype PipeExpr (t :: Type) = PipeExpr (Expression PipeVar PipeVar PipeFun PipeVar PipeVar PipeExpr t) deriving (Show,Typeable)
 type PipeVar = UntypedVar T.Text
 type PipeFun = UntypedFun T.Text
 
 newtype PipeClauseId = PipeClauseId T.Text deriving (Show,Eq,Ord,Typeable)
 
-type PipeProofNode = P.Proof L.Lisp PipeExpr Int
+type PipeProofNode = P.Proof L.Lisp (Expr SMTPipe) Int
 
 data PipeProof = PipeProof { proofNodes :: Map Int PipeProofNode
                            , proofNode :: Int }
@@ -82,21 +81,21 @@ instance Ord PipeProof where
 instance Show PipeProof where
   showsPrec p pr = showParen (p>10) $ showsPrec 0 (proofNode pr)
 
-instance GEq PipeExpr where
+instance GEq (Expr SMTPipe) where
   geq (PipeExpr e1) (PipeExpr e2) = geq e1 e2
 
-instance GCompare PipeExpr where
+instance GCompare (Expr SMTPipe) where
   gcompare (PipeExpr e1) (PipeExpr e2) = gcompare e1 e2
 
-instance GShow PipeExpr where
+instance GShow (Expr SMTPipe) where
   gshowsPrec = showsPrec
 
-instance GetType PipeExpr where
+instance GetType (Expr SMTPipe) where
   getType (PipeExpr e) = getType e
 
 instance Backend SMTPipe where
   type SMTMonad SMTPipe = IO
-  type Expr SMTPipe = PipeExpr
+  newtype Expr SMTPipe t = PipeExpr (Expression PipeVar PipeVar PipeFun PipeVar PipeVar (Expr SMTPipe) t) deriving (Show,Typeable)
   type Var SMTPipe = PipeVar
   type QVar SMTPipe = PipeVar
   type Fun SMTPipe = PipeFun
@@ -428,7 +427,7 @@ renderDefineVar names tp name lexpr
               Nothing -> "var"
     (name'',nnames) = genName' names name'
 
-renderGetValue :: SMTPipe -> PipeExpr t -> L.Lisp
+renderGetValue :: SMTPipe -> Expr SMTPipe t -> L.Lisp
 renderGetValue b (PipeExpr e) = L.List [L.Symbol "get-value"
                                        ,L.List [exprToLisp (datatypes b) e]]
 
@@ -458,7 +457,7 @@ parseGetProof b resp = case runExcept $ parseProof b Map.empty Map.empty Map.emp
     findProof (x:xs) = findProof xs
 
 parseProof :: SMTPipe
-           -> Map T.Text (PipeExpr BoolType)
+           -> Map T.Text (Expr SMTPipe BoolType)
            -> Map T.Text Int
            -> Map Int PipeProofNode
            -> L.Lisp
@@ -483,8 +482,8 @@ parseProof pipe exprs proofs nodes l = case l of
     exprParser = pipeParser pipe
     exprParser' exprs = exprParser { parseRecursive = \_ -> parseDefExpr' exprs
                                    }
-    parseDefExpr' :: Map T.Text (PipeExpr BoolType) -> Maybe Sort -> L.Lisp
-                  -> (forall tp. PipeExpr tp -> LispParse a)
+    parseDefExpr' :: Map T.Text (Expr SMTPipe BoolType) -> Maybe Sort -> L.Lisp
+                  -> (forall tp. Expr SMTPipe tp -> LispParse a)
                   -> LispParse a
     parseDefExpr' exprs srt l@(L.Symbol name) res = case Map.lookup name exprs of
       Just def -> res def
@@ -492,8 +491,8 @@ parseProof pipe exprs proofs nodes l = case l of
                  \e -> res (PipeExpr e)
     parseDefExpr' exprs srt l res = lispToExprWith (exprParser' exprs) srt l
                                     (res.PipeExpr)
-    parseDefExpr :: Map T.Text (PipeExpr BoolType) -> L.Lisp
-                 -> LispParse (PipeExpr BoolType)
+    parseDefExpr :: Map T.Text (Expr SMTPipe BoolType) -> L.Lisp
+                 -> LispParse (Expr SMTPipe BoolType)
     parseDefExpr exprs l = parseDefExpr' exprs (Just $ Sort BoolRepr) l $
                            \e -> case getType e of
                              BoolRepr -> return e
@@ -636,19 +635,19 @@ createPipe solver args = do
     _ -> return p0
 
 lispToExprUntyped :: SMTPipe -> L.Lisp
-                  -> (forall (t::Type). PipeExpr t -> LispParse a)
+                  -> (forall (t::Type). Expr SMTPipe t -> LispParse a)
                   -> LispParse a
 lispToExprUntyped st l res = lispToExprWith (pipeParser st) Nothing l $
                              \e -> res (PipeExpr e)
 
-lispToExprTyped :: SMTPipe -> Repr t -> L.Lisp -> LispParse (PipeExpr t)
+lispToExprTyped :: SMTPipe -> Repr t -> L.Lisp -> LispParse (Expr SMTPipe t)
 lispToExprTyped st tp l = lispToExprWith (pipeParser st) (Just (Sort tp)) l $
                           \e -> case geq tp (getType e) of
                           Just Refl -> return (PipeExpr e)
                           Nothing -> throwE $ show l++" has type "++show (getType e)++", but "++show tp++" was expected."
 
 pipeParser :: SMTPipe
-           -> LispParser PipeVar PipeVar PipeFun PipeVar PipeVar PipeExpr
+           -> LispParser PipeVar PipeVar PipeFun PipeVar PipeVar (Expr SMTPipe)
 pipeParser st = parse
   where
   parse = LispParser { parseFunction = \srt name fun con test field
@@ -1178,7 +1177,7 @@ lispToBitVec (L.Symbol (T.stripPrefix "#b" -> Just bv))
 lispToBitVec _ = Nothing
 
 exprToLisp :: TypeRegistry T.Text T.Text T.Text
-           -> Expression PipeVar PipeVar PipeFun PipeVar PipeVar PipeExpr t
+           -> Expression PipeVar PipeVar PipeFun PipeVar PipeVar (Expr SMTPipe) t
            -> L.Lisp
 exprToLisp reg
   = runIdentity . exprToLispWith
