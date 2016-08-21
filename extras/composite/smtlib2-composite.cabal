@@ -49,5 +49,6 @@ Library
     GADTs
     TemplateHaskell
     StandaloneDeriving
+    GeneralizedNewtypeDeriving
     DeriveFunctor
     CPP
