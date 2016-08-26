@@ -61,6 +61,18 @@ instance (Backend b) => Embed (SMT b) (Expr b) where
     embedSMT $ toBackend (Quantification quant args body)
   embedTypeOf = pure getType
 
+instance Embed Identity Repr where
+  type EmVar Identity Repr = Repr
+  type EmQVar Identity Repr = Repr
+  type EmFun Identity Repr = FunRepr
+  type EmFunArg Identity Repr = Repr
+  type EmLVar Identity Repr = Repr
+  embed e = pure f <*> e
+    where
+      f e = runIdentity $ expressionType return return (\(FunRepr arg tp) -> return (arg,tp)) return return return e
+  embedQuantifier _ _ _ = pure bool
+  embedTypeOf = pure id
+
 newtype BackendInfo b = BackendInfo b
 
 instance (Backend b) => Extract (BackendInfo b) (Expr b) where
