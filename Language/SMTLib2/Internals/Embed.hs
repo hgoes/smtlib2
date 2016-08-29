@@ -29,7 +29,7 @@ class (Applicative m,
         -> m (e tp)
   embedQuantifier :: Quantifier
                   -> List Repr arg
-                  -> (forall m e. Embed m e => List (EmQVar m e) arg -> m (e BoolType))
+                  -> (forall m e. (Embed m e,Monad m) => List (EmQVar m e) arg -> m (e BoolType))
                   -> m (e BoolType)
   embedTypeOf :: m (e tp -> Repr tp)
 

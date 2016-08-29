@@ -49,6 +49,8 @@ module Language.SMTLib2 (
   pattern ConstReal,creal,
   -- *** Bitvector constants
   pattern ConstBV,cbv,
+  -- ** Quantification
+  exists, forall,
   -- ** Functions
   pattern Fun,app,fun,
   -- *** Equality

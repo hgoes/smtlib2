@@ -5,6 +5,8 @@ module Language.SMTLib2.Internals.Interface
         -- ** Constants
         pattern ConstBool,pattern ConstInt,pattern ConstReal,pattern ConstBV,
         constant,asConstant,true,false,cbool,cint,creal,cbv,cdt,
+        -- ** Quantification
+        exists,forall,
         -- ** Functions
         pattern Fun,app,fun,
         -- *** Equality
@@ -931,3 +933,17 @@ is e con = embed $ E.App (E.Test con) . (::: Nil) <$>
 (.#.) e f = embed $ E.App (E.Field f) . (::: Nil) <$>
             embedM e
 {-# INLINEABLE (.#.) #-}
+
+exists :: (Embed m e,Monad m) => List Repr tps
+       -> (forall m e. (Embed m e,Monad m) => List e tps -> m (e BoolType))
+       -> m (e BoolType)
+exists tps f = embedQuantifier Exists tps (\vars -> do
+                                              nvars <- List.traverse (\var -> embed $ pure $ QVar var) vars
+                                              f nvars)
+
+forall :: (Embed m e,Monad m) => List Repr tps
+       -> (forall m e. (Embed m e,Monad m) => List e tps -> m (e BoolType))
+       -> m (e BoolType)
+forall tps f = embedQuantifier Forall tps (\vars -> do
+                                              nvars <- List.traverse (\var -> embed $ pure $ QVar var) vars
+                                              f nvars)
