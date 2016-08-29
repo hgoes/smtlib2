@@ -2,7 +2,7 @@ module Language.SMTLib2.Internals.Type.List where
 
 import Language.SMTLib2.Internals.Type.Nat
 
-import Prelude hiding (head,tail,length,mapM,insert,drop,take,last,reverse,map)
+import Prelude hiding (head,tail,length,mapM,insert,drop,take,last,reverse,map,traverse)
 import Data.GADT.Compare
 import Data.GADT.Show
 import Language.Haskell.TH
@@ -157,6 +157,10 @@ mapIndexM f (x ::: xs) = do
   nx <- f Zero x
   nxs <- mapIndexM (\n -> f (Succ n)) xs
   return (nx ::: nxs)
+
+traverse :: Applicative f => (forall x. e x -> f (e' x)) -> List e lst -> f (List e' lst)
+traverse f Nil = pure Nil
+traverse f (x ::: xs) = (:::) <$> f x <*> traverse f xs
 
 cons :: e x -> List e xs -> List e (x ': xs)
 cons = (:::)
