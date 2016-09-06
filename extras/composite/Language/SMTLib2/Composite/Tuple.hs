@@ -2,21 +2,21 @@ module Language.SMTLib2.Composite.Tuple where
 
 import Language.SMTLib2
 import Language.SMTLib2.Composite.Class
+import Language.SMTLib2.Composite.Lens
 
 import Data.GADT.Show
 import Data.GADT.Compare
 import Data.Proxy
+import Control.Lens
 
 data CompTuple2 (a :: (Type -> *) -> *) (b :: (Type -> *) -> *) e
-  = CompTuple2 { ctuple2_1 :: a e
-               , ctuple2_2 :: b e }
-  deriving Show
+  = CompTuple2 { _ctuple2_1 :: a e
+               , _ctuple2_2 :: b e }
 
 data CompTuple3 (a :: (Type -> *) -> *) (b :: (Type -> *) -> *) (c :: (Type -> *) -> *) e
-  = CompTuple3 { ctuple3_1 :: a e
-               , ctuple3_2 :: b e
-               , ctuple3_3 :: c e }
-  deriving Show
+  = CompTuple3 { _ctuple3_1 :: a e
+               , _ctuple3_2 :: b e
+               , _ctuple3_3 :: c e }
 
 data RevTuple2 a b tp
   = RevTuple2_1 (RevComp a tp)
@@ -27,22 +27,47 @@ data RevTuple3 a b c tp
   | RevTuple3_2 (RevComp b tp)
   | RevTuple3_3 (RevComp c tp)
 
+makeLenses ''CompTuple2
+makeLenses ''CompTuple3
+
+tuple2_1 :: (Composite a,Composite b) => CompLens (CompTuple2 a b) a
+tuple2_1 = liftLens ctuple2_1
+
+tuple2_2 :: (Composite a,Composite b) => CompLens (CompTuple2 a b) b
+tuple2_2 = liftLens ctuple2_2
+
+tuple3_1 :: (Composite a,Composite b,Composite c) => CompLens (CompTuple3 a b c) a
+tuple3_1 = liftLens ctuple3_1
+
+tuple3_2 :: (Composite a,Composite b,Composite c) => CompLens (CompTuple3 a b c) b
+tuple3_2 = liftLens ctuple3_2
+
+tuple3_3 :: (Composite a,Composite b,Composite c) => CompLens (CompTuple3 a b c) c
+tuple3_3 = liftLens ctuple3_3
+
 instance (Composite a,Composite b) => Composite (CompTuple2 a b) where
-  type CompDescr (CompTuple2 a b) = (CompDescr a,CompDescr b)
   type RevComp (CompTuple2 a b) = RevTuple2 a b
-  compositeType (a,b) = CompTuple2 (compositeType a) (compositeType b)
   foldExprs f tup = do
-    n1 <- foldExprs (f . RevTuple2_1) (ctuple2_1 tup)
-    n2 <- foldExprs (f . RevTuple2_2) (ctuple2_2 tup)
+    n1 <- foldExprs (f . RevTuple2_1) (_ctuple2_1 tup)
+    n2 <- foldExprs (f . RevTuple2_2) (_ctuple2_2 tup)
     return $ CompTuple2 n1 n2
-  accessComposite (RevTuple2_1 r) tup = accessComposite r (ctuple2_1 tup)
-  accessComposite (RevTuple2_2 r) tup = accessComposite r (ctuple2_2 tup)
-  createComposite f (a,b) = do
-    ta <- createComposite (\tp r -> f tp (RevTuple2_1 r)) a
-    tb <- createComposite (\tp r -> f tp (RevTuple2_2 r)) b
-    return $ CompTuple2 ta tb
-  revType (_::Proxy (CompTuple2 a b)) (a,_) (RevTuple2_1 r) = revType (Proxy::Proxy a) a r
-  revType (_::Proxy (CompTuple2 a b)) (_,b) (RevTuple2_2 r) = revType (Proxy::Proxy b) b r
+  accessComposite (RevTuple2_1 r) = maybeLens ctuple2_1 `composeMaybe` accessComposite r
+  accessComposite (RevTuple2_2 r) = maybeLens ctuple2_2 `composeMaybe` accessComposite r
+  compCombine f (CompTuple2 x1 y1) (CompTuple2 x2 y2) = do
+    actX <- compCombine f x1 x2
+    actY <- compCombine f y1 y2
+    return $ do
+      x3 <- actX
+      y3 <- actY
+      return $ CompTuple2 x3 y3
+  compCompare (CompTuple2 x1 y1) (CompTuple2 x2 y2) = case compCompare x1 x2 of
+    EQ -> compCompare y1 y2
+    r -> r
+  compShow p (CompTuple2 x y) = showChar '(' . compShow 0 x . showChar ',' . compShow 0 y . showChar ')'
+  compInvariant (CompTuple2 x y) = do
+    invX <- compInvariant x
+    invY <- compInvariant y
+    return $ invX++invY
 
 instance (CompositeExtract a,CompositeExtract b)
   => CompositeExtract (CompTuple2 a b) where
@@ -53,25 +78,39 @@ instance (CompositeExtract a,CompositeExtract b)
       compExtract f b
 
 instance (Composite a,Composite b,Composite c) => Composite (CompTuple3 a b c) where
-  type CompDescr (CompTuple3 a b c) = (CompDescr a,CompDescr b,CompDescr c)
   type RevComp (CompTuple3 a b c) = RevTuple3 a b c
-  compositeType (a,b,c) = CompTuple3 (compositeType a) (compositeType b) (compositeType c)
   foldExprs f tup = do
-    n1 <- foldExprs (f . RevTuple3_1) (ctuple3_1 tup)
-    n2 <- foldExprs (f . RevTuple3_2) (ctuple3_2 tup)
-    n3 <- foldExprs (f . RevTuple3_3) (ctuple3_3 tup)
+    n1 <- foldExprs (f . RevTuple3_1) (_ctuple3_1 tup)
+    n2 <- foldExprs (f . RevTuple3_2) (_ctuple3_2 tup)
+    n3 <- foldExprs (f . RevTuple3_3) (_ctuple3_3 tup)
     return $ CompTuple3 n1 n2 n3
-  accessComposite (RevTuple3_1 r) tup = accessComposite r (ctuple3_1 tup)
-  accessComposite (RevTuple3_2 r) tup = accessComposite r (ctuple3_2 tup)
-  accessComposite (RevTuple3_3 r) tup = accessComposite r (ctuple3_3 tup)
-  createComposite f (a,b,c) = do
-    ta <- createComposite (\tp r -> f tp (RevTuple3_1 r)) a
-    tb <- createComposite (\tp r -> f tp (RevTuple3_2 r)) b
-    tc <- createComposite (\tp r -> f tp (RevTuple3_3 r)) c
-    return $ CompTuple3 ta tb tc
-  revType (_::Proxy (CompTuple3 a b c)) (a,_,_) (RevTuple3_1 r) = revType (Proxy::Proxy a) a r
-  revType (_::Proxy (CompTuple3 a b c)) (_,b,_) (RevTuple3_2 r) = revType (Proxy::Proxy b) b r
-  revType (_::Proxy (CompTuple3 a b c)) (_,_,c) (RevTuple3_3 r) = revType (Proxy::Proxy c) c r
+  accessComposite (RevTuple3_1 r) = maybeLens ctuple3_1 `composeMaybe` accessComposite r
+  accessComposite (RevTuple3_2 r) = maybeLens ctuple3_2 `composeMaybe` accessComposite r
+  accessComposite (RevTuple3_3 r) = maybeLens ctuple3_3 `composeMaybe` accessComposite r
+  compCombine f (CompTuple3 x1 y1 z1) (CompTuple3 x2 y2 z2) = do
+    actX <- compCombine f x1 x2
+    actY <- compCombine f y1 y2
+    actZ <- compCombine f z1 z2
+    return $ do
+      x3 <- actX
+      y3 <- actY
+      z3 <- actZ
+      return $ CompTuple3 x3 y3 z3
+  compCompare (CompTuple3 x1 y1 z1) (CompTuple3 x2 y2 z2) = case compCompare x1 x2 of
+    EQ -> case compCompare y1 y2 of
+      EQ -> compCompare z1 z2
+      r -> r
+    r -> r
+  compShow _ (CompTuple3 x y z)
+    = showChar '(' .
+      compShow 0 x . showChar ',' .
+      compShow 0 y . showChar ',' .
+      compShow 0 z . showChar ')'
+  compInvariant (CompTuple3 x y z) = do
+    invX <- compInvariant x
+    invY <- compInvariant y
+    invZ <- compInvariant z
+    return $ invX++invY++invZ
 
 instance (CompositeExtract a,CompositeExtract b,CompositeExtract c)
   => CompositeExtract (CompTuple3 a b c) where

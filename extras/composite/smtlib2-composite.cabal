@@ -15,26 +15,32 @@ Source-Repository head
   Location:     https://github.com/hguenther/smtlib2.git
 
 Library
-  Build-Depends: smtlib2 >= 1.0 && < 1.1, base, dependent-sum, dependent-map, mtl, containers, template-haskell, constraints
+  Build-Depends: smtlib2 >= 1.0 && < 1.1, base, dependent-sum, dependent-map,
+                 mtl, containers, template-haskell, constraints, lens,
+                 transformers
   Exposed-Modules:
                   Language.SMTLib2.Composite
                   Language.SMTLib2.Composite.Class
+                  Language.SMTLib2.Composite.Domains
                   Language.SMTLib2.Composite.Expression
+                  Language.SMTLib2.Composite.Lens
                   Language.SMTLib2.Composite.Null
                   Language.SMTLib2.Composite.Singleton
                   Language.SMTLib2.Composite.List
-                  Language.SMTLib2.Composite.List.Dynamic
+                  Language.SMTLib2.Composite.Convert
+                  Language.SMTLib2.Composite.Convert.Instances
                   Language.SMTLib2.Composite.Maybe
                   Language.SMTLib2.Composite.Either
                   Language.SMTLib2.Composite.Map
                   Language.SMTLib2.Composite.Tuple
                   Language.SMTLib2.Composite.Array
+                  Language.SMTLib2.Composite.Array.Static
                   Language.SMTLib2.Composite.Array.Bounded
                   Language.SMTLib2.Composite.Array.Composite
-                  Language.SMTLib2.Composite.Array.Sectioned
                   Language.SMTLib2.Composite.Data
                   Language.SMTLib2.Composite.Choice
                   Language.SMTLib2.Composite.Ranged
+                  Language.SMTLib2.Composite.Linear
   Extensions:
     RankNTypes
     KindSignatures
@@ -52,3 +58,5 @@ Library
     GeneralizedNewtypeDeriving
     DeriveFunctor
     CPP
+    ViewPatterns
+    TypeOperators

@@ -1,6 +1,7 @@
 module Language.SMTLib2.Composite.Expression where
 
 import Language.SMTLib2.Composite.Class
+import Language.SMTLib2.Composite.Lens
 
 import Language.SMTLib2
 import Language.SMTLib2.Internals.Embed
@@ -26,7 +27,7 @@ data CompositeExpr a t
 instance Composite a => GetType (CompositeExpr a) where
   getType (CompositeExpr descr e :: CompositeExpr a t)
     = runIdentity $ E.expressionType
-      (return . revType (Proxy::Proxy a) descr)
+      (return . revType descr)
       (return.getType) (return.getFunType) (return.getType)
       (return.getType) (return.getType) e
 
@@ -45,12 +46,12 @@ createRevComp f descr
 
 instance Composite a => GEq (CompositeExpr a) where
   geq (CompositeExpr dx x) (CompositeExpr dy y)
-    = if dx==dy
-      then geq x y
-      else Nothing
+    = case compCompare dx dy of
+        EQ -> geq x y
+        _ -> Nothing
 instance Composite a => GCompare (CompositeExpr a) where
   gcompare (CompositeExpr dx x) (CompositeExpr dy y)
-    = case compare dx dy of
+    = case compCompare dx dy of
     EQ -> gcompare x y
     LT -> GLT
     GT -> GGT
@@ -101,7 +102,7 @@ concretizeExpr :: (Embed m e,Monad m,Composite arg,GetType e)
                => arg e
                -> CompositeExpr arg tp
                -> m (e tp)
-concretizeExpr arg (CompositeExpr _ (E.Var rev)) = case accessComposite rev arg of
+concretizeExpr arg (CompositeExpr _ (E.Var rev)) = case arg `getMaybe` accessComposite rev of
   Just r -> return r
   Nothing -> error $ "concretizeExpr: Unknown key "++gshow rev
 concretizeExpr arg (CompositeExpr _ (E.App fun args)) = do

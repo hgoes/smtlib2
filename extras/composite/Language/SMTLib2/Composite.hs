@@ -29,11 +29,10 @@ module Language.SMTLib2.Composite
    -- ** Map
    CompMap(..),
    RevMap(..),
-   mapITE,
    -- ** Array
    CompArray(..),
    RevArray(..),
-   select,store,
+   selectArray,storeArray,
    -- ** Data-structures
    makeComposite
   ) where
@@ -49,6 +48,8 @@ import Language.SMTLib2.Composite.List
 import Language.SMTLib2.Composite.Map
 import Language.SMTLib2.Composite.Array
 import Language.SMTLib2.Composite.Data
+import Language.SMTLib2.Composite.Convert
+import Language.SMTLib2.Composite.Convert.Instances
 
 import Language.SMTLib2 hiding (select,store)
 

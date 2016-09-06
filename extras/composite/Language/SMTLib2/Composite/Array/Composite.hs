@@ -6,16 +6,17 @@ module Language.SMTLib2.Composite.Array.Composite
 import Language.SMTLib2 hiding (select,store)
 import qualified Language.SMTLib2.Internals.Type.List as List
 import Language.SMTLib2.Composite.Class
-import Language.SMTLib2.Composite.Array (CompArray(..),RevArray(..))
-import qualified Language.SMTLib2.Composite.Array as Array
+import Language.SMTLib2.Composite.Array
 import Language.SMTLib2.Composite.Ranged
 import Language.SMTLib2.Composite.Data
+import Language.SMTLib2.Composite.Domains
+import Language.SMTLib2.Composite.Lens
 
 import Control.Monad.State
 import Data.Functor.Identity
 import Data.GADT.Show
 import Data.GADT.Compare
-import Data.Proxy
+import Control.Lens
 
 data AnyList (e :: Type -> *) = forall tps. AnyList (List e tps)
 
@@ -26,27 +27,41 @@ allFields c = execState (foldExprs (\_ e -> do
                                        return e
                                    ) c) (AnyList Nil)
 
-allFieldDescr :: Composite c => Proxy c -> CompDescr c -> AnyList Repr
-allFieldDescr (_::Proxy c) descr = allFields (compositeType descr :: c Repr)
+allFieldDescr :: Composite c => CompDescr c -> AnyList Repr
+allFieldDescr descr = allFields descr
 
 data CompositeArray (idx :: (Type -> *) -> *) c e
-  = forall ilst. CompositeArray (List Repr ilst) (CompArray ilst c e)
+  = forall ilst. CompositeArray (CompArray ilst c e)
 
 data RevCompositeArray (idx :: (Type -> *) -> *) c tp where
   RevCompositeArray :: RevComp c tp -> List Repr ilst -> RevCompositeArray idx c (ArrayType ilst tp)
 
 instance (Composite idx,Composite c) => Composite (CompositeArray idx c) where
-  type CompDescr (CompositeArray idx c) = (CompDescr idx,CompDescr c)
   type RevComp (CompositeArray idx c) = RevCompositeArray idx c
-  compositeType (idx,c) = case allFieldDescr (Proxy::Proxy idx) idx of
-    AnyList ilst -> CompositeArray ilst (compositeType (ilst,c)) :: CompositeArray idx c Repr
-  foldExprs f (CompositeArray ilst arr) = do
-    narr <- foldExprs (\(RevArray r) e -> f (RevCompositeArray r ilst) e
+  foldExprs f (CompositeArray arr) = do
+    narr <- foldExprs (\(RevArray r) e -> f (RevCompositeArray r (_indexDescr arr)) e
                       ) arr
-    return (CompositeArray ilst narr)
-  accessComposite (RevCompositeArray r ilst) (CompositeArray ilst' arr)
-    = case geq ilst ilst' of
-    Just Refl -> accessComposite (RevArray r) arr
+    return (CompositeArray narr)
+  accessComposite (RevCompositeArray r ilst)
+    = lens (\(CompositeArray arr) -> do
+               Refl <- geq ilst (_indexDescr arr)
+               arr `getMaybe` accessComposite (RevArray r))
+      (\(CompositeArray arr) x -> do
+          Refl <- geq ilst (_indexDescr arr)
+          narr <- setMaybe arr (accessComposite (RevArray r)) x
+          return (CompositeArray narr))
+  compCombine f (CompositeArray arr1) (CompositeArray arr2) = case geq (_indexDescr arr1) (_indexDescr arr2) of
+    Just Refl -> do
+      res <- compCombine f arr1 arr2
+      case res of
+        Just narr -> return $ Just $ CompositeArray narr
+        Nothing -> return Nothing
+    Nothing -> return Nothing
+  compCompare (CompositeArray arr1) (CompositeArray arr2) = case gcompare (_indexDescr arr1) (_indexDescr arr2) of
+    GEQ -> compCompare arr1 arr2
+    GLT -> LT
+    GGT -> GT
+  compShow p (CompositeArray arr) = compShow p arr
 
 instance (Composite idx,Composite c) => Show (RevCompositeArray idx c tp) where
   showsPrec p (RevCompositeArray rev idx)
@@ -74,14 +89,19 @@ instance (Composite idx,Composite c) => GCompare (RevCompositeArray idx c) where
     GLT -> GLT
     GGT -> GGT
 
-select :: (Composite idx,Composite c,Embed m e,Monad m,GetType e) => CompositeArray idx c e -> idx e -> m (c e)
-select (CompositeArray ilst arr) idx = case allFields idx of
-  AnyList ilst' -> case geq ilst (runIdentity $ List.mapM (return.getType) ilst') of
-    Just Refl -> Array.select arr ilst'
-
-store :: (Composite idx,Composite c,Embed m e,Monad m,GetType e) => CompositeArray idx c e -> idx e -> c e -> m (CompositeArray idx c e)
-store (CompositeArray ilst arr) idx el = case allFields idx of
-  AnyList ilst' -> case geq ilst (runIdentity $ List.mapM (return.getType) ilst') of
-    Just Refl -> do
-      narr <- Array.store arr ilst' el
-      return (CompositeArray ilst narr)
+instance (Composite idx,Composite c) => IsArray (CompositeArray idx c) idx where
+  type ElementType (CompositeArray idx c) = c
+  newArray idx el = case allFields idx of
+    AnyList ilst -> do
+      arr <- newConstantArray ilst el
+      return $ CompositeArray arr
+  select (CompositeArray arr) idx = case allFields idx of
+    AnyList ilst' -> case geq (_indexDescr arr) (runIdentity $ List.mapM (return.getType) ilst') of
+      Just Refl -> fmap Just $ selectArray arr ilst'
+  store (CompositeArray arr) idx el = case allFields idx of
+    AnyList ilst' -> case geq (_indexDescr arr) (runIdentity $ List.mapM (return.getType) ilst') of
+      Just Refl -> do
+        narr <- storeArray arr ilst' el
+        case narr of
+          Nothing -> return Nothing
+          Just narr' -> return $ Just $ CompositeArray narr'

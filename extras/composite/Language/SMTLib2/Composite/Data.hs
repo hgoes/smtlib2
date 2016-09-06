@@ -9,12 +9,11 @@ import Data.GADT.Show
 import Control.Monad
 
 makeComposite :: String -- ^ Name of the composite type
-              -> String -- ^ Name of the description type
               -> String -- ^ Name of the reverse type
               -> Int -- ^ Parameter number
-              -> [(String,String,[(String,String,String,TH.TypeQ -> [TH.TypeQ] -> TH.TypeQ)])]
+              -> [(String,[(String,String,TH.TypeQ -> [TH.TypeQ] -> TH.TypeQ)])]
               -> TH.Q [TH.Dec]
-makeComposite name dname rname par' cons = do
+makeComposite name rname par' cons = do
   let name' = TH.mkName name
       e = TH.mkName "e"
       par = take par' (fmap (\c -> [c]) ['a'..'z'])
@@ -28,25 +27,8 @@ makeComposite name dname rname par' cons = do
       [ TH.varStrictType (TH.mkName field)
         (TH.strictType TH.notStrict
          (TH.appT (tp (TH.conT name') (fmap (TH.varT . TH.mkName) par)) (TH.varT e)))
-      | (field,_,_,tp) <- fields]
-    | (con,_,fields) <- cons ]
-#if MIN_VERSION_template_haskell(2,11,0)
-    (TH.cxt [])
-#else
-    []
-#endif
-  i2 <- TH.dataD (TH.cxt []) (TH.mkName dname)
-    (fmap (TH.PlainTV . TH.mkName) par)
-#if MIN_VERSION_template_haskell(2,11,0)
-    Nothing
-#endif
-    [ TH.recC (TH.mkName dcon)
-      [ TH.varStrictType (TH.mkName dfield)
-        (TH.strictType TH.notStrict
-         (TH.appT (TH.conT ''CompDescr) (tp (TH.conT name') (fmap (TH.varT . TH.mkName) par))))
-      | (_,dfield,_,tp) <- fields ]
-    | (_,dcon,fields) <- cons     
-    ]
+      | (field,_,tp) <- fields]
+    | (con,fields) <- cons ]
 #if MIN_VERSION_template_haskell(2,11,0)
     (TH.cxt [])
 #else
@@ -63,53 +45,40 @@ makeComposite name dname rname par' cons = do
        (TH.appT (TH.appT (TH.conT ''RevComp)
                  (tp (TH.conT name') (fmap (TH.varT . TH.mkName) par)))
         (TH.varT $ TH.mkName "tp"))]
-    | (_,_,fields) <- cons
-    , (_,_,rev,tp) <- fields ]
+    | (_,fields) <- cons
+    , (_,rev,tp) <- fields ]
 #if MIN_VERSION_template_haskell(2,11,0)
     (TH.cxt [])
 #else
     []
 #endif
   let lpar = length par
-      revs = concat $ fmap (\(_,_,fields)
-                            -> fmap (\(_,_,rev,_) -> TH.mkName rev) fields
+      revs = concat $ fmap (\(_,fields)
+                            -> fmap (\(_,rev,_) -> TH.mkName rev) fields
                            ) cons
-  i4 <- deriveDescrOrd lpar (TH.mkName dname)
+  i4 <- deriveOrd lpar (TH.mkName name)
   i5 <- deriveRevShow lpar (TH.mkName rname) revs
   i6 <- deriveRevGEq lpar (TH.mkName rname) revs
   i7 <- deriveRevGCompare lpar (TH.mkName rname) revs
-  i8 <- deriveComposite lpar (TH.mkName name) (TH.mkName dname) (TH.mkName rname)
-    [ (TH.mkName con,TH.mkName dcon,
-       [ (TH.mkName field,TH.mkName dfield,TH.mkName rev)
-       | (field,dfield,rev,tp) <- fields ])
-    | (con,dcon,fields) <- cons ]
-  return $ [i1,i2,i3]++i4++i5++i6++i7++i8
+  i8 <- deriveComposite lpar (TH.mkName name) (TH.mkName rname)
+    [ (TH.mkName con,
+       [ (TH.mkName field,TH.mkName rev)
+       | (field,rev,tp) <- fields ])
+    | (con,fields) <- cons ]
+  return $ [i1,i3]++i4++i5++i6++i7++i8
 
-deriveComposite :: Int -> TH.Name -> TH.Name -> TH.Name
-                -> [(TH.Name,TH.Name,[(TH.Name,TH.Name,TH.Name)])]
+deriveComposite :: Int -> TH.Name -> TH.Name
+                -> [(TH.Name,[(TH.Name,TH.Name)])]
                 -> TH.Q [TH.Dec]
-deriveComposite numPar name dname rname cons = do
+deriveComposite numPar name rname cons = do
   pars <- replicateM numPar (TH.newName "c")
   let ctx = TH.cxt $ fmap (\par -> (TH.conT ''Composite) `TH.appT` (TH.varT par)
                           ) pars
       compArgs n = foldr (\par tp -> TH.appT tp (TH.varT par)
                          ) n pars
   i1 <- TH.instanceD ctx ((TH.conT ''Composite) `TH.appT` (compArgs (TH.conT name)))
-    [TH.tySynInstD ''CompDescr (TH.tySynEqn [compArgs (TH.conT name)]
-                                (compArgs (TH.conT dname)))
-    ,TH.tySynInstD ''RevComp (TH.tySynEqn [compArgs (TH.conT name)]
+    [TH.tySynInstD ''RevComp (TH.tySynEqn [compArgs (TH.conT name)]
                               (compArgs (TH.conT rname)))
-    ,TH.funD 'compositeType
-     [ do
-         fieldNames <- mapM (const (TH.newName "arg")) fields
-         TH.clause [TH.conP dcon
-                    [ TH.varP fieldName
-                    | fieldName <- fieldNames ]]
-           (TH.normalB (foldl
-                        (\cur fieldName -> cur `TH.appE` (TH.appE (TH.varE 'compositeType)
-                                                          (TH.varE fieldName)))
-                        (TH.conE con) fieldNames)) []
-     | (con,dcon,fields) <- cons ]
     ,TH.funD 'foldExprs
      [ do
          fName <- TH.newName "f"
@@ -126,13 +95,13 @@ deriveComposite numPar name dname rname cons = do
                                                          ,TH.conE rev]
                                                ,TH.varE old
                                                ])
-            | (old,new,(_,_,rev)) <- zip3 fieldNames nfieldNames fields ] ++
+            | (old,new,(_,rev)) <- zip3 fieldNames nfieldNames fields ] ++
             [ TH.noBindS (TH.appE (TH.varE 'return)
                           (foldl (\cur fieldName
                                    -> cur `TH.appE` (TH.varE fieldName)
                                  ) (TH.conE con) nfieldNames)) ]
            ) []
-     | (con,dcon,fields) <- cons ]
+     | (con,fields) <- cons ]
     ,TH.funD 'accessComposite
      [ do
          matchName <- TH.newName "x"
@@ -142,8 +111,8 @@ deriveComposite numPar name dname rname cons = do
            (TH.normalB $ TH.appsE [TH.varE 'accessComposite
                                   ,TH.varE revName
                                   ,TH.varE matchName]) []
-     | (con,dcon,fields) <- cons
-     , (n,(field,_,rev)) <- zip [0..] fields ]
+     | (con,fields) <- cons
+     , (n,(field,rev)) <- zip [0..] fields ]
     ]
   return [i1]
 
@@ -223,13 +192,16 @@ deriveRevShow numPar rname rcons = do
     [TH.funD 'gshowsPrec [TH.clause [] (TH.normalB $ TH.varE 'showsPrec) []]]
   return [i1,i2]
 
-deriveDescrOrd :: Int -> TH.Name -> TH.Q [TH.Dec]
-deriveDescrOrd numPar dname = do
+deriveOrd :: Int -> TH.Name -> TH.Q [TH.Dec]
+deriveOrd numPar dname = do
   pars <- replicateM numPar (TH.newName "c")
-  let ctx = TH.cxt $ fmap (\par -> (TH.conT ''Composite) `TH.appT` (TH.varT par)
-                          ) pars
+  e <- TH.newName "e"
+  let ctxEq = TH.cxt $ fmap (\par -> (TH.conT ''Eq) `TH.appT` ((TH.varT par) `TH.appT` (TH.varT e))
+                            ) pars
+      ctxOrd = TH.cxt $ fmap (\par -> (TH.conT ''Ord) `TH.appT` ((TH.varT par) `TH.appT` (TH.varT e))
+                             ) pars
       compArgs n = foldl (\tp par -> TH.appT tp (TH.varT par)
-                         ) n pars
-  i1 <- TH.standaloneDerivD ctx ((TH.conT ''Eq) `TH.appT` (compArgs (TH.conT dname)))
-  i2 <- TH.standaloneDerivD ctx ((TH.conT ''Ord) `TH.appT` (compArgs (TH.conT dname)))
+                         ) n (pars ++ [e])
+  i1 <- TH.standaloneDerivD ctxEq ((TH.conT ''Eq) `TH.appT` (compArgs (TH.conT dname)))
+  i2 <- TH.standaloneDerivD ctxOrd ((TH.conT ''Ord) `TH.appT` (compArgs (TH.conT dname)))
   return [i1,i2]

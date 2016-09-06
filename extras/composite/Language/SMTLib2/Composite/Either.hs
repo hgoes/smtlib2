@@ -2,29 +2,59 @@ module Language.SMTLib2.Composite.Either where
 
 import Language.SMTLib2
 import Language.SMTLib2.Composite.Class
+import Language.SMTLib2.Composite.Lens
 
 import Data.GADT.Show
 import Data.GADT.Compare
+import Control.Lens
 
-newtype CompEither a b (e :: Type -> *) = CompEither { compEither :: Either (a e) (b e)
-                                                     } deriving Show
+newtype CompEither a b (e :: Type -> *) = CompEither { compEither :: Either (a e) (b e) }
 
 data RevEither a b tp = RevLeft (RevComp a tp)
                       | RevRight (RevComp b tp)
 
+left :: MaybeLens (CompEither a b e) (a e)
+left = lens (\(CompEither x) -> case x of
+                Left x' -> Just x'
+                Right _ -> Nothing)
+       (\x nel -> Just $ CompEither (Left nel))
+
+right :: MaybeLens (CompEither a b e) (b e)
+right = lens (\(CompEither x) -> case x of
+                Right x' -> Just x'
+                Left _ -> Nothing)
+        (\x nel -> Just $ CompEither (Right nel))
+
 instance (Composite a,Composite b) => Composite (CompEither a b) where
-  type CompDescr (CompEither a b) = Either (CompDescr a) (CompDescr b)
   type RevComp (CompEither a b) = RevEither a b
-  compositeType (Left d) = CompEither (Left (compositeType d))
-  compositeType (Right d) = CompEither (Right (compositeType d))
   foldExprs f (CompEither (Left x)) = do
     nx <- foldExprs (f . RevLeft) x
     return (CompEither (Left nx))
   foldExprs f (CompEither (Right x)) = do
     nx <- foldExprs (f . RevRight) x
     return (CompEither (Right nx))
-  accessComposite (RevLeft r) (CompEither (Left x)) = accessComposite r x
-  accessComposite (RevRight r) (CompEither (Right x)) = accessComposite r x
+  accessComposite (RevLeft r) = left `composeMaybe` accessComposite r
+  accessComposite (RevRight r) = right `composeMaybe` accessComposite r
+  compCombine f (CompEither (Left x)) (CompEither (Left y)) = do
+    z <- compCombine f x y
+    return $ fmap (CompEither . Left) z
+  compCombine f (CompEither (Right x)) (CompEither (Right y)) = do
+    z <- compCombine f x y
+    return $ fmap (CompEither . Right) z
+  compCombine _ _ _ = return Nothing
+  compCompare (CompEither (Left x)) (CompEither (Left y)) = compCompare x y
+  compCompare (CompEither (Left _)) _ = LT
+  compCompare _ (CompEither (Left _)) = GT
+  compCompare (CompEither (Right x)) (CompEither (Right y)) = compCompare x y
+  compShow p (CompEither (Left x)) = showParen (p>10) $
+    showString "Left " . compShow 11 x
+  compShow p (CompEither (Right x)) = showParen (p>10) $
+    showString "Right " . compShow 11 x
+  compInvariant (CompEither (Left x)) = compInvariant x
+  compInvariant (CompEither (Right x)) = compInvariant x
+  
+eitherDescr :: Either (CompDescr a) (CompDescr b) -> CompDescr (CompEither a b)
+eitherDescr = CompEither
 
 instance (CompositeExtract a,CompositeExtract b)
   => CompositeExtract (CompEither a b) where

@@ -2,41 +2,40 @@ module Language.SMTLib2.Composite.Map where
 
 import Language.SMTLib2
 import Language.SMTLib2.Composite.Class
+import Language.SMTLib2.Composite.Lens
 
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.GADT.Show
 import Data.GADT.Compare
+import Text.Show
+import Control.Lens
 
 data RevMap k a tp = RevMap k (RevComp a tp)
 
-newtype CompMap k a (e :: Type -> *) = CompMap { compMap :: Map k (a e) } deriving Show
+newtype CompMap k a (e :: Type -> *) = CompMap { _compMap :: Map k (a e) }
 
-mapITE :: (Ord k,Embed m e,Monad m) => (e BoolType -> a e -> a e -> m (a e))
-       -> e BoolType
-       -> CompMap k a e
-       -> CompMap k a e
-       -> m (CompMap k a e)
-mapITE f cond (CompMap mp1) (CompMap mp2) = do
-  mp <- sequence $ Map.unionWith
-    (\v1 v2 -> do
-        r1 <- v1
-        r2 <- v2
-        f cond r1 r2)
-    (fmap return mp1)
-    (fmap return mp2)
-  return (CompMap mp)
+makeLenses ''CompMap
 
 instance (Show k,Ord k,Composite a) => Composite (CompMap k a) where
-  type CompDescr (CompMap k a) = Map k (CompDescr a)
   type RevComp (CompMap k a) = RevMap k a
-  compositeType mp = CompMap (fmap compositeType mp)
   foldExprs f (CompMap mp) = do
     nmp <- sequence $ Map.mapWithKey
       (\k -> foldExprs (f . RevMap k)) mp
     return (CompMap nmp)
-  accessComposite (RevMap k r) (CompMap mp) = case Map.lookup k mp of
-    Just el -> accessComposite r el
+  accessComposite (RevMap k r) = maybeLens compMap `composeMaybe` mapElement k `composeMaybe` accessComposite r
+  compCombine f (CompMap mp1) (CompMap mp2) = do
+    nmp <- sequence $ Map.mergeWithKey (\_ x y -> Just $ compCombine f x y) (fmap $ return.Just) (fmap $ return.Just) mp1 mp2
+    return $ fmap CompMap $ sequence nmp
+  compCompare (CompMap mp1) (CompMap mp2)
+    = mconcat $ Map.elems $ Map.mergeWithKey (\_ x y -> Just $ compCompare x y)
+      (fmap $ const LT) (fmap $ const GT) mp1 mp2
+      
+  compShow p (CompMap mp)
+    = showParen (p>10) $
+      showString "CompMap " .
+      showListWith (\(val,el) -> showsPrec 10 val . showString " -> " . compShow 10 el) (Map.toList mp)
+  compInvariant (CompMap mp) = fmap concat $ mapM compInvariant $ Map.elems mp
 
 instance (Show k,Ord k,CompositeExtract a) => CompositeExtract (CompMap k a) where
   type CompExtract (CompMap k a) = Map k (CompExtract a)
@@ -64,3 +63,6 @@ instance (Ord k,Composite a) => GCompare (RevMap k a) where
       GGT -> GGT
     LT -> GLT
     GT -> GGT
+
+mapElement :: Ord k => k -> MaybeLens (Map k a) a
+mapElement k = lens (\mp -> Map.lookup k mp) (\mp entr -> Just $ Map.insert k entr mp)

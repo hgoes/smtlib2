@@ -1,167 +1,115 @@
 module Language.SMTLib2.Composite.Array.Bounded where
 
-import Language.SMTLib2
+import Language.SMTLib2 hiding (select,store)
 import Language.SMTLib2.Composite.Class
-import Language.SMTLib2.Composite.Array as Array
+import Language.SMTLib2.Composite.Lens
+import Language.SMTLib2.Composite.Domains
 
-import Data.GADT.Show
+import Control.Lens
+import Data.Monoid
 import Data.GADT.Compare
+import Data.GADT.Show
+import Prelude hiding (Bounded)
 
-data CompArrayBounded idx c e = CompArrayBounded { boundedArray :: CompArray '[idx] c e
-                                                 , lowerBound :: Either (Value idx) (e idx)
-                                                 , upperBound :: Either (Value idx) (e idx) }
+data Bounded arr idx (e :: Type -> *)
+  = Bounded { _boundedArray :: arr e
+            , _bound :: idx e }
 
-data RevArrayBounded idx c tp where
-  RevArrayBounded :: RevComp (CompArray '[idx] c) tp -> RevArrayBounded idx c tp
-  RevLowerBound :: RevArrayBounded idx c idx
-  RevUpperBound :: RevArrayBounded idx c idx
+makeLenses ''Bounded
 
-data CompArrayBoundedDescr idx c
-  = CompArrayBoundedDescr { boundedArrayDescr :: CompDescr (CompArray '[idx] c)
-                          , constantLowerBound :: Maybe (Value idx)
-                          , constantUpperBound :: Maybe (Value idx)
-                          }
+data RevBounded arr idx tp where
+  RevBoundedArray :: RevComp arr tp -> RevBounded arr idx tp
+  RevBound :: RevComp idx tp -> RevBounded arr idx tp
 
-deriving instance Composite c => Eq (CompArrayBoundedDescr idx c)
-deriving instance Composite c => Ord (CompArrayBoundedDescr idx c)
-deriving instance Show (CompDescr c) => Show (CompArrayBoundedDescr idx c)
+instance (Composite arr,Composite idx) => Composite (Bounded arr idx) where
+  type RevComp (Bounded arr idx) = RevBounded arr idx
+  foldExprs f (Bounded arr bnd) = do
+    narr <- foldExprs (f . RevBoundedArray) arr
+    nbnd <- foldExprs (f . RevBound) bnd
+    return (Bounded narr nbnd)
+  accessComposite (RevBoundedArray r) = maybeLens boundedArray `composeMaybe`
+                                        accessComposite r
+  accessComposite (RevBound r) = maybeLens bound `composeMaybe`
+                                 accessComposite r
+  compCombine f b1 b2 = do
+    arr <- compCombine f (_boundedArray b1) (_boundedArray b2)
+    case arr of
+      Nothing -> return Nothing
+      Just narr -> do
+        bnd <- compCombine f (_bound b1) (_bound b2)
+        case bnd of
+          Nothing -> return Nothing
+          Just nbnd -> return $ Just $ Bounded narr nbnd
+  compCompare (Bounded arr1 bnd1) (Bounded arr2 bnd2)
+    = compCompare arr1 arr2 `mappend`
+      compCompare bnd1 bnd2
+  compShow p (Bounded arr bnd)
+    = showParen (p>10) $
+      showString "Bounded " .
+      compShow 11 arr . showChar ' ' .
+      compShow 11 bnd
+  compInvariant (Bounded arr bnd) = do
+    inv1 <- compInvariant arr
+    inv2 <- compInvariant bnd
+    return $ inv1++inv2
 
-instance Composite c => Composite (CompArrayBounded idx c) where
-  type CompDescr (CompArrayBounded idx c) = CompArrayBoundedDescr idx c
-  type RevComp (CompArrayBounded idx c) = RevArrayBounded idx c
-  compositeType descr = CompArrayBounded { boundedArray = compositeType (boundedArrayDescr descr)
-                                         , lowerBound = case constantLowerBound descr of
-                                             Just rl -> Left rl
-                                             Nothing -> Right (case fst $ boundedArrayDescr descr of
-                                                                 i ::: Nil -> i)
-                                         , upperBound = case constantUpperBound descr of
-                                             Just ru -> Left ru
-                                             Nothing -> Right (case fst $ boundedArrayDescr descr of
-                                                                 i ::: Nil -> i) }
-  foldExprs f arr = do
-    narr <- foldExprs (\r -> f (RevArrayBounded r)) (boundedArray arr)
-    nlower <- case lowerBound arr of
-      Left v -> return (Left v)
-      Right v -> do
-        nv <- f RevLowerBound v
-        return (Right nv)
-    nupper <- case upperBound arr of
-      Left v -> return (Left v)
-      Right v -> do
-        nv <- f RevUpperBound v
-        return (Right nv)
-    return CompArrayBounded { boundedArray = narr
-                            , lowerBound = nlower
-                            , upperBound = nupper }
-  accessComposite (RevArrayBounded r) arr = accessComposite r (boundedArray arr)
-  accessComposite RevLowerBound arr = case lowerBound arr of
-                                        Left _ -> Nothing
-                                        Right v -> Just v
-  accessComposite RevUpperBound arr = case upperBound arr of
-                                        Left _ -> Nothing
-                                        Right v -> Just v
+instance (IsArray arr idx,IsRanged idx,IsNumeric idx) => IsArray (Bounded arr idx) idx where
+  type ElementType (Bounded arr idx) = ElementType arr
+  newArray idx el = do
+    arr <- newArray idx el
+    bnd <- compositeFromValue (fromInteger 0)
+    return $ Bounded arr bnd
+  select (Bounded arr _) idx = select arr idx
+  store (Bounded arr sz) idx nel = do
+    narr <- store arr idx nel
+    case narr of
+      Nothing -> return Nothing
+      Just narr' -> return $ Just $ Bounded narr' sz
 
-instance (CompositeExtract c,Enum (Value idx)) => CompositeExtract (CompArrayBounded idx c) where
-  type CompExtract (CompArrayBounded idx c) = [(Value idx,CompExtract c)]
-  compExtract f arr = do
-    lower <- case lowerBound arr of
-      Left v -> return v
-      Right v -> f v
-    upper <- case upperBound arr of
-      Left v -> return v
-      Right v -> f v
-    mapM (\idx -> do
-             cidx <- constant idx
-             el <- Array.select (boundedArray arr) (cidx ::: Nil)
-             res <- compExtract f el
-             return (idx,res)
-         ) [lower..upper]
+instance (IsArray arr idx,IsRanged idx,IsNumeric idx,Enum (Value (SingletonType idx))) => IsBounded (Bounded arr idx) idx where
+  checkIndex arr idx = do
+    idxRange <- getRange idx
+    sizeRange <- getRange $ _bound arr
+    let zeroRange = rangedConst (toEnum 0)
+        arrRange = betweenRange zeroRange sizeRange
+        outsideRange = setMinusRange arrRange idxRange
+        insideRange = intersectionRange arrRange idxRange
+    if nullRange outsideRange
+      then return NoError
+      else if nullRange insideRange
+           then return AlwaysError
+           else do
+      errCond <- compositeGEQ idx (_bound arr)
+      return $ SometimesError errCond
 
-instance Composite c => Show (RevArrayBounded idx c tp) where
-  showsPrec p (RevArrayBounded r) = showParen (p>10) $
-    showString "arr " . gshowsPrec 11 r
-  showsPrec _ RevLowerBound = showString "lower-bound"
-  showsPrec _ RevUpperBound = showString "upper-bound"
-
-instance Composite c => GShow (RevArrayBounded idx c) where
-  gshowsPrec = showsPrec
-
-instance Composite c => GEq (RevArrayBounded idx c) where
-  geq (RevArrayBounded r1) (RevArrayBounded r2) = do
+instance (Composite arr,Composite idx) => GEq (RevBounded arr idx) where
+  geq (RevBoundedArray r1) (RevBoundedArray r2) = do
     Refl <- geq r1 r2
     return Refl
-  geq RevLowerBound RevLowerBound = return Refl
-  geq RevUpperBound RevUpperBound = return Refl
+  geq (RevBound r1) (RevBound r2) = do
+    Refl <- geq r1 r2
+    return Refl
   geq _ _ = Nothing
 
-instance Composite c => GCompare (RevArrayBounded idx c) where
-  gcompare (RevArrayBounded r1) (RevArrayBounded r2) = case gcompare r1 r2 of
+instance (Composite arr,Composite idx) => GCompare (RevBounded arr idx) where
+  gcompare (RevBoundedArray r1) (RevBoundedArray r2) = case gcompare r1 r2 of
     GEQ -> GEQ
     GLT -> GLT
     GGT -> GGT
-  gcompare (RevArrayBounded _) _ = GLT
-  gcompare _ (RevArrayBounded _) = GGT
-  gcompare RevLowerBound RevLowerBound = GEQ
-  gcompare RevLowerBound _ = GLT
-  gcompare _ RevLowerBound = GGT
-  gcompare RevUpperBound RevUpperBound = GEQ
+  gcompare (RevBoundedArray _) _ = GLT
+  gcompare _ (RevBoundedArray _) = GGT
+  gcompare (RevBound r1) (RevBound r2) = case gcompare r1 r2 of
+    GEQ -> GEQ
+    GLT -> GLT
+    GGT -> GGT
 
-consDescr :: Num (Value idx) => (CompDescr c -> CompDescr c -> CompDescr c)
-          -> CompDescr c
-          -> CompArrayBoundedDescr idx c
-          -> CompArrayBoundedDescr idx c
-consDescr f c descr
-  = descr { boundedArrayDescr = case boundedArrayDescr descr of
-              (idx,el) -> (idx,f el c)
-          , constantLowerBound = case constantLowerBound descr of
-                                   Just l -> Just (l-1)
-                                   Nothing -> Nothing }
+instance (Composite arr,Composite idx) => Show (RevBounded arr idx tp) where
+  showsPrec p (RevBoundedArray r) = showParen (p>10) $
+    showString "RevBoundedArray " .
+    gshowsPrec 11 r
+  showsPrec p (RevBound r) = showParen (p>10) $
+    showString "RevBound " .
+    gshowsPrec 11 r
 
-cons :: (Composite c,Embed m e,Monad m,GetType e,Num (Value idx),Num (m (e idx))) => c e
-     -> CompArrayBounded idx c e
-     -> m (e idx,CompArrayBounded idx c e)
-cons x xs = case lowerBound xs of
-  Left c -> do
-    idx <- constant c
-    narr <- Array.store (boundedArray xs) (idx ::: Nil) x
-    return (idx,xs { boundedArray = narr
-                   , lowerBound = Left (c-1) })
-  Right l -> do
-    nl <- (return l) - 1
-    narr <- Array.store (boundedArray xs) (l ::: Nil) x
-    return (l,xs { boundedArray = narr
-                 , lowerBound = Right nl })
-
-snocDescr :: Num (Value idx) => (CompDescr c -> CompDescr c -> CompDescr c)
-          -> CompDescr c
-          -> CompArrayBoundedDescr idx c
-          -> CompArrayBoundedDescr idx c
-snocDescr f c descr
-  = descr { boundedArrayDescr = case boundedArrayDescr descr of
-              (idx,el) -> (idx,f el c)
-          , constantUpperBound = case constantUpperBound descr of
-                                   Just u -> Just (u+1)
-                                   Nothing -> Nothing }
-
-snoc :: (Composite c,Embed m e,Monad m,GetType e,Num (Value idx),Num (m (e idx))) => c e
-     -> CompArrayBounded idx c e
-     -> m (e idx,CompArrayBounded idx c e)
-snoc x xs = case upperBound xs of
-  Left c -> do
-    idx <- constant c
-    narr <- Array.store (boundedArray xs) (idx ::: Nil) x
-    return (idx,xs { boundedArray = narr
-                   , upperBound = Left (c-1) })
-  Right l -> do
-    nl <- (return l) - 1
-    narr <- Array.store (boundedArray xs) (l ::: Nil) x
-    return (l,xs { boundedArray = narr
-                 , upperBound = Right nl })
-
-select :: (Embed m e,Monad m,GetType e,Composite c) => CompArrayBounded idx c e -> e idx -> m (c e)
-select arr idx = Array.select (boundedArray arr) (idx ::: Nil)
-
-store :: (Embed m e,Monad m,GetType e,Composite c) => CompArrayBounded idx c e -> e idx -> c e -> m (CompArrayBounded idx c e)
-store arr idx el = do
-  narr <- Array.store (boundedArray arr) (idx ::: Nil) el
-  return arr { boundedArray = narr }
+instance (Composite arr,Composite idx) => GShow (RevBounded arr idx) where
+  gshowsPrec = showsPrec
