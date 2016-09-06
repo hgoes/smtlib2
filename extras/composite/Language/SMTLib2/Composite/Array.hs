@@ -209,7 +209,6 @@ instance (Embed m e,Monad m) => Embed (ReaderT (List Repr idx) m) (Arrayed idx e
       mapLets Nil = Nil
       mapLets (LetBinding (Arrayed q) (Arrayed e) ::: xs)
         = LetBinding q e ::: mapLets xs
-  embedQuantifier = error "Cannot embed quantification in Arrayed"
   embedTypeOf = do
     tp <- lift embedTypeOf
     let f (Arrayed (tp -> ArrayRepr _ rtp)) = rtp
