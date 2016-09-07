@@ -77,6 +77,14 @@ instance (IsNumeric c) => Composite (Linear c) where
     showsPrec 11 c . showChar ' ' .
     showListWith (\(c,v) -> showsPrec 10 c . showChar '*' . compShow 10 v) lins
 
+instance (IsRanged c,IsNumeric c) => IsRanged (Linear c) where
+  getRange (Linear c lin) = do
+    let rc = rangedConst c
+    rlin <- mapM (\(c,x) -> do
+                     rx <- getRange x
+                     return $ (rangedConst c) `rangeMult` rx) lin
+    return $ foldl rangeAdd rc rlin
+
 instance IsNumeric c => IsSingleton (Linear c) where
   type SingletonType (Linear c) = SingletonType c
   getSingleton (Linear c lin) = do

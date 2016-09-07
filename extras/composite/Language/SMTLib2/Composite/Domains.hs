@@ -3,7 +3,7 @@ module Language.SMTLib2.Composite.Domains where
 import Language.SMTLib2
 import Language.SMTLib2.Composite.Class
 import Language.SMTLib2.Internals.Type.Nat
-import Language.SMTLib2.Internals.Type (bvPred,bvSucc)
+import Language.SMTLib2.Internals.Type (bvPred,bvSucc,bvAdd,bvSub,bvMul,bvDiv,bvMinValue,bvMaxValue)
 import Language.SMTLib2.Internals.Embed
 import Data.List (sortBy,sort)
 import Data.Ord (comparing)
@@ -634,37 +634,64 @@ data Inf x = NegInfinity | Regular x | PosInfinity deriving (Eq,Ord,Show,Functor
 
 type Bounds x = [(Inf x,Inf x)]
 
+addInf :: (a -> a -> a) -> Inf a -> Inf a -> Maybe (Inf a)
+addInf add (Regular x) (Regular y) = Just $ Regular $ x `add` y
+addInf _ NegInfinity PosInfinity = Nothing
+addInf _ PosInfinity NegInfinity = Nothing
+addInf _ PosInfinity _ = Just PosInfinity
+addInf _ NegInfinity _ = Just NegInfinity
+addInf _ _ PosInfinity = Just PosInfinity
+addInf _ _ NegInfinity = Just NegInfinity
+
+addInf' :: (a -> a -> a) -> Inf a -> Inf a -> Inf a
+addInf' add x y = case addInf add x y of
+  Just r -> r
+  Nothing -> error "Adding positive and negative infinity undefined."
+
+subInf :: (a -> a -> a) -> Inf a -> Inf a -> Maybe (Inf a)
+subInf sub (Regular x) (Regular y) = Just $ Regular $ x `sub` y
+subInf _ NegInfinity NegInfinity = Nothing
+subInf _ PosInfinity PosInfinity = Nothing
+subInf _ PosInfinity _ = Just PosInfinity
+subInf _ NegInfinity _ = Just NegInfinity
+subInf _ _ PosInfinity = Just NegInfinity
+subInf _ _ NegInfinity = Just PosInfinity
+
+subInf' :: (a -> a -> a) -> Inf a -> Inf a -> Inf a
+subInf' add x y = case subInf add x y of
+  Just r -> r
+  Nothing -> error "Subtracting infinity undefined."
+
+mulInf :: Ord a => a -- ^ Zero
+       -> (a -> a -> a) -- ^ Multiplication
+       -> Inf a -> Inf a -> Inf a
+mulInf _ mul (Regular x) (Regular y) = Regular $ x `mul` y
+mulInf zero _ (Regular x) PosInfinity = case compare x zero of
+  LT -> NegInfinity
+  EQ -> Regular zero
+  GT -> PosInfinity
+mulInf zero _ (Regular x) NegInfinity = case compare x zero of
+  LT -> PosInfinity
+  EQ -> Regular zero
+  GT -> NegInfinity
+mulInf _ _ PosInfinity PosInfinity = PosInfinity
+mulInf _ _ PosInfinity NegInfinity = NegInfinity
+mulInf zero _ PosInfinity (Regular y) = case compare y zero of
+  LT -> NegInfinity
+  EQ -> Regular zero
+  GT -> PosInfinity
+mulInf _ _ NegInfinity PosInfinity = NegInfinity
+mulInf _ _ NegInfinity NegInfinity = PosInfinity
+mulInf zero _ NegInfinity (Regular y) = case compare y zero of
+  LT -> PosInfinity
+  EQ -> Regular zero
+  GT -> NegInfinity
+
 instance (Ord x,Num x) => Num (Inf x) where
   fromInteger = Regular . fromInteger
-  (+) (Regular x) (Regular y) = Regular $ x+y
-  (+) NegInfinity PosInfinity = error "Adding positive and negative infinity undefined."
-  (+) PosInfinity NegInfinity = error "Adding positive and negative infinity undefined."
-  (+) PosInfinity _ = PosInfinity
-  (+) NegInfinity _ = NegInfinity
-  (+) _ PosInfinity = PosInfinity
-  (+) _ NegInfinity = NegInfinity
-  (-) (Regular x) (Regular y) = Regular $ x-y
-  (-) NegInfinity NegInfinity = error "Subtracting negative infinity from negative infinity undefined."
-  (-) PosInfinity PosInfinity = error "Subtracting positive infinity from positity infinity undefined."
-  (-) NegInfinity _ = NegInfinity
-  (-) PosInfinity _ = PosInfinity
-  (-) _ NegInfinity = PosInfinity
-  (-) _ PosInfinity = NegInfinity
-  (*) (Regular x) (Regular y) = Regular $ x*y
-  (*) (Regular 0) _ = 0
-  (*) _ (Regular 0) = 0
-  (*) PosInfinity y = if y > 0
-                      then PosInfinity
-                      else NegInfinity
-  (*) x PosInfinity = if x > 0
-                      then PosInfinity
-                      else NegInfinity
-  (*) NegInfinity y = if y < 0
-                      then PosInfinity
-                      else NegInfinity
-  (*) x NegInfinity = if x < 0
-                      then PosInfinity
-                      else NegInfinity
+  (+) = addInf' (+)
+  (-) = subInf' (-)
+  (*) = mulInf 0 (*)
   negate (Regular x) = Regular $ negate x
   negate NegInfinity = PosInfinity
   negate PosInfinity = NegInfinity
@@ -815,60 +842,64 @@ fromBounds tp bnd = case tp of
       | u < 0 || l >= 2^bw = bvRange' bw xs
       | otherwise          = (max l 0,min u (2^bw-1)):bvRange' bw xs
 
-addOverflow :: (Num a,Ord a) => a -> a -> (a,Bool)
-addOverflow x y = (sum,overf)
+addOverflow :: Ord a => a -- ^ Zero
+            -> (a -> a -> a) -- ^ Addition
+            -> a -> a -> (a,Bool)
+addOverflow zero add x y = (sum,overf)
   where
-    sum = x + y
-    overf = if x >= 0
+    sum = x `add` y
+    overf = if x >= zero
             then sum < y
             else sum > y
 
-multOverflow :: (Integral a,Eq a) => a -> a -> (a,Bool)
-multOverflow x y = (prod,prod `div` y /= x)
+multOverflow :: Eq a => (a -> a -> a) -> (a -> a -> a) -> a -> a -> (a,Bool)
+multOverflow mul div x y = (prod,prod `div` y /= x)
   where
-    prod = x * y
+    prod = x `mul` y
 
-addBounds :: (Num a,Ord a) => Maybe a -> Bounds a -> Bounds a -> Bounds a
-addBounds lim b1 b2 = [ r
-                      | r1 <- b1
-                      , r2 <- b2
-                      , r <- addRange lim r1 r2 ]
+addBounds :: Ord a => a -> (a -> a -> a) -> Maybe a -> Bounds a -> Bounds a -> Bounds a
+addBounds zero add lim b1 b2 = [ r
+                               | r1 <- b1
+                               , r2 <- b2
+                               , r <- addRange zero (addInf' add) lim r1 r2 ]
 
-addRange :: (Num a,Ord a) => Maybe a -> (Inf a,Inf a) -> (Inf a,Inf a) -> [(Inf a,Inf a)]
-addRange (Just lim) (l1,u1) (l2,u2)
+subBounds :: Ord a => a -> (a -> a -> a) -> Maybe a -> Bounds a -> Bounds a -> Bounds a
+subBounds zero add lim b1 b2 = [ r
+                               | r1 <- b1
+                               , r2 <- b2
+                               , r <- addRange zero (subInf' add) lim r1 r2 ]
+
+addRange :: Ord a => a -- ^ Zero
+         -> (Inf a -> Inf a -> Inf a) -- ^ Addition
+         -> Maybe a -- ^ Upper bound
+         -> (Inf a,Inf a)
+         -> (Inf a,Inf a)
+         -> [(Inf a,Inf a)]
+addRange zero add (Just lim) (l1,u1) (l2,u2)
   | overfL = [(nl,nu)]
   | overfU = if nl <= nu
-             then [(0,Regular lim)]
-             else [(0,nu),(nl,Regular lim)]
+             then [(Regular zero,Regular lim)]
+             else [(Regular zero,nu),(nl,Regular lim)]
   | otherwise = [(nl,nu)]
   where
-    (nl,overfL) = addOverflow l1 l2
-    (nu,overfU) = addOverflow u1 u2
-addRange Nothing (l1,u1) (l2,u2)
-  = [(l1+l2,u1+u2)]
+    (nl,overfL) = addOverflow (Regular zero) add l1 l2
+    (nu,overfU) = addOverflow (Regular zero) add u1 u2
+addRange _ add Nothing (l1,u1) (l2,u2)
+  = [(add l1 l2,add u1 u2)]
 
-subBounds :: (Num a,Ord a) => Maybe a -> Bounds a -> Bounds a -> Bounds a
-subBounds lim b1 b2 = [ r
-                      | r1 <- b1
-                      , r2 <- b2
-                      , r <- addRange lim r1 (negRange r2) ]
+multBounds :: Ord a => a -> (a -> a -> a) -> (a -> a -> a) -> Maybe a -> Bounds a -> Bounds a -> Bounds a
+multBounds zero mul div lim b1 b2 = [ r | r1 <- b1
+                                        , r2 <- b2
+                                        , r <- multRange zero mul div lim r1 r2 ]
   where
-    negRange :: (Num a,Ord a) => (Inf a,Inf a) -> (Inf a,Inf a)
-    negRange (l,u) = (-u,-l)
-
-multBounds :: (Integral a,Ord a) => Maybe a -> Bounds a -> Bounds a -> Bounds a
-multBounds lim b1 b2 = [ r | r1 <- b1
-                           , r2 <- b2
-                           , r <- multRange lim r1 r2 ]
-  where
-    multRange :: (Integral a,Ord a) => Maybe a -> (Inf a,Inf a) -> (Inf a,Inf a) -> [(Inf a,Inf a)]
-    multRange (Just lim) (Regular l1,Regular u1) (Regular l2,Regular u2)
-      | overfL || overfU = [(0,Regular lim)]
+    multRange :: Ord a => a -> (a -> a -> a) -> (a -> a -> a) -> Maybe a -> (Inf a,Inf a) -> (Inf a,Inf a) -> [(Inf a,Inf a)]
+    multRange zero mul div (Just lim) (Regular l1,Regular u1) (Regular l2,Regular u2)
+      | overfL || overfU = [(Regular zero,Regular lim)]
       | otherwise = [(Regular nl,Regular nu)]
       where
-        (nl,overfL) = multOverflow l1 l2
-        (nu,overfU) = multOverflow u1 u2
-    multRange Nothing (l1,u1) (l2,u2) = [(l1*l2,u1*u2)]
+        (nl,overfL) = multOverflow mul div l1 l2
+        (nu,overfU) = multOverflow mul div u1 u2
+    multRange zero mul _ Nothing (l1,u1) (l2,u2) = [(mulInf zero mul l1 l2,mulInf zero mul u1 u2)]
 
 negBounds :: (Num a,Ord a) => Bounds a -> Bounds a
 negBounds = reverse . fmap neg
@@ -906,18 +937,18 @@ signumBounds = sign False False False
           GT -> sign hasN hasZ True xs
 
 instance Num (Range IntType) where
-  (+) r1 r2 = fromBounds int $ addBounds Nothing (toBounds r1) (toBounds r2)
-  (-) r1 r2 = fromBounds int $ subBounds Nothing (toBounds r1) (toBounds r2)
-  (*) r1 r2 = fromBounds int $ multBounds Nothing (toBounds r1) (toBounds r2)
+  (+) r1 r2 = fromBounds int $ addBounds 0 (+) Nothing (toBounds r1) (toBounds r2)
+  (-) r1 r2 = fromBounds int $ subBounds 0 (-) Nothing (toBounds r1) (toBounds r2)
+  (*) r1 r2 = fromBounds int $ multBounds 0 (*) div Nothing (toBounds r1) (toBounds r2)
   negate r = fromBounds int $ negBounds (toBounds r)
   abs r = fromBounds int $ absBounds (toBounds r)
   signum r = fromBounds int $ signumBounds (toBounds r)
   fromInteger x = IntRange (False,[x,x])
 
 instance IsNatural bw => Num (Range (BitVecType bw)) where
-  (+) r1@(BitVecRange bw _) r2 = fromBounds (bitvec bw) $ addBounds (Just maxBound) (toBounds r1) (toBounds r2)
-  (-) r1@(BitVecRange bw _) r2 = fromBounds (bitvec bw) $ subBounds (Just maxBound) (toBounds r1) (toBounds r2)
-  (*) r1@(BitVecRange bw _) r2 = fromBounds (bitvec bw) $ multBounds (Just maxBound) (toBounds r1) (toBounds r2)
+  (+) r1@(BitVecRange bw _) r2 = fromBounds (bitvec bw) $ addBounds (BitVecValue 0 bw) bvAdd (Just maxBound) (toBounds r1) (toBounds r2)
+  (-) r1@(BitVecRange bw _) r2 = fromBounds (bitvec bw) $ subBounds (BitVecValue 0 bw) bvSub (Just maxBound) (toBounds r1) (toBounds r2)
+  (*) r1@(BitVecRange bw _) r2 = fromBounds (bitvec bw) $ multBounds (BitVecValue 0 bw) bvMul bvDiv (Just maxBound) (toBounds r1) (toBounds r2)
   negate r@(BitVecRange bw _) = fromBounds (bitvec bw) $ negBounds (toBounds r)
   abs r@(BitVecRange bw _) = fromBounds (bitvec bw) $ absBounds (toBounds r)
   signum r@(BitVecRange bw _) = fromBounds (bitvec bw) $ signumBounds (toBounds r)
@@ -938,3 +969,11 @@ rangeFrom from = fromBounds (getType from) [(Regular from,PosInfinity)]
 
 rangeTo :: Value tp -> Range tp
 rangeTo to = fromBounds (getType to) [(NegInfinity,Regular to)]
+
+rangeAdd :: Range tp -> Range tp -> Range tp
+rangeAdd r1@(IntRange {}) r2 = fromBounds int $ addBounds 0 (+) Nothing (toBounds r1) (toBounds r2)
+rangeAdd r1@(BitVecRange bw _) r2 = fromBounds (bitvec bw) $ addBounds (BitVecValue 0 bw) bvAdd (Just $ bvMaxValue False (BitVecRepr bw)) (toBounds r1) (toBounds r2)
+
+rangeMult :: Range tp -> Range tp -> Range tp
+rangeMult r1@(IntRange {}) r2 = fromBounds int $ multBounds 0 (*) div Nothing (toBounds r1) (toBounds r2)
+rangeMult r1@(BitVecRange bw _) r2 = fromBounds (bitvec bw) $ multBounds (BitVecValue 0 bw) bvMul bvDiv (Just $ bvMaxValue False (BitVecRepr bw)) (toBounds r1) (toBounds r2)

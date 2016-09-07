@@ -693,6 +693,9 @@ bvSub (BitVecValue x bw) (BitVecValue y _) = BitVecValue ((x-y) `mod` (2^(natura
 bvMul :: Value (BitVecType bw) -> Value (BitVecType bw) -> Value (BitVecType bw)
 bvMul (BitVecValue x bw) (BitVecValue y _) = BitVecValue ((x*y) `mod` (2^(naturalToInteger bw))) bw
 
+bvDiv :: Value (BitVecType bw) -> Value (BitVecType bw) -> Value (BitVecType bw)
+bvDiv (BitVecValue x bw) (BitVecValue y _) = BitVecValue (x `div` y) bw
+
 bvNegate :: Value (BitVecType bw) -> Value (BitVecType bw)
 bvNegate (BitVecValue x bw) = BitVecValue (if x==0
                                            then 0
