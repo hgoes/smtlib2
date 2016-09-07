@@ -742,6 +742,22 @@ instance IsNatural bw => Bounded (Value (BitVecType bw)) where
   minBound = withBW $ \bw -> BitVecValue 0 bw
   maxBound = withBW $ \bw -> BitVecValue (2^(naturalToInteger bw)-1) bw
 
+-- | Get the minimal value for a bitvector.
+--   If unsigned, the value is 0, otherwise 2^(bw-1).
+bvMinValue :: Bool -- ^ Signed bitvector?
+           -> Repr (BitVecType bw)
+           -> Value (BitVecType bw)
+bvMinValue False (BitVecRepr bw) = BitVecValue 0 bw
+bvMinValue True (BitVecRepr bw) = BitVecValue (2^(naturalToInteger bw-1)) bw
+
+-- | Get the maximal value for a bitvector.
+--   If unsigned, the value is 2^(bw-1)-1, otherwise 2^bw-1.
+bvMaxValue :: Bool -- ^ Signed bitvector?
+           -> Repr (BitVecType bw)
+           -> Value (BitVecType bw)
+bvMaxValue False (BitVecRepr bw) = BitVecValue (2^(naturalToInteger bw)-1) bw
+bvMaxValue True (BitVecRepr bw) = BitVecValue (2^(naturalToInteger bw-1)-1) bw
+
 instance IsNatural bw => Bits (Value (BitVecType bw)) where
   (.&.) (BitVecValue x bw) (BitVecValue y _) = BitVecValue (x .&. y) bw
   (.|.) (BitVecValue x bw) (BitVecValue y _) = BitVecValue (x .|. y) bw
