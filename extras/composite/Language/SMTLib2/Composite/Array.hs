@@ -107,8 +107,11 @@ instance Composite c => GCompare (RevArray i c) where
     GLT -> GLT
     GGT -> GGT
 
+instance Composite c => Container (CompArray idx c) where
+  type ElementType (CompArray idx c) = c
+  elementType = elementDescr
+
 instance (Composite c,IsSingleton idx,SingletonType idx ~ i) => IsArray (CompArray '[i] c) idx where
-  type ElementType (CompArray '[i] c) = c
   newArray idx el = do
     let ridx = runIdentity (getSingleton idx) ::: Nil
     newConstantArray ridx el

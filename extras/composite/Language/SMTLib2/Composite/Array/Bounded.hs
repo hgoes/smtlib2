@@ -53,8 +53,11 @@ instance (Composite arr,Composite idx) => Composite (Bounded arr idx) where
     inv2 <- compInvariant bnd
     return $ inv1++inv2
 
-instance (IsArray arr idx,IsRanged idx,IsNumeric idx) => IsArray (Bounded arr idx) idx where
+instance (Container arr,Composite idx) => Container (Bounded arr idx) where
   type ElementType (Bounded arr idx) = ElementType arr
+  elementType arr = elementType (_boundedArray arr)
+
+instance (IsArray arr idx,IsRanged idx,IsNumeric idx) => IsArray (Bounded arr idx) idx where
   newArray idx el = do
     arr <- newArray idx el
     bnd <- compositeFromValue (fromInteger 0)
@@ -81,6 +84,7 @@ instance (IsArray arr idx,IsRanged idx,IsNumeric idx,Enum (Value (SingletonType 
            else do
       errCond <- compositeGEQ idx (_bound arr)
       return $ SometimesError errCond
+  arraySize arr = return $ _bound arr
 
 instance (Composite arr,Composite idx) => GEq (RevBounded arr idx) where
   geq (RevBoundedArray r1) (RevBoundedArray r2) = do

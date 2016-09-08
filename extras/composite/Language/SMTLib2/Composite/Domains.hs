@@ -29,18 +29,27 @@ class IsSingleton c => IsRanged c where
     tp <- embedTypeOf
     return $ fullRange (tp x')
 
-class (IsSingleton c,Num (Value (SingletonType c))) => IsNumeric c where
-  compositeFromValue :: Embed m e => Value (SingletonType c) -> m (c e)
-  compositePlus :: Embed m e => c e -> c e -> m (c e)
-  compositeMinus :: Embed m e => c e -> c e -> m (c e)
+class (IsSingleton c,Integral (Value (SingletonType c))) => IsNumeric c where
+  compositeFromValue :: (Embed m e,Monad m) => Value (SingletonType c) -> m (c e)
+  compositePlus :: (Embed m e,Monad m) => c e -> c e -> m (c e)
+  compositeMinus :: (Embed m e,Monad m) => c e -> c e -> m (c e)
   compositeSum :: (Embed m e,Monad m) => [c e] -> m (c e)
   compositeSum [] = compositeFromValue (fromInteger 0)
   compositeSum (x:xs) = foldlM compositePlus x xs
-  compositeMult :: Embed m e => c e -> c e -> m (c e)
-  compositeGEQ :: Embed m e => c e -> c e -> m (e BoolType)
+  compositeNegate :: (Embed m e,Monad m) => c e -> m (c e)
+  compositeNegate x = do
+    zero <- compositeFromValue (fromInteger 0)
+    compositeMinus zero x
+  compositeMult :: (Embed m e,Monad m) => c e -> c e -> m (c e)
+  compositeGEQ :: (Embed m e,Monad m) => c e -> c e -> m (e BoolType)
+  compositeDiv :: (Embed m e,Monad m) => c e -> c e -> m (c e)
+  compositeMod :: (Embed m e,Monad m) => c e -> c e -> m (c e)
 
-class (Composite arr,Composite idx,Composite (ElementType arr)) => IsArray arr idx where
-  type ElementType arr :: (Type -> *) -> *
+class (Composite c,Composite (ElementType c)) => Container c where
+  type ElementType c :: (Type -> *) -> *
+  elementType :: c Repr -> ElementType c Repr
+
+class (Container arr,Composite idx) => IsArray arr idx where
   newArray :: (Embed m e,Monad m,GetType e) => idx Repr -> ElementType arr e -> m (arr e)
   select :: (Embed m e,Monad m,GetType e,GCompare e) => arr e -> idx e -> m (Maybe (ElementType arr e))
   store :: (Embed m e,Monad m,GetType e,GCompare e) => arr e -> idx e -> ElementType arr e -> m (Maybe (arr e))
@@ -53,9 +62,10 @@ data ErrorCondition e
 class IsArray arr idx => IsBounded arr idx where
   checkIndex :: (Embed m e,Monad m,GetType e)
              => arr e -> idx e -> m (ErrorCondition e)
+  arraySize :: (Embed m e,Monad m) => arr e -> m (idx e)
 
 class (Composite c,IsNumeric idx) => ByteWidth c idx where
-  byteWidth :: (Embed m e,Monad m) => c e -> m (idx e)
+  byteWidth :: (Embed m e,Monad m,GetType e) => c e -> m (idx e)
 
 class StaticByteWidth (c :: (Type -> *) -> *) where
   staticByteWidth :: GetType e => c e -> Integer
@@ -64,7 +74,7 @@ class (ByteWidth c idx,ByteWidth el idx) => ByteAccess c idx el where
   byteRead :: (Embed m e,Monad m,GetType e,GCompare e)
            => c e
            -> idx e
-           -> idx e
+           -> Integer
            -> m [(Maybe (el e),e BoolType)]
   byteWrite :: (Embed m e,Monad m,GetType e,GCompare e)
             => c e
@@ -84,33 +94,38 @@ class (Composite c,Composite el) => StaticByteAccess c el where
                   -> el e
                   -> m (Maybe (c e))
 
-fromStaticByteRead :: (ByteWidth c idx,StaticByteAccess c el,IsRanged idx,Integral (Value (SingletonType idx)),Embed m e,Monad m)
+class Composite c => CanConcat c where
+  withConcat :: (Embed m e,Monad m) => (c e -> m (a,c e)) -> [c e] -> m (Maybe (a,[c e]))
+  withConcat f [c] = do
+    (res,nc) <- f c
+    return $ Just (res,[nc])
+  withConcat _ _ = return Nothing
+
+compConcat :: (CanConcat c,Embed m e,Monad m) => [c e] -> m (Maybe (c e))
+compConcat xs = do
+  res <- withConcat (\c -> return (c,c)) xs
+  return $ fmap fst res
+
+fromStaticByteRead :: (ByteWidth c idx,StaticByteAccess c el,IsRanged idx,Integral (Value (SingletonType idx)),
+                       Embed m e,Monad m,GetType e)
                    => c e
                    -> idx e
-                   -> idx e
+                   -> Integer
                    -> m [(Maybe (el e),e BoolType)]
 fromStaticByteRead c (idx :: idx e) sz = do
   rangeStart <- getRange idx
-  rangeSize <- getRange sz
   (objSize :: idx e) <- byteWidth c
   objSizeRange <- getRange objSize
   let objRange = betweenRange (rangedConst 0) objSizeRange
       rangeStart' = intersectionRange objRange rangeStart
-      rangeSize' = intersectionRange objRange rangeSize
   case asFiniteRange rangeStart' of
-    Just starts -> case asFiniteRange rangeSize' of
-      Just sizes
-        -> sequence
-           [ do
-               cond1 <- getSingleton idx .==. constant start
-               cond2 <- getSingleton sz .==. constant size
-               cond <- cond1 .&. cond2
-               res <- staticByteRead c (toInteger start) (toInteger size)
-               return (res,cond)
-           | start <- starts, size <- sizes ]
-      Nothing -> do
-        cond <- true
-        return [(Nothing,cond)]
+    Just starts
+      -> sequence
+         [ do
+             cond <- getSingleton idx .==. constant start
+             res <- staticByteRead c (toInteger start) sz
+             return (res,cond)
+         | start <- starts ]
     Nothing -> do
       cond <- true
       return [(Nothing,cond)]

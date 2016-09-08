@@ -62,8 +62,17 @@ instance Composite el => Composite (StaticArray idx el) where
     invSt <- mapM compInvariant st
     return $ invD++concat (Map.elems invSt)
 
+instance Composite el => Container (StaticArray idx el) where
+  type ElementType (StaticArray idx el) = el
+  elementType arr = foldl (\cur el -> let elType = compType el
+                                      in case runIdentity $ compCombine (const return) cur elType of
+                                           Just ncur -> ncur
+                                           Nothing -> error "incompatible elements in static array"
+                          ) defType (_stores arr)
+    where
+      defType = compType $ _defaultElement arr
+
 instance (IsRanged idx,SingletonType idx ~ i,Composite el) => IsArray (StaticArray '[i] el) idx where
-  type ElementType (StaticArray '[i] el) = el
   newArray idx el = return $ StaticArray { _indexType = runIdentity (getSingleton idx) ::: Nil
                                          , _defaultElement = el
                                          , _stores = Map.empty }

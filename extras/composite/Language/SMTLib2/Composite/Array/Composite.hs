@@ -89,8 +89,11 @@ instance (Composite idx,Composite c) => GCompare (RevCompositeArray idx c) where
     GLT -> GLT
     GGT -> GGT
 
-instance (Composite idx,Composite c) => IsArray (CompositeArray idx c) idx where
+instance (Composite c,Composite idx) => Container (CompositeArray idx c) where
   type ElementType (CompositeArray idx c) = c
+  elementType (CompositeArray arr) = elementType arr
+
+instance (Composite idx,Composite c) => IsArray (CompositeArray idx c) idx where
   newArray idx el = case allFields idx of
     AnyList ilst -> do
       arr <- newConstantArray ilst el

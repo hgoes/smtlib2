@@ -106,11 +106,18 @@ instance (IsRanged start,IsRanged alt,
   getRange (Start x) = getRange x
   getRange (Alternative x) = getRange x
 
+instance (Container start,Container alt,
+          ElementType start ~ ElementType alt,
+          Convert start alt)
+         => Container (Fallback start alt) where
+  type ElementType (Fallback start alt) = ElementType start
+  elementType (Start x) = elementType x
+  elementType (Alternative x) = elementType x
+
 instance (IsArray start idx,IsArray alt idx,
           ElementType start ~ ElementType alt,
           Convert start alt)
          => IsArray (Fallback start alt) idx where
-  type ElementType (Fallback start alt) = ElementType start
   newArray idx el = do
     arr <- newArray idx el
     return $ Start arr
