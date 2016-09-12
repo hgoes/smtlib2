@@ -279,7 +279,7 @@ linearByteRead arr off sz = do
             Just _ -> error "linearByteRead: Internal error."
 
 linearByteWrite :: (IsBounded arr idx,ByteAccess (ElementType arr) idx el,
-                    StaticByteWidth (ElementType arr),IsRanged idx,CanConcat (ElementType arr),
+                    StaticByteWidth (ElementType arr),IsRanged idx,
                     StaticByteWidth el,StaticByteAccess (ElementType arr) el,
                     Embed m e,Monad m,GetType e,GCompare e)
                 => arr e -> Linear idx e -> el e -> m (ByteWrite arr el e)
