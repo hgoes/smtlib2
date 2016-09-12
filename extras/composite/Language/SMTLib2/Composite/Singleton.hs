@@ -13,6 +13,7 @@ import Data.GADT.Show
 import Control.Lens
 import Data.Maybe
 import Data.Constraint
+import qualified Data.Map as Map
 
 newtype Comp (tp :: Type) e = Comp { _comp :: e tp }
 
@@ -123,21 +124,61 @@ instance (IsRanged i,IsNumeric i,Integral (Value (SingletonType i)))
   byteWrite = fromStaticByteWrite
 
 instance StaticByteAccess (Comp (BitVecType bw)) CompBV where
-  staticByteRead (Comp e) off len = do
+  staticByteRead (Comp e :: Comp (BitVecType bw) e) off len = do
     tp <- embedTypeOf
+    (cond :: e BoolType) <- true
     case tp e of
-      BitVecRepr bw -> reifyNat (fromInteger off) $
-        \roff -> reifyNat (fromInteger len) $
-        \rlen -> case naturalLEQ (naturalAdd roff rlen) bw of
-          Just Dict -> case naturalLEQ roff bw of -- Redundant, but neccessary for the typechecker
-            Just Dict -> do
-              split <- splitBV roff rlen e
-              return $ Just $ CompBV $ splitBVGet split
-          Nothing -> return Nothing
-  staticByteWrite (Comp trg) off (CompBV src) = reifyNat (fromInteger off) $
-    \roff -> do
-      ntrg <- bvWrite roff src trg
-      return $ fmap Comp ntrg
+      BitVecRepr bw -> do
+        let bw' = naturalToInteger bw
+            (len',over) = if off+bw' > len
+                          then (bw'-off,Just $ len-(bw'-off))
+                          else (len,Nothing)
+        if off >= bw'
+          then return $ outsideRead cond
+          else reifyNat (fromInteger off) $
+               \roff -> reifyNat (fromInteger len') $
+               \rlen -> case naturalLEQ (naturalAdd roff rlen) bw of
+                 Just Dict -> case naturalLEQ roff bw of -- Redundant, but neccessary for the typechecker
+                   Just Dict -> do
+                     split <- splitBV roff rlen e
+                     let result = CompBV $ splitBVGet split
+                     return $ ByteRead (case over of
+                                          Just ov -> Map.singleton ov (result,cond)
+                                          Nothing -> Map.empty)
+                              Nothing
+                              (case over of
+                                 Nothing -> Just result
+                                 Just _ -> Nothing)
+                              Nothing
+  staticByteWrite (Comp trg :: Comp (BitVecType bw) e) off (CompBV src) = do
+    tp <- embedTypeOf
+    (cond :: e BoolType) <- true
+    case tp src of
+      BitVecRepr srcWidth -> do
+          let srcWidth' = naturalToInteger srcWidth
+          trgWidth' <- bvSize trg
+          if off >= trgWidth'
+            then return $ outsideWrite cond
+            else if off+srcWidth' > trgWidth'
+                 then (do
+                          let len = trgWidth' - off
+                              rest = srcWidth' - len
+                          reifyNat (fromInteger off) $
+                            \roff -> reifyNat (fromInteger len) $
+                            \rlen -> do
+                              Just splitTrg <- splitBVMaybe roff rlen trg
+                              Just (NoPrefix wr wrRest) <- splitBVMaybe Zero rlen src
+                              ntrg <- unsplitBV $ splitBVSet splitTrg wr
+                              return $ ByteWrite [(CompBV wrRest,cond)] Nothing (Just $ Comp ntrg) Nothing)
+                 else (reifyNat (fromInteger off) $
+                       \roff -> do
+                         Just splitTrg <- splitBVMaybe roff srcWidth trg
+                         ntrg <- unsplitBV $ splitBVSet splitTrg src
+                         return $ ByteWrite [] Nothing (Just (Comp ntrg)) Nothing)
+
+bvSize :: Embed m e => e (BitVecType bw) -> m Integer
+bvSize e = (\tp -> case tp e of
+               BitVecRepr bw -> naturalToInteger bw) <$> embedTypeOf
 
 data BVSplit start len size e where
   NoSplit   :: e (BitVecType size) -> BVSplit Z size size e

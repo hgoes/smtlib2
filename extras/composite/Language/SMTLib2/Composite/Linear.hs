@@ -14,8 +14,9 @@ import Data.Monoid
 import Text.Show
 import Data.Foldable
 import Data.Proxy
-import Data.List (sortBy)
+import Data.List (sortBy,unzip3)
 import Data.Ord (comparing)
+import qualified Data.Map as Map
 
 data Linear c (e :: Type -> *) = Linear { _linConst :: Value (SingletonType c)
                                         , _linear :: [(Value (SingletonType c),c e)] }
@@ -165,17 +166,21 @@ instance (IsBounded arr idx,StaticByteWidth (ElementType arr),IsNumeric idx)
     return $ Linear (fromInteger 0) [(fromInteger elSize,sz)]
 
 instance (IsBounded arr idx,ByteAccess (ElementType arr) idx el,
-           StaticByteWidth (ElementType arr),IsRanged idx,CanConcat (ElementType arr),
+           StaticByteWidth (ElementType arr),IsRanged idx,
+           StaticByteAccess (ElementType arr) el,
+           CanConcat el,
            StaticByteWidth el,ByteWidth el (Linear idx))
          => ByteAccess (ByteArray arr) (Linear idx) el where
   byteRead = linearByteRead
   byteWrite = linearByteWrite
 
 linearByteRead :: (IsBounded arr idx,ByteAccess (ElementType arr) idx el,
-                   StaticByteWidth (ElementType arr),IsRanged idx,CanConcat (ElementType arr),
+                   StaticByteWidth (ElementType arr),IsRanged idx,
+                   StaticByteAccess (ElementType arr) el,
+                   CanConcat el,
                    Embed m e,Monad m,GetType e,GCompare e)
                => arr e -> Linear idx e -> Integer
-               -> m [(Maybe (el e),e BoolType)]
+               -> m (ByteRead el e)
 linearByteRead arr off sz = do
   let offTp = delinearType off
       arrTp = compType arr
@@ -191,35 +196,93 @@ linearByteRead arr off sz = do
   c2 <- delinear $ Linear nconstIdx nlinIdx
   rc2 <- compositeDiv c2 elWidth''
   rest <- compositeMod c2 elWidth''
-  restRange <- getRange rest
-  case upperBound restRange of
-    Just (Regular upper) -> do
-      let loadElems = case (upper+sz') `divMod` elWidth' of
-                        (num,0) -> num
-                        (num,_) -> num+1
-      elems <- mapM (\nidx -> do
-                        nidx' <- compositeFromValue nidx
-                        ridx <- compositeSum [c1,rc2,nidx']
-                        Comp.select arr ridx) [0..loadElems-1]
-      case sequence elems of
-        Just relems -> do
-          relem <- compConcat relems
-          case relem of
-            Nothing -> do
-              cond <- true
-              return [(Nothing,cond)]
-            Just relem' -> byteRead relem' rest sz
+  (objs,imprec,largestIdx) <- read arr c1 rc2 [0..] (Just rest) sz
+  nobjs <- mapM (\(obj,cond) -> do
+                    nobj <- compConcat obj
+                    return (nobj,cond)) objs
+  let nobjs' = [ (obj,cond) | (Just obj,cond) <- nobjs ]
+  imprec' <- sequence [ case cond of
+                          [] -> true
+                          [c] -> return c
+                          _ -> and' cond
+                      | (Nothing,cond) <- nobjs ]
+  nimprec <- case imprec' ++ imprec of
+    [] -> return Nothing
+    [x] -> return $ Just x
+    xs -> fmap Just $ or' xs
+  res <- ites nobjs'
+  case res of
     Nothing -> do
       cond <- true
-      return [(Nothing,cond)]
+      return $ impreciseRead cond
+    Just res -> do
+      largestIdx' <- compositeFromValue largestIdx
+      maxIdx <- compositeSum [c1,rc2,largestIdx']
+      safety <- checkIndex arr maxIdx
+      safetyCond <- case safety of
+        NoError -> return Nothing
+        SometimesError c -> return $ Just c
+        AlwaysError -> fmap Just true
+      return $ ByteRead Map.empty safetyCond res nimprec
   where
-    arrTp = compType arr
+    ites [] = return $ Just Nothing
+    ites [(x,_)] = return (Just (Just x))
+    ites ((x,c):xs) = case c of
+      [] -> return $ Just (Just x)
+      _ -> do
+        c' <- case c of
+          [c] -> return c
+          _ -> and' c
+        rest <- ites xs
+        case rest of
+          Nothing -> return Nothing
+          Just (Just rest') -> do
+            result <- compITE c' x rest'
+            case result of
+              Nothing -> return Nothing
+              Just res -> return $ Just $ Just res
+
+    read :: (IsBounded arr idx,ByteAccess (ElementType arr) idx el,
+             StaticByteWidth (ElementType arr),IsRanged idx,
+             StaticByteAccess (ElementType arr) el,
+             Embed m e,Monad m,GCompare e,GetType e
+            ) => arr e -> idx e -> idx e -> [Value (SingletonType idx)] -> Maybe (idx e) -> Integer
+         -> m ([([el e],[e BoolType])],[e BoolType],Value (SingletonType idx))
+    read arr c1 c2 (i:is) rest sz = do
+      idx <- compositeFromValue i
+      idx' <- compositeSum [c1,c2,idx]
+      el <- Comp.select arr idx'
+      case el of
+        Nothing -> do
+          cond <- true
+          return ([],[cond],i)
+        Just el' -> do
+          res <- case rest of
+                   Just rest' -> byteRead el' rest' sz
+                   Nothing -> staticByteRead el' 0 sz
+          overs <- sequence [ do
+                                (res,imprec,largestIdx) <- read arr c1 c2 is Nothing remaining
+                                nres <- mapM (\(objs,conds) -> return (incompl:objs,cond:conds)) res
+                                return (nres,imprec,largestIdx)
+                            | (remaining,(incompl,cond)) <- Map.toList (overreads res) ]
+          let (objs1,imprecs1,idxs) = unzip3 overs
+              imprecs2 = case readImprecision res of
+                Nothing -> []
+                Just c -> [c]
+          objs2 <- case fullRead res of
+            Nothing -> return []
+            Just obj -> do
+              cond <- fullReadCond res
+              return [([obj],cond)]
+          case readOutside res of
+            Nothing -> return (objs2++concat objs1,imprecs2++concat imprecs1,maximum (i:idxs))
+            Just _ -> error "linearByteRead: Internal error."
 
 linearByteWrite :: (IsBounded arr idx,ByteAccess (ElementType arr) idx el,
                     StaticByteWidth (ElementType arr),IsRanged idx,CanConcat (ElementType arr),
-                    StaticByteWidth el,
+                    StaticByteWidth el,StaticByteAccess (ElementType arr) el,
                     Embed m e,Monad m,GetType e,GCompare e)
-                => arr e -> Linear idx e -> el e -> m (Maybe (arr e,Maybe (e BoolType)))
+                => arr e -> Linear idx e -> el e -> m (ByteWrite arr el e)
 linearByteWrite arr off el = do
   let offTp = delinearType off
       arrTp = compType arr
@@ -236,38 +299,66 @@ linearByteWrite arr off el = do
   c2 <- delinear $ Linear nconstIdx nlinIdx
   rc2 <- compositeDiv c2 elWidth''
   rest <- compositeMod c2 elWidth''
-  restRange <- getRange rest
-  case upperBound restRange of
-    Just (Regular upper) -> do
-      let loadElems = case (upper+sz') `divMod` elWidth' of
-                        (num,0) -> num
-                        (num,_) -> num+1
-      elems <- mapM (\nidx -> do
-                        nidx' <- compositeFromValue nidx
-                        ridx <- compositeSum [c1,rc2,nidx']
-                        Comp.select arr ridx) [0..loadElems-1]
-      case sequence elems of
-        Just relems -> do
-          res <- withConcat (\e -> do
-                                res <- byteWrite e rest el
-                                case res of
-                                  Nothing -> do
-                                    cond <- true
-                                    return (Just cond,e)
-                                  Just (ne,err) -> return (err,ne)
-                            ) relems
-          case res of
-            Nothing -> return Nothing
-            Just (err,nelems) -> do
-              narr <- foldlM (\carr (nel,idx) -> do
-                                 idx' <- compositeFromValue idx
-                                 ridx <- compositeSum [c1,rc2,idx']
-                                 res <- Comp.store carr ridx nel
-                                 case res of
-                                   Nothing -> return carr
-                                   Just narr -> return narr
-                             ) arr (zip nelems [0..])
-              return $ Just (narr,err)
+  (narr,imprec,largestIdx) <- write arr c1 rc2 [0..] (Just rest) el []
+  nimprec <- case imprec of
+    [] -> return Nothing
+    [x] -> return $ Just x
+    xs -> fmap Just $ or' xs
+  largestIdx' <- compositeFromValue largestIdx
+  maxIdx <- compositeSum [c1,rc2,largestIdx']
+  safety <- checkIndex arr maxIdx
+  safetyCond <- case safety of
+    NoError -> return Nothing
+    SometimesError c -> return $ Just c
+    AlwaysError -> fmap Just true
+  return $ ByteWrite [] safetyCond (Just narr) nimprec
+  where
+    write :: (IsBounded arr idx,ByteAccess (ElementType arr) idx el,
+              StaticByteWidth (ElementType arr),IsRanged idx,
+              StaticByteAccess (ElementType arr) el,
+              Embed m e,Monad m,GCompare e,GetType e)
+          => arr e -> idx e -> idx e -> [Value (SingletonType idx)] -> Maybe (idx e) -> el e
+          -> [e BoolType]
+          -> m (arr e,[e BoolType],Value (SingletonType idx))
+    write arr c1 c2 (i:is) rest wr conds = do
+      idx <- compositeFromValue i
+      idx' <- compositeSum [c1,c2,idx]
+      el <- Comp.select arr idx'
+      case el of
+        Nothing -> do
+          cond <- true
+          return (arr,[cond],i)
+        Just el' -> do
+          res <- case rest of
+            Just rest' -> byteWrite el' rest' wr
+            Nothing -> staticByteWrite el' 0 wr
+          arr1 <- case fullWrite res of
+            Nothing -> return arr
+            Just nel -> case conds of
+              [] -> do
+                res <- Comp.store arr idx' nel
+                case res of
+                  Just n -> return n
+                  Nothing -> error "linearByteWrite: Internal error."
+              [x] -> do
+                res <- Comp.storeCond arr x idx' nel
+                case res of
+                  Just n -> return n
+                  Nothing -> error "linearByteWrite: Internal error."
+              _ -> do
+                cond <- and' conds
+                res <- Comp.storeCond arr cond idx' nel
+                case res of
+                  Just n -> return n
+                  Nothing -> error "linearByteWrite: Internal error."
+          (arr2,imprec1,max1) <- foldlM (\(carr,cimprec,cmax) (nwr,cond) -> do
+                                            (narr,nimprec,nmax) <- write carr c1 c2 is Nothing nwr (cond:conds)
+                                            return (narr,cimprec++nimprec,max cmax nmax)
+                                        ) (arr1,[],i) (overwrite res)
+          let imprec2 = case writeImprecision res of
+                Nothing -> []
+                Just c -> [c]
+          return (arr2,imprec1++imprec2,max1)
 
 instance (IsNumeric c) => Composite (Linear c) where
   type RevComp (Linear c) = RevLinear c

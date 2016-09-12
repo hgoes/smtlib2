@@ -1,6 +1,6 @@
 module Language.SMTLib2.Composite.Domains where
 
-import Language.SMTLib2
+import Language.SMTLib2 hiding (select,store)
 import Language.SMTLib2.Composite.Class
 import Language.SMTLib2.Internals.Type.Nat
 import Language.SMTLib2.Internals.Type (bvPred,bvSucc,bvAdd,bvSub,bvMul,bvDiv,bvMinValue,bvMaxValue)
@@ -10,6 +10,9 @@ import Data.Ord (comparing)
 import Data.Functor.Identity
 import Data.GADT.Compare
 import Data.Foldable
+import Data.Maybe (catMaybes)
+import Data.Map (Map)
+import qualified Data.Map as Map
 
 class Composite c => IsSingleton c where
   type SingletonType c :: Type
@@ -53,6 +56,13 @@ class (Container arr,Composite idx) => IsArray arr idx where
   newArray :: (Embed m e,Monad m,GetType e) => idx Repr -> ElementType arr e -> m (arr e)
   select :: (Embed m e,Monad m,GetType e,GCompare e) => arr e -> idx e -> m (Maybe (ElementType arr e))
   store :: (Embed m e,Monad m,GetType e,GCompare e) => arr e -> idx e -> ElementType arr e -> m (Maybe (arr e))
+  -- | Store an element only if a condition is true
+  storeCond :: (Embed m e,Monad m,GetType e,GCompare e) => arr e -> e BoolType -> idx e -> ElementType arr e -> m (Maybe (arr e))
+  storeCond arr cond idx el = do
+    narr <- store arr idx el
+    case narr of
+      Nothing -> return Nothing
+      Just narr' -> compITE cond narr' arr
 
 data ErrorCondition e
   = NoError
@@ -70,29 +80,41 @@ class (Composite c,IsNumeric idx) => ByteWidth c idx where
 class StaticByteWidth (c :: (Type -> *) -> *) where
   staticByteWidth :: GetType e => c e -> Integer
 
+data ByteRead a e
+  = ByteRead { overreads :: Map Integer (a e,e BoolType) -- ^ Maps remaining bytes to incomplete reads
+             , readOutside :: Maybe (e BoolType)
+             , fullRead :: Maybe (a e)
+             , readImprecision :: Maybe (e BoolType) }
+
+data ByteWrite a b e
+  = ByteWrite { overwrite :: [(b e,e BoolType)]
+              , writeOutside :: Maybe (e BoolType)
+              , fullWrite :: Maybe (a e)
+              , writeImprecision :: Maybe (e BoolType) }
+
 class (ByteWidth c idx,ByteWidth el idx) => ByteAccess c idx el where
   byteRead :: (Embed m e,Monad m,GetType e,GCompare e)
            => c e
            -> idx e
            -> Integer
-           -> m [(Maybe (el e),e BoolType)]
+           -> m (ByteRead el e)
   byteWrite :: (Embed m e,Monad m,GetType e,GCompare e)
             => c e
             -> idx e
             -> el e
-            -> m (Maybe (c e,Maybe (e BoolType)))
+            -> m (ByteWrite c el e)
 
 class (Composite c,Composite el) => StaticByteAccess c el where
   staticByteRead :: (Embed m e,Monad m)
                  => c e
                  -> Integer
                  -> Integer
-                 -> m (Maybe (el e))
+                 -> m (ByteRead el e)
   staticByteWrite :: (Embed m e,Monad m)
                   => c e
                   -> Integer
                   -> el e
-                  -> m (Maybe (c e))
+                  -> m (ByteWrite c el e)
 
 class Composite c => CanConcat c where
   withConcat :: (Embed m e,Monad m) => (c e -> m (a,c e)) -> [c e] -> m (Maybe (a,[c e]))
@@ -101,34 +123,158 @@ class Composite c => CanConcat c where
     return $ Just (res,[nc])
   withConcat _ _ = return Nothing
 
+outsideRead :: e BoolType -> ByteRead a e
+outsideRead c = ByteRead Map.empty (Just c) Nothing Nothing
+
+impreciseRead :: e BoolType -> ByteRead a e
+impreciseRead c = ByteRead Map.empty Nothing Nothing (Just c)
+
+outsideWrite :: e BoolType -> ByteWrite a b e
+outsideWrite c = ByteWrite [] (Just c) Nothing Nothing
+
+fullReadCond :: (Embed m e,Monad m) => ByteRead el e -> m [e BoolType]
+fullReadCond r = do
+  c1 <- mapM (\(_,c) -> not' c) (Map.elems $ overreads r)
+  c2 <- case readOutside r of
+    Nothing -> return []
+    Just c -> do
+      c' <- not' c
+      return [c']
+  c3 <- case readImprecision r of
+    Nothing -> return []
+    Just c -> do
+      c' <- not' c
+      return [c']
+  return $ c1++c2++c3
+
 compConcat :: (CanConcat c,Embed m e,Monad m) => [c e] -> m (Maybe (c e))
 compConcat xs = do
   res <- withConcat (\c -> return (c,c)) xs
   return $ fmap fst res
 
+maybeITE :: (Embed m e,Monad m) => e BoolType -> Maybe (e BoolType) -> Maybe (e BoolType) -> m (Maybe (e BoolType))
+maybeITE c Nothing Nothing = return Nothing
+maybeITE c (Just r1) Nothing = do
+  nr <- c .&. r1
+  return $ Just nr
+maybeITE c Nothing (Just r2) = do
+  nr <- (not' c) .&. r2
+  return $ Just nr
+maybeITE c (Just r1) (Just r2) = do
+  nr <- (c .&. r1) .|. ((not' c) .&. r2)
+  return $ Just nr
+
+byteReadITE :: (Embed m e,Monad m,Composite el,GetType e,GCompare e)
+            => [(ByteRead el e,e BoolType)] -> m (ByteRead el e)
+byteReadITE [] = return $ ByteRead Map.empty Nothing Nothing Nothing
+byteReadITE [(r,_)] = return r
+byteReadITE ((r,c):rs) = do
+  rest <- byteReadITE rs
+  notc <- not' c
+  over <- merge c notc (overreads r) (overreads rest)
+  outside <- maybeITE c (readOutside r) (readOutside rest)
+  full <- case fullRead r of
+    Nothing -> return $ fullRead rest
+    Just full1 -> case fullRead rest of
+      Nothing -> return $ Just full1
+      Just full2 -> do
+        Just nfull <- compITE c full1 full2
+        return $ Just nfull
+  imprec <- maybeITE c (readImprecision r) (readImprecision rest)
+  return $ ByteRead over outside full imprec
+  where
+    merge :: (Embed m e,Monad m,Composite a,GetType e,GCompare e)
+          => e BoolType -> e BoolType
+          -> Map Integer (a e,e BoolType)
+          -> Map Integer (a e,e BoolType)
+          -> m (Map Integer (a e,e BoolType))
+    merge c notc x y
+      = sequence $ Map.mergeWithKey (\_ (el1,c1) (el2,c2) -> Just $ do
+                                        Just nel <- compITE c el1 el2
+                                        cond <- c .&. (c1 .|. c2)
+                                        return (nel,cond))
+        (fmap (\(el,c') -> do
+                  nc <- c' .&. c
+                  return (el,nc)))
+        (fmap (\(el,c') -> do
+                  nc <- c' .&. notc
+                  return (el,nc))) x y
+
+byteWriteITE :: (Embed m e,Monad m,Composite c,Composite el,GetType e,GCompare e)
+             => [(ByteWrite c el e,e BoolType)] -> m (ByteWrite c el e)
+byteWriteITE [] = return $ ByteWrite [] Nothing Nothing Nothing
+byteWriteITE [(w,_)] = return w
+byteWriteITE ((w,c):ws) = do
+  rest <- byteWriteITE ws
+  notc <- not' c
+  over <- merge c notc (overwrite w) (overwrite rest)
+  outside <- maybeITE c (writeOutside w) (writeOutside rest)
+  full <- case fullWrite w of
+    Nothing -> return $ fullWrite rest
+    Just full1 -> case fullWrite rest of
+      Nothing -> return $ Just full1
+      Just full2 -> do
+        Just nfull <- compITE c full1 full2
+        return $ Just nfull
+  imprec <- maybeITE c (writeImprecision w) (writeImprecision rest)
+  return $ ByteWrite over outside full imprec
+  where
+    merge c notc [] ys = mapM (\(rest,cond) -> do
+                                  ncond <- notc .&. cond
+                                  return (rest,ncond)) ys
+    merge c notc xs [] = mapM (\(rest,cond) -> do
+                                  ncond <- c .&. cond
+                                  return (rest,ncond)) xs
+    merge c notc ((xrest,xcond):xs) ((yrest,ycond):ys)
+      = case compCompare xrest yrest of
+      EQ -> do
+        Just nrest <- compITE c xrest yrest
+        ncond <- (c .&. xcond) .|. (notc .&. ycond)
+        ns <- merge c notc xs ys
+        return $ (nrest,ncond):ns
+      LT -> do
+        ncond <- c .&. xcond
+        ns <- merge c notc xs ((yrest,ycond):ys)
+        return $ (xrest,ncond):ns
+      GT -> do
+        ncond <- notc .&. ycond
+        ns <- merge c notc ((xrest,ncond):xs) ys
+        return $ (yrest,ncond):ns
+
 fromStaticByteRead :: (ByteWidth c idx,StaticByteAccess c el,IsRanged idx,Integral (Value (SingletonType idx)),
-                       Embed m e,Monad m,GetType e)
+                       Embed m e,Monad m,GetType e,GCompare e)
                    => c e
                    -> idx e
                    -> Integer
-                   -> m [(Maybe (el e),e BoolType)]
+                   -> m (ByteRead el e)
 fromStaticByteRead c (idx :: idx e) sz = do
   rangeStart <- getRange idx
   (objSize :: idx e) <- byteWidth c
   objSizeRange <- getRange objSize
   let objRange = betweenRange (rangedConst 0) objSizeRange
       rangeStart' = intersectionRange objRange rangeStart
+      rangeOutside = setMinusRange rangeStart objRange
   case asFiniteRange rangeStart' of
-    Just starts
-      -> sequence
-         [ do
-             cond <- getSingleton idx .==. constant start
-             res <- staticByteRead c (toInteger start) sz
-             return (res,cond)
-         | start <- starts ]
+    Just starts -> do
+      reads <- sequence
+               [ do
+                   cond <- getSingleton idx .==. constant start
+                   res <- staticByteRead c (toInteger start) sz
+                   return (res,cond)
+               | start <- starts ]
+      read <- byteReadITE reads
+      if nullRange rangeOutside
+        then return read
+        else do
+        outside <- compositeGEQ idx objSize
+        case readOutside read of
+          Nothing -> return $ read { readOutside = Just outside }
+          Just outside' -> do
+            noutside <- outside .|. outside'
+            return $ read { readOutside = Just noutside }
     Nothing -> do
       cond <- true
-      return [(Nothing,cond)]
+      return $ ByteRead Map.empty Nothing Nothing (Just cond)
 
 fromStaticByteWrite :: (ByteWidth c idx,StaticByteAccess c el,IsRanged idx,
                         Integral (Value (SingletonType idx)),Embed m e,Monad m,
@@ -136,7 +282,7 @@ fromStaticByteWrite :: (ByteWidth c idx,StaticByteAccess c el,IsRanged idx,
                     => c e
                     -> idx e
                     -> el e
-                    -> m (Maybe (c e,Maybe (e BoolType)))
+                    -> m (ByteWrite c el e)
 fromStaticByteWrite c (idx :: idx e) el = do
   rangeStart <- getRange idx
   (objSize :: idx e) <- byteWidth c
@@ -151,25 +297,19 @@ fromStaticByteWrite c (idx :: idx e) el = do
                              res <- staticByteWrite c (toInteger start) el
                              return (res,cond)
                          | start <- starts ]
-      nel <- mkITE [ (res,cond) | (Just res,cond) <- nelems ]
-      case nel of
-        Nothing -> return Nothing
-        Just nel' -> do
-          let errs = [cond | (Nothing,cond) <- nelems ]
-          errCond <- case errs of
-            [] -> return Nothing
-            _ -> fmap Just $ and' errs
-          return (Just (nel',errCond))
-  where
-    mkITE :: (Composite c,Embed m e,Monad m,GetType e,GCompare e)
-          => [(c e,e BoolType)] -> m (Maybe (c e))
-    mkITE [] = return Nothing
-    mkITE [(x,_)] = return $ Just x
-    mkITE ((x,c):xs) = do
-      rest <- mkITE xs
-      case rest of
-        Nothing -> return Nothing
-        Just ifF -> compITE c x ifF
+      write <- byteWriteITE nelems
+      if nullRange rangeOutside
+        then return write
+        else do
+        outside <- compositeGEQ idx objSize
+        case writeOutside write of
+          Nothing -> return $ write { writeOutside = Just outside }
+          Just outside' -> do
+            noutside <- outside .|. outside'
+            return $ write { writeOutside = Just noutside }
+    Nothing -> do
+      cond <- true
+      return $ ByteWrite [] Nothing Nothing (Just cond)
 
 -- | The boolean states if the range starts included (True) or not (False).
 --   Invariant: The range elements are sorted ascending.
