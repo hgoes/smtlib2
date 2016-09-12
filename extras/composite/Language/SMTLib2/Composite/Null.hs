@@ -9,7 +9,7 @@ import Data.GADT.Compare
 import Data.GADT.Show
 import Control.Lens
 
-data NoComp (val :: *) (e :: Type -> *) = NoComp val
+newtype NoComp (val :: *) (e :: Type -> *) = NoComp val
 
 data NoRev (tp :: Type)
 
