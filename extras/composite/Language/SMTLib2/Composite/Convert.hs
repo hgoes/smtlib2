@@ -51,6 +51,137 @@ alternative2_2 = lens (\f -> case f of
                           _ -> Nothing)
                  (\_ x -> Just (Alternative2_2 x))
 
+fallback :: (Embed m e,Monad m,Convert start alt,GetType e)
+         => (start e -> start e -> m (Maybe (start e)))
+         -> (alt e -> alt e -> m (Maybe (alt e)))
+         -> Fallback start alt e
+         -> Fallback start alt e
+         -> m (Maybe (Fallback start alt e))
+fallback f g (Start x) (Start y) = do
+  z <- f x y
+  case z of
+    Just res -> return $ Just $ Start res
+    Nothing -> do
+      nx <- convert x
+      case nx of
+        Just nx' -> fallback f g (Alternative nx') (Start y)
+        Nothing -> return Nothing
+fallback f g (Start x) (Alternative y) = do
+  nx <- convert x
+  case nx of
+    Just nx' -> fallback f g (Alternative nx') (Alternative y)
+    Nothing -> return Nothing
+fallback f g (Alternative x) (Start y) = do
+  ny <- convert y
+  case ny of
+    Just ny' -> fallback f g (Alternative x) (Alternative ny')
+    Nothing -> return Nothing
+fallback f g (Alternative x) (Alternative y) = do
+  z <- g x y
+  case z of
+    Just res -> return $ Just $ Alternative res
+    Nothing -> return Nothing
+
+mapFallback :: (Embed m e,Monad m)
+            => (start e -> m (start' e))
+            -> (alt e -> m (alt' e))
+            -> Fallback start alt e
+            -> m (Fallback start' alt' e)
+mapFallback f g (Start x) = do
+  nx <- f x
+  return $ Start nx
+mapFallback f g (Alternative x) = do
+  nx <- g x
+  return $ Alternative nx
+
+fallback2 :: (Embed m e,Monad m,GetType e,
+              Convert start alt1,Convert start alt2,Convert alt1 alt2)
+          => (start e -> start e -> m (Maybe (start e)))
+          -> (alt1 e -> alt1 e -> m (Maybe (alt1 e)))
+          -> (alt2 e -> alt2 e -> m (Maybe (alt2 e)))
+          -> Fallback2 start alt1 alt2 e
+          -> Fallback2 start alt1 alt2 e
+          -> m (Maybe (Fallback2 start alt1 alt2 e))
+fallback2 f g h (Start2 x) (Start2 y) = do
+  z <- f x y
+  case z of
+    Just res -> return $ Just $ Start2 res
+    Nothing -> do
+      nx <- convert x
+      case nx of
+        Just nx' -> fallback2 f g h (Alternative2_1 nx') (Start2 y)
+        Nothing -> do
+          nx2 <- convert x
+          case nx2 of
+            Nothing -> return Nothing
+            Just nx2' -> fallback2 f g h (Alternative2_2 nx2') (Start2 y)
+fallback2 f g h (Start2 x) (Alternative2_1 y) = do
+  nx <- convert x
+  case nx of
+    Just nx' -> fallback2 f g h (Alternative2_1 nx') (Alternative2_1 y)
+    Nothing -> do
+      nx2 <- convert x
+      case nx2 of
+        Nothing -> return Nothing
+        Just nx2' -> fallback2 f g h (Alternative2_2 nx2') (Alternative2_1 y)
+fallback2 f g h (Start2 x) (Alternative2_2 y) = do
+  nx <- convert x
+  case nx of
+    Nothing -> return Nothing
+    Just nx' -> fallback2 f g h (Alternative2_2 nx') (Alternative2_2 y)
+fallback2 f g h (Alternative2_1 x) (Start2 y) = do
+  ny <- convert y
+  case ny of
+    Just ny' -> fallback2 f g h (Alternative2_1 x) (Alternative2_1 ny')
+    Nothing -> do
+      ny2 <- convert y
+      case ny2 of
+        Just ny2' -> fallback2 f g h (Alternative2_1 x) (Alternative2_2 ny2')
+        Nothing -> return Nothing
+fallback2 f g h (Alternative2_1 x) (Alternative2_1 y) = do
+  z <- g x y
+  case z of
+    Just res -> return $ Just $ Alternative2_1 res
+    Nothing -> do
+      nx <- convert x
+      case nx of
+        Nothing -> return Nothing
+        Just nx' -> fallback2 f g h (Alternative2_2 nx') (Alternative2_1 y)
+fallback2 f g h (Alternative2_1 x) (Alternative2_2 y) = do
+  nx <- convert x
+  case nx of
+    Nothing -> return Nothing
+    Just nx' -> fallback2 f g h (Alternative2_2 nx') (Alternative2_2 y)
+fallback2 f g h (Alternative2_2 x) (Start2 y) = do
+  ny <- convert y
+  case ny of
+    Nothing -> return Nothing
+    Just ny' -> fallback2 f g h (Alternative2_2 x) (Alternative2_2 ny')
+fallback2 f g h (Alternative2_2 x) (Alternative2_1 y) = do
+  ny <- convert y
+  case ny of
+    Nothing -> return Nothing
+    Just ny' -> fallback2 f g h (Alternative2_2 x) (Alternative2_2 ny')
+fallback2 f g h (Alternative2_2 x) (Alternative2_2 y) = do
+  res <- h x y
+  return $ fmap Alternative2_2 res
+
+mapFallback2 :: (Embed m e,Monad m)
+             => (start e -> m (start' e))
+             -> (alt1 e -> m (alt1' e))
+             -> (alt2 e -> m (alt2' e))
+             -> Fallback2 start alt1 alt2 e
+             -> m (Fallback2 start' alt1' alt2' e)
+mapFallback2 f g h (Start2 x) = do
+  nx <- f x
+  return $ Start2 nx
+mapFallback2 f g h (Alternative2_1 x) = do
+  nx <- g x
+  return $ Alternative2_1 nx
+mapFallback2 f g h (Alternative2_2 x) = do
+  nx <- h x
+  return $ Alternative2_2 nx
+
 data RevFallback start alt tp where
   RevStart :: RevComp start tp -> RevFallback start alt tp
   RevAlternative :: RevComp alt tp -> RevFallback start alt tp
@@ -71,38 +202,7 @@ instance (Composite start,Composite alt,Convert start alt)
     return (Alternative ne)
   accessComposite (RevStart r) = start `composeMaybe` accessComposite r
   accessComposite (RevAlternative r) = alternative `composeMaybe` accessComposite r
-  compCombine f (Start x) (Start y) = do
-    z <- compCombine f x y
-    case z of
-      Just res -> return (Just (Start res))
-      Nothing -> do
-        nx <- convert x
-        case nx of
-          Nothing -> return Nothing
-          Just nx' -> do
-            ny <- convert y
-            case ny of
-              Nothing -> return Nothing
-              Just ny' -> do
-                res <- compCombine f nx' ny'
-                return $ fmap Alternative res
-  compCombine f (Start x) (Alternative y) = do
-    nx <- convert x
-    case nx of
-      Nothing -> return Nothing
-      Just nx' -> do
-        res <- compCombine f nx' y
-        return $ fmap Alternative res
-  compCombine f (Alternative x) (Start y) = do
-    ny <- convert y
-    case ny of
-      Nothing -> return Nothing
-      Just ny' -> do
-        res <- compCombine f x ny'
-        return $ fmap Alternative res
-  compCombine f (Alternative x) (Alternative y) = do
-    res <- compCombine f x y
-    return $ fmap Alternative res
+  compCombine f = fallback (compCombine f) (compCombine f)
   compCompare (Start x) (Start y) = compCompare x y
   compCompare (Start _) _ = LT
   compCompare _ (Start _) = GT
@@ -128,75 +228,7 @@ instance (Composite start,Composite alt1,Composite alt2,
   accessComposite (RevStart2 r) = start2 `composeMaybe` accessComposite r
   accessComposite (RevAlternative2_1 r) = alternative2_1 `composeMaybe` accessComposite r
   accessComposite (RevAlternative2_2 r) = alternative2_2 `composeMaybe` accessComposite r
-  compCombine f (Start2 x) (Start2 y) = do
-    z <- compCombine f x y
-    case z of
-      Just res -> return $ Just $ Start2 res
-      Nothing -> do
-        nx <- convert x
-        case nx of
-          Just nx' -> compCombine f (Alternative2_1 nx') (Start2 y)
-          Nothing -> do
-            nx2 <- convert x
-            case nx2 of
-              Nothing -> return Nothing
-              Just nx2' -> compCombine f (Alternative2_2 nx2') (Start2 y)
-  compCombine f (Start2 x) (Alternative2_1 y) = do
-    nx <- convert x
-    case nx of
-      Just nx' -> compCombine f (Alternative2_1 nx') (Alternative2_1 y)
-      Nothing -> do
-        nx2 <- convert x
-        case nx2 of
-          Nothing -> return Nothing
-          Just nx2' -> compCombine f (Alternative2_2 nx2') (Alternative2_1 y)
-  compCombine f (Start2 x) (Alternative2_2 y) = do
-    nx <- convert x
-    case nx of
-      Nothing -> return Nothing
-      Just nx' -> compCombine f (Alternative2_2 nx') (Alternative2_2 y)
-  compCombine f (Alternative2_1 x) (Start2 y) = do
-    ny <- convert y
-    case ny of
-      Just ny' -> compCombine f (Alternative2_1 x) (Alternative2_1 ny')
-      Nothing -> do
-        ny2 <- convert y
-        case ny2 of
-          Just ny2' -> compCombine f (Alternative2_1 x) (Alternative2_2 ny2')
-          Nothing -> return Nothing
-  compCombine f (Alternative2_1 x) (Alternative2_1 y) = do
-    z <- compCombine f x y
-    case z of
-      Just res -> return $ Just $ Alternative2_1 res
-      Nothing -> do
-        nx <- convert x
-        case nx of
-          Nothing -> return Nothing
-          Just nx' -> compCombine f (Alternative2_2 nx') (Alternative2_1 y)
-  compCombine f (Alternative2_1 x) (Alternative2_2 y) = do
-    nx <- convert x
-    case nx of
-      Nothing -> return Nothing
-      Just nx' -> do
-        res <- compCombine f nx' y
-        return $ fmap Alternative2_2 res
-  compCombine f (Alternative2_2 x) (Start2 y) = do
-    ny <- convert y
-    case ny of
-      Nothing -> return Nothing
-      Just ny' -> do
-        res <- compCombine f x ny'
-        return $ fmap Alternative2_2 res
-  compCombine f (Alternative2_2 x) (Alternative2_1 y) = do
-    ny <- convert y
-    case ny of
-      Nothing -> return Nothing
-      Just ny' -> do
-        res <- compCombine f x ny'
-        return $ fmap Alternative2_2 res
-  compCombine f (Alternative2_2 x) (Alternative2_2 y) = do
-    res <- compCombine f x y
-    return $ fmap Alternative2_2 res
+  compCombine f = fallback2 (compCombine f) (compCombine f) (compCombine f)
   compCompare (Start2 x) (Start2 y) = compCompare x y
   compCompare (Start2 _) _ = LT
   compCompare _ (Start2 _) = GT
