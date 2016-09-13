@@ -3,11 +3,13 @@ module Language.SMTLib2.Composite.Tuple where
 import Language.SMTLib2
 import Language.SMTLib2.Composite.Class
 import Language.SMTLib2.Composite.Lens
+import Language.SMTLib2.Composite.Domains
 
 import Data.GADT.Show
 import Data.GADT.Compare
 import Data.Proxy
 import Control.Lens
+import qualified Data.Map as Map
 
 data CompTuple2 (a :: (Type -> *) -> *) (b :: (Type -> *) -> *) e
   = CompTuple2 { _ctuple2_1 :: a e
@@ -196,3 +198,62 @@ instance (Composite a,Composite b,Composite c) => GCompare (RevTuple3 a b c) whe
     GEQ -> GEQ
     GLT -> GLT
     GGT -> GGT
+
+instance (ByteWidth a idx,ByteWidth b idx) => ByteWidth (CompTuple2 a b) idx where
+  byteWidth (CompTuple2 x y) = do
+    wx <- byteWidth x
+    wy <- byteWidth y
+    compositePlus wx wy
+
+instance (StaticByteWidth a,StaticByteAccess a el,StaticByteAccess b el,CanConcat el)
+         => StaticByteAccess (CompTuple2 a b) el where
+  staticByteRead (CompTuple2 x y) idx sz = do
+    let wx = staticByteWidth x
+    if idx >= wx
+      then staticByteRead y (idx-wx) sz
+      else do
+      rx <- staticByteRead x idx sz
+      reads1 <- case fullRead rx of
+        Just r -> do
+          cond <- fullReadCond rx
+          cond' <- case cond of
+            [] -> true
+            [c] -> return c
+            _ -> and' cond
+          return [(ByteRead Map.empty Nothing (Just r) (readImprecision rx),cond')]
+        Nothing -> return []
+      reads2 <- sequence [ do
+                             r <- staticByteRead y 0 rest
+                             nr <- concatRead part r
+                             return (nr,cond)
+                         | (rest,(part,cond)) <- Map.toList $ overreads rx ]
+      byteReadITE (reads1++reads2)
+
+instance (StaticByteWidth a,ByteAccess a idx el,ByteAccess b idx el,CanConcat el)
+         => ByteAccess (CompTuple2 a b) idx el where
+  byteRead (CompTuple2 x y) idx sz = do
+    rx <- byteRead x idx sz
+    reads1 <- case fullRead rx of
+      Just r -> do
+        cond <- fullReadCond rx
+        cond' <- case cond of
+          [] -> true
+          [c] -> return c
+          _ -> and' cond
+        return [(ByteRead Map.empty Nothing (Just r) (readImprecision rx),cond')]
+      Nothing -> return []
+    reads2 <- sequence [ do
+                           r <- staticByteRead y 0 rest
+                           nr <- concatRead part r
+                           return (nr,cond)
+                       | (rest,(part,cond)) <- Map.toList $ overreads rx ]
+    reads3 <- case readOutside rx of
+      Nothing -> return []
+      Just cond -> do
+        let wx = staticByteWidth x
+        wx' <- compositeFromValue (fromInteger wx)
+        nidx <- compositeMinus idx wx'
+        ry <- byteRead y nidx sz
+        return [(ry,cond)]
+    byteReadITE (reads1++reads2++reads3)
+

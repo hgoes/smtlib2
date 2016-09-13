@@ -92,7 +92,7 @@ data ByteWrite a b e
               , fullWrite :: Maybe (a e)
               , writeImprecision :: Maybe (e BoolType) }
 
-class (ByteWidth c idx,ByteWidth el idx) => ByteAccess c idx el where
+class (ByteWidth c idx,ByteWidth el idx,StaticByteAccess c el) => ByteAccess c idx el where
   byteRead :: (Embed m e,Monad m,GetType e,GCompare e)
            => c e
            -> idx e
@@ -105,7 +105,7 @@ class (ByteWidth c idx,ByteWidth el idx) => ByteAccess c idx el where
             -> m (ByteWrite c el e)
 
 class (Composite c,Composite el) => StaticByteAccess c el where
-  staticByteRead :: (Embed m e,Monad m)
+  staticByteRead :: (Embed m e,Monad m,GetType e,GCompare e)
                  => c e
                  -> Integer
                  -> Integer
@@ -146,6 +146,30 @@ fullReadCond r = do
       c' <- not' c
       return [c']
   return $ c1++c2++c3
+
+concatRead :: (Embed m e,Monad m,CanConcat el) => el e -> ByteRead el e -> m (ByteRead el e)
+concatRead part read = do
+  fcond <- true
+  let fail = impreciseRead fcond
+  novers <- mapM (\(el,cond) -> do
+                     nel <- compConcat [part,el]
+                     case nel of
+                       Nothing -> return Nothing
+                       Just nel' -> return $ Just (nel',cond)) (overreads read)
+  case sequence novers of
+    Nothing -> return fail
+    Just novers' -> do
+      nfull <- case fullRead read of
+        Nothing -> return $ Just Nothing
+        Just full -> do
+          full' <- compConcat [part,full]
+          case full' of
+            Nothing -> return Nothing
+            Just f -> return $ Just $ Just f
+      case nfull of
+        Nothing -> return fail
+        Just nfull' -> return read { overreads = novers'
+                                   , fullRead = nfull' }
 
 compConcat :: (CanConcat c,Embed m e,Monad m) => [c e] -> m (Maybe (c e))
 compConcat xs = do

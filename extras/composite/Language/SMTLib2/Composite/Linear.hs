@@ -165,11 +165,18 @@ instance (IsBounded arr idx,StaticByteWidth (ElementType arr),IsNumeric idx)
     sz <- arraySize arr
     return $ Linear (fromInteger 0) [(fromInteger elSize,sz)]
 
-instance (IsBounded arr idx,ByteAccess (ElementType arr) idx el,
-           StaticByteWidth (ElementType arr),IsRanged idx,
-           StaticByteAccess (ElementType arr) el,
-           CanConcat el,
-           StaticByteWidth el,ByteWidth el (Linear idx))
+instance StaticByteAccess arr el => StaticByteAccess (ByteArray arr) el where
+  staticByteRead (ByteArray arr) = staticByteRead arr
+  staticByteWrite (ByteArray arr) idx el = do
+    wr <- staticByteWrite arr idx el
+    return $ ByteWrite (overwrite wr) (writeOutside wr) (fmap ByteArray $ fullWrite wr) (writeImprecision wr)
+
+instance (StaticByteAccess arr el,
+          IsBounded arr idx,ByteAccess (ElementType arr) idx el,
+          StaticByteWidth (ElementType arr),IsRanged idx,
+          StaticByteAccess (ElementType arr) el,
+          CanConcat el,
+          StaticByteWidth el,ByteWidth el (Linear idx))
          => ByteAccess (ByteArray arr) (Linear idx) el where
   byteRead = linearByteRead
   byteWrite = linearByteWrite
