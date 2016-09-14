@@ -66,14 +66,12 @@ instance Composite a => Show (CompositeExpr a t) where
 instance Composite a => GShow (CompositeExpr a) where
   gshowsPrec = showsPrec
 
-newtype CompT c m a = CompT (ReaderT c m a) deriving (Functor,Applicative,Monad,MonadReader c)
-
-instance (Composite a,d ~ CompDescr a,Monad m) => Embed (CompT d m) (CompositeExpr a) where
-  type EmVar (CompT d m) (CompositeExpr a) = RevComp a
-  type EmQVar (CompT d m) (CompositeExpr a) = E.NoVar
-  type EmFun (CompT d m) (CompositeExpr a) = E.NoFun
-  type EmFunArg (CompT d m) (CompositeExpr a) = E.NoVar
-  type EmLVar (CompT d m) (CompositeExpr a) = E.NoVar
+instance (Composite a,Monad m) => Embed (ReaderT (a Repr) m) (CompositeExpr a) where
+  type EmVar (ReaderT (a Repr) m) (CompositeExpr a) = RevComp a
+  type EmQVar (ReaderT (a Repr) m) (CompositeExpr a) = E.NoVar
+  type EmFun (ReaderT (a Repr) m) (CompositeExpr a) = E.NoFun
+  type EmFunArg (ReaderT (a Repr) m) (CompositeExpr a) = E.NoVar
+  type EmLVar (ReaderT (a Repr) m) (CompositeExpr a) = E.NoVar
   embed e = do
     re <- e
     descr <- ask
