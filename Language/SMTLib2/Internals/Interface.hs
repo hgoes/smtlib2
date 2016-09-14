@@ -108,7 +108,7 @@ allEqToSame' tp n lst = do
   d <- allEqToSame tp n lst
   return (d,lst)
 
-class IsSMTNumber (tp :: Type) where
+class Num (Value tp) => IsSMTNumber (tp :: Type) where
   smtNumRepr :: NumRepr tp
   smtFromInteger :: Integer -> Value tp
 
