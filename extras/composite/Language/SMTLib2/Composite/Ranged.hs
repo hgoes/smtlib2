@@ -30,6 +30,7 @@ import Language.SMTLib2
 import Language.SMTLib2.Internals.Type.Nat
 import Language.SMTLib2.Internals.Type (bvPred,bvSucc)
 import Data.GADT.Compare
+import Data.GADT.Show
 import Data.List (sortBy)
 import Data.Ord (comparing)
 import Data.Constraint
@@ -39,6 +40,11 @@ data Ranged c (e :: Type -> *) = Ranged { _getRange :: Range (SingletonType c)
                                         , _ranged :: c e }
 
 makeLenses ''Ranged
+
+instance (Composite c,GShow e) => Show (Ranged c e) where
+  showsPrec p (Ranged r c) = showParen (p>10) $
+    showString "Ranged " . showsPrec 11 r . showChar ' ' .
+    compShow 11 c
 
 instance (Composite c,IsSingleton c) => Composite (Ranged c) where
   type RevComp (Ranged c) = RevComp c
@@ -51,9 +57,7 @@ instance (Composite c,IsSingleton c) => Composite (Ranged c) where
   compCompare (Ranged r1 c1) (Ranged r2 c2) = case compare r1 r2 of
     EQ -> compCompare c1 c2
     r -> r
-  compShow p (Ranged r c) = showParen (p>10) $
-    showString "Ranged " . showsPrec 11 r . showChar ' ' .
-    compShow 11 c
+  compShow = showsPrec
   compInvariant (Ranged r c) = compInvariant c
 
 instance (CompositeExtract c,IsSingleton c) => CompositeExtract (Ranged c) where
