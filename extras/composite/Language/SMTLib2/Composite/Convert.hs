@@ -57,29 +57,41 @@ fallback :: (Embed m e,Monad m,Convert start alt,GetType e)
          -> Fallback start alt e
          -> Fallback start alt e
          -> m (Maybe (Fallback start alt e))
-fallback f g (Start x) (Start y) = do
+fallback f g fb1 fb2 = do
+  res <- fallbackExtra (\s1 s2 -> fmap (fmap (\x -> (x,()))) $ f s1 s2)
+         (\a1 a2 -> fmap (fmap (\x -> (x,()))) $ g a1 a2)
+         fb1 fb2
+  return $ fmap fst res
+
+fallbackExtra :: (Embed m e,Monad m,Convert start alt,GetType e)
+              => (start e -> start e -> m (Maybe (start e,a)))
+              -> (alt e -> alt e -> m (Maybe (alt e,a)))
+              -> Fallback start alt e
+              -> Fallback start alt e
+              -> m (Maybe (Fallback start alt e,a))
+fallbackExtra f g (Start x) (Start y) = do
   z <- f x y
   case z of
-    Just res -> return $ Just $ Start res
+    Just (res,extra) -> return $ Just (Start res,extra)
     Nothing -> do
       nx <- convert x
       case nx of
-        Just nx' -> fallback f g (Alternative nx') (Start y)
+        Just nx' -> fallbackExtra f g (Alternative nx') (Start y)
         Nothing -> return Nothing
-fallback f g (Start x) (Alternative y) = do
+fallbackExtra f g (Start x) (Alternative y) = do
   nx <- convert x
   case nx of
-    Just nx' -> fallback f g (Alternative nx') (Alternative y)
+    Just nx' -> fallbackExtra f g (Alternative nx') (Alternative y)
     Nothing -> return Nothing
-fallback f g (Alternative x) (Start y) = do
+fallbackExtra f g (Alternative x) (Start y) = do
   ny <- convert y
   case ny of
-    Just ny' -> fallback f g (Alternative x) (Alternative ny')
+    Just ny' -> fallbackExtra f g (Alternative x) (Alternative ny')
     Nothing -> return Nothing
-fallback f g (Alternative x) (Alternative y) = do
+fallbackExtra f g (Alternative x) (Alternative y) = do
   z <- g x y
   case z of
-    Just res -> return $ Just $ Alternative res
+    Just (res,extra) -> return $ Just (Alternative res,extra)
     Nothing -> return Nothing
 
 mapFallback :: (Embed m e,Monad m)
@@ -102,69 +114,86 @@ fallback2 :: (Embed m e,Monad m,GetType e,
           -> Fallback2 start alt1 alt2 e
           -> Fallback2 start alt1 alt2 e
           -> m (Maybe (Fallback2 start alt1 alt2 e))
-fallback2 f g h (Start2 x) (Start2 y) = do
+fallback2 f g h fb1 fb2 = do
+  res <- fallbackExtra2 (adj f) (adj g) (adj h) fb1 fb2
+  return $ fmap fst res
+  where
+    adj c p q = fmap (fmap (\x -> (x,()))) $ c p q
+
+
+fallbackExtra2 :: (Embed m e,Monad m,GetType e,
+                   Convert start alt1,Convert start alt2,Convert alt1 alt2)
+               => (start e -> start e -> m (Maybe (start e,a)))
+               -> (alt1 e -> alt1 e -> m (Maybe (alt1 e,a)))
+               -> (alt2 e -> alt2 e -> m (Maybe (alt2 e,a)))
+               -> Fallback2 start alt1 alt2 e
+               -> Fallback2 start alt1 alt2 e
+               -> m (Maybe (Fallback2 start alt1 alt2 e,a))
+fallbackExtra2 f g h (Start2 x) (Start2 y) = do
   z <- f x y
   case z of
-    Just res -> return $ Just $ Start2 res
+    Just (res,extra) -> return $ Just (Start2 res,extra)
     Nothing -> do
       nx <- convert x
       case nx of
-        Just nx' -> fallback2 f g h (Alternative2_1 nx') (Start2 y)
+        Just nx' -> fallbackExtra2 f g h (Alternative2_1 nx') (Start2 y)
         Nothing -> do
           nx2 <- convert x
           case nx2 of
             Nothing -> return Nothing
-            Just nx2' -> fallback2 f g h (Alternative2_2 nx2') (Start2 y)
-fallback2 f g h (Start2 x) (Alternative2_1 y) = do
+            Just nx2' -> fallbackExtra2 f g h (Alternative2_2 nx2') (Start2 y)
+fallbackExtra2 f g h (Start2 x) (Alternative2_1 y) = do
   nx <- convert x
   case nx of
-    Just nx' -> fallback2 f g h (Alternative2_1 nx') (Alternative2_1 y)
+    Just nx' -> fallbackExtra2 f g h (Alternative2_1 nx') (Alternative2_1 y)
     Nothing -> do
       nx2 <- convert x
       case nx2 of
         Nothing -> return Nothing
-        Just nx2' -> fallback2 f g h (Alternative2_2 nx2') (Alternative2_1 y)
-fallback2 f g h (Start2 x) (Alternative2_2 y) = do
+        Just nx2' -> fallbackExtra2 f g h (Alternative2_2 nx2') (Alternative2_1 y)
+fallbackExtra2 f g h (Start2 x) (Alternative2_2 y) = do
   nx <- convert x
   case nx of
     Nothing -> return Nothing
-    Just nx' -> fallback2 f g h (Alternative2_2 nx') (Alternative2_2 y)
-fallback2 f g h (Alternative2_1 x) (Start2 y) = do
+    Just nx' -> fallbackExtra2 f g h (Alternative2_2 nx') (Alternative2_2 y)
+fallbackExtra2 f g h (Alternative2_1 x) (Start2 y) = do
   ny <- convert y
   case ny of
-    Just ny' -> fallback2 f g h (Alternative2_1 x) (Alternative2_1 ny')
+    Just ny' -> fallbackExtra2 f g h (Alternative2_1 x) (Alternative2_1 ny')
     Nothing -> do
       ny2 <- convert y
       case ny2 of
-        Just ny2' -> fallback2 f g h (Alternative2_1 x) (Alternative2_2 ny2')
+        Just ny2' -> fallbackExtra2 f g h (Alternative2_1 x) (Alternative2_2 ny2')
         Nothing -> return Nothing
-fallback2 f g h (Alternative2_1 x) (Alternative2_1 y) = do
+fallbackExtra2 f g h (Alternative2_1 x) (Alternative2_1 y) = do
   z <- g x y
   case z of
-    Just res -> return $ Just $ Alternative2_1 res
+    Just (res,extra) -> return $ Just (Alternative2_1 res,extra)
     Nothing -> do
       nx <- convert x
       case nx of
         Nothing -> return Nothing
-        Just nx' -> fallback2 f g h (Alternative2_2 nx') (Alternative2_1 y)
-fallback2 f g h (Alternative2_1 x) (Alternative2_2 y) = do
+        Just nx' -> fallbackExtra2 f g h (Alternative2_2 nx') (Alternative2_1 y)
+fallbackExtra2 f g h (Alternative2_1 x) (Alternative2_2 y) = do
   nx <- convert x
   case nx of
     Nothing -> return Nothing
-    Just nx' -> fallback2 f g h (Alternative2_2 nx') (Alternative2_2 y)
-fallback2 f g h (Alternative2_2 x) (Start2 y) = do
+    Just nx' -> fallbackExtra2 f g h (Alternative2_2 nx') (Alternative2_2 y)
+fallbackExtra2 f g h (Alternative2_2 x) (Start2 y) = do
   ny <- convert y
   case ny of
     Nothing -> return Nothing
-    Just ny' -> fallback2 f g h (Alternative2_2 x) (Alternative2_2 ny')
-fallback2 f g h (Alternative2_2 x) (Alternative2_1 y) = do
+    Just ny' -> fallbackExtra2 f g h (Alternative2_2 x) (Alternative2_2 ny')
+fallbackExtra2 f g h (Alternative2_2 x) (Alternative2_1 y) = do
   ny <- convert y
   case ny of
     Nothing -> return Nothing
-    Just ny' -> fallback2 f g h (Alternative2_2 x) (Alternative2_2 ny')
-fallback2 f g h (Alternative2_2 x) (Alternative2_2 y) = do
+    Just ny' -> fallbackExtra2 f g h (Alternative2_2 x) (Alternative2_2 ny')
+fallbackExtra2 f g h (Alternative2_2 x) (Alternative2_2 y) = do
   res <- h x y
-  return $ fmap Alternative2_2 res
+  case res of
+    Nothing -> return Nothing
+    Just (res',extra) -> return $ Just (Alternative2_2 res',extra)
 
 mapFallback2 :: (Embed m e,Monad m)
              => (start e -> m (start' e))
