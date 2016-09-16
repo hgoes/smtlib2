@@ -6,10 +6,12 @@ import Language.SMTLib2.Internals.Type.List (List(..))
 import qualified Language.SMTLib2.Internals.Type.List as List
 import Language.SMTLib2.Internals.Monad
 import Language.SMTLib2.Internals.Backend
+import Language.SMTLib2.Internals.Evaluate
 
 import Data.Functor.Identity
 import Control.Monad.State
 import Data.GADT.Compare
+import qualified Data.Dependent.Map as DMap
 
 type EmbedExpr m e tp = Expression (EmVar m e) (EmQVar m e) (EmFun m e) (EmFunArg m e) (EmLVar m e) e tp
 
@@ -72,6 +74,63 @@ instance Embed Identity Repr where
       f e = runIdentity $ expressionType return return (\(FunRepr arg tp) -> return (arg,tp)) return return return e
   embedQuantifier _ _ _ = pure bool
   embedTypeOf = pure id
+
+-- | A user-supplied function.
+--   Can be used in embedding 'Value's or 'EvalResult's.
+--   Since we don't have function equality in haskell, an integer is provided to distinguish functions.
+data UserFun (m :: * -> *) (e :: Type -> *) (sig :: ([Type],Type))  where
+  UserFun :: List Repr arg             -- Argument types
+          -> Repr res                  -- Result type
+          -> Int                       -- Number to distinguish functions
+          -> (List e arg -> m (e res)) -- The function implementation
+          -> UserFun m e '(arg,res)
+
+instance GEq (UserFun m e) where
+  geq (UserFun arg1 res1 n1 _) (UserFun arg2 res2 n2 _) = do
+    Refl <- geq arg1 arg2
+    Refl <- geq res1 res2
+    if n1==n2
+      then return Refl
+      else Nothing
+
+instance GCompare (UserFun m e) where
+  gcompare (UserFun arg1 res1 n1 _) (UserFun arg2 res2 n2 _) = case gcompare arg1 arg2 of
+    GLT -> GLT
+    GGT -> GGT
+    GEQ -> case gcompare res1 res2 of
+      GLT -> GLT
+      GGT -> GGT
+      GEQ -> case compare n1 n2 of
+        LT -> GLT
+        GT -> GGT
+        EQ -> GEQ
+
+instance GetFunType (UserFun m e) where
+  getFunType (UserFun arg res _ _) = (arg,res)
+
+instance Embed Identity Value where
+  type EmVar Identity Value = NoVar
+  type EmQVar Identity Value = NoVar
+  type EmFun Identity Value = UserFun Identity Value
+  type EmFunArg Identity Value = NoVar
+  type EmLVar Identity Value = NoVar
+  embed e = do
+    re <- e
+    res <- evaluateExpr
+           (error "embed: No variables in embedded values")
+           (error "embed: No quantified variables in embedded values")
+           (error "embed: No function variables in embedded values")
+           (\(UserFun _ _ _ f) lst -> do
+               lst' <- List.mapM (\res -> case res of
+                                     ValueResult v -> return v) lst
+               fmap ValueResult $ f lst')
+           (error "embed: No fields in embedded values")
+           (error "embed: No quantifier in embedded values")
+           DMap.empty
+           (\_ val -> return $ ValueResult val) re
+    case res of
+      ValueResult v -> return v
+  embedTypeOf = pure getType
 
 newtype BackendInfo b = BackendInfo b
 
