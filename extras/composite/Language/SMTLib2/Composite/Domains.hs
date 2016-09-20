@@ -3,7 +3,7 @@ module Language.SMTLib2.Composite.Domains where
 import Language.SMTLib2 hiding (select,store)
 import Language.SMTLib2.Composite.Class
 import Language.SMTLib2.Internals.Type.Nat
-import Language.SMTLib2.Internals.Type (bvPred,bvSucc,bvAdd,bvSub,bvMul,bvDiv,bvMinValue,bvMaxValue)
+import Language.SMTLib2.Internals.Type (bvPred,bvSucc,bvAdd,bvSub,bvMul,bvNegate,bvDiv,bvMod,bvMinValue,bvMaxValue)
 import Language.SMTLib2.Internals.Embed
 import Data.List (sortBy,sort)
 import Data.Ord (comparing)
@@ -1080,10 +1080,67 @@ multBounds zero mul div lim b1 b2 = [ r | r1 <- b1
         (nu,overfU) = multOverflow mul div u1 u2
     multRange zero mul _ Nothing (l1,u1) (l2,u2) = [(mulInf zero mul l1 l2,mulInf zero mul u1 u2)]
 
-negBounds :: (Num a,Ord a) => Bounds a -> Bounds a
-negBounds = reverse . fmap neg
+divBounds :: Ord a => a -> a -> (a -> a -> a) -> Bounds a -> Bounds a -> Bounds a
+divBounds zero negOne div b1 b2 = [ divRange zero negOne div r1 r2
+                                  | r1 <- b1
+                                  , r2 <- b2 ]
   where
-    neg (l,u) = (negate u,negate l)
+    divRange :: Ord a => a -> a -> (a -> a -> a) -> (Inf a,Inf a) -> (Inf a,Inf a) -> (Inf a,Inf a)
+    divRange zero negOne div (lx,ux) (ly,uy)
+      | ly <= Regular zero && uy >= Regular zero = (NegInfinity,PosInfinity)
+      | ly >= Regular zero = (case lx of
+                                NegInfinity -> NegInfinity
+                                PosInfinity -> PosInfinity
+                                Regular x -> case uy of
+                                  PosInfinity -> Regular zero
+                                  Regular y -> Regular $ x `div` y,
+                              case ux of
+                                NegInfinity -> NegInfinity
+                                PosInfinity -> PosInfinity
+                                Regular x -> case ly of
+                                  PosInfinity -> if x < zero
+                                                 then Regular negOne
+                                                 else Regular zero
+                                  Regular y -> Regular $ x `div` y)
+      | otherwise = (case ux of
+                       NegInfinity -> PosInfinity
+                       PosInfinity -> NegInfinity
+                       Regular x -> case ly of
+                         NegInfinity -> if x>=zero
+                                        then Regular zero
+                                        else Regular negOne
+                         Regular y -> Regular $ x `div` y,
+                      case lx of
+                        NegInfinity -> PosInfinity
+                        PosInfinity -> NegInfinity
+                        Regular x -> case uy of
+                          NegInfinity -> if x>=zero
+                                         then Regular zero
+                                         else Regular negOne
+                          Regular y -> Regular $ x `div` y)
+
+modBounds :: Ord a => a -> (a -> a -> a) -> Bounds a -> Bounds a -> Bounds a
+modBounds zero mod b1 b2 = [ modRange zero mod r1 r2
+                           | r1 <- b1
+                           , r2 <- b2 ]
+  where
+    modRange :: Ord a => a -> (a -> a -> a) -> (Inf a,Inf a) -> (Inf a,Inf a) -> (Inf a,Inf a)
+    modRange zero mod (lx,ux) (ly,uy)
+      | ly <= Regular zero && uy >= Regular zero = (NegInfinity,PosInfinity)
+      | uy < Regular zero = if lx > ly && ux <= Regular zero
+                            then (lx,ux)
+                            else (ly,Regular zero)
+      | otherwise = if ux < ly && lx >= Regular zero
+                    then (lx,ly)
+                    else (Regular zero,uy)
+
+negBounds :: Ord a => (a -> a) -> Bounds a -> Bounds a
+negBounds negate = reverse . fmap neg
+  where
+    neg (l,u) = (negate' u,negate' l)
+    negate' PosInfinity = NegInfinity
+    negate' NegInfinity = PosInfinity
+    negate' (Regular x) = Regular $ negate x
 
 absBounds :: (Num a,Ord a) => Bounds a -> Bounds a
 absBounds = fmap abs'
@@ -1119,7 +1176,7 @@ instance Num (Range IntType) where
   (+) r1 r2 = fromBounds int $ addBounds 0 (+) Nothing (toBounds r1) (toBounds r2)
   (-) r1 r2 = fromBounds int $ subBounds 0 (-) Nothing (toBounds r1) (toBounds r2)
   (*) r1 r2 = fromBounds int $ multBounds 0 (*) div Nothing (toBounds r1) (toBounds r2)
-  negate r = fromBounds int $ negBounds (toBounds r)
+  negate r = fromBounds int $ negBounds negate (toBounds r)
   abs r = fromBounds int $ absBounds (toBounds r)
   signum r = fromBounds int $ signumBounds (toBounds r)
   fromInteger x = IntRange (False,[x,x])
@@ -1128,7 +1185,7 @@ instance IsNatural bw => Num (Range (BitVecType bw)) where
   (+) r1@(BitVecRange bw _) r2 = fromBounds (bitvec bw) $ addBounds (BitVecValue 0 bw) bvAdd (Just maxBound) (toBounds r1) (toBounds r2)
   (-) r1@(BitVecRange bw _) r2 = fromBounds (bitvec bw) $ subBounds (BitVecValue 0 bw) bvSub (Just maxBound) (toBounds r1) (toBounds r2)
   (*) r1@(BitVecRange bw _) r2 = fromBounds (bitvec bw) $ multBounds (BitVecValue 0 bw) bvMul bvDiv (Just maxBound) (toBounds r1) (toBounds r2)
-  negate r@(BitVecRange bw _) = fromBounds (bitvec bw) $ negBounds (toBounds r)
+  negate r@(BitVecRange bw _) = fromBounds (bitvec bw) $ negBounds negate (toBounds r)
   abs r@(BitVecRange bw _) = fromBounds (bitvec bw) $ absBounds (toBounds r)
   signum r@(BitVecRange bw _) = fromBounds (bitvec bw) $ signumBounds (toBounds r)
   fromInteger x = BitVecRange getNatural [(x,x)]
@@ -1156,3 +1213,19 @@ rangeAdd r1@(BitVecRange bw _) r2 = fromBounds (bitvec bw) $ addBounds (BitVecVa
 rangeMult :: Range tp -> Range tp -> Range tp
 rangeMult r1@(IntRange {}) r2 = fromBounds int $ multBounds 0 (*) div Nothing (toBounds r1) (toBounds r2)
 rangeMult r1@(BitVecRange bw _) r2 = fromBounds (bitvec bw) $ multBounds (BitVecValue 0 bw) bvMul bvDiv (Just $ bvMaxValue False (BitVecRepr bw)) (toBounds r1) (toBounds r2)
+
+rangeNeg :: Range tp -> Range tp
+rangeNeg r@(IntRange {}) = fromBounds int $ negBounds negate $ toBounds r
+rangeNeg r@(BitVecRange bw _) = fromBounds (bitvec bw) $ negBounds bvNegate $ toBounds r
+
+rangeDiv :: Range tp -> Range tp -> Range tp
+rangeDiv r1@(IntRange {}) r2 = fromBounds int $ divBounds 0 (-1) div (toBounds r1) (toBounds r2)
+rangeDiv r1@(BitVecRange bw _) r2 = fromBounds (bitvec bw) $
+                                    divBounds (BitVecValue 0 bw) (BitVecValue (2^(naturalToInteger bw-1)) bw) bvDiv
+                                    (toBounds r1) (toBounds r2)
+
+rangeMod :: Range tp -> Range tp -> Range tp
+rangeMod r1@(IntRange {}) r2 = fromBounds int $ modBounds 0 mod (toBounds r1) (toBounds r2)
+rangeMod r1@(BitVecRange bw _) r2 = fromBounds (bitvec bw) $
+                                    modBounds (BitVecValue 0 bw) bvMod
+                                    (toBounds r1) (toBounds r2)
