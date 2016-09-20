@@ -1,10 +1,12 @@
 {-# LANGUAGE DataKinds,GADTs,TypeFamilies,ExistentialQuantification,ScopedTypeVariables,RankNTypes #-}
 module Language.SMTLib2.Composite.Choice
-  (Choice(),
+  (Choice(),ChoiceEncoding,
    -- * Encodings
    boolEncoding,intEncoding,bvEncoding,dtEncoding,possibleChoices,
+   -- * Constructor
+   singleton,initial,
    -- * Functions
-   chosen,choiceValues,choices,initial
+   chosen,choiceValues,choices
   ) where
 
 import Language.SMTLib2.Composite.Class
@@ -31,99 +33,42 @@ import Control.Monad.Except
 import Text.Show
 import Data.Maybe
 
-data Choice c e = ChoiceSingleton { _choiceSingleton :: c e }
-                | ChoiceBool { _choiceBool :: [(c e,e BoolType)] }
-                | forall t. ChoiceValue { _choiceValue :: [(c e,Value t)]
-                                        , _choiceExpr :: e t }
+data ChoiceEncoding = BoolEncoding
+                    | ValueEncoding Type
 
-choiceSingleton :: MaybeLens (Choice c e) (c e)
-choiceSingleton = lens (\x -> case x of
-                           ChoiceSingleton y -> Just y
-                           _ -> Nothing)
-                  (\_ new -> Just $ ChoiceSingleton new)
+data Choice enc c e where
+  ChoiceSingleton :: c e -> Choice BoolEncoding c e
+  ChoiceBool :: [(c e,e BoolType)] -> Choice BoolEncoding c e
+  ChoiceValue :: [(c e,Value tp)] -> e tp -> Choice (ValueEncoding tp) c e
 
-choiceBool :: MaybeLens (Choice c e) [(c e,e BoolType)]
+singleton :: (Composite c,Embed m e,Monad m,GetType e) => Choice enc c Repr -> c e -> m (Choice enc c e)
+singleton (ChoiceSingleton _) x = return $ ChoiceSingleton x
+singleton (ChoiceBool _) x = return $ ChoiceSingleton x
+singleton (ChoiceValue mp _) x = case lookupBy (\(el,_) -> compCompare (compType x) el) mp of
+  Just (_,key) -> do
+    val <- constant key
+    return $ ChoiceValue [(x,key)] val
+
+choiceBool :: MaybeLens (Choice BoolEncoding c e) [(c e,e BoolType)]
 choiceBool = lens (\x -> case x of
                       ChoiceBool xs -> Just xs
                       _ -> Nothing)
              (\_ new -> Just $ ChoiceBool new)
 
-{-choiceValue :: MaybeLens (Choice c e) (forall t. [(c e,Value t)])
-choiceValue = lens (\x -> case x of
-                       ChoiceValue xs _ -> Just xs
-                       _ -> Nothing)
-              (\x new -> case x of
-                  ChoiceValue _ e -> case new of
-                    [] -> Just $ ChoiceValue [] e
-                    (_,v):_ -> do
-                      Refl <- geq (getType e) (getType v)
-                      return $ ChoiceValue new e)
+boolEncoding :: Composite c => [c Repr] -> Choice BoolEncoding c Repr
+boolEncoding [c] = ChoiceSingleton c
+boolEncoding cs  = ChoiceBool $ zip (normalizeList compCompare cs) (repeat bool)
 
-choiceExpr :: MaybeLens (Choice c e) (forall t. e t)
-choiceExpr = lens (\x -> case x of
-                      ChoiceValue _ e -> Just e
-                      _ -> Nothing)
-             undefined-}
-
-type ChoiceEncoding c = Choice c Repr
-
--- | Sort and remove duplicates from a list.
-normalizeList :: (a -> a -> Ordering) -> [a] -> [a]
-normalizeList f = dups . sortBy f
-  where
-    dups [] = []
-    dups [x] = [x]
-    dups (x:y:ys) = if f x y == EQ
-                    then dups (x:ys)
-                    else x:dups (y:ys)
-
--- | Insert into a sorted list with a comparing and combining function.
-insertByWith :: Monad m => (a -> a -> Ordering) -> (a -> a -> m a) -> a -> [a] -> m [a]
-insertByWith comp comb x [] = return [x]
-insertByWith comp comb x (y:ys) = case comp x y of
-  LT -> return $ x:y:ys
-  GT -> do
-    ys' <- insertByWith comp comb x ys
-    return $ y:ys'
-  EQ -> do
-    ny <- comb x y
-    return $ ny:ys
-
-mergeByWith :: Monad m => (a -> a -> Ordering) -> (a -> a -> m a) -> [a] -> [a] -> m [a]
-mergeByWith comp comb [] ys = return ys
-mergeByWith comp comb xs [] = return xs
-mergeByWith comp comb (x:xs) (y:ys) = case comp x y of
-  LT -> do
-    zs <- mergeByWith comp comb xs (y:ys)
-    return $ x:zs
-  GT -> do
-    zs <- mergeByWith comp comb (x:xs) ys
-    return $ y:zs
-  EQ -> do
-    z <- comb x y
-    zs <- mergeByWith comp comb xs ys
-    return $ z:zs
-
-compareListWith :: (a -> a -> Ordering) -> [a] -> [a] -> Ordering
-compareListWith _ [] [] = EQ
-compareListWith _ [] _ = LT
-compareListWith _ _ [] = GT
-compareListWith f (x:xs) (y:ys) = case f x y of
-  EQ -> compareListWith f xs ys
-  r -> r
-
-boolEncoding :: Composite c => [CompDescr c] -> ChoiceEncoding c
-boolEncoding [x] = ChoiceSingleton x
-boolEncoding xs = ChoiceBool (zip (normalizeList compCompare xs) (repeat bool))
-
-intEncoding :: Composite c => [CompDescr c] -> ChoiceEncoding c
+intEncoding :: Composite c => [c Repr] -> Choice (ValueEncoding IntType) c Repr
 intEncoding xs = ChoiceValue (zip (normalizeList compCompare xs) [ IntValue n | n <- [0..] ]) int
 
-bvEncoding :: Composite c => [CompDescr c] -> ChoiceEncoding c
-bvEncoding xs = reifyNat bits $ \bw -> ChoiceValue
-                                       (zip (normalizeList compCompare xs)
-                                        [ BitVecValue n bw | n <- [0..] ])
-                                       (bitvec bw)
+bvEncoding :: Composite c => [c Repr]
+           -> (forall bw. Choice (ValueEncoding (BitVecType bw)) c Repr -> a)
+           -> a
+bvEncoding xs f = reifyNat bits $ \bw -> f $ ChoiceValue
+                                         (zip (normalizeList compCompare xs)
+                                          [ BitVecValue n bw | n <- [0..] ])
+                                         (bitvec bw)
   where
     bits = ceiling $ logBase 2 (fromIntegral size :: Double)
     size = length xs
@@ -138,11 +83,13 @@ reifyTypeList :: (forall r'. a -> (forall (tp::[Type]). Typeable tp => e tp -> r
 reifyTypeList _ [] g = g Nil
 reifyTypeList f (x:xs) g = f x $ \x' -> reifyTypeList f xs $ \xs' -> g (x' ::: xs')
 
-dtEncoding :: (Composite c,Backend b) => Proxy c -> String -> [(String,CompDescr c)] -> SMT b (ChoiceEncoding c)
-dtEncoding (_::Proxy c) dtName els
+dtEncoding :: (Composite c,Backend b) => String -> [(String,c Repr)]
+           -> (forall dt. Choice (ValueEncoding (DataType (DynamicValue dt))) c Repr -> SMT b a)
+           -> SMT b a
+dtEncoding dtName (els :: [(String,c Repr)]) g
   = reifyTypeList
   (\(con,el) f -> f (EncodingElement el (DynConstructor Nil con))) (normalizeList (\(_,x) (_,y) -> compCompare x y) els) $
-  \(cons :: List (EncodingElement (CompDescr c)) sig)
+  \(cons :: List (EncodingElement (c Repr)) sig)
   -> let cons' = runIdentity $ List.mapM
            (\(EncodingElement _ con) -> return con) cons
          tp :: DynamicDatatype sig
@@ -153,69 +100,15 @@ dtEncoding (_::Proxy c) dtName els
            (\idx (EncodingElement el con) -> return (el,DataValue tp' (DynValue tp idx Nil))) cons
      in do
     registerDatatype tp'
-    return $ ChoiceValue vals (DataRepr tp')
+    g $ ChoiceValue vals (DataRepr tp')
 
--- | Get all the values represented by this encoding.
-possibleChoices :: ChoiceEncoding c -> [CompDescr c]
-possibleChoices (ChoiceBool vals) = fmap fst vals
-possibleChoices (ChoiceValue mp _) = fmap fst mp
+data RevChoice enc c t where
+  RevChoiceBool :: Integer -> RevChoice BoolEncoding c BoolType
+  RevChoiceValue :: RevChoice (ValueEncoding t) c t
+  RevChoiceElement :: Integer -> RevComp c tp -> RevChoice enc c tp
 
-data RevChoice c t where
-  RevChoiceBool :: Integer -> RevChoice c BoolType
-  RevChoiceValue :: Repr t -> RevChoice c t
-  RevChoiceElement :: Integer -> RevComp c tp -> RevChoice c tp
-
-instance Composite c => GShow (RevChoice c) where
-  gshowsPrec p (RevChoiceBool i) = showParen (p>10) $
-    showString "RevChoiceBool " .
-    showsPrec 11 i
-  gshowsPrec p (RevChoiceValue tp) = showParen (p>10) $
-    showString "RevChoiceValue " .
-    showsPrec 11 tp
-  gshowsPrec p (RevChoiceElement i rev) = showParen (p>10) $
-    showString "RevChoiceElement " .
-    showsPrec 11 i . showChar ' ' .
-    gshowsPrec 11 rev
-
-instance Composite c => GEq (RevChoice c) where
-  geq (RevChoiceBool x) (RevChoiceBool y) = if x==y
-                                            then Just Refl
-                                            else Nothing
-  geq (RevChoiceValue t1) (RevChoiceValue t2) = do
-    Refl <- geq t1 t2
-    return Refl
-  geq (RevChoiceElement i1 r1) (RevChoiceElement i2 r2)
-    = if i1==i2
-      then do
-    Refl <- geq r1 r2
-    return Refl
-      else Nothing
-  geq _ _ = Nothing
-
-instance Composite c => GCompare (RevChoice c) where
-  gcompare (RevChoiceBool x) (RevChoiceBool y) = case compare x y of
-    EQ -> GEQ
-    LT -> GLT
-    GT -> GGT
-  gcompare (RevChoiceBool _) _ = GLT
-  gcompare _ (RevChoiceBool _) = GGT
-  gcompare (RevChoiceValue x) (RevChoiceValue y) = case gcompare x y of
-    GEQ -> GEQ
-    GLT -> GLT
-    GGT -> GGT
-  gcompare (RevChoiceValue _) _ = GLT
-  gcompare _ (RevChoiceValue _) = GGT
-  gcompare (RevChoiceElement i1 r1) (RevChoiceElement i2 r2) = case compare i1 i2 of
-    LT -> GLT
-    GT -> GGT
-    EQ -> case gcompare r1 r2 of
-      GEQ -> GEQ
-      GLT -> GLT
-      GGT -> GGT
-
-instance (Composite c) => Composite (Choice c) where
-  type RevComp (Choice a) = RevChoice a
-
+instance (Composite c) => Composite (Choice enc c) where
+  type RevComp (Choice enc a) = RevChoice enc a
   foldExprs f (ChoiceSingleton x) = do
     nx <- foldExprs (\rev -> f (RevChoiceElement 0 rev)
                     ) x
@@ -229,7 +122,7 @@ instance (Composite c) => Composite (Choice c) where
                  ) $ zip [0..] lst
     return $ ChoiceBool nlst
   foldExprs f (ChoiceValue lst v) = do
-    nv <- f (RevChoiceValue (getType v)) v
+    nv <- f RevChoiceValue v
     nlst <- mapM (\(i,(el,val)) -> do
                      nel <- foldExprs (\rev -> f (RevChoiceElement i rev)) el
                      return (nel,val)
@@ -239,15 +132,11 @@ instance (Composite c) => Composite (Choice c) where
     = choiceBool `composeMaybe`
       listElement' i `composeMaybe`
       maybeLens _2
-  accessComposite (RevChoiceValue tp)
+  accessComposite RevChoiceValue
     = lens (\ch -> case ch of
-               ChoiceValue _ e -> do
-                 Refl <- geq (getType e) tp
-                 return e)
+               ChoiceValue _ e -> return e)
       (\ch ne -> case ch of
-          ChoiceValue vals e -> do
-            Refl <- geq (getType e) tp
-            return $ ChoiceValue vals ne)
+          ChoiceValue vals e -> return $ ChoiceValue vals ne)
   accessComposite (RevChoiceElement i r)
     = lens (\x -> case x of
                ChoiceSingleton c -> if i==0
@@ -380,8 +269,8 @@ instance (Composite c) => Composite (Choice c) where
         c <- and' (xs'++y:ys')
         return $ c:cs
 
-instance CompositeExtract c => CompositeExtract (Choice c) where
-  type CompExtract (Choice a) = CompExtract a
+instance CompositeExtract c => CompositeExtract (Choice enc c) where
+  type CompExtract (Choice enc a) = CompExtract a
   compExtract f (ChoiceSingleton x) = compExtract f x
   compExtract f (ChoiceBool lst) = do
     nlst <- mapM (\(v,cond) -> do
@@ -399,8 +288,107 @@ instance CompositeExtract c => CompositeExtract (Choice c) where
       [x] -> compExtract f x
       _ -> error "Choice: More than one value selected."
 
+instance Composite c => GShow (RevChoice enc c) where
+  gshowsPrec p (RevChoiceBool i) = showParen (p>10) $
+    showString "RevChoiceBool " .
+    showsPrec 11 i
+  gshowsPrec p RevChoiceValue = showString "RevChoiceValue"
+  gshowsPrec p (RevChoiceElement i rev) = showParen (p>10) $
+    showString "RevChoiceElement " .
+    showsPrec 11 i . showChar ' ' .
+    gshowsPrec 11 rev
+
+instance Composite c => GEq (RevChoice enc c) where
+  geq (RevChoiceBool x) (RevChoiceBool y) = if x==y
+                                            then Just Refl
+                                            else Nothing
+  geq RevChoiceValue RevChoiceValue = Just Refl
+  geq (RevChoiceElement i1 r1) (RevChoiceElement i2 r2)
+    = if i1==i2
+      then do
+    Refl <- geq r1 r2
+    return Refl
+      else Nothing
+  geq _ _ = Nothing
+
+instance Composite c => GCompare (RevChoice enc c) where
+  gcompare (RevChoiceBool x) (RevChoiceBool y) = case compare x y of
+    EQ -> GEQ
+    LT -> GLT
+    GT -> GGT
+  gcompare (RevChoiceBool _) _ = GLT
+  gcompare _ (RevChoiceBool _) = GGT
+  gcompare RevChoiceValue RevChoiceValue = GEQ
+  gcompare RevChoiceValue _ = GLT
+  gcompare _ RevChoiceValue = GGT
+  gcompare (RevChoiceElement i1 r1) (RevChoiceElement i2 r2) = case compare i1 i2 of
+    LT -> GLT
+    GT -> GGT
+    EQ -> case gcompare r1 r2 of
+      GEQ -> GEQ
+      GLT -> GLT
+      GGT -> GGT
+
+-- | Sort and remove duplicates from a list.
+normalizeList :: (a -> a -> Ordering) -> [a] -> [a]
+normalizeList f = dups . sortBy f
+  where
+    dups [] = []
+    dups [x] = [x]
+    dups (x:y:ys) = if f x y == EQ
+                    then dups (x:ys)
+                    else x:dups (y:ys)
+
+-- | Insert into a sorted list with a comparing and combining function.
+insertByWith :: Monad m => (a -> a -> Ordering) -> (a -> a -> m a) -> a -> [a] -> m [a]
+insertByWith comp comb x [] = return [x]
+insertByWith comp comb x (y:ys) = case comp x y of
+  LT -> return $ x:y:ys
+  GT -> do
+    ys' <- insertByWith comp comb x ys
+    return $ y:ys'
+  EQ -> do
+    ny <- comb x y
+    return $ ny:ys
+
+mergeByWith :: Monad m => (a -> a -> Ordering) -> (a -> a -> m a) -> [a] -> [a] -> m [a]
+mergeByWith comp comb [] ys = return ys
+mergeByWith comp comb xs [] = return xs
+mergeByWith comp comb (x:xs) (y:ys) = case comp x y of
+  LT -> do
+    zs <- mergeByWith comp comb xs (y:ys)
+    return $ x:zs
+  GT -> do
+    zs <- mergeByWith comp comb (x:xs) ys
+    return $ y:zs
+  EQ -> do
+    z <- comb x y
+    zs <- mergeByWith comp comb xs ys
+    return $ z:zs
+
+lookupBy :: (a -> Ordering) -> [a] -> Maybe a
+lookupBy _ [] = Nothing
+lookupBy f (x:xs) = case f x of
+  LT -> lookupBy f xs
+  EQ -> Just x
+  GT -> Nothing
+
+compareListWith :: (a -> a -> Ordering) -> [a] -> [a] -> Ordering
+compareListWith _ [] [] = EQ
+compareListWith _ [] _ = LT
+compareListWith _ _ [] = GT
+compareListWith f (x:xs) (y:ys) = case f x y of
+  EQ -> compareListWith f xs ys
+  r -> r
+
+-- | Get all the values represented by this encoding.
+possibleChoices :: Choice enc c e -> [c e]
+possibleChoices (ChoiceSingleton x) = [x]
+possibleChoices (ChoiceBool vals) = fmap fst vals
+possibleChoices (ChoiceValue mp _) = fmap fst mp
+
 chosen :: Composite c
-       => CompLens (Choice c) c
+       => CompLens (Choice enc c) c
 chosen
   = lensM (\ch -> case ch of
               ChoiceSingleton x -> return x
@@ -410,7 +398,13 @@ chosen
                                 cond <- var .==. constant val
                                 return (c,cond)) xs
                 mkITE xs')
-    (\_ nel -> return $ ChoiceSingleton nel)
+    (\prev nel -> case prev of
+        ChoiceSingleton _ -> return $ ChoiceSingleton nel
+        ChoiceBool _ -> return $ ChoiceSingleton nel
+        ChoiceValue entrs _ -> case lookupBy (\(el,_) -> compCompare nel el) entrs of
+          Just (_,k) -> do
+            val <- constant k
+            return $ ChoiceValue entrs val)
   where
     mkITE :: (Composite c,Embed m e,Monad m,GetType e,GCompare e)
           => [(c e,e BoolType)]
@@ -423,7 +417,7 @@ chosen
         Just v' -> return v'
         Nothing -> error "Unmergable composite type used in chosen lens"
 
-choiceValues :: CompLens (Choice c) (CompList c)
+choiceValues :: CompLens (Choice enc c) (CompList c)
 choiceValues
   = liftLens $ lens
     (\ch -> case ch of
@@ -446,7 +440,7 @@ choiceValues
 -- | A lens accessing all possible values and their conditions.
 --   Warning: Updating this lens for a value encoding will blow up the condition
 --   expressions.
-choices :: CompLens (Choice c) (CompList (CompTuple2 c (Comp BoolType)))
+choices :: CompLens (Choice enc c) (CompList (CompTuple2 c (Comp BoolType)))
 choices
   = lensM (\ch -> case ch of
               ChoiceSingleton x -> do
@@ -459,15 +453,20 @@ choices
                                 return $ CompTuple2 c (Comp cond)
                             ) lst
                 return $ CompList res)
-    (\ch (CompList nlst) -> case ch of
+    (\ch (CompList nlst) -> let nbool :: (Embed m e,Monad m)
+                                      => [CompTuple2 c (Comp BoolType) e]
+                                      -> m (Choice BoolEncoding c e)
+                                nbool nlst = case nlst of
+                                  [CompTuple2 el _] -> return $ ChoiceSingleton el
+                                  _ -> return $ ChoiceBool $ fmap (\(CompTuple2 el (Comp cond)) -> (el,cond)) nlst
+                            in case ch of
         ChoiceValue lst e -> case zipSame (\(_,val) (CompTuple2 el (Comp cond)) -> (el,cond,val)) lst nlst of
           Nothing -> error "Cannot update the structure of a value encoding choice."
           Just rlst -> do
             ne <- mkITE rlst
             return (ChoiceValue (fmap (\(el,_,val) -> (el,val)) rlst) ne)
-        _ -> case nlst of
-          [CompTuple2 el _] -> return $ ChoiceSingleton el
-          _ -> return $ ChoiceBool $ fmap (\(CompTuple2 el (Comp cond)) -> (el,cond)) nlst)
+        ChoiceSingleton _ -> nbool nlst
+        ChoiceBool _ -> nbool nlst)
   where
     mkITE [(_,_,val)] = constant val
     mkITE ((_,cond,val):rest) = do
@@ -481,7 +480,10 @@ zipSame f (x:xs) (y:ys) = do
   return (f x y:rest)
 zipSame _ _ _ = Nothing
 
-initial :: (Composite c,Embed m e,Monad m) => (CompDescr c -> m (c e,Maybe (e BoolType))) -> ChoiceEncoding c -> m (Choice c e)
+initial :: (Composite c,Embed m e,Monad m)
+        => (c Repr -> m (c e,Maybe (e BoolType)))
+        -> Choice enc c Repr
+        -> m (Choice enc c e)
 initial f (ChoiceBool xs) = do
   lst <- mapM (\(x,_) -> do
                   (c,cond) <- f x
