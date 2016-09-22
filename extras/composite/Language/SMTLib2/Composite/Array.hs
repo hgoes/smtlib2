@@ -148,7 +148,13 @@ storeArray (CompArray idx arr) i el = do
                         put res
                         return e
                       Nothing -> throwError ()
-                  Nothing -> throwError ()
+                  Nothing -> do
+                    narr <- lift $ lift $ SMT.constArray idx e
+                    case setMaybe arr (accessComposite rev) (Arrayed narr) of
+                      Just res -> do
+                        put res
+                        return e
+                      Nothing -> throwError ()
             ) el) arr
   case narr of
       Left () -> return Nothing
