@@ -71,6 +71,9 @@ instance IsArray arr idx => IsArray (ByteArray arr) idx where
       Nothing -> return Nothing
       Just narr -> return $ Just $ ByteArray narr
 
+instance IsStaticBounded arr => IsStaticBounded (ByteArray arr) where
+  checkStaticIndex (ByteArray arr) = checkStaticIndex arr
+
 instance IsBounded arr idx => IsBounded (ByteArray arr) idx where
   checkIndex (ByteArray arr) = checkIndex arr
 
@@ -165,11 +168,66 @@ instance (IsBounded arr idx,StaticByteWidth (ElementType arr),IsNumeric idx)
     sz <- arraySize arr
     return $ Linear (fromInteger 0) [(fromInteger elSize,sz)]
 
-instance StaticByteAccess arr el => StaticByteAccess (ByteArray arr) el where
-  staticByteRead (ByteArray arr) = staticByteRead arr
+{-instance (IsStaticBounded arr,
+          --StaticByteAccess (ElementType arr) el,
+          StaticByteWidth (ElementType arr),
+          CanConcat el,
+          StaticByteWidth el)
+         => StaticByteAccess (ByteArray arr) el where
+  staticByteRead (ByteArray arr) off sz = do
+    let arrTp = compType arr
+        elTp = elementType arrTp
+        elWidth = staticByteWidth elTp
+        largestIdx = case (off+sz) `divMod` elWidth of
+          (res,0) -> res-1
+          (res,_) -> res
+        (startIdx,off) = off `divMod` elWidth
+    safety <- checkStaticIndex arr largestIdx
+    safetyCond <- case safety of
+      NoError -> return Nothing
+      SometimesError c -> return $ Just c
+      AlwaysError -> fmap Just true
+    res <- read arr startIdx off sz
+    case res of
+      Just el -> return $ Just (el,0)
+      Nothing -> return Nothing
+    where
+      read arr idx off sz = do
+        idx' <- compositeFromValue (fromInteger idx)
+        el <- Comp.select arr idx'
+        case el of
+          Nothing -> return Nothing
+          Just el' -> do
+            res <- staticByteRead el' off sz
+            case res of
+              Nothing -> return Nothing
+              Just (el,0) -> return (Just el)
+              Just (el,rest) -> do
+                nel <- read arr (idx+1) 0 rest
+                case nel of
+                  Nothing -> return Nothing
+                  Just nel' -> compConcat [el,nel']
   staticByteWrite (ByteArray arr) idx el = do
     wr <- staticByteWrite arr idx el
-    return $ ByteWrite (overwrite wr) (writeOutside wr) (fmap ByteArray $ fullWrite wr) (writeImprecision wr)
+    let arrTp = compType arr
+        elTp = elementType arrTp
+        sz = staticByteWidth el
+        elWidth = staticByteWidth elTp
+        largestIdx = case (idx+sz) `divMod` elWidth of
+          (res,0) -> res-1
+          (res,_) -> res
+    safety <- checkStaticIndex arr largestIdx
+    safetyCond <- case safety of
+      NoError -> return Nothing
+      SometimesError c -> return $ Just c
+      AlwaysError -> fmap Just true
+    outside <- case writeOutside wr of
+      Nothing -> return safetyCond
+      Just c1 -> case safetyCond of
+        Nothing -> return $ Just c1
+        Just c2 -> fmap Just $ c1 .&. c2
+    return wr { fullWrite = fmap ByteArray $ fullWrite wr
+              , writeOutside = outside }-}
 
 instance (StaticByteAccess arr el,
           IsBounded arr idx,ByteAccess (ElementType arr) idx el,
@@ -266,7 +324,7 @@ linearByteRead arr off sz = do
         Just el' -> do
           res <- case rest of
                    Just rest' -> byteRead el' rest' sz
-                   Nothing -> staticByteRead el' 0 sz
+                   Nothing -> staticByteRead el' 0 sz >>= toByteRead
           overs <- sequence [ do
                                 (res,imprec,largestIdx) <- read arr c1 c2 is Nothing remaining
                                 nres <- mapM (\(objs,conds) -> return (incompl:objs,cond:conds)) res
@@ -338,7 +396,7 @@ linearByteWrite arr off el = do
         Just el' -> do
           res <- case rest of
             Just rest' -> byteWrite el' rest' wr
-            Nothing -> staticByteWrite el' 0 wr
+            Nothing -> staticByteWrite el' 0 wr >>= toByteWrite
           arr1 <- case fullWrite res of
             Nothing -> return arr
             Just nel -> case conds of

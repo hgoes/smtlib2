@@ -272,6 +272,17 @@ instance (Composite start,Composite alt1,Composite alt2,
   compInvariant (Alternative2_1 x) = compInvariant x
   compInvariant (Alternative2_2 x) = compInvariant x
 
+instance (Convert start alt,
+          Convert start x,Convert alt x) => Convert (Fallback start alt) x where
+  convert (Start x) = convert x
+  convert (Alternative x) = convert x
+
+instance (Convert start alt1,Convert start alt2,Convert alt1 alt2,
+          Convert start x,Convert alt1 x,Convert alt2 x) => Convert (Fallback2 start alt1 alt2) x where
+  convert (Start2 x) = convert x
+  convert (Alternative2_1 x) = convert x
+  convert (Alternative2_2 x) = convert x
+
 instance (IsSingleton start,IsSingleton alt,
           SingletonType start ~ SingletonType alt,
           Convert start alt)
@@ -431,23 +442,39 @@ instance (IsArray start idx,IsArray alt1 idx,IsArray alt2 idx,
       Nothing -> return Nothing
       Just res -> return $ Just $ Alternative2_2 res
 
+instance (IsStaticBounded start,IsStaticBounded alt,
+          ElementType start ~ ElementType alt,
+          Convert start alt)
+         => IsStaticBounded (Fallback start alt) where
+  checkStaticIndex (Start x) = checkStaticIndex x
+  checkStaticIndex (Alternative x) = checkStaticIndex x
+
 instance (IsBounded start idx,IsBounded alt idx,
           ElementType start ~ ElementType alt,
           Convert start alt)
          => IsBounded (Fallback start alt) idx where
-  checkIndex (Start x) idx = checkIndex x idx
-  checkIndex (Alternative x) idx = checkIndex x idx
+  checkIndex (Start x) = checkIndex x
+  checkIndex (Alternative x) = checkIndex x
   arraySize (Start x) = arraySize x
   arraySize (Alternative x) = arraySize x
+
+instance (IsStaticBounded start,IsStaticBounded alt1,IsStaticBounded alt2,
+          ElementType start ~ ElementType alt1,
+          ElementType start ~ ElementType alt2,
+          Convert start alt1,Convert start alt2,Convert alt1 alt2)
+         => IsStaticBounded (Fallback2 start alt1 alt2) where
+  checkStaticIndex (Start2 x) = checkStaticIndex x
+  checkStaticIndex (Alternative2_1 x) = checkStaticIndex x
+  checkStaticIndex (Alternative2_2 x) = checkStaticIndex x
 
 instance (IsBounded start idx,IsBounded alt1 idx,IsBounded alt2 idx,
           ElementType start ~ ElementType alt1,
           ElementType start ~ ElementType alt2,
           Convert start alt1,Convert start alt2,Convert alt1 alt2)
          => IsBounded (Fallback2 start alt1 alt2) idx where
-  checkIndex (Start2 x) idx = checkIndex x idx
-  checkIndex (Alternative2_1 x) idx = checkIndex x idx
-  checkIndex (Alternative2_2 x) idx = checkIndex x idx
+  checkIndex (Start2 x) = checkIndex x
+  checkIndex (Alternative2_1 x) = checkIndex x
+  checkIndex (Alternative2_2 x) = checkIndex x
   arraySize (Start2 x) = arraySize x
   arraySize (Alternative2_1 x) = arraySize x
   arraySize (Alternative2_2 x) = arraySize x

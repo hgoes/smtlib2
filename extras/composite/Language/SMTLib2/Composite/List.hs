@@ -138,3 +138,6 @@ safeGenericInsertAt n x (y:ys) = do
   ys' <- safeGenericInsertAt (n-1) x ys
   return $ y:ys'
 safeGenericInsertAt _ _ [] = Nothing
+
+instance StaticByteWidth a => StaticByteWidth (CompList a) where
+  staticByteWidth (CompList xs) = sum $ fmap staticByteWidth xs

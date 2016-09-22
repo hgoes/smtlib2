@@ -49,8 +49,17 @@ instance (Composite arg,GShow e) => Show (arg e) where
 unionDescr :: Composite arg => arg Repr -> arg Repr -> Maybe (arg Repr)
 unionDescr x y = runIdentity $ compCombine (\tp _ -> return tp) x y
 
-compITE :: Composite arg => (Embed m e,Monad m,GetType e,GCompare e) => e BoolType -> arg e -> arg e -> m (Maybe (arg e))
+compITE :: (Composite arg,Embed m e,Monad m,GetType e,GCompare e) => e BoolType -> arg e -> arg e -> m (Maybe (arg e))
 compITE cond = compCombine (ite cond)
+
+compITEs :: (Composite arg,Embed m e,Monad m,GetType e,GCompare e) => [(e BoolType,arg e)] -> m (Maybe (arg e))
+compITEs [] = return Nothing
+compITEs [(_,x)] = return (Just x)
+compITEs ((c,x):xs) = do
+  rest <- compITEs xs
+  case rest of
+    Nothing -> return Nothing
+    Just rest' -> compITE c x rest'
 
 compType :: (Composite arg,GetType e) => arg e -> arg Repr
 compType = runIdentity . foldExprs (const $ return . getType)

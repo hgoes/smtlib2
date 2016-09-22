@@ -69,11 +69,31 @@ instance (IsArray arr idx,IsRanged idx,IsNumeric idx) => IsArray (Bounded arr id
       Nothing -> return Nothing
       Just narr' -> return $ Just $ Bounded narr' sz
 
-instance (IsArray arr idx,IsRanged idx,IsNumeric idx,Enum (Value (SingletonType idx))) => IsBounded (Bounded arr idx) idx where
+instance (IsArray arr idx,IsRanged idx,IsNumeric idx)
+  => IsStaticBounded (Bounded arr idx) where
+  checkStaticIndex arr idx = do
+    let idx' = fromInteger idx
+        idxRange = singletonRange idx'
+    sizeRange <- getRange $ _bound arr
+    let zeroRange = rangedConst (toEnum 0)
+        arrRange = betweenRange zeroRange sizeRange
+        outsideRange = setMinusRange arrRange idxRange
+        insideRange = intersectionRange arrRange idxRange
+    if nullRange outsideRange
+      then return NoError
+      else if nullRange insideRange
+           then return AlwaysError
+           else do
+      ridx <- compositeFromValue idx'
+      errCond <- compositeGEQ ridx (_bound arr)
+      return $ SometimesError errCond
+
+instance (IsArray arr idx,IsRanged idx,IsNumeric idx)
+  => IsBounded (Bounded arr idx) idx where
   checkIndex arr idx = do
     idxRange <- getRange idx
     sizeRange <- getRange $ _bound arr
-    let zeroRange = rangedConst (toEnum 0)
+    let zeroRange = rangedConst (fromInteger 0)
         arrRange = betweenRange zeroRange sizeRange
         outsideRange = setMinusRange arrRange idxRange
         insideRange = intersectionRange arrRange idxRange
@@ -117,3 +137,11 @@ instance (Composite arr,Composite idx) => Show (RevBounded arr idx tp) where
 
 instance (Composite arr,Composite idx) => GShow (RevBounded arr idx) where
   gshowsPrec = showsPrec
+
+instance (Composite idx,StaticByteAccess arr el) => StaticByteAccess (Bounded arr idx) el where
+  staticByteRead (Bounded arr _) off sz = staticByteRead arr off sz
+  staticByteWrite (Bounded arr arrSz) off el = do
+    res <- staticByteWrite arr off el
+    case res of
+      Nothing -> return Nothing
+      Just (narr,rest) -> return $ Just (Bounded narr arrSz,rest)

@@ -108,3 +108,55 @@ instance (Composite idx,Composite c) => IsArray (CompositeArray idx c) idx where
         case narr of
           Nothing -> return Nothing
           Just narr' -> return $ Just $ CompositeArray narr'
+
+instance (StaticByteAccess el res,CanConcat res,IsNumeric idx,StaticByteWidth el)
+         => StaticByteAccess (CompositeArray idx el) res where
+  staticByteRead comp@(CompositeArray arr :: CompositeArray idx el e) off sz = do
+    let elementSize = staticByteWidth (elementDescr (compType arr))
+        (idx,rest) = off `divMod` elementSize
+    res <- read idx rest sz
+    case res of
+      Nothing -> return Nothing
+      Just (els,nsz) -> do
+        el <- compConcat els
+        case el of
+          Nothing -> return Nothing
+          Just el' -> return $ Just (el',nsz)
+    where
+      read idx off sz = do
+        idx' <- compositeFromValue (fromInteger idx)
+        el <- select comp (idx' :: idx e)
+        case el of
+          Nothing -> return Nothing
+          Just el' -> do
+            res <- staticByteRead el' off sz
+            case res of
+              Nothing -> return Nothing
+              Just (rd,0) -> return $ Just ([rd],0)
+              Just (rd,rest) -> do
+                rds <- read (idx+1) 0 rest
+                case rds of
+                  Nothing -> return Nothing
+                  Just (rds',rest') -> return $ Just (rd:rds',rest')
+  staticByteWrite comp@(CompositeArray arr :: CompositeArray idx el e) off el = do
+    let elementSize = staticByteWidth (elementDescr (compType arr))
+        (idx,rest) = off `divMod` elementSize
+    write comp idx rest el
+    where
+      write arr idx off el = do
+        idx' <- compositeFromValue (fromInteger idx)
+        rd <- select comp (idx' :: idx e)
+        case rd of
+          Nothing -> return Nothing
+          Just rd' -> do
+            res <- staticByteWrite rd' off el
+            case res of
+              Nothing -> return Nothing
+              Just (nrd,rest) -> do
+                narr <- store arr idx' nrd
+                case narr of
+                  Nothing -> return Nothing
+                  Just narr' -> case rest of
+                    Nothing -> return $ Just (narr',Nothing)
+                    Just rest' -> write narr' (idx+1) 0 rest'
+      

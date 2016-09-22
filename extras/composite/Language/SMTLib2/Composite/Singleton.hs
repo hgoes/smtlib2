@@ -126,7 +126,6 @@ instance (IsRanged i,IsNumeric i,Integral (Value (SingletonType i)))
 instance StaticByteAccess (Comp (BitVecType bw)) CompBV where
   staticByteRead (Comp e :: Comp (BitVecType bw) e) off len = do
     tp <- embedTypeOf
-    (cond :: e BoolType) <- true
     case tp e of
       BitVecRepr bw -> do
         let bw' = naturalToInteger bw
@@ -134,7 +133,7 @@ instance StaticByteAccess (Comp (BitVecType bw)) CompBV where
                           then (bw'-off,Just $ len-(bw'-off))
                           else (len,Nothing)
         if off >= bw'
-          then return $ outsideRead cond
+          then return Nothing
           else reifyNat (fromInteger off) $
                \roff -> reifyNat (fromInteger len') $
                \rlen -> case naturalLEQ (naturalAdd roff rlen) bw of
@@ -142,23 +141,17 @@ instance StaticByteAccess (Comp (BitVecType bw)) CompBV where
                    Just Dict -> do
                      split <- splitBV roff rlen e
                      let result = CompBV $ splitBVGet split
-                     return $ ByteRead (case over of
-                                          Just ov -> Map.singleton ov (result,cond)
-                                          Nothing -> Map.empty)
-                              Nothing
-                              (case over of
-                                 Nothing -> Just result
-                                 Just _ -> Nothing)
-                              Nothing
+                     case over of
+                       Nothing -> return $ Just (result,0)
+                       Just ov -> return $ Just (result,ov)
   staticByteWrite (Comp trg :: Comp (BitVecType bw) e) off (CompBV src) = do
     tp <- embedTypeOf
-    (cond :: e BoolType) <- true
     case tp src of
       BitVecRepr srcWidth -> do
           let srcWidth' = naturalToInteger srcWidth
           trgWidth' <- bvSize trg
           if off >= trgWidth'
-            then return $ outsideWrite cond
+            then return Nothing
             else if off+srcWidth' > trgWidth'
                  then (do
                           let len = trgWidth' - off
@@ -169,12 +162,12 @@ instance StaticByteAccess (Comp (BitVecType bw)) CompBV where
                               Just splitTrg <- splitBVMaybe roff rlen trg
                               Just (NoPrefix wr wrRest) <- splitBVMaybe Zero rlen src
                               ntrg <- unsplitBV $ splitBVSet splitTrg wr
-                              return $ ByteWrite [(CompBV wrRest,cond)] Nothing (Just $ Comp ntrg) Nothing)
+                              return $ Just (Comp ntrg,Just (CompBV wrRest)))
                  else (reifyNat (fromInteger off) $
                        \roff -> do
                          Just splitTrg <- splitBVMaybe roff srcWidth trg
                          ntrg <- unsplitBV $ splitBVSet splitTrg src
-                         return $ ByteWrite [] Nothing (Just (Comp ntrg)) Nothing)
+                         return $ Just (Comp ntrg,Nothing))
 
 bvSize :: Embed m e => e (BitVecType bw) -> m Integer
 bvSize e = (\tp -> case tp e of

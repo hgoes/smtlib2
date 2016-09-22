@@ -213,25 +213,23 @@ instance (StaticByteWidth a,StaticByteAccess a el,StaticByteAccess b el,CanConca
       then staticByteRead y (idx-wx) sz
       else do
       rx <- staticByteRead x idx sz
-      reads1 <- case fullRead rx of
-        Just r -> do
-          cond <- fullReadCond rx
-          cond' <- case cond of
-            [] -> true
-            [c] -> return c
-            _ -> and' cond
-          return [(ByteRead Map.empty Nothing (Just r) (readImprecision rx),cond')]
-        Nothing -> return []
-      reads2 <- sequence [ do
-                             r <- staticByteRead y 0 rest
-                             nr <- concatRead part r
-                             return (nr,cond)
-                         | (rest,(part,cond)) <- Map.toList $ overreads rx ]
-      byteReadITE (reads1++reads2)
+      case rx of
+        Nothing -> return Nothing
+        Just (rx',restx) -> if restx==0
+                            then return $ Just (rx',0)
+                            else do
+          ry <- staticByteRead y (idx-wx) restx
+          case ry of
+            Nothing -> return Nothing
+            Just (ry',resty) -> do
+              res <- compConcat [rx',ry']
+              case res of
+                Nothing -> return Nothing
+                Just res' -> return $ Just (res',resty)
 
 instance (StaticByteWidth a,ByteAccess a idx el,ByteAccess b idx el,CanConcat el)
          => ByteAccess (CompTuple2 a b) idx el where
-  byteRead (CompTuple2 x y) idx sz = do
+  byteRead (CompTuple2 x y) (idx :: idx e) sz = do
     rx <- byteRead x idx sz
     reads1 <- case fullRead rx of
       Just r -> do
@@ -243,7 +241,8 @@ instance (StaticByteWidth a,ByteAccess a idx el,ByteAccess b idx el,CanConcat el
         return [(ByteRead Map.empty Nothing (Just r) (readImprecision rx),cond')]
       Nothing -> return []
     reads2 <- sequence [ do
-                           r <- staticByteRead y 0 rest
+                           zero <- compositeFromValue (fromInteger 0)
+                           r <- byteRead y (zero::idx e) rest
                            nr <- concatRead part r
                            return (nr,cond)
                        | (rest,(part,cond)) <- Map.toList $ overreads rx ]
@@ -256,4 +255,37 @@ instance (StaticByteWidth a,ByteAccess a idx el,ByteAccess b idx el,CanConcat el
         ry <- byteRead y nidx sz
         return [(ry,cond)]
     byteReadITE (reads1++reads2++reads3)
-
+  byteWrite (CompTuple2 x y) (idx::idx e) el = do
+    wx <- byteWrite x idx el
+    writes1 <- case fullWrite wx of
+      Just w -> do
+        cond <- fullWriteCond wx
+        cond' <- case cond of
+          [] -> true
+          [c] -> return c
+          _ -> and' cond
+        return [(ByteWrite [] Nothing (Just (CompTuple2 w y)) (writeImprecision wx),cond')]
+      Nothing -> return []
+    writes2 <- sequence [ do
+                            zero <- compositeFromValue (fromInteger 0)
+                            wy <- byteWrite y (zero::idx e) rest
+                            return $ (wy { fullWrite = case fullWrite wx of
+                                             Nothing -> case fullWrite wy of
+                                               Nothing -> Nothing
+                                               Just y' -> Just $ CompTuple2 x y'
+                                             Just x' -> case fullWrite wy of
+                                               Nothing -> Just $ CompTuple2 x' y
+                                               Just y' -> Just $ CompTuple2 x' y' },cond)
+                        | (rest,cond) <- overwrite wx ]
+    writes3 <- case writeOutside wx of
+      Nothing -> return []
+      Just cond -> do
+        let szx = staticByteWidth x
+        szx' <- compositeFromValue (fromInteger szx)
+        nidx <- compositeMinus idx szx'
+        wy <- byteWrite y nidx el
+        return [(wy { fullWrite = case fullWrite wy of
+                        Nothing -> Nothing
+                        Just y' -> Just $ CompTuple2 x y'
+                    },cond)]
+    byteWriteITE (writes1++writes2++writes3)

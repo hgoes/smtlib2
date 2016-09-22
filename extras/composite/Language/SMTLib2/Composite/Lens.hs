@@ -66,7 +66,11 @@ composeMaybe l1 l2
 maybeLens :: Lens' a b -> MaybeLens a b
 maybeLens l = lens (\x -> Just $ x ^. l)
               (\x new -> Just $ x & l .~ new)
-                                   
+
+nothingLens :: MaybeLens a b
+nothingLens = lens (\_ -> Nothing)
+              (\_ _ -> Nothing)
+
 forceMaybe :: MaybeLens a b -> Lens' a b
 forceMaybe l = lens (\x -> case getMaybe x l of
                         Just r -> r)
