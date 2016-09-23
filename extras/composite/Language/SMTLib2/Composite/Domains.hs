@@ -128,6 +128,10 @@ class Composite c => CanConcat c where
     return $ Just (res,[nc])
   withConcat _ _ = return Nothing
 
+class Composite c => CanSplit c where
+  withSplit :: (Embed m e,Monad m) => ((c e,c e) -> m (a,c e,c e)) -> Integer -> c e -> m (Maybe (a,c e))
+  withSplit _ _ _ = return Nothing
+
 outsideRead :: e BoolType -> ByteRead a e
 outsideRead c = ByteRead Map.empty (Just c) Nothing Nothing
 
@@ -194,6 +198,11 @@ concatRead part read = do
 compConcat :: (CanConcat c,Embed m e,Monad m) => [c e] -> m (Maybe (c e))
 compConcat xs = do
   res <- withConcat (\c -> return (c,c)) xs
+  return $ fmap fst res
+
+compSplit :: (CanSplit c,Embed m e,Monad m) => Integer -> c e -> m (Maybe (c e,c e))
+compSplit off c = do
+  res <- withSplit (\(pre,post) -> return ((pre,post),pre,post)) off c
   return $ fmap fst res
 
 maybeITE :: (Embed m e,Monad m) => e BoolType -> Maybe (e BoolType) -> Maybe (e BoolType) -> m (Maybe (e BoolType))
