@@ -8,6 +8,7 @@ import Language.SMTLib2.Internals.Type.List
 import qualified Language.SMTLib2.Internals.Type.List as List
 
 import Data.GADT.Compare
+import Data.GADT.Show
 import Data.List (genericLength)
 import Data.Bits
 import Data.Dependent.Map (DMap)
@@ -341,3 +342,141 @@ evaluateFun _ _ (Test con) ((ValueResult (ConstrValue con' _)) ::: Nil)
 --  = ev f con args
 evaluateFun _ _ (Divisible n) ((ValueResult (IntValue i)) ::: Nil)
   = return $ ValueResult $ BoolValue $ i `mod` n == 0
+
+instance GetFunType fun => GetType (EvalResult fun) where
+  getType (ValueResult v) = getType v
+  getType (ArrayResult v) = let (idx,res) = getArrayModelType v
+                            in ArrayRepr idx res
+
+getArrayModelType :: GetFunType fun => ArrayModel fun idx el -> (List Repr idx,Repr el)
+getArrayModelType (ArrayConst c idx) = (idx,getType c)
+getArrayModelType (ArrayFun fun) = getFunType fun
+getArrayModelType (ArrayMap fun args idx)
+  = let (_,res) = getFunType fun
+    in (idx,res)
+getArrayModelType (ArrayStore idx el arr) = getArrayModelType arr
+
+instance GShow fun => Show (EvalResult fun res) where
+  showsPrec p (ValueResult v) = showsPrec p v
+  showsPrec p (ArrayResult arr) = showsPrec p arr
+
+instance GShow fun => Show (ArrayModel fun idx el) where
+  showsPrec p (ArrayConst c idx)
+    = showString "(array-const " .
+      showsPrec 11 idx . showChar ' ' .
+      showsPrec 11 c . showChar ')'
+  showsPrec p (ArrayFun fun)
+    = showString "(array-fun " .
+      showsPrec 11 fun . showChar ')'
+  showsPrec p (ArrayMap fun args idx)
+    = showString "(array-map " .
+      showsPrec 11 fun . showChar ' ' .
+      showsPrec 11 args . showChar ')'
+  showsPrec p (ArrayStore idx el mdl)
+    = showString "(array-store " .
+      showsPrec 11 idx . showChar ' ' .
+      showsPrec 11 el . showChar ' ' .
+      showsPrec 11 mdl . showChar ')'
+
+instance GShow fun => GShow (EvalResult fun) where
+  gshowsPrec = showsPrec
+
+instance GShow fun => GShow (ArrayModel fun idx) where
+  gshowsPrec = showsPrec
+
+instance GEq fun => GEq (EvalResult fun) where
+  geq (ValueResult x) (ValueResult y) = geq x y
+  geq (ArrayResult mdl1) (ArrayResult mdl2) = do
+    (Refl,Refl) <- geqArrayModel mdl1 mdl2
+    return Refl
+  geq _ _ = Nothing
+
+instance GCompare fun => GCompare (EvalResult fun) where
+  gcompare (ValueResult x) (ValueResult y) = gcompare x y
+  gcompare (ValueResult _) _ = GLT
+  gcompare _ (ValueResult _) = GGT
+  gcompare (ArrayResult x) (ArrayResult y) = case gcompareArrayModel x y of
+    (GEQ,GEQ) -> GEQ
+    (GEQ,GLT) -> GLT
+    (GEQ,GGT) -> GGT
+    (GLT,_) -> GLT
+    (GGT,_) -> GGT
+
+geqArrayModel :: GEq fun => ArrayModel fun idx1 el1 -> ArrayModel fun idx2 el2 -> Maybe (idx1 :~: idx2,el1 :~: el2)
+geqArrayModel (ArrayConst v1 idx1) (ArrayConst v2 idx2) = do
+  Refl <- geq v1 v2
+  Refl <- geq idx1 idx2
+  return (Refl,Refl)
+geqArrayModel (ArrayFun f1) (ArrayFun f2) = do
+  Refl <- geq f1 f2
+  return (Refl,Refl)
+geqArrayModel (ArrayMap f1 arg1 idx1) (ArrayMap f2 arg2 idx2) = do
+  Refl <- geq idx1 idx2
+  Refl <- geq f1 f2
+  _ <- zipToListM (\x y -> do
+                      (Refl,Refl) <- geqArrayModel x y
+                      return ()) arg1 arg2
+  return (Refl,Refl)
+geqArrayModel (ArrayStore idx1 el1 arr1) (ArrayStore idx2 el2 arr2) = do
+  Refl <- geq idx1 idx2
+  Refl <- geq el1 el2
+  (Refl,Refl) <- geqArrayModel arr1 arr2
+  return (Refl,Refl)
+geqArrayModel _ _ = Nothing
+
+gcompareArrayModel :: GCompare fun => ArrayModel fun idx1 el1 -> ArrayModel fun idx2 el2
+                   -> (GOrdering idx1 idx2,
+                       GOrdering el1 el2)
+gcompareArrayModel (ArrayConst c1 idx1) (ArrayConst c2 idx2)
+  = case gcompare idx1 idx2 of
+  GEQ -> (GEQ,gcompare c1 c2)
+  GLT -> (GLT,GLT)
+  GGT -> (GGT,GGT)
+gcompareArrayModel (ArrayConst _ _) _ = (GLT,GLT)
+gcompareArrayModel _ (ArrayConst _ _) = (GGT,GGT)
+gcompareArrayModel (ArrayFun f1) (ArrayFun f2) = case gcompare f1 f2 of
+  GEQ -> (GEQ,GEQ)
+  GLT -> (GLT,GLT)
+  GGT -> (GGT,GGT)
+gcompareArrayModel (ArrayFun _) _ = (GLT,GLT)
+gcompareArrayModel _ (ArrayFun _) = (GGT,GGT)
+gcompareArrayModel (ArrayMap f1 arg1 idx1) (ArrayMap f2 arg2 idx2)
+  = case gcompare idx1 idx2 of
+  GEQ -> (GEQ,case gcompare f1 f2 of
+                GEQ -> case gcompareArrayModels arg1 arg2 of
+                  GEQ -> GEQ
+                  GLT -> GLT
+                  GGT -> GGT
+                GLT -> GLT
+                GGT -> GGT)
+  GLT -> (GLT,GLT)
+  GGT -> (GGT,GGT)
+  where
+    gcompareArrayModels :: GCompare fun
+                        => List (ArrayModel fun idx) arg1
+                        -> List (ArrayModel fun idx) arg2
+                        -> GOrdering arg1 arg2
+    gcompareArrayModels Nil Nil = GEQ
+    gcompareArrayModels Nil _ = GLT
+    gcompareArrayModels _ Nil = GGT
+    gcompareArrayModels (x:::xs) (y:::ys) = case gcompareArrayModel x y of
+      (GEQ,GEQ) -> case gcompareArrayModels xs ys of
+        GEQ -> GEQ
+        GLT -> GLT
+        GGT -> GGT
+      (GEQ,GLT) -> GLT
+      (GEQ,GGT) -> GGT
+      (GLT,_) -> GLT
+      (GGT,_) -> GGT
+gcompareArrayModel (ArrayMap _ _ _) _ = (GLT,GLT)
+gcompareArrayModel _ (ArrayMap _ _ _) = (GGT,GGT)
+gcompareArrayModel (ArrayStore idx1 el1 mdl1) (ArrayStore idx2 el2 mdl2)
+  = case gcompareArrayModel mdl1 mdl2 of
+  (GEQ,GEQ) -> case gcompare idx1 idx2 of
+    GEQ -> case gcompare el1 el2 of
+      GEQ -> (GEQ,GEQ)
+      GLT -> (GEQ,GLT)
+      GGT -> (GEQ,GGT)
+    GLT -> (GLT,GLT)
+    GGT -> (GGT,GGT)
+  r -> r

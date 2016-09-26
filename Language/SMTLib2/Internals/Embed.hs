@@ -11,6 +11,7 @@ import Language.SMTLib2.Internals.Evaluate
 import Data.Functor.Identity
 import Control.Monad.State
 import Data.GADT.Compare
+import Data.GADT.Show
 import qualified Data.Dependent.Map as DMap
 
 type EmbedExpr m e tp = Expression (EmVar m e) (EmQVar m e) (EmFun m e) (EmFunArg m e) (EmLVar m e) e tp
@@ -108,6 +109,12 @@ instance GCompare (UserFun m e) where
 instance GetFunType (UserFun m e) where
   getFunType (UserFun arg res _ _) = (arg,res)
 
+instance GShow (UserFun m e) where
+  gshowsPrec p (UserFun idx res n _)
+    = showParen (p>10) $ showsPrec 11 n . showString " : " .
+      showsPrec 11 idx . showString " -> " .
+      showsPrec 11 res
+
 instance Embed Identity Value where
   type EmVar Identity Value = NoVar
   type EmQVar Identity Value = NoVar
@@ -130,6 +137,43 @@ instance Embed Identity Value where
            (\_ val -> return $ ValueResult val) re
     case res of
       ValueResult v -> return v
+  embedQuantifier = error "embedQuantifier: Cannot use quantifiers in Value"
+  embedTypeOf = pure getType
+
+newtype ValueExt m tp = ValueExt { valueExt :: EvalResult (UserFun m (ValueExt m)) tp }
+
+instance GetType (ValueExt m) where
+  getType (ValueExt e) = getType e
+
+instance GShow (ValueExt m) where
+  gshowsPrec p (ValueExt e) = gshowsPrec p e
+
+instance GEq (ValueExt m) where
+  geq (ValueExt e1) (ValueExt e2) = geq e1 e2
+
+instance GCompare (ValueExt m) where
+  gcompare (ValueExt e1) (ValueExt e2) = gcompare e1 e2
+
+instance Embed Identity (ValueExt Identity) where
+  type EmVar Identity (ValueExt Identity) = NoVar
+  type EmQVar Identity (ValueExt Identity) = NoVar
+  type EmFun Identity (ValueExt Identity) = UserFun Identity (ValueExt Identity)
+  type EmFunArg Identity (ValueExt Identity) = NoVar
+  type EmLVar Identity (ValueExt Identity) = NoVar
+  embed e = do
+    re <- e
+    fmap ValueExt $ evaluateExpr
+           (error "embed: No variables in embedded values")
+           (error "embed: No quantified variables in embedded values")
+           (error "embed: No function variables in embedded values")
+           (\(UserFun _ _ _ f) lst -> do
+               lst' <- List.mapM (return.ValueExt) lst
+               fmap valueExt $ f lst')
+           (error "embed: No fields in embedded values")
+           (error "embed: No quantifier in embedded values")
+           DMap.empty
+           (\_ val -> return $ valueExt val) re
+  embedQuantifier = error "embedQuantifier: Cannot use quantifiers in ValueExt"
   embedTypeOf = pure getType
 
 newtype BackendInfo b = BackendInfo b
