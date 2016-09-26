@@ -137,7 +137,6 @@ instance Embed Identity Value where
            (\_ val -> return $ ValueResult val) re
     case res of
       ValueResult v -> return v
-  embedQuantifier = error "embedQuantifier: Cannot use quantifiers in Value"
   embedTypeOf = pure getType
 
 newtype ValueExt m tp = ValueExt { valueExt :: EvalResult (UserFun m (ValueExt m)) tp }
