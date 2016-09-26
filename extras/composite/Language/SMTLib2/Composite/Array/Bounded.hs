@@ -95,7 +95,7 @@ instance (IsArray arr idx,IsRanged idx,IsNumeric idx)
     sizeRange <- getRange $ _bound arr
     let zeroRange = rangedConst (fromInteger 0)
         arrRange = betweenRange zeroRange sizeRange
-        outsideRange = setMinusRange arrRange idxRange
+        outsideRange = setMinusRange idxRange arrRange
         insideRange = intersectionRange arrRange idxRange
     if nullRange outsideRange
       then return NoError
