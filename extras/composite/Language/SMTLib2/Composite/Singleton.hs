@@ -53,6 +53,8 @@ instance IsNumeric (Comp IntType) where
   compositeSum = fmap Comp . plus . fmap _comp
   compositeMult (Comp x) (Comp y) = fmap Comp (x .*. y)
   compositeGEQ (Comp x) (Comp y) = x .>=. y
+  compositeDiv (Comp x) (Comp y) = fmap Comp $ div' x y
+  compositeMod (Comp x) (Comp y) = fmap Comp $ mod' x y
 
 instance IsNatural bw => IsNumeric (Comp (BitVecType bw)) where
   compositeFromValue = fmap Comp . constant

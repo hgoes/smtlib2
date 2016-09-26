@@ -1,6 +1,7 @@
 module Language.SMTLib2.Composite.Class where
 
 import Language.SMTLib2
+import Language.SMTLib2.Internals.Embed
 import Language.SMTLib2.Composite.Lens
 
 import Data.GADT.Compare
@@ -63,6 +64,35 @@ compITEs ((c,x):xs) = do
 
 compType :: (Composite arg,GetType e) => arg e -> arg Repr
 compType = runIdentity . foldExprs (const $ return . getType)
+
+newtype EqT e m a = EqT (WriterT [e BoolType] m a) deriving (Applicative,Functor,Monad,MonadWriter [e BoolType])
+
+instance (Embed m e,Monad m) => Embed (EqT e m) e where
+  type EmVar (EqT e m) e = EmVar m e
+  type EmQVar (EqT e m) e = EmQVar m e
+  type EmFun (EqT e m) e = EmFun m e
+  type EmFunArg (EqT e m) e = EmFunArg m e
+  type EmLVar (EqT e m) e = EmLVar m e
+  embed e = do
+    re <- e
+    EqT (lift $ embed (pure re))
+  embedQuantifier q arg f
+    = EqT (lift $ embedQuantifier q arg f)
+  embedTypeOf = EqT (lift embedTypeOf)
+
+compEq :: (Composite arg,Embed m e,Monad m,GetType e,GCompare e) => arg e -> arg e -> m (Maybe (e BoolType))
+compEq x y = do
+  let EqT wr = compCombine (\vx vy -> do
+                               eq <- vx .==. vy
+                               tell [eq]
+                               return vx) x y
+  (res,eqs) <- runWriterT wr
+  case res of
+    Nothing -> return Nothing
+    Just _ -> case eqs of
+      [] -> fmap Just true
+      [c] -> return $ Just c
+      _ -> fmap Just $ and' eqs
 
 createComposite :: (Composite arg,Monad m)
                 => (forall t. Repr t -> RevComp arg t -> m (e t))

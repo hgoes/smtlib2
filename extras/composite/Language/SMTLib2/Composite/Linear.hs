@@ -258,10 +258,18 @@ linearByteRead arr off sz = do
       sz' = fromInteger sz
   elWidth'' <- compositeFromValue elWidth'
   c1 <- delinear $ Linear constIdx linIdx
-  c2 <- delinear $ Linear nconstIdx nlinIdx
-  rc2 <- compositeDiv c2 elWidth''
-  rest <- compositeMod c2 elWidth''
-  (objs,imprec,largestIdx) <- read arr c1 rc2 [0..] (Just rest) sz
+  (c2,rest) <- case nlinIdx of
+    [] -> if nconstIdx==0
+          then return (Nothing,Nothing)
+          else do
+      c <- compositeFromValue nconstIdx
+      return (Nothing,Just c)
+    _ -> do
+      c <- delinear $ Linear nconstIdx nlinIdx
+      rc2 <- compositeDiv c elWidth''
+      rest <- compositeMod c elWidth''
+      return (Just rc2,Just rest)
+  (objs,imprec,largestIdx) <- read arr c1 c2 [0..] rest sz
   nobjs <- mapM (\(obj,cond) -> do
                     nobj <- compConcat obj
                     return (nobj,cond)) objs
@@ -282,7 +290,9 @@ linearByteRead arr off sz = do
       return $ impreciseRead cond
     Just res -> do
       largestIdx' <- compositeFromValue largestIdx
-      maxIdx <- compositeSum [c1,rc2,largestIdx']
+      maxIdx <- compositeSum ([c1]++(case c2 of
+                                       Nothing -> []
+                                       Just c -> [c])++[largestIdx'])
       safety <- checkIndex arr maxIdx
       safetyCond <- case safety of
         NoError -> return Nothing
@@ -311,11 +321,13 @@ linearByteRead arr off sz = do
              StaticByteWidth (ElementType arr),IsRanged idx,
              StaticByteAccess (ElementType arr) el,
              Embed m e,Monad m,GCompare e,GetType e
-            ) => arr e -> idx e -> idx e -> [Value (SingletonType idx)] -> Maybe (idx e) -> Integer
+            ) => arr e -> idx e -> Maybe (idx e) -> [Value (SingletonType idx)] -> Maybe (idx e) -> Integer
          -> m ([([el e],[e BoolType])],[e BoolType],Value (SingletonType idx))
     read arr c1 c2 (i:is) rest sz = do
       idx <- compositeFromValue i
-      idx' <- compositeSum [c1,c2,idx]
+      idx' <- compositeSum ([c1]++(case c2 of
+                                     Nothing -> []
+                                     Just c -> [c])++[idx])
       el <- Comp.select arr idx'
       case el of
         Nothing -> do
@@ -361,16 +373,26 @@ linearByteWrite arr off el = do
       sz' = fromInteger sz
   elWidth'' <- compositeFromValue elWidth'
   c1 <- delinear $ Linear constIdx linIdx
-  c2 <- delinear $ Linear nconstIdx nlinIdx
-  rc2 <- compositeDiv c2 elWidth''
-  rest <- compositeMod c2 elWidth''
-  (narr,imprec,largestIdx) <- write arr c1 rc2 [0..] (Just rest) el []
+  (c2,rest) <- case nlinIdx of
+    [] -> if nconstIdx==0
+          then return (Nothing,Nothing)
+          else do
+      c <- compositeFromValue nconstIdx
+      return (Nothing,Just c)
+    _ -> do
+      c <- delinear $ Linear nconstIdx nlinIdx
+      rc2 <- compositeDiv c elWidth''
+      rest <- compositeMod c elWidth''
+      return (Just rc2,Just rest)
+  (narr,imprec,largestIdx) <- write arr c1 c2 [0..] rest el []
   nimprec <- case imprec of
     [] -> return Nothing
     [x] -> return $ Just x
     xs -> fmap Just $ or' xs
   largestIdx' <- compositeFromValue largestIdx
-  maxIdx <- compositeSum [c1,rc2,largestIdx']
+  maxIdx <- compositeSum ([c1]++(case c2 of
+                                   Nothing -> []
+                                   Just c -> [c])++[largestIdx'])
   safety <- checkIndex arr maxIdx
   safetyCond <- case safety of
     NoError -> return Nothing
@@ -382,12 +404,14 @@ linearByteWrite arr off el = do
               StaticByteWidth (ElementType arr),IsRanged idx,
               StaticByteAccess (ElementType arr) el,
               Embed m e,Monad m,GCompare e,GetType e)
-          => arr e -> idx e -> idx e -> [Value (SingletonType idx)] -> Maybe (idx e) -> el e
+          => arr e -> idx e -> Maybe (idx e) -> [Value (SingletonType idx)] -> Maybe (idx e) -> el e
           -> [e BoolType]
           -> m (arr e,[e BoolType],Value (SingletonType idx))
     write arr c1 c2 (i:is) rest wr conds = do
       idx <- compositeFromValue i
-      idx' <- compositeSum [c1,c2,idx]
+      idx' <- compositeSum ([c1]++(case c2 of
+                                     Nothing -> []
+                                     Just c -> [c])++[idx])
       el <- Comp.select arr idx'
       case el of
         Nothing -> do
@@ -485,7 +509,10 @@ instance (IsRanged c,IsNumeric c) => IsRanged (Linear c) where
     let rc = rangedConst c
     rlin <- mapM (\(c,x) -> do
                      rx <- getRange x
-                     return $ (rangedConst c) `rangeMult` rx) lin
+                     case asFiniteRange rx of
+                       Nothing -> return $ (rangedConst c) `rangeMult` rx
+                       Just rxs -> return $ rangeFromList (getType c) (fmap (*c) rxs)
+                 ) lin
     return $ foldl rangeAdd rc rlin
 
 instance IsNumeric c => IsSingleton (Linear c) where

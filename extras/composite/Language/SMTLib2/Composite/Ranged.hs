@@ -92,7 +92,12 @@ instance IsNumeric c => IsNumeric (Ranged c) where
     return $ Ranged (rangeNeg $ _range c) nc
   compositeMult c1 c2 = do
     c <- compositeMult (_ranged c1) (_ranged c2)
-    return $ Ranged (rangeMult (_range c1) (_range c2)) c
+    let nrange = case asFiniteRange (_range c1) of
+          Just r1 -> case asFiniteRange (_range c2) of
+            Just r2 -> rangeFromList (getType (_range c1)) [ v1*v2 | v1 <- r1, v2 <- r2 ]
+            Nothing -> rangeMult (_range c1) (_range c2)
+          Nothing -> rangeMult (_range c1) (_range c2)
+    return $ Ranged nrange c
   compositeGEQ c1 c2 = compositeGEQ (_ranged c1) (_ranged c2)
   compositeDiv c1 c2 = do
     c <- compositeDiv (_ranged c1) (_ranged c2)

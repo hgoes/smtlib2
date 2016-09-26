@@ -47,6 +47,9 @@ tuple3_2 = liftLens ctuple3_2
 tuple3_3 :: (Composite a,Composite b,Composite c) => CompLens (CompTuple3 a b c) c
 tuple3_3 = liftLens ctuple3_3
 
+instance (Composite a,Composite b,GShow e) => Show (CompTuple2 a b e) where
+  showsPrec p (CompTuple2 x y) = showChar '(' . compShow 0 x . showChar ',' . compShow 0 y . showChar ')'
+
 instance (Composite a,Composite b) => Composite (CompTuple2 a b) where
   type RevComp (CompTuple2 a b) = RevTuple2 a b
   foldExprs f tup = do
@@ -65,7 +68,7 @@ instance (Composite a,Composite b) => Composite (CompTuple2 a b) where
   compCompare (CompTuple2 x1 y1) (CompTuple2 x2 y2) = case compCompare x1 x2 of
     EQ -> compCompare y1 y2
     r -> r
-  compShow p (CompTuple2 x y) = showChar '(' . compShow 0 x . showChar ',' . compShow 0 y . showChar ')'
+  compShow = showsPrec
   compInvariant (CompTuple2 x y) = do
     invX <- compInvariant x
     invY <- compInvariant y
@@ -78,6 +81,13 @@ instance (CompositeExtract a,CompositeExtract b)
     = (\va vb -> (va,vb)) <$>
       compExtract f a <*>
       compExtract f b
+
+instance (Composite a,Composite b,Composite c,GShow e)
+         => Show (CompTuple3 a b c e) where
+  showsPrec p (CompTuple3 x y z) = showChar '(' .
+                                   compShow 0 x . showChar ',' .
+                                   compShow 0 y . showChar ',' .
+                                   compShow 0 z . showChar ')'
 
 instance (Composite a,Composite b,Composite c) => Composite (CompTuple3 a b c) where
   type RevComp (CompTuple3 a b c) = RevTuple3 a b c
@@ -103,11 +113,7 @@ instance (Composite a,Composite b,Composite c) => Composite (CompTuple3 a b c) w
       EQ -> compCompare z1 z2
       r -> r
     r -> r
-  compShow _ (CompTuple3 x y z)
-    = showChar '(' .
-      compShow 0 x . showChar ',' .
-      compShow 0 y . showChar ',' .
-      compShow 0 z . showChar ')'
+  compShow = showsPrec
   compInvariant (CompTuple3 x y z) = do
     invX <- compInvariant x
     invY <- compInvariant y

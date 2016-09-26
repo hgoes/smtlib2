@@ -9,11 +9,13 @@ import Data.List (sortBy,sort)
 import Data.Ord (comparing)
 import Data.Functor.Identity
 import Data.GADT.Compare
+import Data.GADT.Show
 import Data.Foldable
 import Data.Maybe (catMaybes)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Either (partitionEithers)
+import Text.Show
 
 class Composite c => IsSingleton c where
   type SingletonType c :: Type
@@ -1295,3 +1297,44 @@ rangeMod r1@(IntRange {}) r2 = fromBounds int $ modBounds 0 mod (toBounds r1) (t
 rangeMod r1@(BitVecRange bw _) r2 = fromBounds (bitvec bw) $
                                     modBounds (BitVecValue 0 bw) bvMod
                                     (toBounds r1) (toBounds r2)
+
+instance (Composite a,GShow e) => Show (ByteRead a e) where
+  showsPrec p rd = showParen (p>10) $
+    showString "ByteRead { overreads = " .
+    showListWith (\(off,(obj,c))
+                   -> showsPrec 11 off . showString " -> " .
+                      compShow 0 obj . showChar '{' .
+                      gshowsPrec 0 c . showChar '}') (Map.toList $ overreads rd) .
+    showString ", readOutside = " .
+    (case readOutside rd of
+       Nothing -> showString "Nothing"
+       Just c -> showString "Just " . gshowsPrec 11 c) .
+    showString ", fullRead = " .
+    (case fullRead rd of
+       Nothing -> showString "Nothing"
+       Just c -> showString "Just " . compShow 11 c) .
+    showString ", readImprecision = " .
+    (case readImprecision rd of
+       Nothing -> showString "Nothing"
+       Just c -> showString "Just " . gshowsPrec 11 c) .
+    showString " }"
+
+instance (Composite a,Composite b,GShow e) => Show (ByteWrite a b e) where
+  showsPrec p wr = showParen (p>10) $
+    showString "ByteWrite { overwrite = " .
+    showListWith (\(obj,c)
+                   -> compShow 0 obj . showChar '{' .
+                      gshowsPrec 0 c . showChar '}') (overwrite wr) .
+    showString ", writeOutside = " .
+    (case writeOutside wr of
+       Nothing -> showString "Nothing"
+       Just c -> showString "Just " . gshowsPrec 11 c) .
+    showString ", fullWrite = " .
+    (case fullWrite wr of
+       Nothing -> showString "Nothing"
+       Just c -> showString "Just " . compShow 11 c) .
+    showString ", writeImprecision = " .
+    (case writeImprecision wr of
+       Nothing -> showString "Nothing"
+       Just c -> showString "Just " . gshowsPrec 11 c) .
+    showString " }"
