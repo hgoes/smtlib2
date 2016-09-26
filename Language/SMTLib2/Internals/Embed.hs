@@ -172,7 +172,6 @@ instance Embed Identity (ValueExt Identity) where
            (error "embed: No quantifier in embedded values")
            DMap.empty
            (\_ val -> return $ valueExt val) re
-  embedQuantifier = error "embedQuantifier: Cannot use quantifiers in ValueExt"
   embedTypeOf = pure getType
 
 newtype BackendInfo b = BackendInfo b
