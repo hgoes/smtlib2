@@ -240,18 +240,7 @@ instance (Composite c) => Composite (Choice enc c) where
                                r -> r) xs ys
     GLT -> LT
     GGT -> GT
-  compShow p (ChoiceSingleton x) = showParen (p>10) $ showString "ChoiceSingleton " . compShow 11 x
-  compShow p (ChoiceBool xs)
-    = showParen (p>10) $ showString "ChoiceBool " .
-      showListWith (\(x,ex) -> showChar '(' . compShow 0 x .
-                               showChar ',' . gshowsPrec 0 ex .
-                               showChar ')') xs
-  compShow p (ChoiceValue xs e)
-    = showParen (p>10) $ showString "ChoiceValue " .
-      showListWith (\(x,vx) -> showChar '(' . compShow 0 x .
-                               showChar ',' . gshowsPrec 0 vx .
-                               showChar ')') xs . showChar ' ' .
-      gshowsPrec 11 e
+  compShow = showsPrec
   compInvariant (ChoiceSingleton c) = compInvariant c
   compInvariant (ChoiceBool xs) = do
     recInv <- fmap concat $ mapM (\(x,_) -> compInvariant x) xs
@@ -268,6 +257,20 @@ instance (Composite c) => Composite (Choice enc c) where
         cs <- oneOf (xs++[y]) ys
         c <- and' (xs'++y:ys')
         return $ c:cs
+
+instance (Composite c,GShow e) => Show (Choice enc c e) where
+  showsPrec p (ChoiceSingleton x) = showParen (p>10) $ showString "ChoiceSingleton " . compShow 11 x
+  showsPrec p (ChoiceBool xs)
+    = showParen (p>10) $ showString "ChoiceBool " .
+      showListWith (\(x,ex) -> showChar '(' . compShow 0 x .
+                               showChar ',' . gshowsPrec 0 ex .
+                               showChar ')') xs
+  showsPrec p (ChoiceValue xs e)
+    = showParen (p>10) $ showString "ChoiceValue " .
+      showListWith (\(x,vx) -> showChar '(' . compShow 0 x .
+                               showChar ',' . gshowsPrec 0 vx .
+                               showChar ')') xs . showChar ' ' .
+      gshowsPrec 11 e
 
 instance CompositeExtract c => CompositeExtract (Choice enc c) where
   type CompExtract (Choice enc a) = CompExtract a
@@ -288,15 +291,18 @@ instance CompositeExtract c => CompositeExtract (Choice enc c) where
       [x] -> compExtract f x
       _ -> error "Choice: More than one value selected."
 
-instance Composite c => GShow (RevChoice enc c) where
-  gshowsPrec p (RevChoiceBool i) = showParen (p>10) $
+instance Composite c => Show (RevChoice enc c tp) where
+  showsPrec p (RevChoiceBool i) = showParen (p>10) $
     showString "RevChoiceBool " .
     showsPrec 11 i
-  gshowsPrec p RevChoiceValue = showString "RevChoiceValue"
-  gshowsPrec p (RevChoiceElement i rev) = showParen (p>10) $
+  showsPrec p RevChoiceValue = showString "RevChoiceValue"
+  showsPrec p (RevChoiceElement i rev) = showParen (p>10) $
     showString "RevChoiceElement " .
     showsPrec 11 i . showChar ' ' .
     gshowsPrec 11 rev
+
+instance Composite c => GShow (RevChoice enc c) where
+  gshowsPrec = showsPrec
 
 instance Composite c => GEq (RevChoice enc c) where
   geq (RevChoiceBool x) (RevChoiceBool y) = if x==y

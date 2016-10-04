@@ -31,11 +31,12 @@ instance (Show k,Ord k,Composite a) => Composite (CompMap k a) where
     = mconcat $ Map.elems $ Map.mergeWithKey (\_ x y -> Just $ compCompare x y)
       (fmap $ const LT) (fmap $ const GT) mp1 mp2
       
-  compShow p (CompMap mp)
-    = showParen (p>10) $
-      showString "CompMap " .
-      showListWith (\(val,el) -> showsPrec 10 val . showString " -> " . compShow 10 el) (Map.toList mp)
+  compShow = showsPrec
   compInvariant (CompMap mp) = fmap concat $ mapM compInvariant $ Map.elems mp
+
+instance (Show k,Composite a,GShow e) => Show (CompMap k a e) where
+  showsPrec p (CompMap mp)
+    = showListWith (\(k,el) -> showsPrec 5 k . showString " -> " . compShow 5 el) (Map.toList mp)
 
 instance (Show k,Ord k,CompositeExtract a) => CompositeExtract (CompMap k a) where
   type CompExtract (CompMap k a) = Map k (CompExtract a)

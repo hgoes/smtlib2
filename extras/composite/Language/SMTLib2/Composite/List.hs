@@ -47,8 +47,11 @@ instance Composite a => Composite (CompList a) where
       comp (x:xs) (y:ys) = case compCompare x y of
         EQ -> comp xs ys
         r -> r
-  compShow _ (CompList xs) = showListWith (compShow 0) xs
+  compShow = showsPrec
   compInvariant (CompList xs) = fmap concat $ mapM compInvariant xs
+
+instance (Composite a,GShow e) => Show (CompList a e) where
+  showsPrec _ (CompList xs) = showListWith (compShow 0) xs
 
 {-instance (Composite a,IsRanged idx,
           Enum (Value (SingletonType idx))
