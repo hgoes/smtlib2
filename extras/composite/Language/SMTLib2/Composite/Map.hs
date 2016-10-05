@@ -27,16 +27,25 @@ instance (Show k,Ord k,Composite a) => Composite (CompMap k a) where
   compCombine f (CompMap mp1) (CompMap mp2) = do
     nmp <- sequence $ Map.mergeWithKey (\_ x y -> Just $ compCombine f x y) (fmap $ return.Just) (fmap $ return.Just) mp1 mp2
     return $ fmap CompMap $ sequence nmp
-  compCompare (CompMap mp1) (CompMap mp2)
-    = mconcat $ Map.elems $ Map.mergeWithKey (\_ x y -> Just $ compCompare x y)
-      (fmap $ const LT) (fmap $ const GT) mp1 mp2
-      
+  compCompare = compare
   compShow = showsPrec
   compInvariant (CompMap mp) = fmap concat $ mapM compInvariant $ Map.elems mp
 
 instance (Show k,Composite a,GShow e) => Show (CompMap k a e) where
   showsPrec p (CompMap mp)
     = showListWith (\(k,el) -> showsPrec 5 k . showString " -> " . compShow 5 el) (Map.toList mp)
+
+instance (Ord k,Composite a,GCompare e) => Eq (CompMap k a e) where
+  (==) (CompMap mp1) (CompMap mp2)
+    = and $ Map.mergeWithKey (\_ x y -> Just $ case compCompare x y of
+                                 EQ -> True
+                                 _ -> False)
+      (fmap $ const False) (fmap $ const False) mp1 mp2
+
+instance (Ord k,Composite a,GCompare e) => Ord (CompMap k a e) where
+  compare (CompMap mp1) (CompMap mp2)
+    = mconcat $ Map.elems $ Map.mergeWithKey (\_ x y -> Just $ compCompare x y)
+      (fmap $ const LT) (fmap $ const GT) mp1 mp2
 
 instance (Show k,Ord k,CompositeExtract a) => CompositeExtract (CompMap k a) where
   type CompExtract (CompMap k a) = Map k (CompExtract a)
@@ -67,3 +76,6 @@ instance (Ord k,Composite a) => GCompare (RevMap k a) where
 
 mapElement :: Ord k => k -> MaybeLens (Map k a) a
 mapElement k = lens (\mp -> Map.lookup k mp) (\mp entr -> Just $ Map.insert k entr mp)
+
+accessMap :: Ord k => k -> MaybeLens (CompMap k a e) (a e)
+accessMap k = maybeLens compMap `composeMaybe` mapElement k
