@@ -26,6 +26,12 @@ mget l s = liftM getConstant $ l Constant s
 mset :: (Monad m) => LensM m s t a b -> s -> b -> m t
 mset l s v = liftM runIdentity $ l (const $ Identity v) s
 
+withLensM :: (Monad m) => LensM' m a b -> (b -> m b) -> a -> m a
+withLensM l f x = do
+  el <- mget l x
+  nel <- f el
+  mset l x nel
+
 type CompLens a b = forall m e. (Embed m e,GetType e,GCompare e,Monad m) => LensM' m (a e) (b e)
 
 composeLensM :: Monad m => LensM' m a b -> LensM' m b c -> LensM' m a c
