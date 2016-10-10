@@ -6,32 +6,32 @@ import Language.SMTLib2.Composite.Lens
 import Language.SMTLib2.Composite.Domains
 
 import Data.GADT.Compare
+import Data.GADT.Show
 import Control.Lens
 
 newtype CompMaybe a (e :: Type -> *) = CompMaybe { _compMaybe :: Maybe (a e) }
 
+newtype RevMaybe a tp = RevMaybe (RevComp a tp)
+
 makeLenses ''CompMaybe
 
 instance Composite a => Composite (CompMaybe a) where
-  type RevComp (CompMaybe a) = RevComp a
+  type RevComp (CompMaybe a) = RevMaybe a
   foldExprs f (CompMaybe Nothing) = return $ CompMaybe Nothing
   foldExprs f (CompMaybe (Just v)) = do
-    nv <- foldExprs f v
+    nv <- foldExprs (f . RevMaybe) v
     return (CompMaybe (Just nv))
-  accessComposite r = maybeLens compMaybe `composeMaybe` just `composeMaybe` accessComposite r
-  compCombine f (CompMaybe Nothing) (CompMaybe Nothing)
-    = return $ Just $ CompMaybe Nothing
+  accessComposite (RevMaybe r) = maybeLens compMaybe `composeMaybe` just `composeMaybe` accessComposite r
   compCombine f (CompMaybe (Just x)) (CompMaybe (Just y)) = do
     z <- compCombine f x y
     return $ fmap (CompMaybe . Just) z
+  compCombine _ (CompMaybe Nothing) y = return $ Just y
+  compCombine _ x (CompMaybe Nothing) = return $ Just x
   compCompare (CompMaybe Nothing) (CompMaybe Nothing) = EQ
   compCompare (CompMaybe Nothing) _ = LT
   compCompare _ (CompMaybe Nothing) = GT
   compCompare (CompMaybe (Just x)) (CompMaybe (Just y)) = compCompare x y
-  compShow _ (CompMaybe Nothing) = showString "Nothing"
-  compShow p (CompMaybe (Just x)) = showParen (p>10) $
-    showString "Just " .
-    compShow 11 x
+  compShow = showsPrec
   compInvariant (CompMaybe Nothing) = return []
   compInvariant (CompMaybe (Just x)) = compInvariant x
 
@@ -68,3 +68,20 @@ instance ByteAccess a idx el => ByteAccess (CompMaybe a) idx el where
   byteWrite (CompMaybe (Just obj)) idx el = do
     res <- byteWrite obj idx el
     return res { fullWrite = fmap (CompMaybe . Just) (fullWrite res) }
+
+instance (Composite a,GShow e) => Show (CompMaybe a e) where
+  showsPrec _ (CompMaybe Nothing) = showString "Nothing"
+  showsPrec p (CompMaybe (Just x))
+    = showParen (p>10) $ showString "Just " . compShow 11 x
+
+instance Composite a => GEq (RevMaybe a) where
+  geq (RevMaybe r1) (RevMaybe r2) = geq r1 r2
+
+instance Composite a => GCompare (RevMaybe a) where
+  gcompare (RevMaybe r1) (RevMaybe r2) = gcompare r1 r2
+
+instance Composite a => Show (RevMaybe a tp) where
+  showsPrec p (RevMaybe r) = gshowsPrec p r
+
+instance Composite a => GShow (RevMaybe a) where
+  gshowsPrec = showsPrec

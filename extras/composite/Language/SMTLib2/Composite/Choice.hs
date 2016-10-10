@@ -224,22 +224,7 @@ instance (Composite c) => Composite (Choice enc c) where
         Left () -> return Nothing
         Right zs' -> return $ Just $ ChoiceValue zs' ez
     Nothing -> return Nothing
-  compCompare (ChoiceSingleton x) (ChoiceSingleton y) = compCompare x y
-  compCompare (ChoiceSingleton _) _ = LT
-  compCompare _ (ChoiceSingleton _) = GT
-  compCompare (ChoiceBool xs) (ChoiceBool ys)
-    = compareListWith (\(cx,ex) (cy,ey) -> case gcompare ex ey of
-                          GEQ -> compCompare cx cy
-                          GLT -> LT
-                          GGT -> GT) xs ys
-  compCompare (ChoiceBool _) _ = LT
-  compCompare _ (ChoiceBool _) = GT
-  compCompare (ChoiceValue xs ex) (ChoiceValue ys ey) = case gcompare ex ey of
-    GEQ -> compareListWith (\(cx,vx) (cy,vy) -> case compare vx vy of
-                               EQ -> compCompare cx cy
-                               r -> r) xs ys
-    GLT -> LT
-    GGT -> GT
+  compCompare = compareChoice
   compShow = showsPrec
   compInvariant (ChoiceSingleton c) = compInvariant c
   compInvariant (ChoiceBool xs) = do
@@ -257,6 +242,29 @@ instance (Composite c) => Composite (Choice enc c) where
         cs <- oneOf (xs++[y]) ys
         c <- and' (xs'++y:ys')
         return $ c:cs
+
+compareChoice :: (Composite c,GCompare e) => Choice enc c e -> Choice enc c e -> Ordering
+compareChoice (ChoiceSingleton x) (ChoiceSingleton y) = compCompare x y
+compareChoice (ChoiceSingleton _) _ = LT
+compareChoice _ (ChoiceSingleton _) = GT
+compareChoice (ChoiceBool xs) (ChoiceBool ys)
+  = compareListWith (\(cx,ex) (cy,ey) -> case gcompare ex ey of
+                        GEQ -> compCompare cx cy
+                        GLT -> LT
+                        GGT -> GT) xs ys
+compareChoice (ChoiceBool _) _ = LT
+compareChoice _ (ChoiceBool _) = GT
+compareChoice (ChoiceValue xs ex) (ChoiceValue ys ey) = case gcompare ex ey of
+  GEQ -> compareListWith (\(cx,vx) (cy,vy) -> case compare vx vy of
+                             EQ -> compCompare cx cy
+                             r -> r) xs ys
+  GLT -> LT
+  GGT -> GT
+
+instance (Composite c,GCompare e) => Eq (Choice enc c e) where
+  (==) x y = compareChoice x y==EQ
+instance (Composite c,GCompare e) => Ord (Choice enc c e) where
+  compare = compareChoice
 
 instance (Composite c,GShow e) => Show (Choice enc c e) where
   showsPrec p (ChoiceSingleton x) = showParen (p>10) $ showString "ChoiceSingleton " . compShow 11 x
