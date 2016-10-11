@@ -16,13 +16,13 @@ matrix:
             - ghc-7.10.3
             - cabal-install-1.24
             - happy-1.19.5
-    - env: CABALVER=1.24 GHCVER=8.0.2 HAPPYVER=1.19.5 RESOLVER=nightly-2016-06-21
+    - env: CABALVER=1.24 GHCVER=8.0.1 HAPPYVER=1.19.5 RESOLVER=lts-7.3
       addons:
         apt:
           sources:
             - hvr-ghc
           packages:
-            - ghc-8.0.2
+            - ghc-8.0.1
             - cabal-install-1.24
             - happy-1.19.5
 before_install:
