@@ -498,6 +498,9 @@ initial :: (Composite c,Embed m e,Monad m)
         => (c Repr -> m (c e,Maybe (e BoolType)))
         -> Choice enc c Repr
         -> m (Choice enc c e)
+initial f (ChoiceSingleton x) = do
+  (r,_) <- f x
+  return (ChoiceSingleton r)
 initial f (ChoiceBool xs) = do
   lst <- mapM (\(x,_) -> do
                   (c,cond) <- f x
