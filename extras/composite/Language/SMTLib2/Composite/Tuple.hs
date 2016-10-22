@@ -73,6 +73,8 @@ instance (Composite a,Composite b) => Composite (CompTuple2 a b) where
     invX <- compInvariant x
     invY <- compInvariant y
     return $ invX++invY
+  revName (_::Proxy (CompTuple2 a b)) (RevTuple2_1 r) = "0_"++revName (Proxy::Proxy a) r
+  revName (_::Proxy (CompTuple2 a b)) (RevTuple2_2 r) = "1_"++revName (Proxy::Proxy b) r
 
 instance (CompositeExtract a,CompositeExtract b)
   => CompositeExtract (CompTuple2 a b) where
