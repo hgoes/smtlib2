@@ -58,7 +58,11 @@ instance IsSingleton c => Composite (Ranged c) where
     EQ -> compCompare c1 c2
     r -> r
   compShow = showsPrec
-  compInvariant (Ranged r c) = compInvariant c
+  compInvariant (Ranged r c) = do
+    el <- getSingleton c
+    i <- rangeInvariant r el
+    is <- compInvariant c
+    return $ i:is
 
 instance (CompositeExtract c,IsSingleton c) => CompositeExtract (Ranged c) where
   type CompExtract (Ranged c) = CompExtract c
