@@ -211,6 +211,17 @@ mapFallback2 f g h (Alternative2_2 x) = do
   nx <- h x
   return $ Alternative2_2 nx
 
+convertFallback :: (Convert a b,Embed m e,Monad m,GetType e)
+                => Fallback a b e
+                -> m (Maybe (Fallback a b e))
+convertFallback (Start x) = do
+  y <- convert x
+  case y of
+    Nothing -> return Nothing
+    Just y' -> return $ Just (Alternative y')
+convertFallback (Alternative x)
+  = return $ Just (Alternative x)
+
 data RevFallback start alt tp where
   RevStart :: RevComp start tp -> RevFallback start alt tp
   RevAlternative :: RevComp alt tp -> RevFallback start alt tp
