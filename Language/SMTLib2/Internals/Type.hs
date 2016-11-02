@@ -607,6 +607,12 @@ typeSize (DataRepr dt) = do
     fieldSize :: IsDatatype dt => Field dt csig tp -> Maybe Integer
     fieldSize field = typeSize $ fieldType field
 
+typeFiniteDomain :: Repr tp -> Maybe [Value tp]
+typeFiniteDomain BoolRepr = Just [BoolValue False,BoolValue True]
+typeFiniteDomain (BitVecRepr bw) = Just [ BitVecValue n bw
+                                        | n <- [0..2^(naturalToInteger bw)-1] ]
+typeFiniteDomain _ = Nothing
+
 instance Enum (Value BoolType) where
   succ (BoolValue x) = BoolValue (succ x)
   pred (BoolValue x) = BoolValue (pred x)
