@@ -415,7 +415,48 @@ data Range tp where
   BitVecRange :: Natural bw -> [(Integer,Integer)] -> Range (BitVecType bw)
 
 deriving instance Eq (Range tp)
-deriving instance Show (Range tp)
+--deriving instance Show (Range tp)
+
+showIntRange :: IntRange -> ShowS
+showIntRange (open,rng)
+  = showChar '[' .
+    (if open
+     then showString "-inf" .
+          (case rng of
+              [] -> showString "..inf"
+              x:xs -> showsPrec 5 x . renderRange xs)
+     else renderRange rng) .
+    showChar ']'
+  where
+    renderRange [] = id
+    renderRange [x] = showsPrec 5 x .
+                      showString "..inf"
+    renderRange [x,y]
+      | x==y = showsPrec 5 x
+      | otherwise = showsPrec 5 x .
+                    showString ".." .
+                    showsPrec 5 y
+    renderRange (x:y:rest)
+      | x==y = showsPrec 5 x .
+               showChar ',' .
+               renderRange rest
+      | otherwise = showsPrec 5 x .
+                    showString ".." .
+                    showsPrec 5 y .
+                    showChar ',' .
+                    renderRange rest
+                    
+instance Show (Range tp) where
+  showsPrec _ (BoolRange f t)
+    = shows ((if f then [False] else [])++
+             (if t then [True] else []))
+  showsPrec _ (IntRange rng) = showIntRange rng
+  showsPrec _ (BitVecRange _ rng)
+    = showListWith (\(x,y) -> if x==y
+                              then showsPrec 5 x
+                              else showsPrec 5 x .
+                                   showString ".." .
+                                   showsPrec 5 y) rng
 
 instance Ord (Range tp) where
   compare (BoolRange f1 t1) (BoolRange f2 t2) = compare (f1,t1) (f2,t2)
