@@ -6,14 +6,15 @@ module Language.SMTLib2.Composite.Choice
    -- * Constructor
    singleton,initial,
    -- * Functions
-   chosen,choiceValues,choices
+   getChosen,setChosen,getChoiceValues,getChoices,mapChoices
   ) where
 
 import Language.SMTLib2.Composite.Class
-import Language.SMTLib2.Composite.Lens
+import Language.SMTLib2.Composite.Container
 import Language.SMTLib2.Composite.List
 import Language.SMTLib2.Composite.Tuple
 import Language.SMTLib2.Composite.Singleton
+import Language.SMTLib2.Composite.Null
 import Language.SMTLib2
 import Language.SMTLib2.Internals.Type
 import qualified Language.SMTLib2.Internals.Type.List as List
@@ -28,7 +29,6 @@ import Control.Monad.Identity
 import Data.Typeable
 import Data.List (genericIndex,sortBy)
 import Data.Ord (comparing)
-import Control.Lens hiding (Choice,chosen)
 import Control.Monad.Except
 import Text.Show
 import Data.Maybe
@@ -48,12 +48,6 @@ singleton (ChoiceValue mp _) x = case lookupBy (\(el,_) -> compCompare (compType
   Just (_,key) -> do
     val <- constant key
     return $ ChoiceValue [(x,key)] val
-
-choiceBool :: MaybeLens (Choice BoolEncoding c e) [(c e,e BoolType)]
-choiceBool = lens (\x -> case x of
-                      ChoiceBool xs -> Just xs
-                      _ -> Nothing)
-             (\_ new -> Just $ ChoiceBool new)
 
 boolEncoding :: Composite c => [c Repr] -> Choice BoolEncoding c Repr
 boolEncoding [c] = ChoiceSingleton c
@@ -128,37 +122,36 @@ instance (Composite c) => Composite (Choice enc c) where
                      return (nel,val)
                  ) $ zip [0..] lst
     return (ChoiceValue nlst nv)
-  accessComposite (RevChoiceBool i)
-    = choiceBool `composeMaybe`
-      listElement' i `composeMaybe`
-      maybeLens _2
-  accessComposite RevChoiceValue
-    = lens (\ch -> case ch of
-               ChoiceValue _ e -> return e)
-      (\ch ne -> case ch of
-          ChoiceValue vals e -> return $ ChoiceValue vals ne)
-  accessComposite (RevChoiceElement i r)
-    = lens (\x -> case x of
-               ChoiceSingleton c -> if i==0
-                                    then c `getMaybe` accessComposite r
-                                    else Nothing
-               ChoiceBool cs -> cs `getMaybe` lensLst r
-               ChoiceValue cs _ -> cs `getMaybe` lensLst r)
-      (\x new -> case x of
-          ChoiceSingleton c -> if i==0
-                               then do
-            nc <- c & accessComposite r .~ new
-            return $ ChoiceSingleton nc
-                               else Nothing
-          ChoiceBool cs -> fmap ChoiceBool $ cs & lensLst r .~ new
-          ChoiceValue cs e -> do
-            ncs <- cs & lensLst r .~ new
-            return $ ChoiceValue ncs e)
-    where
-      lensLst :: (Composite c,GetType e) => RevComp c tp -> MaybeLens [(c e,a)] (e tp)
-      lensLst r = listElement' i `composeMaybe`
-                  maybeLens _1 `composeMaybe`
-                  accessComposite r
+  getRev (RevChoiceBool i) (ChoiceBool lst) = do
+    (_,cond) <- safeGenericIndex lst i
+    return cond
+  getRev RevChoiceValue (ChoiceValue _ e) = Just e
+  getRev (RevChoiceElement 0 r) (ChoiceSingleton c) = getRev r c
+  getRev (RevChoiceElement n r) (ChoiceBool lst) = do
+    (el,_) <- safeGenericIndex lst n
+    getRev r el
+  getRev (RevChoiceElement n r) (ChoiceValue lst _) = do
+    (el,_) <- safeGenericIndex lst n
+    getRev r el
+  getRev _ _ = Nothing
+  setRev (RevChoiceBool i) x (Just (ChoiceBool lst)) = do
+    nlst <- safeGenericUpdateAt i (\(el,_) -> Just (el,x)) lst
+    return $ ChoiceBool nlst
+  setRev RevChoiceValue x (Just (ChoiceValue lst _)) = Just $ ChoiceValue lst x
+  setRev (RevChoiceElement 0 r) x (Just (ChoiceSingleton y)) = do
+    ny <- setRev r x (Just y)
+    return $ ChoiceSingleton ny
+  setRev (RevChoiceElement n r) x (Just (ChoiceBool lst)) = do
+    nlst <- safeGenericUpdateAt n (\(el,cond) -> do
+                                      nel <- setRev r x (Just el)
+                                      return (nel,cond)) lst
+    return $ ChoiceBool nlst
+  setRev (RevChoiceElement n r) x (Just (ChoiceValue lst v)) = do
+    nlst <- safeGenericUpdateAt n (\(el,val) -> do
+                                      nel <- setRev r x (Just el)
+                                      return (nel,val)) lst
+    return $ ChoiceValue nlst v
+  setRev _ _ _ = Nothing
   compCombine f (ChoiceSingleton x) (ChoiceSingleton y) = do
     z <- compCombine f x y
     case z of
@@ -401,92 +394,64 @@ possibleChoices (ChoiceSingleton x) = [x]
 possibleChoices (ChoiceBool vals) = fmap fst vals
 possibleChoices (ChoiceValue mp _) = fmap fst mp
 
-chosen :: Composite c
-       => CompLens (Choice enc c) c
-chosen
-  = lensM (\ch -> case ch of
-              ChoiceSingleton x -> return x
-              ChoiceBool xs -> mkITE xs
-              ChoiceValue xs var -> do
-                xs' <- mapM (\(c,val) -> do
-                                cond <- var .==. constant val
-                                return (c,cond)) xs
-                mkITE xs')
-    (\prev nel -> case prev of
-        ChoiceSingleton _ -> return $ ChoiceSingleton nel
-        ChoiceBool _ -> return $ ChoiceSingleton nel
-        ChoiceValue entrs _ -> case lookupBy (\(el,_) -> compCompare nel el) entrs of
-          Just (_,k) -> do
-            val <- constant k
-            return $ ChoiceValue entrs val)
-  where
-    mkITE :: (Composite c,Embed m e,Monad m,GetType e,GCompare e)
-          => [(c e,e BoolType)]
-          -> m (c e)
-    mkITE [(v,_)] = return v
-    mkITE ((vT,c):rest) = do
-      vF <- mkITE rest
-      v <- compITE c vT vF
-      case v of
-        Just v' -> return v'
-        Nothing -> error "Unmergable composite type used in chosen lens"
+getChosen :: (Composite c,Embed m e,Monad m,GetType e,GCompare e)
+          => Choice enc c e
+          -> m (Maybe (c e))
+getChosen (ChoiceSingleton x) = return (Just x)
+getChosen (ChoiceBool xs) = compITEs (fmap (\(x,c) -> (c,x)) xs)
+getChosen (ChoiceValue xs var) = do
+  xs' <- mapM (\(c,val) -> do
+                  cond <- var .==. constant val
+                  return (cond,c)
+              ) xs
+  compITEs xs'
 
-choiceValues :: CompLens (Choice enc c) (CompList c)
-choiceValues
-  = liftLens $ lens
-    (\ch -> case ch of
-        ChoiceSingleton x -> CompList [x]
-        ChoiceBool lst -> CompList $ fmap fst lst
-        ChoiceValue lst _ -> CompList $ fmap fst lst)
-    (\ch (CompList nlst) -> case ch of
-        ChoiceSingleton _ -> case nlst of
-          [nx] -> ChoiceSingleton nx
-          _ -> err
-        ChoiceBool lst -> case zipSame (\(_,cond) el -> (el,cond)) lst nlst of
-          Just res -> ChoiceBool res
-          Nothing -> err
-        ChoiceValue lst e -> case zipSame (\(_,val) el -> (el,val)) lst nlst of
-          Just res -> ChoiceValue res e
-          Nothing -> err)
-  where
-    err = error "choicesValues cannot change the number of choice elements."
+setChosen :: (Composite c,Embed m e,Monad m,GCompare e)
+          => Choice enc c e
+          -> c e
+          -> m (Choice enc c e)
+setChosen (ChoiceSingleton _) nel = return $ ChoiceSingleton nel
+setChosen (ChoiceBool _) nel = return $ ChoiceSingleton nel
+setChosen (ChoiceValue entrs _) nel = case lookupBy (\(el,_) -> compCompare nel el) entrs of
+  Just (_,k) -> do
+    val <- constant k
+    return $ ChoiceValue entrs val
 
--- | A lens accessing all possible values and their conditions.
---   Warning: Updating this lens for a value encoding will blow up the condition
---   expressions.
-choices :: CompLens (Choice enc c) (CompList (CompTuple2 c (Comp BoolType)))
-choices
-  = lensM (\ch -> case ch of
-              ChoiceSingleton x -> do
-                cond <- true
-                return $ CompList [CompTuple2 x (Comp cond)]
-              ChoiceBool lst -> return $ CompList $ fmap (\(el,cond) -> CompTuple2 el (Comp cond)) lst
-              ChoiceValue lst e -> do
-                res <- mapM (\(c,val) -> do
-                                cond <- e .==. constant val
-                                return $ CompTuple2 c (Comp cond)
-                            ) lst
-                return $ CompList res)
-    (\ch (CompList nlst) -> let nbool :: (Embed m e,Monad m)
-                                      => [CompTuple2 c (Comp BoolType) e]
-                                      -> m (Choice BoolEncoding c e)
-                                nbool nlst = case nlst of
-                                  [CompTuple2 el _] -> return $ ChoiceSingleton el
-                                  _ -> return $ ChoiceBool $ fmap (\(CompTuple2 el (Comp cond)) -> (el,cond)) nlst
-                            in case ch of
-        ChoiceValue lst e -> case zipSame (\(_,val) (CompTuple2 el (Comp cond)) -> (el,cond,val)) lst nlst of
-          Nothing -> error "Cannot update the structure of a value encoding choice."
-          Just rlst -> do
-            ne <- mkITE rlst
-            return (ChoiceValue (fmap (\(el,_,val) -> (el,val)) rlst) ne)
-        ChoiceSingleton _ -> nbool nlst
-        ChoiceBool _ -> nbool nlst)
-  where
-    mkITE [(_,_,val)] = constant val
-    mkITE ((_,cond,val):rest) = do
-      ifF <- mkITE rest
-      ite cond (constant val) ifF
-                                      
+getChoiceValues :: Choice enc c e -> [c e]
+getChoiceValues (ChoiceSingleton x) = [x]
+getChoiceValues (ChoiceBool lst) = fmap fst lst
+getChoiceValues (ChoiceValue lst _) = fmap fst lst
+
+getChoices :: (Embed m e,Monad m) => Choice enc c e -> m [(c e,[e BoolType])]
+getChoices (ChoiceSingleton x) = return [(x,[])]
+getChoices (ChoiceBool lst) = return $ fmap (\(el,c) -> (el,[c])) lst
+getChoices (ChoiceValue lst e)
+  = mapM (\(c,val) -> do
+             cond <- e .==. constant val
+             return (c,[cond])
+         ) lst
+
+mapChoices :: (Embed m e,Monad m)
+           => (e BoolType -> c e -> m (c e))
+           -> Choice enc c e
+           -> m (Choice enc c e)
+mapChoices f (ChoiceSingleton x) = do
+  cond <- true
+  nx <- f cond x
+  return $ ChoiceSingleton nx
+mapChoices f (ChoiceBool lst) = do
+  nlst <- mapM (\(el,cond) -> do
+                   nel <- f cond el
+                   return (nel,cond)) lst
+  return $ ChoiceBool nlst
+mapChoices f (ChoiceValue lst var) = do
+  nlst <- mapM (\(el,val) -> do
+                   cond <- var .==. constant val
+                   nel <- f cond el
+                   return (nel,val)
+               ) lst
+  return $ ChoiceValue nlst var
+
 zipSame :: (a -> b -> c) -> [a] -> [b] -> Maybe [c]
 zipSame f [] [] = Just []
 zipSame f (x:xs) (y:ys) = do
@@ -521,3 +486,33 @@ initial f (ChoiceValue xs tp) = do
     mkITE ((cond,val):rest) = do
       ifF <- mkITE rest
       ite cond (constant val) ifF
+
+chosen :: (Embed m e,Monad m) => Accessor (Choice enc c) (NoComp Integer) c m e
+chosen = Accessor get set
+  where
+    get :: (Embed m e,Monad m)
+        => Choice enc c e
+        -> m [(NoComp Integer e,[e BoolType],c e)]
+    get (ChoiceSingleton x) = return [(NoComp 0,[],x)]
+    get (ChoiceBool xs) = return $ fmap (\((el,c),n) -> (NoComp n,[c],el)
+                                        ) $ zip xs [0..]
+    get (ChoiceValue xs var) = mapM (\((el,val),n) -> do
+                                        cond <- var .==. constant val
+                                        return (NoComp n,[cond],el)
+                                    ) $ zip xs [0..]
+
+    set :: (Embed m e,Monad m)
+        => [(NoComp Integer e,c e)]
+        -> Choice enc c e
+        -> m (Choice enc c e)
+    set [] ch = return ch
+    set [(_,nel)] (ChoiceSingleton _) = return $ ChoiceSingleton nel
+    set upd (ChoiceBool xs) = return $ ChoiceBool $ merge upd 0 xs
+    set upd (ChoiceValue xs var) = return $ ChoiceValue (merge upd 0 xs) var
+
+    merge [] _ xs = xs
+    merge upd@((NoComp i,nel):upd') p ((el,cond):xs)
+      | p==i      = (nel,cond):merge upd' (p+1) xs
+      | otherwise = (el,cond):merge upd (p+1) xs
+
+                                          

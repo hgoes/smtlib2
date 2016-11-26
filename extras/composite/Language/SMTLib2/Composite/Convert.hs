@@ -3,11 +3,10 @@ module Language.SMTLib2.Composite.Convert where
 import Language.SMTLib2 hiding (store,select)
 import Language.SMTLib2.Composite.Class
 import Language.SMTLib2.Composite.Domains
-import Language.SMTLib2.Composite.Lens
 
 import Data.GADT.Show
 import Data.GADT.Compare
-import Control.Lens
+import Data.Functor.Identity
 
 class (Composite from,Composite to) => Convert from to where
   convert :: (Embed m e,Monad m,GetType e) => from e -> m (Maybe (to e))
@@ -20,36 +19,6 @@ data Fallback2 start alt1 alt2 (e :: Type -> *)
   = Start2 { _start2 :: start e }
   | Alternative2_1 { _alternative2_1 :: alt1 e }
   | Alternative2_2 { _alternative2_2 :: alt2 e }
-
-start :: MaybeLens (Fallback start alt e) (start e)
-start = lens (\f -> case f of
-                 Start x -> Just x
-                 _ -> Nothing)
-        (\_ x -> Just (Start x))
-
-alternative :: MaybeLens (Fallback start alt e) (alt e)
-alternative = lens (\f -> case f of
-                       Alternative x -> Just x
-                       _ -> Nothing)
-              (\_ x -> Just (Alternative x))
-
-start2 :: MaybeLens (Fallback2 start alt1 alt2 e) (start e)
-start2 = lens (\f -> case f of
-                  Start2 x -> Just x
-                  _ -> Nothing)
-         (\_ x -> Just (Start2 x))
-
-alternative2_1 :: MaybeLens (Fallback2 start alt1 alt2 e) (alt1 e)
-alternative2_1 = lens (\f -> case f of
-                          Alternative2_1 x -> Just x
-                          _ -> Nothing)
-                 (\_ x -> Just (Alternative2_1 x))
-
-alternative2_2 :: MaybeLens (Fallback2 start alt1 alt2 e) (alt2 e)
-alternative2_2 = lens (\f -> case f of
-                          Alternative2_2 x -> Just x
-                          _ -> Nothing)
-                 (\_ x -> Just (Alternative2_2 x))
 
 fallback :: (Embed m e,Monad m,Convert start alt,GetType e)
          => (start e -> start e -> m (Maybe (start e)))
@@ -240,8 +209,19 @@ instance (Composite start,Composite alt,Convert start alt)
   foldExprs f (Alternative e) = do
     ne <- foldExprs (f.RevAlternative) e
     return (Alternative ne)
-  accessComposite (RevStart r) = start `composeMaybe` accessComposite r
-  accessComposite (RevAlternative r) = alternative `composeMaybe` accessComposite r
+  getRev (RevStart r) (Start x) = getRev r x
+  getRev (RevAlternative r) (Alternative x) = getRev r x
+  getRev _ _ = Nothing
+  setRev (RevStart r) x fb = do
+    nel <- setRev r x (case fb of
+                         Just (Start y) -> Just y
+                         _ -> Nothing)
+    return $ Start nel
+  setRev (RevAlternative r) x fb = do
+    nel <- setRev r x (case fb of
+                         Just (Alternative y) -> Just y
+                         _ -> Nothing)
+    return $ Alternative nel
   compCombine f = fallback (compCombine f) (compCombine f)
   compCompare (Start x) (Start y) = compCompare x y
   compCompare (Start _) _ = LT
@@ -265,9 +245,25 @@ instance (Composite start,Composite alt1,Composite alt2,
   foldExprs f (Alternative2_2 e) = do
     ne <- foldExprs (f.RevAlternative2_2) e
     return $ Alternative2_2 ne
-  accessComposite (RevStart2 r) = start2 `composeMaybe` accessComposite r
-  accessComposite (RevAlternative2_1 r) = alternative2_1 `composeMaybe` accessComposite r
-  accessComposite (RevAlternative2_2 r) = alternative2_2 `composeMaybe` accessComposite r
+  getRev (RevStart2 r) (Start2 x) = getRev r x
+  getRev (RevAlternative2_1 r) (Alternative2_1 x) = getRev r x
+  getRev (RevAlternative2_2 r) (Alternative2_2 x) = getRev r x
+  getRev _ _ = Nothing
+  setRev (RevStart2 r) x fb = do
+    nel <- setRev r x (case fb of
+                         Just (Start2 y) -> Just y
+                         _ -> Nothing)
+    return $ Start2 nel
+  setRev (RevAlternative2_1 r) x fb = do
+    nel <- setRev r x (case fb of
+                         Just (Alternative2_1 y) -> Just y
+                         _ -> Nothing)
+    return $ Alternative2_1 nel
+  setRev (RevAlternative2_2 r) x fb = do
+    nel <- setRev r x (case fb of
+                         Just (Alternative2_2 y) -> Just y
+                         _ -> Nothing)
+    return $ Alternative2_2 nel
   compCombine f = fallback2 (compCombine f) (compCombine f) (compCombine f)
   compCompare (Start2 x) (Start2 y) = compCompare x y
   compCompare (Start2 _) _ = LT
@@ -344,19 +340,19 @@ instance (IsRanged start,IsRanged alt1,IsRanged alt2,
   getRange (Alternative2_1 x) = getRange x
   getRange (Alternative2_2 x) = getRange x
 
-instance (Container start,Container alt,
+instance (Wrapper start,Wrapper alt,
           ElementType start ~ ElementType alt,
           Convert start alt)
-         => Container (Fallback start alt) where
+         => Wrapper (Fallback start alt) where
   type ElementType (Fallback start alt) = ElementType start
   elementType (Start x) = elementType x
   elementType (Alternative x) = elementType x
 
-instance (Container start,Container alt1,Container alt2,
+instance (Wrapper start,Wrapper alt1,Wrapper alt2,
           ElementType start ~ ElementType alt1,
           ElementType start ~ ElementType alt2,
           Convert start alt1,Convert start alt2,Convert alt1 alt2)
-         => Container (Fallback2 start alt1 alt2) where
+         => Wrapper (Fallback2 start alt1 alt2) where
   type ElementType (Fallback2 start alt1 alt2) = ElementType start
   elementType (Start2 x) = elementType x
   elementType (Alternative2_1 x) = elementType x
@@ -527,3 +523,115 @@ instance (Composite start,Composite alt1,Composite alt2)
   gcompare (RevAlternative2_1 _) _ = GLT
   gcompare _ (RevAlternative2_1 _) = GGT
   gcompare (RevAlternative2_2 x) (RevAlternative2_2 y) = gcompare x y
+
+instance (IsNumeric start,IsNumeric alt,Convert start alt
+         ) => IsNumeric (Fallback start alt) where
+  compositeFromInteger i (Start r) = case compositeFromInteger i r of
+    Just r -> Just $ Start r
+    Nothing -> do
+      nr <- runIdentity $ convert r
+      res <- compositeFromInteger i nr
+      return $ Alternative res
+  compositeFromInteger i (Alternative r)
+    = fmap Alternative $ compositeFromInteger i r
+  compositeToInteger (Start i) = compositeToInteger i
+  compositeToInteger (Alternative i) = compositeToInteger i
+  compositePlus = fallback compositePlus compositePlus
+  compositeMinus = fallback compositeMinus compositeMinus
+  compositeSum xs = case mapM (\x -> case x of
+                                  Start x' -> Just x'
+                                  Alternative _ -> Nothing
+                              ) xs of
+    Just xs' -> do
+      res <- compositeSum xs'
+      case res of
+        Just r -> return $ Just $ Start r
+        Nothing -> conv
+    Nothing -> conv
+    where
+      conv =  do
+        xs' <- mapM (\x -> case x of
+                        Start x' -> convert x'
+                        Alternative x' -> return $ Just x'
+                    ) xs
+        case sequence xs' of
+          Nothing -> return Nothing
+          Just xs'' -> do
+            res <- compositeSum xs''
+            case res of
+              Nothing -> return Nothing
+              Just r -> return $ Just $ Alternative r
+  compositeNegate (Start x) = do
+    res <- compositeNegate x
+    case res of
+      Just r -> return $ Just $ Start r
+      Nothing -> do
+        nx <- convert x
+        case nx of
+          Nothing -> return Nothing
+          Just nx' -> do
+            res <- compositeNegate nx'
+            return $ fmap Alternative res
+  compositeMult = fallback compositeMult compositeMult
+  compositeGEQ (Start x::Fallback start alt e) (Start y) = do
+    res <- compositeGEQ x y
+    case res of
+      Just r -> return $ Just r
+      Nothing -> do
+        nx <- convert x
+        case nx of
+          Nothing -> return Nothing
+          Just nx' -> do
+            ny <- convert y
+            case ny of
+              Nothing -> return Nothing
+              Just ny' -> compositeGEQ (nx'::alt e) ny'
+  compositeGEQ (Alternative x) (Alternative y) = compositeGEQ x y
+  compositeGEQ (Start x) y = do
+    nx <- convert x
+    case nx of
+      Nothing -> return Nothing
+      Just nx' -> compositeGEQ (Alternative nx') y
+  compositeGEQ x (Start y) = do
+    ny <- convert y
+    case ny of
+      Nothing -> return Nothing
+      Just ny' -> compositeGEQ x (Alternative ny')
+  compositeDiv = fallback compositeDiv compositeDiv
+  compositeMod = fallback compositeMod compositeMod
+
+instance (CanConcat start,CanConcat alt,Convert start alt) => CanConcat (Fallback start alt) where
+  withConcat f xs = case mapM (\x -> case x of
+                                  Start x' -> return x'
+                                  Alternative _ -> Nothing
+                              ) xs of
+    Nothing -> conv
+    Just xs' -> do
+      res <- withConcat (\x -> do
+                            (res,nx) <- f (Start x)
+                            case nx of
+                              Start nx' -> return (Just res,nx')
+                              _ -> return (Nothing,x)
+                        ) xs'
+      case res of
+        Nothing -> conv
+        Just (Nothing,_) -> conv
+        Just (Just r,nxs) -> return $ Just (r,fmap Start nxs)
+    where
+      conv = do
+        xs' <- mapM (\x -> case x of
+                        Start x -> convert x
+                        Alternative x -> return $ Just x
+                    ) xs
+        case sequence xs' of
+          Nothing -> return Nothing
+          Just xs'' -> do
+            res <- withConcat (\x -> do
+                                  (res,nx) <- f (Alternative x)
+                                  case nx of
+                                    Alternative nx' -> return (Just res,nx')
+                                    _ -> return (Nothing,x)
+                              ) xs''
+            case res of
+              Just (Just r,nxs) -> return $ Just (r,fmap Alternative nxs)
+              _ -> return Nothing

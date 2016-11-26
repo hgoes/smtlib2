@@ -2,14 +2,12 @@ module Language.SMTLib2.Composite.Class where
 
 import Language.SMTLib2
 import Language.SMTLib2.Internals.Embed
-import Language.SMTLib2.Composite.Lens
 
 import Data.GADT.Compare
 import Data.GADT.Show
 import Data.Proxy
 import Data.Functor.Identity
 import Control.Monad.Writer
-import Control.Lens
 
 type CompDescr arg = arg Repr
 
@@ -21,7 +19,8 @@ class (GCompare (RevComp arg),GShow (RevComp arg))
             => (forall t. RevComp arg t -> e t -> m (e' t))
             -> arg e
             -> m (arg e')
-  accessComposite :: GetType e => RevComp arg t -> MaybeLens (arg e) (e t)
+  getRev :: GetType e => RevComp arg tp -> arg e -> Maybe (e tp)
+  setRev :: GetType e => RevComp arg tp -> e tp -> Maybe (arg e) -> Maybe (arg e)
   compCombine :: (Embed m e,Monad m,GetType e,GCompare e)
               => (forall tp. e tp -> e tp -> m (e tp))
               -> arg e -> arg e -> m (Maybe (arg e))
@@ -31,7 +30,7 @@ class (GCompare (RevComp arg),GShow (RevComp arg))
   compCompare :: GCompare e => arg e -> arg e -> Ordering
   compShow :: GShow e => Int -> arg e -> ShowS
 
-  compInvariant :: (Embed m e,Monad m) => arg e -> m [e BoolType]
+  compInvariant :: (Embed m e,Monad m,GetType e) => arg e -> m [e BoolType]
   compInvariant _ = return []
 
 {-
@@ -102,7 +101,7 @@ createComposite f descr
   = foldExprs (\rev tp -> f tp rev) descr
 
 revType :: Composite arg => CompDescr arg -> RevComp arg tp -> Repr tp
-revType descr rev = case descr `getMaybe` accessComposite rev of
+revType descr rev = case getRev rev descr of
   Just r -> r
   Nothing -> error "revType: Internal error, type for unknown element requested."
 
@@ -117,7 +116,7 @@ defaultUnion :: (Composite arg,Monad m,GetType a,GetType b)
              -> arg b
              -> m (arg c)
 defaultUnion f descr x y
-  = createComposite (\_ rev -> f rev (x `getMaybe` accessComposite rev) (y `getMaybe` accessComposite rev)) descr
+  = createComposite (\_ rev -> f rev (getRev rev x) (getRev rev y)) descr
 
 defaultEq :: (Composite arg,Embed m e,Monad m,GetType e)
           => CompDescr arg

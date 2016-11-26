@@ -3,13 +3,10 @@ module Language.SMTLib2.Composite.Linear where
 import Language.SMTLib2
 import Language.SMTLib2.Composite.Class
 import Language.SMTLib2.Composite.Domains as Comp
-import Language.SMTLib2.Composite.Lens
 import Language.SMTLib2.Composite.List
---import Language.SMTLib2.Composite.Choice (insertByWith,mergeByWith)
 
 import Data.GADT.Compare
 import Data.GADT.Show
-import Control.Lens
 import Data.Monoid
 import Text.Show
 import Data.Foldable
@@ -17,37 +14,37 @@ import Data.Proxy
 import Data.List (sortBy,unzip3)
 import Data.Ord (comparing)
 import qualified Data.Map as Map
+import Data.Functor.Identity
 
-data Linear c (e :: Type -> *) = Linear { _linConst :: Value (SingletonType c)
-                                        , _linear :: [(Value (SingletonType c),c e)] }
-
-makeLenses ''Linear
+data Linear c (e :: Type -> *) = Linear { linConst :: c Value
+                                        , linear :: [(c Value,c e)] }
 
 data RevLinear c tp where
   RevFactor :: Integer -> RevComp c tp -> RevLinear c tp
 
-delinear :: (IsNumeric c,Embed m e,Monad m) => Linear c e -> m (c e)
+delinear :: (IsNumeric c,Embed m e,Monad m,GetType e) => Linear c e -> m (c e)
 delinear lin = do
-  const <- compositeFromValue $ _linConst lin
+  const' <- foldExprs (const constant) (linConst lin)
   ps <- mapM (\(c,x) -> do
-                 c' <- compositeFromValue c
-                 compositeMult c' x) $ _linear lin
-  compositeSum $ const:ps
+                 c' <- foldExprs (const constant) c
+                 Just r <- compositeMult c' x
+                 return r
+             ) $ linear lin
+  Just res <- compositeSum $ const':ps
+  return res
 
 delinearType :: (IsNumeric c,GetType e) => Linear c e -> c Repr
 delinearType lin = runIdentity $ delinear (compType lin)
 
-newtype ByteArray arr (e :: Type -> *) = ByteArray { _byteArray :: arr e }
-
-makeLenses ''ByteArray
+newtype ByteArray arr (e :: Type -> *) = ByteArray { byteArray :: arr e }
 
 instance Composite arr => Composite (ByteArray arr) where
   type RevComp (ByteArray arr) = RevComp arr
   foldExprs f (ByteArray arr) = do
     narr <- foldExprs f arr
     return $ ByteArray narr
-  accessComposite r = maybeLens byteArray `composeMaybe`
-                      accessComposite r
+  getRev r (ByteArray arr) = getRev r arr
+  setRev r x arr = fmap ByteArray $ setRev r x (fmap byteArray arr)
   compCombine f (ByteArray arr1) (ByteArray arr2) = do
     narr <- compCombine f arr1 arr2
     return $ fmap ByteArray narr
@@ -56,7 +53,7 @@ instance Composite arr => Composite (ByteArray arr) where
   compShow p (ByteArray arr) = compShow p arr
   compInvariant (ByteArray arr) = compInvariant arr
 
-instance Container arr => Container (ByteArray arr) where
+instance Wrapper arr => Wrapper (ByteArray arr) where
   type ElementType (ByteArray arr) = ElementType arr
   elementType (ByteArray arr) = elementType arr
 
@@ -78,73 +75,107 @@ instance IsBounded arr idx => IsBounded (ByteArray arr) idx where
   checkIndex (ByteArray arr) = checkIndex arr
 
 instance IsNumeric idx => IsNumeric (Linear idx) where
-  compositeFromValue v = return $ Linear v []
   compositePlus (Linear c1 lin1) (Linear c2 lin2) = do
     lin <- addLin lin1 lin2
-    return $ Linear (c1+c2) lin
+    case lin of
+      Just lin' -> case runIdentity $ compositePlus c1 c2 of
+        Just nc -> return $ Just $ Linear nc lin'
+        Nothing -> return Nothing
+      Nothing -> return Nothing
     where
-      addLin [] ys = return ys
-      addLin xs [] = return xs
-      addLin ((cx,x):xs) ((cy,y):ys) = case compare cx cy of
+      addLin [] ys = return $ Just ys
+      addLin xs [] = return $ Just xs
+      addLin ((cx,x):xs) ((cy,y):ys) = case compCompare cx cy of
         EQ -> do
           z <- compositePlus x y
-          zs <- addLin xs ys
-          return $ (cx,z):zs
+          case z of
+            Nothing -> return Nothing
+            Just z' -> do
+              zs <- addLin xs ys
+              case zs of
+                Nothing -> return Nothing
+                Just zs' -> return $ Just $ (cx,z'):zs'
         LT -> do
           zs <- addLin xs ((cy,y):ys)
-          return $ (cx,x):zs
+          case zs of
+            Nothing -> return Nothing
+            Just zs' -> return $ Just $ (cx,x):zs'
         GT -> do
           zs <- addLin ((cx,x):xs) ys
-          return $ (cy,y):zs
+          case zs of
+            Nothing -> return Nothing
+            Just zs' -> return $ Just $ (cy,y):zs'
   compositeMinus (Linear c1 lin1) (Linear c2 lin2) = do
     lin <- subLin lin1 lin2
-    return $ Linear (c1+c2) lin
+    case lin of
+      Nothing -> return Nothing
+      Just lin' -> case runIdentity $ compositeMinus c1 c2 of
+        Nothing -> return Nothing
+        Just nc -> return $ Just $ Linear nc lin'
     where
-      subLin [] ys = return ys
-      subLin xs [] = return xs
-      subLin ((cx,x):xs) ((cy,y):ys) = case compare cx cy of
+      subLin [] ys = return $ Just ys
+      subLin xs [] = return $ Just xs
+      subLin ((cx,x):xs) ((cy,y):ys) = case compCompare cx cy of
         EQ -> do
           z <- compositeMinus x y
-          zs <- subLin xs ys
-          return $ (cx,z):zs
+          case z of
+            Nothing -> return Nothing
+            Just z' -> do
+              zs <- subLin xs ys
+              case zs of
+                Nothing -> return Nothing
+                Just zs' -> return $ Just $ (cx,z'):zs'
         LT -> do
           zs <- subLin xs ((cy,y):ys)
-          return $ (cx,x):zs
+          case zs of
+            Nothing -> return Nothing
+            Just zs' -> return $ Just $ (cx,x):zs'
         GT -> do
           y' <- compositeNegate y
-          zs <- subLin ((cx,x):xs) ys
-          return $ (cy,y'):zs
-  compositeNegate l = do
+          case y' of
+            Nothing -> return Nothing
+            Just y'' -> do
+              zs <- subLin ((cx,x):xs) ys
+              case zs of
+                Nothing -> return Nothing
+                Just zs' -> return $ Just $ (cy,y''):zs'
+  {-compositeNegate l = do
     nlins <- mapM (\(c,x) -> do
                       nx <- compositeNegate x
                       return (c,nx)) (_linear l)
-    return $ Linear (negate $ _linConst l) nlins
+    return $ Linear (runIdentity $ compositeNegate $ _linConst l) nlins
   compositeMult l1 l2 = do
-    let nconst = (_linConst l1)*(_linConst l2)
+    let nconst = runIdentity $ compositeMult (_linConst l1) (_linConst l2)
     nlin1 <- sequence [ do
                           z <- compositeMult x y
-                          return (cx*cy,z)
+                          return (runIdentity $ compositeMult cx cy,z)
                       | (cx,x) <- _linear l1
                       , (cy,y) <- _linear l2 ]
-    let nlin2 = if _linConst l2==0
-                then []
-                else [ (cx*_linConst l2,x) | (cx,x) <- _linear l1 ]
-        nlin3 = if _linConst l1==0
-                then []
-                else [ (cy*_linConst l1,y) | (cy,y) <- _linear l2 ]
-    nlin <-  merge $ sortBy (comparing fst) $ nlin1++nlin2++nlin3
+    let nlin2 = case compCompare (_linConst l2)
+                     (runIdentity $ foldExprs (const constant) $
+                      compositeFromInteger 0 (compType $ _linConst l2)) of
+                  EQ -> []
+                  _ -> [ (runIdentity $ compositeMult cx (_linConst l2),x)
+                       | (cx,x) <- _linear l1 ]
+        nlin3 = case compCompare (_linConst l1)
+                     (runIdentity $ foldExprs (const constant) $
+                      compositeFromInteger 0 (compType $ _linConst l2)) of
+                  EQ -> []
+                  _ -> [ (runIdentity $ compositeMult cy (_linConst l1),y)
+                       | (cy,y) <- _linear l2 ]
+    nlin <-  merge $ sortBy (\(x,_) (y,_) -> compCompare x y) $ nlin1++nlin2++nlin3
     return $ Linear nconst nlin
     where
       merge [] = return []
       merge [x] = return [x]
-      merge ((cx,x):(cy,y):rest) = case compare cx cy of
+      merge ((cx,x):(cy,y):rest) = case compCompare cx cy of
         EQ -> do
           z <- compositePlus x y
           merge $ (cx,z):rest
         LT -> do
           zs <- merge $ (cy,y):rest
           return $ (cx,x):zs
-  compositeGEQ (Linear c1 []) (Linear c2 []) = cbool $ c1 >= c2
+  compositeGEQ (Linear c1 []) (Linear c2 []) = constant $ runIdentity $ compositeGEQ c1 c2
   compositeGEQ l1 l2 = do
     e1 <- delinear l1
     e2 <- delinear l2
@@ -153,20 +184,24 @@ instance IsNumeric idx => IsNumeric (Linear idx) where
     e1 <- delinear l1
     e2 <- delinear l2
     res <- compositeDiv e1 e2
-    return $ Linear 0 [(1,res)]
+    return $ Linear (compositeFromInteger 0 (compType e1))
+      [(compositeFromInteger 1 (compType e1),res)]
   compositeMod l1 l2 = do
     e1 <- delinear l1
     e2 <- delinear l2
     res <- compositeMod e1 e2
-    return $ Linear 0 [(1,res)]
+    return $ Linear (compositeFromInteger 0 (compType e1))
+      [(compositeFromInteger 1 (compType e1),res)]-}
 
 instance (IsBounded arr idx,StaticByteWidth (ElementType arr),IsNumeric idx)
          => ByteWidth (ByteArray arr) (Linear idx) where
-  byteWidth (ByteArray arr) = do
+  byteWidth (ByteArray arr) (Linear r _) = do
     let elTp = elementType (compType arr)
         elSize = staticByteWidth elTp
+        Just zero = compositeFromInteger 0 (compType r)
+        Just elSize' = compositeFromInteger elSize (compType r)
     sz <- arraySize arr
-    return $ Linear (fromInteger 0) [(fromInteger elSize,sz)]
+    return $ Linear zero [(elSize',sz)]
 
 {-instance (IsStaticBounded arr,
           --StaticByteAccess (ElementType arr) el,
@@ -187,13 +222,14 @@ instance (IsBounded arr idx,StaticByteWidth (ElementType arr),IsNumeric idx)
       NoError -> return Nothing
       SometimesError c -> return $ Just c
       AlwaysError -> fmap Just true
-    res <- read arr startIdx off sz
+    res <- read arr (indexType arr) startIdx off sz
     case res of
       Just el -> return $ Just (el,0)
       Nothing -> return Nothing
     where
-      read arr idx off sz = do
-        idx' <- compositeFromValue (fromInteger idx)
+      read arr tp idx off sz = do
+        idx' <- foldExprs (const constant) $
+                compositeFromInteger idx tp
         el <- Comp.select arr idx'
         case el of
           Nothing -> return Nothing
@@ -203,7 +239,7 @@ instance (IsBounded arr idx,StaticByteWidth (ElementType arr),IsNumeric idx)
               Nothing -> return Nothing
               Just (el,0) -> return (Just el)
               Just (el,rest) -> do
-                nel <- read arr (idx+1) 0 rest
+                nel <- read arr tp (idx+1) 0 rest
                 case nel of
                   Nothing -> return Nothing
                   Just nel' -> compConcat [el,nel']
@@ -216,22 +252,24 @@ instance (IsBounded arr idx,StaticByteWidth (ElementType arr),IsNumeric idx)
         largestIdx = case (idx+sz) `divMod` elWidth of
           (res,0) -> res-1
           (res,_) -> res
-    safety <- checkStaticIndex arr largestIdx
-    safetyCond <- case safety of
-      NoError -> return Nothing
-      SometimesError c -> return $ Just c
-      AlwaysError -> fmap Just true
-    outside <- case writeOutside wr of
-      Nothing -> return safetyCond
-      Just c1 -> case safetyCond of
-        Nothing -> return $ Just c1
-        Just c2 -> fmap Just $ c1 .&. c2
-    return wr { fullWrite = fmap ByteArray $ fullWrite wr
-              , writeOutside = outside }-}
+    case wr of
+      Nothing -> return Nothing
+      Just (narr,outside) -> do
+        safety <- checkStaticIndex arr largestIdx
+        safetyCond <- case safety of
+          NoError -> return Nothing
+          SometimesError c -> return $ Just c
+          AlwaysError -> fmap Just true
+        noutside <- case outside of
+          Nothing -> return safetyCond
+          Just c1 -> case safetyCond of
+            Nothing -> return $ Just c1
+            Just c2 -> fmap Just $ c1 .&. c2
+        return $ Just (ByteArray narr,noutside)-}
 
-instance (StaticByteAccess arr el,
+{-instance (StaticByteAccess arr el,
           IsBounded arr idx,ByteAccess (ElementType arr) idx el,
-          StaticByteWidth (ElementType arr),IsRanged idx,
+          StaticByteWidth (ElementType arr),IsRanged idx,IsNumSingleton idx,
           StaticByteAccess (ElementType arr) el,
           CanConcat el,
           StaticByteWidth el,ByteWidth el (Linear idx))
@@ -240,7 +278,7 @@ instance (StaticByteAccess arr el,
   byteWrite = linearByteWrite
 
 linearByteRead :: (IsBounded arr idx,ByteAccess (ElementType arr) idx el,
-                   StaticByteWidth (ElementType arr),IsRanged idx,
+                   StaticByteWidth (ElementType arr),IsRanged idx,IsNumSingleton idx,
                    StaticByteAccess (ElementType arr) el,
                    CanConcat el,
                    Embed m e,Monad m,GetType e,GCompare e)
@@ -356,7 +394,7 @@ linearByteRead arr off sz = do
             Just _ -> error "linearByteRead: Internal error."
 
 linearByteWrite :: (IsBounded arr idx,ByteAccess (ElementType arr) idx el,
-                    StaticByteWidth (ElementType arr),IsRanged idx,
+                    StaticByteWidth (ElementType arr),IsRanged idx,IsNumSingleton idx,
                     StaticByteWidth el,StaticByteAccess (ElementType arr) el,
                     Embed m e,Monad m,GetType e,GCompare e)
                 => arr e -> Linear idx e -> el e -> m (ByteWrite arr el e)
@@ -447,7 +485,7 @@ linearByteWrite arr off el = do
           let imprec2 = case writeImprecision res of
                 Nothing -> []
                 Just c -> [c]
-          return (arr2,imprec1++imprec2,max1)
+          return (arr2,imprec1++imprec2,max1)-}
 
 instance (IsNumeric c) => Composite (Linear c) where
   type RevComp (Linear c) = RevLinear c
@@ -456,21 +494,27 @@ instance (IsNumeric c) => Composite (Linear c) where
                       nv <- foldExprs (f . RevFactor n) v
                       return (c,nv)) $ zip [0..] facs
     return $ Linear c nfacs
-  accessComposite (RevFactor i r)
-    = maybeLens linear `composeMaybe`
-      listElement' i `composeMaybe`
-      maybeLens _2 `composeMaybe`
-      accessComposite r
+  getRev (RevFactor i r) (Linear _ lst) = do
+    (_,el) <- safeGenericIndex lst i
+    getRev r el
+  setRev (RevFactor i r) x (Just (Linear c lst)) = do
+    nlst <- safeGenericUpdateAt i (\(cy,y) -> do
+                                      ny <- setRev r x (Just y)
+                                      return (cy,ny)) lst
+    return $ Linear c nlst
+  setRev _ _ Nothing = Nothing
   compCombine f (Linear c1 lin1) (Linear c2 lin2)
-    = case compare c1 c2 of
+    = case compCompare c1 c2 of
     EQ -> do
       nl <- mergeFactors f lin1 lin2
       case nl of
         Just nlin -> return $ Just $ Linear c1 nlin
         Nothing -> return Nothing
     LT -> do
-      v <- compositeFromValue (fromInteger 1)
-      nl2 <- mergeFactors f [(c2-c1,v)] lin2
+      let Just one = compositeFromInteger 1 (compType c1)
+      v <- foldExprs (const constant) one
+      let Just nc = runIdentity $ compositeMinus c2 c1
+      nl2 <- mergeFactors f [(nc,v)] lin2
       case nl2 of
         Just nlin2 -> do
           nl <- mergeFactors f lin1 nlin2
@@ -479,8 +523,10 @@ instance (IsNumeric c) => Composite (Linear c) where
             Nothing -> return Nothing
         Nothing -> return Nothing
     GT -> do
-      v <- compositeFromValue (fromInteger 1)
-      nl1 <- mergeFactors f [(c1-c2,v)] lin1
+      let Just one = compositeFromInteger 1 (compType c1)
+      v <- foldExprs (const constant) one
+      let Just nc = runIdentity $ compositeMinus c1 c2
+      nl1 <- mergeFactors f [(nc,v)] lin1
       case nl1 of
         Just nlin1 -> do
           nl <- mergeFactors f nlin1 lin2
@@ -489,22 +535,22 @@ instance (IsNumeric c) => Composite (Linear c) where
             Nothing -> return Nothing
         Nothing -> return Nothing
   compCompare (Linear c1 lin1) (Linear c2 lin2)
-    = compare c1 c2 `mappend`
+    = compCompare c1 c2 `mappend`
       comp lin1 lin2
     where
       comp [] [] = EQ
       comp [] _ = LT
       comp _ [] = GT
       comp ((cx,x):xs) ((cy,y):ys)
-        = compare cx cy `mappend`
+        = compCompare cx cy `mappend`
           compCompare x y `mappend`
           comp xs ys
   compShow p (Linear c lins) = showParen (p>10) $
     showString "Linear " .
-    showsPrec 11 c . showChar ' ' .
-    showListWith (\(c,v) -> showsPrec 10 c . showChar '*' . compShow 10 v) lins
+    compShow 11 c . showChar ' ' .
+    showListWith (\(c,v) -> compShow 10 c . showChar '*' . compShow 10 v) lins
 
-instance (IsRanged c,IsNumeric c) => IsRanged (Linear c) where
+{-instance (IsRanged c,IsNumSingleton c) => IsRanged (Linear c) where
   getRange (Linear c lin) = do
     let rc = rangedConst c
     rlin <- mapM (\(c,x) -> do
@@ -515,7 +561,7 @@ instance (IsRanged c,IsNumeric c) => IsRanged (Linear c) where
                  ) lin
     return $ foldl rangeAdd rc rlin
 
-instance IsNumeric c => IsSingleton (Linear c) where
+instance (IsNumeric c,IsSingleton c) => IsSingleton (Linear c) where
   type SingletonType (Linear c) = SingletonType c
   getSingleton (Linear c lin) = do
     ec <- compositeFromValue c
@@ -524,22 +570,23 @@ instance IsNumeric c => IsSingleton (Linear c) where
                      compositeMult rc x) lin
     res <- compositeSum $ ec:elin
     getSingleton res
+  compositeFromValue v = return $ Linear v []
 
-instance (IsNumeric c,IsConstant c) => IsConstant (Linear c) where
+instance (IsNumSingleton c,IsConstant c) => IsConstant (Linear c) where
   getConstant (Linear c lin) = do
     nlins <- mapM (\(c,x) -> do
                       rx <- getConstant x
                       return $ c*rx) lin
-    return $ sum $ c:nlins
+    return $ sum $ c:nlins-}
 
-mergeFactors :: (Composite c,Embed m e,Monad m,GetType e,GCompare e)
+mergeFactors :: (IsNumeric c,Embed m e,Monad m,GetType e,GCompare e)
              => (forall tp. e tp -> e tp -> m (e tp))
-             -> [(Value tp,c e)]
-             -> [(Value tp,c e)]
-             -> m (Maybe [(Value tp,c e)])
+             -> [(c Value,c e)]
+             -> [(c Value,c e)]
+             -> m (Maybe [(c Value,c e)])
 mergeFactors _ [] ys = return $ Just ys
 mergeFactors _ xs [] = return $ Just xs
-mergeFactors f ((c1,x):xs) ((c2,y):ys) = case compare c1 c2 of
+mergeFactors f ((c1,x):xs) ((c2,y):ys) = case compCompare c1 c2 of
   EQ -> do
     z <- compCombine f x y
     case z of

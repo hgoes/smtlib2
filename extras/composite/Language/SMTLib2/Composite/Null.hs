@@ -2,12 +2,10 @@ module Language.SMTLib2.Composite.Null where
 
 import Language.SMTLib2
 import Language.SMTLib2.Composite.Class
-import Language.SMTLib2.Composite.Lens
 import Language.SMTLib2.Composite.Domains
 
 import Data.GADT.Compare
 import Data.GADT.Show
-import Control.Lens
 
 newtype NoComp (val :: *) (e :: Type -> *) = NoComp val
 
@@ -16,7 +14,8 @@ data NoRev (tp :: Type)
 instance (Ord val,Show val) => Composite (NoComp val) where
   type RevComp (NoComp val) = NoRev
   foldExprs _ (NoComp x) = return (NoComp x)
-  accessComposite _ _ = error "accessComposite called for NoComp"
+  getRev _ _ = Nothing
+  setRev _ _ _ = Nothing
   compCombine _ (NoComp x) (NoComp y) = return $ if x==y
                                                  then Just $ NoComp x
                                                  else Nothing
@@ -33,10 +32,6 @@ instance GEq NoRev where
   geq _ _ = error "geq called for NoRev"
 instance GCompare NoRev where
   gcompare _ _ = error "gcompare called for NoRev"
-
-devoid :: v -> CompLens a (NoComp v)
-devoid v = lensM (\_ -> return (NoComp v))
-           (\st _ -> return st)
 
 instance IsSingleton (NoComp (Value tp)) where
   type SingletonType (NoComp (Value tp)) = tp

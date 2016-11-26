@@ -2,23 +2,21 @@ module Language.SMTLib2.Composite.Tuple where
 
 import Language.SMTLib2
 import Language.SMTLib2.Composite.Class
-import Language.SMTLib2.Composite.Lens
 import Language.SMTLib2.Composite.Domains
 
 import Data.GADT.Show
 import Data.GADT.Compare
 import Data.Proxy
-import Control.Lens
 import qualified Data.Map as Map
 
 data CompTuple2 (a :: (Type -> *) -> *) (b :: (Type -> *) -> *) e
-  = CompTuple2 { _ctuple2_1 :: a e
-               , _ctuple2_2 :: b e }
+  = CompTuple2 { ctuple2_1 :: a e
+               , ctuple2_2 :: b e }
 
 data CompTuple3 (a :: (Type -> *) -> *) (b :: (Type -> *) -> *) (c :: (Type -> *) -> *) e
-  = CompTuple3 { _ctuple3_1 :: a e
-               , _ctuple3_2 :: b e
-               , _ctuple3_3 :: c e }
+  = CompTuple3 { ctuple3_1 :: a e
+               , ctuple3_2 :: b e
+               , ctuple3_3 :: c e }
 
 data RevTuple2 a b tp
   = RevTuple2_1 (RevComp a tp)
@@ -29,35 +27,24 @@ data RevTuple3 a b c tp
   | RevTuple3_2 (RevComp b tp)
   | RevTuple3_3 (RevComp c tp)
 
-makeLenses ''CompTuple2
-makeLenses ''CompTuple3
-
-tuple2_1 :: (Composite a,Composite b) => CompLens (CompTuple2 a b) a
-tuple2_1 = liftLens ctuple2_1
-
-tuple2_2 :: (Composite a,Composite b) => CompLens (CompTuple2 a b) b
-tuple2_2 = liftLens ctuple2_2
-
-tuple3_1 :: (Composite a,Composite b,Composite c) => CompLens (CompTuple3 a b c) a
-tuple3_1 = liftLens ctuple3_1
-
-tuple3_2 :: (Composite a,Composite b,Composite c) => CompLens (CompTuple3 a b c) b
-tuple3_2 = liftLens ctuple3_2
-
-tuple3_3 :: (Composite a,Composite b,Composite c) => CompLens (CompTuple3 a b c) c
-tuple3_3 = liftLens ctuple3_3
-
 instance (Composite a,Composite b,GShow e) => Show (CompTuple2 a b e) where
   showsPrec p (CompTuple2 x y) = showChar '(' . compShow 0 x . showChar ',' . compShow 0 y . showChar ')'
 
 instance (Composite a,Composite b) => Composite (CompTuple2 a b) where
   type RevComp (CompTuple2 a b) = RevTuple2 a b
   foldExprs f tup = do
-    n1 <- foldExprs (f . RevTuple2_1) (_ctuple2_1 tup)
-    n2 <- foldExprs (f . RevTuple2_2) (_ctuple2_2 tup)
+    n1 <- foldExprs (f . RevTuple2_1) (ctuple2_1 tup)
+    n2 <- foldExprs (f . RevTuple2_2) (ctuple2_2 tup)
     return $ CompTuple2 n1 n2
-  accessComposite (RevTuple2_1 r) = maybeLens ctuple2_1 `composeMaybe` accessComposite r
-  accessComposite (RevTuple2_2 r) = maybeLens ctuple2_2 `composeMaybe` accessComposite r
+  getRev (RevTuple2_1 r) (CompTuple2 x _) = getRev r x
+  getRev (RevTuple2_2 r) (CompTuple2 _ x) = getRev r x
+  setRev (RevTuple2_1 r) el (Just (CompTuple2 x y)) = do
+    nx <- setRev r el (Just x)
+    return $ CompTuple2 nx y
+  setRev (RevTuple2_2 r) el (Just (CompTuple2 x y)) = do
+    ny <- setRev r el (Just y)
+    return $ CompTuple2 x ny
+  setRev _ _ Nothing = Nothing
   compCombine f (CompTuple2 x1 y1) (CompTuple2 x2 y2) = do
     actX <- compCombine f x1 x2
     actY <- compCombine f y1 y2
@@ -73,8 +60,8 @@ instance (Composite a,Composite b) => Composite (CompTuple2 a b) where
     invX <- compInvariant x
     invY <- compInvariant y
     return $ invX++invY
-  revName (_::Proxy (CompTuple2 a b)) (RevTuple2_1 r) = "0_"++revName (Proxy::Proxy a) r
-  revName (_::Proxy (CompTuple2 a b)) (RevTuple2_2 r) = "1_"++revName (Proxy::Proxy b) r
+  revName (_::Proxy (CompTuple2 a b)) (RevTuple2_1 r) = "t0_"++revName (Proxy::Proxy a) r
+  revName (_::Proxy (CompTuple2 a b)) (RevTuple2_2 r) = "t1_"++revName (Proxy::Proxy b) r
 
 instance (CompositeExtract a,CompositeExtract b)
   => CompositeExtract (CompTuple2 a b) where
@@ -94,13 +81,23 @@ instance (Composite a,Composite b,Composite c,GShow e)
 instance (Composite a,Composite b,Composite c) => Composite (CompTuple3 a b c) where
   type RevComp (CompTuple3 a b c) = RevTuple3 a b c
   foldExprs f tup = do
-    n1 <- foldExprs (f . RevTuple3_1) (_ctuple3_1 tup)
-    n2 <- foldExprs (f . RevTuple3_2) (_ctuple3_2 tup)
-    n3 <- foldExprs (f . RevTuple3_3) (_ctuple3_3 tup)
+    n1 <- foldExprs (f . RevTuple3_1) (ctuple3_1 tup)
+    n2 <- foldExprs (f . RevTuple3_2) (ctuple3_2 tup)
+    n3 <- foldExprs (f . RevTuple3_3) (ctuple3_3 tup)
     return $ CompTuple3 n1 n2 n3
-  accessComposite (RevTuple3_1 r) = maybeLens ctuple3_1 `composeMaybe` accessComposite r
-  accessComposite (RevTuple3_2 r) = maybeLens ctuple3_2 `composeMaybe` accessComposite r
-  accessComposite (RevTuple3_3 r) = maybeLens ctuple3_3 `composeMaybe` accessComposite r
+  getRev (RevTuple3_1 r) (CompTuple3 x _ _) = getRev r x
+  getRev (RevTuple3_2 r) (CompTuple3 _ x _) = getRev r x
+  getRev (RevTuple3_3 r) (CompTuple3 _ _ x) = getRev r x
+  setRev (RevTuple3_1 r) e (Just (CompTuple3 x y z)) = do
+    nx <- setRev r e (Just x)
+    return $ CompTuple3 nx y z
+  setRev (RevTuple3_2 r) e (Just (CompTuple3 x y z)) = do
+    ny <- setRev r e (Just y)
+    return $ CompTuple3 x ny z
+  setRev (RevTuple3_3 r) e (Just (CompTuple3 x y z)) = do
+    nz <- setRev r e (Just z)
+    return $ CompTuple3 x y nz
+  setRev _ _ Nothing = Nothing
   compCombine f (CompTuple3 x1 y1 z1) (CompTuple3 x2 y2 z2) = do
     actX <- compCombine f x1 x2
     actY <- compCombine f y1 y2
@@ -208,10 +205,11 @@ instance (Composite a,Composite b,Composite c) => GCompare (RevTuple3 a b c) whe
     GGT -> GGT
 
 instance (ByteWidth a idx,ByteWidth b idx) => ByteWidth (CompTuple2 a b) idx where
-  byteWidth (CompTuple2 x y) = do
-    wx <- byteWidth x
-    wy <- byteWidth y
-    compositePlus wx wy
+  byteWidth (CompTuple2 x y) r = do
+    wx <- byteWidth x r
+    wy <- byteWidth y r
+    Just r <- compositePlus wx wy
+    return r
 
 instance (StaticByteWidth a,StaticByteAccess a el,StaticByteAccess b el,CanConcat el)
          => StaticByteAccess (CompTuple2 a b) el where
@@ -249,7 +247,8 @@ instance (StaticByteWidth a,ByteAccess a idx el,ByteAccess b idx el,CanConcat el
         return [(ByteRead Map.empty Nothing (Just r) (readImprecision rx),cond')]
       Nothing -> return []
     reads2 <- sequence [ do
-                           zero <- compositeFromValue (fromInteger 0)
+                           let Just zero' = compositeFromInteger 0 (compType idx)
+                           zero <- foldExprs (const constant) zero'
                            r <- byteRead y (zero::idx e) rest
                            nr <- concatRead part r
                            return (nr,cond)
@@ -258,8 +257,9 @@ instance (StaticByteWidth a,ByteAccess a idx el,ByteAccess b idx el,CanConcat el
       Nothing -> return []
       Just cond -> do
         let wx = staticByteWidth x
-        wx' <- compositeFromValue (fromInteger wx)
-        nidx <- compositeMinus idx wx'
+            Just vwx = compositeFromInteger wx (compType idx)
+        wx' <- foldExprs (const constant) vwx
+        Just nidx <- compositeMinus idx wx'
         ry <- byteRead y nidx sz
         return [(ry,cond)]
     byteReadITE (reads1++reads2++reads3)
@@ -275,7 +275,9 @@ instance (StaticByteWidth a,ByteAccess a idx el,ByteAccess b idx el,CanConcat el
         return [(ByteWrite [] Nothing (Just (CompTuple2 w y)) (writeImprecision wx),cond')]
       Nothing -> return []
     writes2 <- sequence [ do
-                            zero <- compositeFromValue (fromInteger 0)
+                            let Just zero' = compositeFromInteger 0
+                                             (compType idx)
+                            zero <- foldExprs (const constant) zero'
                             wy <- byteWrite y (zero::idx e) rest
                             return $ (wy { fullWrite = case fullWrite wx of
                                              Nothing -> case fullWrite wy of
@@ -289,8 +291,9 @@ instance (StaticByteWidth a,ByteAccess a idx el,ByteAccess b idx el,CanConcat el
       Nothing -> return []
       Just cond -> do
         let szx = staticByteWidth x
-        szx' <- compositeFromValue (fromInteger szx)
-        nidx <- compositeMinus idx szx'
+            Just vszx = compositeFromInteger szx (compType idx)
+        szx' <- foldExprs (const constant) vszx
+        Just nidx <- compositeMinus idx szx'
         wy <- byteWrite y nidx el
         return [(wy { fullWrite = case fullWrite wy of
                         Nothing -> Nothing

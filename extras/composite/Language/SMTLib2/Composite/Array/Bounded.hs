@@ -2,20 +2,16 @@ module Language.SMTLib2.Composite.Array.Bounded where
 
 import Language.SMTLib2 hiding (select,store)
 import Language.SMTLib2.Composite.Class
-import Language.SMTLib2.Composite.Lens
 import Language.SMTLib2.Composite.Domains
 
-import Control.Lens
 import Data.Monoid
 import Data.GADT.Compare
 import Data.GADT.Show
 import Prelude hiding (Bounded)
 
 data Bounded arr idx (e :: Type -> *)
-  = Bounded { _boundedArray :: arr e
-            , _bound :: idx e }
-
-makeLenses ''Bounded
+  = Bounded { boundedArray :: arr e
+            , bound :: idx e }
 
 data RevBounded arr idx tp where
   RevBoundedArray :: RevComp arr tp -> RevBounded arr idx tp
@@ -27,16 +23,21 @@ instance (Composite arr,Composite idx) => Composite (Bounded arr idx) where
     narr <- foldExprs (f . RevBoundedArray) arr
     nbnd <- foldExprs (f . RevBound) bnd
     return (Bounded narr nbnd)
-  accessComposite (RevBoundedArray r) = maybeLens boundedArray `composeMaybe`
-                                        accessComposite r
-  accessComposite (RevBound r) = maybeLens bound `composeMaybe`
-                                 accessComposite r
+  getRev (RevBoundedArray r) arr = getRev r (boundedArray arr)
+  getRev (RevBound r) arr = getRev r (bound arr)
+  setRev (RevBoundedArray r) e (Just arr) = do
+    narr <- setRev r e (Just $ boundedArray arr)
+    return arr { boundedArray = narr }
+  setRev (RevBound r) e (Just arr) = do
+    nbnd <- setRev r e (Just $ bound arr)
+    return arr { bound = nbnd }
+  setRev _ _ Nothing = Nothing
   compCombine f b1 b2 = do
-    arr <- compCombine f (_boundedArray b1) (_boundedArray b2)
+    arr <- compCombine f (boundedArray b1) (boundedArray b2)
     case arr of
       Nothing -> return Nothing
       Just narr -> do
-        bnd <- compCombine f (_bound b1) (_bound b2)
+        bnd <- compCombine f (bound b1) (bound b2)
         case bnd of
           Nothing -> return Nothing
           Just nbnd -> return $ Just $ Bounded narr nbnd
@@ -53,11 +54,11 @@ instance (Composite arr,Composite idx) => Composite (Bounded arr idx) where
     inv2 <- compInvariant bnd
     return $ inv1++inv2
 
-instance (Container arr,Composite idx) => Container (Bounded arr idx) where
+instance (Wrapper arr,Composite idx) => Wrapper (Bounded arr idx) where
   type ElementType (Bounded arr idx) = ElementType arr
-  elementType arr = elementType (_boundedArray arr)
+  elementType arr = elementType (boundedArray arr)
 
-instance (IsArray arr idx,IsRanged idx,IsNumeric idx) => IsArray (Bounded arr idx) idx where
+instance (IsArray arr idx,IsRanged idx,IsSingleton idx,IsNumeric idx,Integral (Value (SingletonType idx))) => IsArray (Bounded arr idx) idx where
   newArray idx el = do
     arr <- newArray idx el
     bnd <- compositeFromValue (fromInteger 0)
@@ -69,12 +70,12 @@ instance (IsArray arr idx,IsRanged idx,IsNumeric idx) => IsArray (Bounded arr id
       Nothing -> return Nothing
       Just narr' -> return $ Just $ Bounded narr' sz
 
-instance (IsArray arr idx,IsRanged idx,IsNumeric idx)
+instance (IsArray arr idx,IsRanged idx,IsNumSingleton idx)
   => IsStaticBounded (Bounded arr idx) where
   checkStaticIndex arr idx = do
     let idx' = fromInteger idx
         idxRange = singletonRange idx'
-    sizeRange <- getRange $ _bound arr
+    sizeRange <- getRange $ bound arr
     let zeroRange = rangedConst (toEnum 0)
         arrRange = betweenRange zeroRange sizeRange
         outsideRange = setMinusRange arrRange idxRange
@@ -85,14 +86,14 @@ instance (IsArray arr idx,IsRanged idx,IsNumeric idx)
            then return AlwaysError
            else do
       ridx <- compositeFromValue idx'
-      errCond <- compositeGEQ ridx (_bound arr)
+      Just errCond <- compositeGEQ ridx (bound arr)
       return $ SometimesError errCond
 
-instance (IsArray arr idx,IsRanged idx,IsNumeric idx)
+instance (IsArray arr idx,IsRanged idx,IsNumSingleton idx)
   => IsBounded (Bounded arr idx) idx where
   checkIndex arr idx = do
     idxRange <- getRange idx
-    sizeRange <- getRange $ _bound arr
+    sizeRange <- getRange $ bound arr
     let zeroRange = rangedConst (fromInteger 0)
         arrRange = betweenRange zeroRange sizeRange
         outsideRange = setMinusRange idxRange arrRange
@@ -102,9 +103,9 @@ instance (IsArray arr idx,IsRanged idx,IsNumeric idx)
       else if nullRange insideRange
            then return AlwaysError
            else do
-      errCond <- compositeGEQ idx (_bound arr)
+      Just errCond <- compositeGEQ idx (bound arr)
       return $ SometimesError errCond
-  arraySize arr = return $ _bound arr
+  arraySize arr = return $ bound arr
 
 instance (Composite arr,Composite idx) => GEq (RevBounded arr idx) where
   geq (RevBoundedArray r1) (RevBoundedArray r2) = do

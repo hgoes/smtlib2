@@ -2,32 +2,34 @@ module Language.SMTLib2.Composite.List where
 
 import Language.SMTLib2
 import Language.SMTLib2.Composite.Class
+import Language.SMTLib2.Composite.Container
 import Language.SMTLib2.Composite.Domains
-import Language.SMTLib2.Composite.Lens
+import Language.SMTLib2.Composite.Null
 
 import Data.List (genericIndex)
+import Data.Maybe (catMaybes)
 import Data.GADT.Show
 import Data.GADT.Compare
 import Text.Show
 import Data.Foldable
-import Control.Lens
 
 data RevList a tp = RevList Integer (RevComp a tp)
 
-newtype CompList a (e :: Type -> *) = CompList { _compList :: [a e] }
-
-makeLenses ''CompList
+newtype CompList a (e :: Type -> *) = CompList { compList :: [a e] }
 
 instance Composite a => Composite (CompList a) where
   type RevComp (CompList a) = RevList a
   foldExprs f (CompList lst) = do
     nlst <- mapM (\(n,el) -> foldExprs (f . RevList n) el) (zip [0..] lst)
     return (CompList nlst)
-  accessComposite (RevList n r)
-    = maybeLens compList `composeMaybe`
-      lens (\lst -> lst `safeGenericIndex` n)
-           (\lst nel -> safeGenericInsertAt n nel lst) `composeMaybe`
-      accessComposite r
+  getRev (RevList n r) (CompList lst) = do
+    el <- safeGenericIndex lst n
+    getRev r el
+  setRev (RevList n r) x (Just (CompList lst)) = do
+    nel <- setRev r x (safeGenericIndex lst n)
+    nlst <- safeGenericInsertAt n nel lst
+    return $ CompList nlst
+  setRev _ _ _ = Nothing
   compCombine f (CompList xs) (CompList ys) = fmap (fmap CompList) $ merge xs ys
     where
       merge [] ys = return (Just ys)
@@ -49,6 +51,39 @@ instance Composite a => Composite (CompList a) where
         r -> r
   compShow = showsPrec
   compInvariant (CompList xs) = fmap concat $ mapM compInvariant xs
+
+instance Container CompList where
+  type CIndex CompList = NoComp Integer
+  elementGet (NoComp i) (CompList lst) = case safeGenericIndex lst i of
+    Nothing -> error $ "elementGet{CompList}: Index "++show i++" out of range."
+    Just res -> return res
+  elementSet (NoComp i) x (CompList lst)
+    = case safeGenericUpdateAt i (\_ -> Just x) lst of
+    Just nlst -> return (CompList nlst)
+    Nothing -> error $ "elementSet{CompList}: Index "++show i++" out of range."
+
+dynamicAt :: (Composite a,Integral (Value tp),Embed m e,Monad m,GetType e)
+          => Maybe (Range tp) -> e tp
+          -> Accessor (CompList a) (NoComp Integer) a m e
+dynamicAt (Just (asFiniteRange -> Just [val])) _
+  = at (NoComp $ toInteger val)
+dynamicAt rng i = Accessor get set
+  where
+    get (CompList lst) = fmap catMaybes $
+                         mapM (\(el,idx) -> do
+                                  let vidx = fromInteger idx
+                                  case rng of
+                                    Just rng'
+                                      | includes vidx rng' -> do
+                                          cond <- i .==. constant vidx
+                                          return $ Just (NoComp idx,[cond],el)
+                                    _ -> return Nothing
+                              ) (zip lst [0..])
+    set upd (CompList lst) = return $ CompList $ merge upd 0 lst
+    merge [] _ lst = lst
+    merge upd@((NoComp i,el):upd') p (x:xs)
+      | i==p      = el:merge upd' (p+1) xs
+      | otherwise = x:merge upd (p+1) xs
 
 instance (Composite a,GShow e) => Show (CompList a e) where
   showsPrec _ (CompList xs) = showListWith (compShow 0) xs
@@ -116,20 +151,6 @@ instance Composite a => GCompare (RevList a) where
     LT -> GLT
     GT -> GGT
 
-listElement :: Integer -> CompLens (CompList a) a
-listElement i = liftLens $ compList . _elem i
-  where
-    _elem :: Integer -> Lens' [a] a
-    _elem i = lens (`genericIndex` i) (flip $ insertAt i)
-
-    insertAt :: Integer -> a -> [a] -> [a]
-    insertAt 0 x (_:ys) = x:ys
-    insertAt n x (y:ys) = y:insertAt (n-1) x ys
-
-listElement' :: (Num i,Eq i) => i -> MaybeLens [a] a
-listElement' i = lens (\xs -> safeGenericIndex xs i)
-                 (\xs x -> safeGenericInsertAt i x xs)
-
 safeGenericIndex :: (Num i,Eq i) => [a] -> i -> Maybe a
 safeGenericIndex (x:xs) 0 = Just x
 safeGenericIndex (_:xs) n = safeGenericIndex xs (n-1)
@@ -141,6 +162,15 @@ safeGenericInsertAt n x (y:ys) = do
   ys' <- safeGenericInsertAt (n-1) x ys
   return $ y:ys'
 safeGenericInsertAt _ _ [] = Nothing
+
+safeGenericUpdateAt :: (Num i,Eq i) => i -> (a -> Maybe a) -> [a] -> Maybe [a]
+safeGenericUpdateAt 0 f (x:xs) = do
+  nx <- f x
+  return $ nx:xs
+safeGenericUpdateAt n f (x:xs) = do
+  nxs <- safeGenericUpdateAt (n-1) f xs
+  return $ x:nxs
+safeGenericUpdateAt _ _ [] = Nothing
 
 instance StaticByteWidth a => StaticByteWidth (CompList a) where
   staticByteWidth (CompList xs) = sum $ fmap staticByteWidth xs

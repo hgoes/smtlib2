@@ -3,8 +3,9 @@ module Language.SMTLib2.Composite.Array where
 import Language.SMTLib2 hiding (select,store)
 import qualified Language.SMTLib2 as SMT
 import Language.SMTLib2.Composite.Class hiding (defaultEq)
-import Language.SMTLib2.Composite.Lens
 import Language.SMTLib2.Composite.Domains
+import Language.SMTLib2.Composite.Container
+import Language.SMTLib2.Composite.Null (NoComp(..))
 import Language.SMTLib2.Internals.Type (Lifted,Fst,Snd)
 import Language.SMTLib2.Internals.Embed
 import Language.SMTLib2.Internals.Expression as E
@@ -16,16 +17,11 @@ import Data.Functor.Identity
 import Control.Monad.Reader
 import Control.Monad.Except
 import Control.Monad.State
-import Control.Lens hiding (Const)
 
-newtype Arrayed idx e tp = Arrayed { _arrayed :: e (ArrayType idx tp) }
+newtype Arrayed idx e tp = Arrayed { arrayed :: e (ArrayType idx tp) }
 
-makeLenses ''Arrayed
-
-data CompArray idx c e = CompArray { _indexDescr :: List Repr idx
-                                   , _compArray  :: c (Arrayed idx e) }
-
-makeLenses ''CompArray
+data CompArray idx c e = CompArray { indexDescr :: List Repr idx
+                                   , compArray  :: c (Arrayed idx e) }
 
 data RevArray idx c tp where
   RevArray :: RevComp c tp -> RevArray idx c (ArrayType idx tp)
@@ -71,10 +67,13 @@ instance Composite c => Composite (CompArray i c) where
                         return (Arrayed ne)
                     ) c
     return (CompArray idx nc)
-  accessComposite (RevArray r)
-    = maybeLens compArray `composeMaybe`
-      accessComposite r `composeMaybe`
-      maybeLens arrayed
+  getRev (RevArray r) (CompArray _ arr) = do
+    Arrayed res <- getRev r arr
+    return res
+  setRev (RevArray r) x (Just (CompArray idx arr)) = do
+    narr <- setRev r (Arrayed x) (Just arr)
+    return $ CompArray idx narr
+  setRev _ _ Nothing = Nothing
   compCombine f (CompArray idx arr1) (CompArray _ arr2) = do
     narr <- runReaderT (compCombine (\(Arrayed e1) (Arrayed e2) -> do
                                         ne <- lift $ f e1 e2
@@ -88,6 +87,30 @@ instance Composite c => Composite (CompArray i c) where
   compInvariant (CompArray idx arr) = do
     invarr <- runReaderT (compInvariant arr) idx
     mapM (\(Arrayed x) -> x .==. constArray idx true) invarr
+
+newtype CompArrayIdx (i::[Type]) e = CompArrayIdx (List e i)
+
+instance Container (CompArray i) where
+  type CIndex (CompArray i) = CompArrayIdx i
+  elementGet (CompArrayIdx idx) arr = selectArray arr idx
+  elementSet (CompArrayIdx idx) x arr = do
+    narr <- storeArray arr idx x
+    case narr of
+      Nothing -> error $ "elementSet{CompArray}: Incompatible updates."
+      Just res -> return res
+
+atArray :: (Composite a,Embed m e,Monad m,GetType e)
+        => List e i
+        -> Accessor (CompArray i a) (NoComp ()) a m e
+atArray idx = Accessor get set
+  where
+    get arr = do
+      el <- selectArray arr idx
+      return [(NoComp (),[],el)]
+    set [(_,el)] arr = do
+      narr <- storeArray arr idx el
+      case narr of
+        Just res -> return res
 
 instance Composite c => Show (RevArray i c tp) where
   showsPrec p (RevArray r) = showParen (p>10) $
@@ -107,7 +130,7 @@ instance Composite c => GCompare (RevArray i c) where
     GLT -> GLT
     GGT -> GGT
 
-instance Composite c => Container (CompArray idx c) where
+instance Composite c => Wrapper (CompArray idx c) where
   type ElementType (CompArray idx c) = c
   elementType = elementDescr
 
@@ -135,22 +158,33 @@ selectArray :: (Composite c,Embed m e,Monad m,GetType e) => CompArray i c e -> L
 selectArray (CompArray _ c) i = foldExprs (\_ (Arrayed e) -> SMT.select e i) c
 
 storeArray :: (Composite c,Embed m e,Monad m,GetType e) => CompArray i c e -> List e i -> c e -> m (Maybe (CompArray i c e))
-storeArray (CompArray idx arr) i el = do
+storeArray = storeArrayCond Nothing
+
+storeArrayCond :: (Composite c,Embed m e,Monad m,GetType e)
+               => Maybe (e BoolType)
+               -> CompArray i c e
+               -> List e i
+               -> c e
+               -> m (Maybe (CompArray i c e))
+storeArrayCond cond (CompArray idx arr) i el = do
   narr <- runExceptT $ execStateT
           (foldExprs
             (\rev e -> do
                 arr <- get
-                case arr `getMaybe` accessComposite rev of
+                case getRev rev arr of
                   Just (Arrayed carr) -> do
-                    narr <- lift $ lift $ SMT.store carr i e
-                    case setMaybe arr (accessComposite rev) (Arrayed narr) of
+                    arr1 <- lift $ lift $ SMT.store carr i e
+                    arr2 <- case cond of
+                      Nothing -> return arr1
+                      Just cond' -> lift $ lift $ ite cond' arr1 carr
+                    case setRev rev (Arrayed arr2) (Just arr) of
                       Just res -> do
                         put res
                         return e
                       Nothing -> throwError ()
                   Nothing -> do
                     narr <- lift $ lift $ SMT.constArray idx e
-                    case setMaybe arr (accessComposite rev) (Arrayed narr) of
+                    case setRev rev (Arrayed narr) (Just arr) of
                       Just res -> do
                         put res
                         return e
@@ -159,23 +193,6 @@ storeArray (CompArray idx arr) i el = do
   case narr of
       Left () -> return Nothing
       Right narr' -> return $ Just $ CompArray idx narr'
-
-arrayElement :: Composite c => (forall m e. (Embed m e,Monad m,GetType e) => m (List e idx)) -> CompLens (CompArray idx c) c
-arrayElement idx = lensM (\arr -> do
-                             ridx <- idx
-                             selectArray arr ridx
-                         )
-                   (\arr el -> do
-                       ridx <- idx
-                       res <- storeArray arr ridx el
-                       case res of
-                         Just r -> return r)
-  where
-    arrayedElementType :: Arrayed idx Repr tp -> Repr tp
-    arrayedElementType (Arrayed (ArrayRepr _ tp)) = tp
-
-    elementType :: Composite c => CompArray idx c Repr -> c Repr
-    elementType (CompArray idx arr) = runIdentity $ foldExprs (\_ -> return . arrayedElementType) arr
 
 instance (Embed m e,Monad m) => Embed (ReaderT (List Repr idx) m) (Arrayed idx e) where
   type EmVar (ReaderT (List Repr idx) m) (Arrayed idx e) = Arrayed idx (EmVar m e)

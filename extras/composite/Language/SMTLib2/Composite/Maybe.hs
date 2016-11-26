@@ -2,18 +2,14 @@ module Language.SMTLib2.Composite.Maybe where
 
 import Language.SMTLib2
 import Language.SMTLib2.Composite.Class hiding (defaultEq)
-import Language.SMTLib2.Composite.Lens
 import Language.SMTLib2.Composite.Domains
 
 import Data.GADT.Compare
 import Data.GADT.Show
-import Control.Lens
 
-newtype CompMaybe a (e :: Type -> *) = CompMaybe { _compMaybe :: Maybe (a e) }
+newtype CompMaybe a (e :: Type -> *) = CompMaybe { compMaybe :: Maybe (a e) }
 
 newtype RevMaybe a tp = RevMaybe (RevComp a tp)
-
-makeLenses ''CompMaybe
 
 instance Composite a => Composite (CompMaybe a) where
   type RevComp (CompMaybe a) = RevMaybe a
@@ -21,7 +17,12 @@ instance Composite a => Composite (CompMaybe a) where
   foldExprs f (CompMaybe (Just v)) = do
     nv <- foldExprs (f . RevMaybe) v
     return (CompMaybe (Just nv))
-  accessComposite (RevMaybe r) = maybeLens compMaybe `composeMaybe` just `composeMaybe` accessComposite r
+  getRev (RevMaybe r) (CompMaybe x) = x >>= getRev r
+  setRev (RevMaybe r) x mb = do
+    nel <- setRev r x (do
+                          CompMaybe mb' <- mb
+                          mb')
+    return $ CompMaybe $ Just nel
   compCombine f (CompMaybe (Just x)) (CompMaybe (Just y)) = do
     z <- compCombine f x y
     return $ fmap (CompMaybe . Just) z
@@ -44,8 +45,9 @@ instance CompositeExtract a => CompositeExtract (CompMaybe a) where
       return (Just res)
 
 instance ByteWidth a idx => ByteWidth (CompMaybe a) idx where
-  byteWidth (CompMaybe Nothing) = compositeFromValue 0
-  byteWidth (CompMaybe (Just obj)) = byteWidth obj
+  byteWidth (CompMaybe Nothing) r = let Just zero = compositeFromInteger 0 r
+                                    in foldExprs (const constant) zero
+  byteWidth (CompMaybe (Just obj)) r = byteWidth obj r
 
 instance StaticByteAccess a el => StaticByteAccess (CompMaybe a) el where
   staticByteRead (CompMaybe Nothing) _ _ = return Nothing

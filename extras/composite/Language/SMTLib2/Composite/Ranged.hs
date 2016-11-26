@@ -25,7 +25,6 @@ module Language.SMTLib2.Composite.Ranged
 
 import Language.SMTLib2.Composite.Class
 import Language.SMTLib2.Composite.Domains
-import Language.SMTLib2.Composite.Lens
 import Language.SMTLib2
 import Language.SMTLib2.Internals.Type.Nat
 import Language.SMTLib2.Internals.Type (bvPred,bvSucc)
@@ -34,12 +33,9 @@ import Data.GADT.Show
 import Data.List (sortBy)
 import Data.Ord (comparing)
 import Data.Constraint
-import Control.Lens
 
-data Ranged c (e :: Type -> *) = Ranged { _range :: Range (SingletonType c)
-                                        , _ranged :: c e }
-
-makeLenses ''Ranged
+data Ranged c (e :: Type -> *) = Ranged { range :: Range (SingletonType c)
+                                        , ranged :: c e }
 
 instance (Composite c,GShow e) => Show (Ranged c e) where
   showsPrec p (Ranged r c) = showParen (p>10) $
@@ -51,7 +47,11 @@ instance IsSingleton c => Composite (Ranged c) where
   foldExprs f (Ranged r c) = do
     nc <- foldExprs f c
     return $ Ranged r nc
-  accessComposite r = maybeLens ranged `composeMaybe` accessComposite r
+  getRev r (Ranged _ c) = getRev r c
+  setRev r x (Just (Ranged rng c)) = do
+    nc <- setRev r x (Just c)
+    return $ Ranged rng nc
+  setRev _ _ Nothing = Nothing
   compCombine f (Ranged r1 c1) (Ranged r2 c2)
     = fmap (fmap (Ranged (unionRange r1 r2))) $ compCombine f c1 c2
   compCompare (Ranged r1 c1) (Ranged r2 c2) = case compare r1 r2 of
@@ -70,15 +70,15 @@ instance (CompositeExtract c,IsSingleton c) => CompositeExtract (Ranged c) where
 
 instance IsSingleton c => IsSingleton (Ranged c) where
   type SingletonType (Ranged c) = SingletonType c
-  getSingleton r = getSingleton (_ranged r)
-
-instance IsSingleton c => IsRanged (Ranged c) where
-  getRange r = return $ _range r
-
-instance IsNumeric c => IsNumeric (Ranged c) where
+  getSingleton r = getSingleton (ranged r)
   compositeFromValue v = do
     rv <- compositeFromValue v
     return $ Ranged (singletonRange v) rv
+  
+instance IsSingleton c => IsRanged (Ranged c) where
+  getRange r = return $ range r
+
+{-instance IsNumSingleton c => IsNumeric (Ranged c) where
   compositePlus c1 c2 = do
     r <- compositePlus (_ranged c1) (_ranged c2)
     return $ Ranged (rangeAdd (_range c1) (_range c2)) r
@@ -109,3 +109,4 @@ instance IsNumeric c => IsNumeric (Ranged c) where
   compositeMod c1 c2 = do
     c <- compositeMod (_ranged c1) (_ranged c2)
     return $ Ranged (rangeMod (_range c1) (_range c2)) c
+-}

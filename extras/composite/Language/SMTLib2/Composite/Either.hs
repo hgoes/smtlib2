@@ -2,28 +2,15 @@ module Language.SMTLib2.Composite.Either where
 
 import Language.SMTLib2
 import Language.SMTLib2.Composite.Class
-import Language.SMTLib2.Composite.Lens
+import Language.SMTLib2.Composite.Container
 
 import Data.GADT.Show
 import Data.GADT.Compare
-import Control.Lens
 
 newtype CompEither a b (e :: Type -> *) = CompEither { compEither :: Either (a e) (b e) }
 
 data RevEither a b tp = RevLeft (RevComp a tp)
                       | RevRight (RevComp b tp)
-
-left :: MaybeLens (CompEither a b e) (a e)
-left = lens (\(CompEither x) -> case x of
-                Left x' -> Just x'
-                Right _ -> Nothing)
-       (\x nel -> Just $ CompEither (Left nel))
-
-right :: MaybeLens (CompEither a b e) (b e)
-right = lens (\(CompEither x) -> case x of
-                Right x' -> Just x'
-                Left _ -> Nothing)
-        (\x nel -> Just $ CompEither (Right nel))
 
 instance (Composite a,Composite b) => Composite (CompEither a b) where
   type RevComp (CompEither a b) = RevEither a b
@@ -33,8 +20,19 @@ instance (Composite a,Composite b) => Composite (CompEither a b) where
   foldExprs f (CompEither (Right x)) = do
     nx <- foldExprs (f . RevRight) x
     return (CompEither (Right nx))
-  accessComposite (RevLeft r) = left `composeMaybe` accessComposite r
-  accessComposite (RevRight r) = right `composeMaybe` accessComposite r
+  getRev (RevLeft r) (CompEither (Left x)) = getRev r x
+  getRev (RevRight r) (CompEither (Right x)) = getRev r x
+  getRev _ _ = Nothing
+  setRev (RevLeft r) x ei = do
+    res <- setRev r x (case ei of
+                         Just (CompEither (Left c)) -> Just c
+                         _ -> Nothing)
+    return $ CompEither $ Left res
+  setRev (RevRight r) x ei = do
+    res <- setRev r x (case ei of
+                         Just (CompEither (Right c)) -> Just c
+                         _ -> Nothing)
+    return $ CompEither $ Right res
   compCombine f (CompEither (Left x)) (CompEither (Left y)) = do
     z <- compCombine f x y
     return $ fmap (CompEither . Left) z
@@ -52,7 +50,29 @@ instance (Composite a,Composite b) => Composite (CompEither a b) where
     showString "Right " . compShow 11 x
   compInvariant (CompEither (Left x)) = compInvariant x
   compInvariant (CompEither (Right x)) = compInvariant x
-  
+
+eitherA :: Monad m
+        => Accessor a idx1 c m e
+        -> Accessor b idx2 c m e
+        -> Accessor (CompEither a b) (CompEither idx1 idx2) c m e
+eitherA accL accR = Accessor get set
+  where
+    get (CompEither (Left x)) = do
+      els <- accessorGet accL x
+      return $ fmap (\(idx,cond,el) -> (CompEither $ Left idx,cond,el)) els
+    get (CompEither (Right x)) = do
+      els <- accessorGet accR x
+      return $ fmap (\(idx,cond,el) -> (CompEither $ Right idx,cond,el)) els
+
+    set upd (CompEither (Left x)) = do
+      let nupd = fmap (\(CompEither (Left idx),el) -> (idx,el)) upd
+      nx <- accessorSet accL nupd x
+      return $ CompEither $ Left nx
+    set upd (CompEither (Right x)) = do
+      let nupd = fmap (\(CompEither (Right idx),el) -> (idx,el)) upd
+      nx <- accessorSet accR nupd x
+      return $ CompEither $ Right nx
+
 eitherDescr :: Either (CompDescr a) (CompDescr b) -> CompDescr (CompEither a b)
 eitherDescr = CompEither
 

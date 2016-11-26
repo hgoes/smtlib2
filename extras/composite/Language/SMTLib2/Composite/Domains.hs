@@ -19,7 +19,8 @@ import Text.Show
 
 class Composite c => IsSingleton c where
   type SingletonType c :: Type
-  getSingleton :: (Embed m e,Monad m) => c e -> m (e (SingletonType c))
+  getSingleton :: (Embed m e,Monad m,GetType e) => c e -> m (e (SingletonType c))
+  compositeFromValue :: (Embed m e,Monad m) => Value (SingletonType c) -> m (c e)
 
 class IsSingleton c => ToSingleton c where
   toSingleton  :: Embed m e => e (SingletonType c) -> m (c e)
@@ -29,36 +30,56 @@ class IsSingleton c => IsConstant c where
   getConstant _ = Nothing
 
 class IsSingleton c => IsRanged c where
-  getRange :: (Embed m e,Monad m) => c e -> m (Range (SingletonType c))
+  getRange :: (Embed m e,Monad m,GetType e) => c e -> m (Range (SingletonType c))
   getRange x = do
     x' <- getSingleton x
     tp <- embedTypeOf
     return $ fullRange (tp x')
 
-class (IsSingleton c,Integral (Value (SingletonType c))) => IsNumeric c where
-  compositeFromValue :: (Embed m e,Monad m) => Value (SingletonType c) -> m (c e)
-  compositePlus :: (Embed m e,Monad m) => c e -> c e -> m (c e)
-  compositeMinus :: (Embed m e,Monad m) => c e -> c e -> m (c e)
-  compositeSum :: (Embed m e,Monad m) => [c e] -> m (c e)
-  compositeSum [] = compositeFromValue (fromInteger 0)
-  compositeSum (x:xs) = foldlM compositePlus x xs
-  compositeNegate :: (Embed m e,Monad m) => c e -> m (c e)
-  compositeNegate x = do
-    zero <- compositeFromValue (fromInteger 0)
-    compositeMinus zero x
-  compositeMult :: (Embed m e,Monad m) => c e -> c e -> m (c e)
-  compositeGEQ :: (Embed m e,Monad m) => c e -> c e -> m (e BoolType)
-  compositeDiv :: (Embed m e,Monad m) => c e -> c e -> m (c e)
-  compositeMod :: (Embed m e,Monad m) => c e -> c e -> m (c e)
+class (Composite c) => IsNumeric c where
+  compositeFromInteger :: Integer -> c Repr -> Maybe (c Value)
+  compositeToInteger :: c Value -> Integer
+  compositePlus :: (Embed m e,Monad m,GetType e)
+                => c e -> c e -> m (Maybe (c e))
+  compositeMinus :: (Embed m e,Monad m,GetType e)
+                 => c e -> c e -> m (Maybe (c e))
+  compositeSum :: (Embed m e,Monad m,GetType e)
+               => [c e] -> m (Maybe (c e))
+  compositeSum (x:xs) = sum' x xs
+    where
+      sum' cur [] = return $ Just cur
+      sum' cur (x:xs) = do
+        ncur <- compositePlus cur x
+        case ncur of
+          Nothing -> return Nothing
+          Just ncur' -> sum' ncur' xs
+  compositeNegate :: (Embed m e,Monad m,GetType e)
+                  => c e -> m (Maybe (c e))
+  --compositeNegate x = do
+  --  zero <- compositeFromValue (fromInteger 0)
+  --  compositeMinus zero x
+  compositeMult :: (Embed m e,Monad m,GetType e)
+                => c e -> c e -> m (Maybe (c e))
+  compositeGEQ :: (Embed m e,Monad m,GetType e)
+               => c e -> c e -> m (Maybe (e BoolType))
+  compositeDiv :: (Embed m e,Monad m,GetType e)
+               => c e -> c e -> m (Maybe (c e))
+  compositeMod :: (Embed m e,Monad m,GetType e)
+               => c e -> c e -> m (Maybe (c e))
 
-class (Composite c,Composite (ElementType c)) => Container c where
+class (IsSingleton c,IsNumeric c,Integral (Value (SingletonType c))) => IsNumSingleton c
+
+class (Composite c,Composite (ElementType c)) => Wrapper c where
   type ElementType c :: (Type -> *) -> *
   elementType :: c Repr -> ElementType c Repr
 
-class (Container arr,Composite idx) => IsArray arr idx where
-  newArray :: (Embed m e,Monad m,GetType e) => idx Repr -> ElementType arr e -> m (arr e)
-  select :: (Embed m e,Monad m,GetType e,GCompare e) => arr e -> idx e -> m (Maybe (ElementType arr e))
-  store :: (Embed m e,Monad m,GetType e,GCompare e) => arr e -> idx e -> ElementType arr e -> m (Maybe (arr e))
+class (Wrapper arr,Composite idx) => IsArray arr idx where
+  newArray :: (Embed m e,Monad m,GetType e)
+           => idx Repr -> ElementType arr e -> m (arr e)
+  select :: (Embed m e,Monad m,GetType e,GCompare e)
+         => arr e -> idx e -> m (Maybe (ElementType arr e))
+  store :: (Embed m e,Monad m,GetType e,GCompare e)
+        => arr e -> idx e -> ElementType arr e -> m (Maybe (arr e))
   -- | Store an element only if a condition is true
   storeCond :: (Embed m e,Monad m,GetType e,GCompare e) => arr e -> e BoolType -> idx e -> ElementType arr e -> m (Maybe (arr e))
   storeCond arr cond idx el = do
@@ -66,13 +87,14 @@ class (Container arr,Composite idx) => IsArray arr idx where
     case narr of
       Nothing -> return Nothing
       Just narr' -> compITE cond narr' arr
+  indexType :: GetType e => arr e -> idx Repr
 
 data ErrorCondition e
   = NoError
   | SometimesError (e BoolType)
   | AlwaysError
 
-class Container arr => IsStaticBounded arr where
+class Wrapper arr => IsStaticBounded arr where
   checkStaticIndex :: (Embed m e,Monad m,GetType e)
                    => arr e -> Integer -> m (ErrorCondition e)
 
@@ -82,7 +104,7 @@ class (IsArray arr idx) => IsBounded arr idx where
   arraySize :: (Embed m e,Monad m) => arr e -> m (idx e)
 
 class (Composite c,IsNumeric idx) => ByteWidth c idx where
-  byteWidth :: (Embed m e,Monad m,GetType e) => c e -> m (idx e)
+  byteWidth :: (Embed m e,Monad m,GetType e) => c e -> idx Repr -> m (idx e)
 
 class StaticByteWidth (c :: (Type -> *) -> *) where
   staticByteWidth :: GetType e => c e -> Integer
@@ -124,11 +146,17 @@ class (Composite c,Composite el) => StaticByteAccess c el where
                   -> m (Maybe (c e,Maybe (el e)))
 
 class Composite c => CanConcat c where
-  withConcat :: (Embed m e,Monad m) => (c e -> m (a,c e)) -> [c e] -> m (Maybe (a,[c e]))
+  withConcat :: (Embed m e,Monad m,GetType e)
+             => (c e -> m (a,c e)) -> [c e] -> m (Maybe (a,[c e]))
   withConcat f [c] = do
     (res,nc) <- f c
     return $ Just (res,[nc])
   withConcat _ _ = return Nothing
+  compConcat :: (Embed m e,Monad m,GetType e)
+             => [c e] -> m (Maybe (c e))
+  compConcat xs = do
+    res <- withConcat (\c -> return (c,c)) xs
+    return $ fmap fst res
 
 class Composite c => CanSplit c where
   withSplit :: (Embed m e,Monad m) => ((c e,c e) -> m (a,c e,c e)) -> Integer -> c e -> m (Maybe (a,c e))
@@ -173,7 +201,7 @@ fullWriteCond w = do
       return [c']
   return $ c1++c2++c3
 
-concatRead :: (Embed m e,Monad m,CanConcat el) => el e -> ByteRead el e -> m (ByteRead el e)
+concatRead :: (Embed m e,Monad m,GetType e,CanConcat el) => el e -> ByteRead el e -> m (ByteRead el e)
 concatRead part read = do
   fcond <- true
   let fail = impreciseRead fcond
@@ -196,11 +224,6 @@ concatRead part read = do
         Nothing -> return fail
         Just nfull' -> return read { overreads = novers'
                                    , fullRead = nfull' }
-
-compConcat :: (CanConcat c,Embed m e,Monad m) => [c e] -> m (Maybe (c e))
-compConcat xs = do
-  res <- withConcat (\c -> return (c,c)) xs
-  return $ fmap fst res
 
 compSplit :: (CanSplit c,Embed m e,Monad m) => Integer -> c e -> m (Maybe (c e,c e))
 compSplit off c = do
@@ -323,7 +346,7 @@ fromStaticByteRead :: (ByteWidth c idx,StaticByteAccess c el,IsRanged idx,Integr
                    -> m (ByteRead el e)
 fromStaticByteRead c (idx :: idx e) sz = do
   rangeStart <- getRange idx
-  (objSize :: idx e) <- byteWidth c
+  (objSize :: idx e) <- byteWidth c (compType idx)
   objSizeRange <- getRange objSize
   let objRange = betweenRange (rangedConst 0) objSizeRange
       rangeStart' = intersectionRange objRange rangeStart
@@ -362,7 +385,7 @@ fromStaticByteRead c (idx :: idx e) sz = do
                                 ) (Map.empty,imprec) reads'
       outside <- if nullRange rangeOutside
                  then return Nothing
-                 else fmap Just $ compositeGEQ idx objSize
+                 else compositeGEQ idx objSize
       return $ ByteRead parts outside full imprec2
     Nothing -> do
       cond <- true
@@ -377,7 +400,7 @@ fromStaticByteWrite :: (ByteWidth c idx,StaticByteAccess c el,IsRanged idx,
                     -> m (ByteWrite c el e)
 fromStaticByteWrite c (idx :: idx e) el = do
   rangeStart <- getRange idx
-  (objSize :: idx e) <- byteWidth c
+  (objSize :: idx e) <- byteWidth c (compType idx)
   objSizeRange <- getRange objSize
   let objRange = betweenRange (rangedConst 0) objSizeRange
       rangeStart' = intersectionRange objRange rangeStart
@@ -397,7 +420,7 @@ fromStaticByteWrite c (idx :: idx e) el = do
       let overs = [ (rest,cond) | (cond,Just (_,Just rest)) <- nelems ]
       outside <- if nullRange rangeOutside
                  then return Nothing
-                 else fmap Just $ compositeGEQ idx objSize
+                 else compositeGEQ idx objSize
       return $ ByteWrite overs outside full imprec
     Nothing -> do
       cond <- true

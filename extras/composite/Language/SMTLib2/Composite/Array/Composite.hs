@@ -8,15 +8,12 @@ import qualified Language.SMTLib2.Internals.Type.List as List
 import Language.SMTLib2.Composite.Class
 import Language.SMTLib2.Composite.Array
 import Language.SMTLib2.Composite.Ranged
-import Language.SMTLib2.Composite.Data
 import Language.SMTLib2.Composite.Domains
-import Language.SMTLib2.Composite.Lens
 
 import Control.Monad.State
 import Data.Functor.Identity
 import Data.GADT.Show
 import Data.GADT.Compare
-import Control.Lens
 
 data AnyList (e :: Type -> *) = forall tps. AnyList (List e tps)
 
@@ -39,25 +36,24 @@ data RevCompositeArray (idx :: (Type -> *) -> *) c tp where
 instance (Composite idx,Composite c) => Composite (CompositeArray idx c) where
   type RevComp (CompositeArray idx c) = RevCompositeArray idx c
   foldExprs f (CompositeArray arr) = do
-    narr <- foldExprs (\(RevArray r) e -> f (RevCompositeArray r (_indexDescr arr)) e
+    narr <- foldExprs (\(RevArray r) e -> f (RevCompositeArray r (indexDescr arr)) e
                       ) arr
     return (CompositeArray narr)
-  accessComposite (RevCompositeArray r ilst)
-    = lens (\(CompositeArray arr) -> do
-               Refl <- geq ilst (_indexDescr arr)
-               arr `getMaybe` accessComposite (RevArray r))
-      (\(CompositeArray arr) x -> do
-          Refl <- geq ilst (_indexDescr arr)
-          narr <- setMaybe arr (accessComposite (RevArray r)) x
-          return (CompositeArray narr))
-  compCombine f (CompositeArray arr1) (CompositeArray arr2) = case geq (_indexDescr arr1) (_indexDescr arr2) of
+  getRev (RevCompositeArray r ilst) (CompositeArray arr) = do
+    Refl <- geq ilst (indexDescr arr)
+    getRev (RevArray r) arr
+  setRev (RevCompositeArray r ilst) e (Just (CompositeArray arr)) = do
+    Refl <- geq ilst (indexDescr arr)
+    narr <- setRev (RevArray r) e (Just arr)
+    return $ CompositeArray narr
+  compCombine f (CompositeArray arr1) (CompositeArray arr2) = case geq (indexDescr arr1) (indexDescr arr2) of
     Just Refl -> do
       res <- compCombine f arr1 arr2
       case res of
         Just narr -> return $ Just $ CompositeArray narr
         Nothing -> return Nothing
     Nothing -> return Nothing
-  compCompare (CompositeArray arr1) (CompositeArray arr2) = case gcompare (_indexDescr arr1) (_indexDescr arr2) of
+  compCompare (CompositeArray arr1) (CompositeArray arr2) = case gcompare (indexDescr arr1) (indexDescr arr2) of
     GEQ -> compCompare arr1 arr2
     GLT -> LT
     GGT -> GT
@@ -89,7 +85,7 @@ instance (Composite idx,Composite c) => GCompare (RevCompositeArray idx c) where
     GLT -> GLT
     GGT -> GGT
 
-instance (Composite c,Composite idx) => Container (CompositeArray idx c) where
+instance (Composite c,Composite idx) => Wrapper (CompositeArray idx c) where
   type ElementType (CompositeArray idx c) = c
   elementType (CompositeArray arr) = elementType arr
 
@@ -99,17 +95,17 @@ instance (Composite idx,Composite c) => IsArray (CompositeArray idx c) idx where
       arr <- newConstantArray ilst el
       return $ CompositeArray arr
   select (CompositeArray arr) idx = case allFields idx of
-    AnyList ilst' -> case geq (_indexDescr arr) (runIdentity $ List.mapM (return.getType) ilst') of
+    AnyList ilst' -> case geq (indexDescr arr) (runIdentity $ List.mapM (return.getType) ilst') of
       Just Refl -> fmap Just $ selectArray arr ilst'
   store (CompositeArray arr) idx el = case allFields idx of
-    AnyList ilst' -> case geq (_indexDescr arr) (runIdentity $ List.mapM (return.getType) ilst') of
+    AnyList ilst' -> case geq (indexDescr arr) (runIdentity $ List.mapM (return.getType) ilst') of
       Just Refl -> do
         narr <- storeArray arr ilst' el
         case narr of
           Nothing -> return Nothing
           Just narr' -> return $ Just $ CompositeArray narr'
 
-instance (StaticByteAccess el res,CanConcat res,IsNumeric idx,StaticByteWidth el)
+instance (StaticByteAccess el res,CanConcat res,IsNumSingleton idx,StaticByteWidth el)
          => StaticByteAccess (CompositeArray idx el) res where
   staticByteRead comp@(CompositeArray arr :: CompositeArray idx el e) off sz = do
     let elementSize = staticByteWidth (elementDescr (compType arr))

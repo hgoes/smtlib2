@@ -3,23 +3,18 @@ module Language.SMTLib2.Composite.Array.Static where
 import Language.SMTLib2
 import Language.SMTLib2.Composite.Class
 import Language.SMTLib2.Composite.Domains
-import Language.SMTLib2.Composite.Lens
-import Language.SMTLib2.Composite.Map (mapElement)
 
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.GADT.Compare
 import Data.GADT.Show
 import Text.Show
-import Control.Lens
 import Data.Functor.Identity
 
 data StaticArray idx el (e :: Type -> *)
-  = StaticArray { _indexType :: List Repr idx
-                , _defaultElement :: el e
-                , _stores :: Map (List Value idx) (el e) }
-
-makeLenses ''StaticArray
+  = StaticArray { indexType' :: List Repr idx
+                , defaultElement :: el e
+                , stores :: Map (List Value idx) (el e) }
 
 data RevStaticArray idx el (tp :: Type) where
   RevDefaultElement :: RevComp el tp -> RevStaticArray idx el tp
@@ -28,15 +23,22 @@ data RevStaticArray idx el (tp :: Type) where
 instance Composite el => Composite (StaticArray idx el) where
   type RevComp (StaticArray idx el) = RevStaticArray idx el
   foldExprs f arr = do
-    ndef <- foldExprs (f . RevDefaultElement) (_defaultElement arr)
+    ndef <- foldExprs (f . RevDefaultElement) (defaultElement arr)
     nstores <- Map.traverseWithKey
                (\idx el -> foldExprs (f . RevStore idx) el)
-               (_stores arr)
-    return (StaticArray (_indexType arr) ndef nstores)
-  accessComposite (RevDefaultElement r)
-    = maybeLens defaultElement `composeMaybe` accessComposite r
-  accessComposite (RevStore i r)
-    = maybeLens stores `composeMaybe` mapElement i `composeMaybe` accessComposite r
+               (stores arr)
+    return (StaticArray (indexType' arr) ndef nstores)
+  getRev (RevDefaultElement r) arr = getRev r (defaultElement arr)
+  getRev (RevStore idx r) arr = do
+    el <- Map.lookup idx (stores arr)
+    getRev r el
+  setRev (RevDefaultElement r) e (Just arr) = do
+    ndef <- setRev r e (Just $ defaultElement arr)
+    return arr { defaultElement = ndef }
+  setRev (RevStore idx r) e (Just arr) = do
+    nstore <- setRev r e (Map.lookup idx $ stores arr)
+    return arr { stores = Map.insert idx nstore (stores arr) }
+  setRev _ _ Nothing = Nothing
   compCombine f (StaticArray i1 d1 st1) (StaticArray _ d2 st2) = do
     nd <- compCombine f d1 d2
     case nd of
@@ -62,28 +64,28 @@ instance Composite el => Composite (StaticArray idx el) where
     invSt <- mapM compInvariant st
     return $ invD++concat (Map.elems invSt)
 
-instance Composite el => Container (StaticArray idx el) where
+instance Composite el => Wrapper (StaticArray idx el) where
   type ElementType (StaticArray idx el) = el
   elementType arr = foldl (\cur el -> let elType = compType el
                                       in case runIdentity $ compCombine (const return) cur elType of
                                            Just ncur -> ncur
                                            Nothing -> error "incompatible elements in static array"
-                          ) defType (_stores arr)
+                          ) defType (stores arr)
     where
-      defType = compType $ _defaultElement arr
+      defType = compType $ defaultElement arr
 
 instance (IsRanged idx,SingletonType idx ~ i,Composite el) => IsArray (StaticArray '[i] el) idx where
-  newArray idx el = return $ StaticArray { _indexType = runIdentity (getSingleton idx) ::: Nil
-                                         , _defaultElement = el
-                                         , _stores = Map.empty }
+  newArray idx el = return $ StaticArray { indexType' = runIdentity (getSingleton idx) ::: Nil
+                                         , defaultElement = el
+                                         , stores = Map.empty }
   select arr idx = do
     idxRange <- getRange idx
-    let itp = case _indexType arr of
+    let itp = case indexType' arr of
            tp ::: Nil -> tp
-        storeRange = rangeFromList itp (fmap (\(x:::Nil) -> x) $ Map.keys $ _stores arr)
+        storeRange = rangeFromList itp (fmap (\(x:::Nil) -> x) $ Map.keys $ stores arr)
         --readRange = intersectionRange storeRange idxRange
         hasDefaultRead = not $ nullRange $ setMinusRange idxRange storeRange
-        reads = Map.filterWithKey (\(k ::: Nil) _ -> includes k idxRange) (_stores arr)
+        reads = Map.filterWithKey (\(k ::: Nil) _ -> includes k idxRange) (stores arr)
     nreads <- mapM (\(val ::: Nil,entr) -> do
                        cond <- getSingleton idx .==. constant val
                        return (cond,entr)
@@ -91,7 +93,7 @@ instance (IsRanged idx,SingletonType idx ~ i,Composite el) => IsArray (StaticArr
     defRead <- if hasDefaultRead
                then do
       cond <- true
-      return [(cond,_defaultElement arr)]
+      return [(cond,defaultElement arr)]
                else return []
     mkITE (nreads++defRead)
     where
@@ -112,11 +114,11 @@ instance (IsRanged idx,SingletonType idx ~ i,Composite el) => IsArray (StaticArr
                                         compITE cond nel el)
                    (fmap (return.Just))
                    (fmap (\_ -> return $ Just nel))
-                   (_stores arr)
+                   (stores arr)
                    (Map.fromList [ (trg:::Nil,()) | trg <- trgs ])
         case nstores of
           Nothing -> return Nothing
-          Just st -> return $ Just arr { _stores = st }
+          Just st -> return $ Just arr { stores = st }
 
 instance Composite el => GEq (RevStaticArray idx el) where
   geq (RevDefaultElement r1) (RevDefaultElement r2) = do

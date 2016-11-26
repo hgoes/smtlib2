@@ -4,27 +4,25 @@ import Language.SMTLib2
 import Language.SMTLib2.Internals.Embed
 import Language.SMTLib2.Internals.Type.Nat
 import Language.SMTLib2.Composite.Class hiding (defaultEq)
-import Language.SMTLib2.Composite.Lens
 import Language.SMTLib2.Composite.Domains
 import Language.SMTLib2.Composite.Null
 
 import Data.GADT.Compare
 import Data.GADT.Show
-import Control.Lens
 import Data.Maybe
 import Data.Constraint
 import qualified Data.Map as Map
+import Data.Foldable
 
-newtype Comp (tp :: Type) e = Comp { _comp :: e tp }
-
-makeLenses ''Comp
+newtype Comp (tp :: Type) e = Comp { comp :: e tp }
 
 instance Composite (Comp tp) where
   type RevComp (Comp tp) = (:~:) tp
   foldExprs f (Comp e) = do
     ne <- f Refl e
     return (Comp ne)
-  accessComposite Refl = maybeLens comp
+  getRev Refl (Comp x) = Just x
+  setRev Refl x _ = Just (Comp x)
   compCombine f (Comp x) (Comp y) = fmap (Just . Comp) $ f x y
   compCompare (Comp x) (Comp y) = defaultCompare x y
   compShow p (Comp x) = gshowsPrec p x
@@ -41,41 +39,59 @@ compDescr = Comp
 
 instance IsSingleton (Comp tp) where
   type SingletonType (Comp tp) = tp
-  getSingleton = pure._comp
+  getSingleton = pure.comp
+  compositeFromValue = fmap Comp . constant
 
 instance IsConstant (Comp tp)
 instance IsRanged (Comp tp)
 
+instance IsNumeric (Comp BoolType) where
+  compositeFromInteger 0 _ = Just $ Comp (BoolValue False)
+  compositeFromInteger 1 _ = Just $ Comp (BoolValue True)
+  compositeFromInteger _ _ = Nothing
+  compositePlus _ _ = return Nothing
+  compositeMinus _ _ = return Nothing
+  compositeSum _ = return Nothing
+  compositeMult _ _ = return Nothing
+  compositeGEQ _ _ = return Nothing
+  compositeDiv _ _ = return Nothing
+  compositeMod _ _ = return Nothing
+
 instance IsNumeric (Comp IntType) where
-  compositeFromValue = fmap Comp . constant
-  compositePlus (Comp x) (Comp y) = fmap Comp (x .+. y)
-  compositeMinus (Comp x) (Comp y) = fmap Comp (x .-. y)
-  compositeSum = fmap Comp . plus . fmap _comp
-  compositeMult (Comp x) (Comp y) = fmap Comp (x .*. y)
-  compositeGEQ (Comp x) (Comp y) = x .>=. y
-  compositeDiv (Comp x) (Comp y) = fmap Comp $ div' x y
-  compositeMod (Comp x) (Comp y) = fmap Comp $ mod' x y
+  compositeFromInteger i _ = Just $ Comp (IntValue i)
+  compositeToInteger (Comp (IntValue i)) = i
+  compositePlus (Comp x) (Comp y) = fmap (Just . Comp) (x .+. y)
+  compositeMinus (Comp x) (Comp y) = fmap (Just . Comp) (x .-. y)
+  compositeSum = fmap (Just . Comp) . plus . fmap comp
+  compositeMult (Comp x) (Comp y) = fmap (Just . Comp) (x .*. y)
+  compositeGEQ (Comp x) (Comp y) = fmap Just $ x .>=. y
+  compositeDiv (Comp x) (Comp y) = fmap (Just . Comp) $ div' x y
+  compositeMod (Comp x) (Comp y) = fmap (Just . Comp) $ mod' x y
+
+instance IsNumSingleton (Comp IntType)
 
 instance IsNatural bw => IsNumeric (Comp (BitVecType bw)) where
-  compositeFromValue = fmap Comp . constant
-  compositePlus (Comp x) (Comp y) = fmap Comp $ bvadd x y
-  compositeMinus (Comp x) (Comp y) = fmap Comp $ bvsub x y
-  compositeMult (Comp x) (Comp y) = fmap Comp $ bvmul x y
-  compositeGEQ (Comp x) (Comp y) = bvsge x y
+  compositeFromInteger i (Comp (BitVecRepr bw)) = Just $ Comp (BitVecValue i bw)
+  compositeToInteger (Comp (BitVecValue i _)) = i
+  compositePlus (Comp x) (Comp y) = fmap (Just . Comp) $ bvadd x y
+  compositeMinus (Comp x) (Comp y) = fmap (Just . Comp) $ bvsub x y
+  compositeMult (Comp x) (Comp y) = fmap (Just . Comp) $ bvmul x y
+  compositeGEQ (Comp x) (Comp y) = fmap Just $ bvsge x y
 
-instance IsNumeric idx => ByteWidth (Comp (BitVecType bw)) idx where
-  byteWidth (Comp e) = do
+instance (IsSingleton idx,Integral (Value (SingletonType idx)),IsNumeric idx) => ByteWidth (Comp (BitVecType bw)) idx where
+  byteWidth (Comp e) r = do
     tp <- embedTypeOf
     case tp e of
-      BitVecRepr bw -> compositeFromValue (fromInteger (naturalToInteger bw `div` 8))
+      BitVecRepr bw -> let Just bw' = compositeFromInteger
+                                      (naturalToInteger bw `div` 8) r
+                       in foldExprs (const constant) bw'
 
 instance StaticByteWidth (Comp (BitVecType bw)) where
   staticByteWidth (Comp e) = case getType e of
     BitVecRepr bw -> naturalToInteger bw `div` 8
 
-data CompBV e = forall bw. CompBV { _compBV :: e (BitVecType bw) }
-
-makeLenses ''CompBV
+data CompBV e = forall bw. CompBV { compBV :: e (BitVecType bw)
+                                  , compBVWidth :: !Integer }
 
 data RevBV tp where
   RevBV :: Natural bw -> RevBV (BitVecType bw)
@@ -97,33 +113,39 @@ instance GShow RevBV where
 
 instance Composite CompBV where
   type RevComp CompBV = RevBV
-  foldExprs f (CompBV e) = case getType e of
+  foldExprs f (CompBV e w) = case getType e of
     BitVecRepr bw -> do
       ne <- f (RevBV bw) e
-      return $ CompBV ne
-  accessComposite (RevBV bw) = lens (\(CompBV e) -> case getType e of
-                                        BitVecRepr bw' -> do
-                                          Refl <- geq bw bw'
-                                          return e)
-                               (\_ new -> Just $ CompBV new)
-  compCombine f (CompBV e1) (CompBV e2) = case geq (getType e1) (getType e2) of
+      return $ CompBV ne w
+  getRev (RevBV bw) (CompBV e _) = case getType e of
+    BitVecRepr bw' -> do
+      Refl <- geq bw bw'
+      return e
+  setRev (RevBV bw) e _ = Just (CompBV e (naturalToInteger bw))
+  compCombine f (CompBV e1 w) (CompBV e2 _) = case geq (getType e1) (getType e2) of
     Just Refl -> do
       ne <- f e1 e2
-      return $ Just $ CompBV ne
+      return $ Just $ CompBV ne w
     Nothing -> return Nothing
-  compCompare (CompBV e1) (CompBV e2) = defaultCompare e1 e2
-  compShow p (CompBV e) = gshowsPrec p e
+  compCompare (CompBV e1 _) (CompBV e2 _) = defaultCompare e1 e2
+  compShow p (CompBV e _) = gshowsPrec p e
 
-instance IsNumeric i => ByteWidth CompBV i where
-  byteWidth (CompBV e) = do
-    tp <- embedTypeOf
-    case tp e of
-      BitVecRepr bw -> compositeFromValue (fromInteger (naturalToInteger bw `div` 8))
+instance (IsNumSingleton i) => ByteWidth CompBV i where
+  byteWidth (CompBV _ w) r = foldExprs (const constant) bw
+    where
+      Just bw = compositeFromInteger (w `div` 8) r
 
-instance (IsRanged i,IsNumeric i,Integral (Value (SingletonType i)))
+instance (IsRanged i,IsNumSingleton i)
          => ByteAccess (Comp (BitVecType bw)) i CompBV where
   byteRead = fromStaticByteRead
   byteWrite = fromStaticByteWrite
+
+instance CanConcat CompBV where
+  compConcat (x:xs) = do
+    res <- foldlM (\(CompBV cur wcur) (CompBV n wn) -> do
+                      r <- concat' cur n
+                      return $ CompBV r (wcur+wn)) x xs
+    return $ Just res
 
 instance StaticByteAccess (Comp (BitVecType bw)) CompBV where
   staticByteRead (Comp e :: Comp (BitVecType bw) e) off len = do
@@ -142,15 +164,15 @@ instance StaticByteAccess (Comp (BitVecType bw)) CompBV where
                  Just Dict -> case naturalLEQ roff bw of -- Redundant, but neccessary for the typechecker
                    Just Dict -> do
                      split <- splitBV roff rlen e
-                     let result = CompBV $ splitBVGet split
+                     let result = CompBV (splitBVGet split) len'
                      case over of
                        Nothing -> return $ Just (result,0)
                        Just ov -> return $ Just (result,ov)
-  staticByteWrite (Comp trg :: Comp (BitVecType bw) e) off (CompBV src) = do
+  staticByteWrite (Comp trg :: Comp (BitVecType bw) e) off (CompBV src wsrc) = do
     tp <- embedTypeOf
     case tp src of
       BitVecRepr srcWidth -> do
-          let srcWidth' = naturalToInteger srcWidth
+          let srcWidth' = wsrc
           trgWidth' <- bvSize trg
           if off >= trgWidth'
             then return Nothing
@@ -164,7 +186,7 @@ instance StaticByteAccess (Comp (BitVecType bw)) CompBV where
                               Just splitTrg <- splitBVMaybe roff rlen trg
                               Just (NoPrefix wr wrRest) <- splitBVMaybe Zero rlen src
                               ntrg <- unsplitBV $ splitBVSet splitTrg wr
-                              return $ Just (Comp ntrg,Just (CompBV wrRest)))
+                              return $ Just (Comp ntrg,Just (CompBV wrRest rest)))
                  else (reifyNat (fromInteger off) $
                        \roff -> do
                          Just splitTrg <- splitBVMaybe roff srcWidth trg

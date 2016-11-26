@@ -2,20 +2,19 @@ module Language.SMTLib2.Composite.Map where
 
 import Language.SMTLib2
 import Language.SMTLib2.Composite.Class
-import Language.SMTLib2.Composite.Lens
+import Language.SMTLib2.Composite.Container
+import Language.SMTLib2.Composite.Null
 
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.GADT.Show
 import Data.GADT.Compare
 import Text.Show
-import Control.Lens
+import Data.List (foldl')
 
 data RevMap k a tp = RevMap k (RevComp a tp)
 
-newtype CompMap k a (e :: Type -> *) = CompMap { _compMap :: Map k (a e) }
-
-makeLenses ''CompMap
+newtype CompMap k a (e :: Type -> *) = CompMap { compMap :: Map k (a e) }
 
 instance (Show k,Ord k,Composite a) => Composite (CompMap k a) where
   type RevComp (CompMap k a) = RevMap k a
@@ -23,13 +22,35 @@ instance (Show k,Ord k,Composite a) => Composite (CompMap k a) where
     nmp <- sequence $ Map.mapWithKey
       (\k -> foldExprs (f . RevMap k)) mp
     return (CompMap nmp)
-  accessComposite (RevMap k r) = maybeLens compMap `composeMaybe` mapElement k `composeMaybe` accessComposite r
+  getRev (RevMap k r) (CompMap mp) = Map.lookup k mp >>= getRev r
+  setRev (RevMap k r) x Nothing = do
+    el <- setRev r x Nothing
+    return $ CompMap $ Map.singleton k el
+  setRev (RevMap k r) x (Just (CompMap mp)) = do
+    nel <- setRev r x (Map.lookup k mp)
+    return $ CompMap $ Map.insert k nel mp
   compCombine f (CompMap mp1) (CompMap mp2) = do
     nmp <- sequence $ Map.mergeWithKey (\_ x y -> Just $ compCombine f x y) (fmap $ return.Just) (fmap $ return.Just) mp1 mp2
     return $ fmap CompMap $ sequence nmp
   compCompare = compare
   compShow = showsPrec
   compInvariant (CompMap mp) = fmap concat $ mapM compInvariant $ Map.elems mp
+
+instance Ord k => Container (CompMap k) where
+  type CIndex (CompMap k) = NoComp k
+  elementGet (NoComp k) (CompMap mp) = return $ mp Map.! k
+  elementSet (NoComp k) x (CompMap mp) = return $ CompMap $ Map.insert k x mp
+
+atMap :: (Ord k,Monad m) => k -> Accessor (CompMap k a) (NoComp k) a m e
+atMap k = Accessor get set
+  where
+    get (CompMap mp) = case Map.lookup k mp of
+      Just el -> return [(NoComp k,[],el)]
+      Nothing -> return []
+    set xs (CompMap mp) = return $ CompMap $
+                          foldl' (\cmp (NoComp k,nel)
+                                   -> Map.insert k nel cmp
+                                 ) mp xs
 
 instance (Show k,Composite a,GShow e) => Show (CompMap k a e) where
   showsPrec p (CompMap mp)
@@ -73,9 +94,3 @@ instance (Ord k,Composite a) => GCompare (RevMap k a) where
       GGT -> GGT
     LT -> GLT
     GT -> GGT
-
-mapElement :: Ord k => k -> MaybeLens (Map k a) a
-mapElement k = lens (\mp -> Map.lookup k mp) (\mp entr -> Just $ Map.insert k entr mp)
-
-accessMap :: Ord k => k -> MaybeLens (CompMap k a e) (a e)
-accessMap k = maybeLens compMap `composeMaybe` mapElement k

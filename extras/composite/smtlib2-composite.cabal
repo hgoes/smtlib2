@@ -16,14 +16,13 @@ Source-Repository head
 
 Library
   Build-Depends: smtlib2 >= 1.0 && < 1.1, base, dependent-sum, dependent-map,
-                 mtl, containers, template-haskell, constraints, lens,
-                 transformers
+                 mtl, containers, template-haskell, constraints
   Exposed-Modules:
                   Language.SMTLib2.Composite
                   Language.SMTLib2.Composite.Class
+                  Language.SMTLib2.Composite.Container
                   Language.SMTLib2.Composite.Domains
                   Language.SMTLib2.Composite.Expression
-                  Language.SMTLib2.Composite.Lens
                   Language.SMTLib2.Composite.Null
                   Language.SMTLib2.Composite.Singleton
                   Language.SMTLib2.Composite.List
@@ -37,7 +36,7 @@ Library
                   Language.SMTLib2.Composite.Array.Static
                   Language.SMTLib2.Composite.Array.Bounded
                   Language.SMTLib2.Composite.Array.Composite
-                  Language.SMTLib2.Composite.Data
+                  --Language.SMTLib2.Composite.Data
                   Language.SMTLib2.Composite.Choice
                   Language.SMTLib2.Composite.Ranged
                   Language.SMTLib2.Composite.Linear

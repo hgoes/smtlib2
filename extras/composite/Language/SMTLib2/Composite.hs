@@ -32,9 +32,7 @@ module Language.SMTLib2.Composite
    -- ** Array
    CompArray(..),
    RevArray(..),
-   selectArray,storeArray,
-   -- ** Data-structures
-   makeComposite
+   selectArray,storeArray
   ) where
 
 import Language.SMTLib2.Composite.Class
@@ -47,7 +45,6 @@ import Language.SMTLib2.Composite.Either
 import Language.SMTLib2.Composite.List
 import Language.SMTLib2.Composite.Map
 import Language.SMTLib2.Composite.Array
-import Language.SMTLib2.Composite.Data
 import Language.SMTLib2.Composite.Convert
 import Language.SMTLib2.Composite.Convert.Instances
 

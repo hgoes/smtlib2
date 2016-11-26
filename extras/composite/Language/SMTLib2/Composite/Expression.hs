@@ -1,7 +1,7 @@
 module Language.SMTLib2.Composite.Expression where
 
 import Language.SMTLib2.Composite.Class
-import Language.SMTLib2.Composite.Lens
+--import Language.SMTLib2.Composite.Lens
 
 import Language.SMTLib2
 import Language.SMTLib2.Internals.Embed
@@ -100,7 +100,7 @@ concretizeExpr :: (Embed m e,Monad m,Composite arg,GetType e)
                => arg e
                -> CompositeExpr arg tp
                -> m (e tp)
-concretizeExpr arg (CompositeExpr _ (E.Var rev)) = case arg `getMaybe` accessComposite rev of
+concretizeExpr arg (CompositeExpr _ (E.Var rev)) = case getRev rev arg of
   Just r -> return r
   Nothing -> error $ "concretizeExpr: Unknown key "++gshow rev
 concretizeExpr arg (CompositeExpr _ (E.App fun args)) = do
