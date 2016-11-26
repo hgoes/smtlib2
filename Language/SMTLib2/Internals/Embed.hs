@@ -10,6 +10,7 @@ import Language.SMTLib2.Internals.Evaluate
 
 import Data.Functor.Identity
 import Control.Monad.State
+import Control.Monad.Except
 import Data.GADT.Compare
 import Data.GADT.Show
 import qualified Data.Dependent.Map as DMap
@@ -272,3 +273,15 @@ analyze :: (Backend b) => Expr b tp -> SMT b (AnalyzedExpr (BackendInfo b) (Expr
 analyze e = do
   st <- get
   return (analyze' (BackendInfo (backend st)) e)
+
+instance (Embed m e,Monad m) => Embed (ExceptT err m) e where
+  type EmVar (ExceptT err m) e = EmVar m e
+  type EmQVar (ExceptT err m) e = EmQVar m e
+  type EmFun (ExceptT err m) e = EmFun m e
+  type EmFunArg (ExceptT err m) e = EmFunArg m e
+  type EmLVar (ExceptT err m) e = EmLVar m e
+  embed e = do
+    re <- e
+    lift $ embed (pure re)
+  embedQuantifier q arg body = lift $ embedQuantifier q arg body
+  embedTypeOf = lift embedTypeOf
