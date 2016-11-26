@@ -1,4 +1,6 @@
-module Language.SMTLib2.Composite.Container where
+module Language.SMTLib2.Composite.Container
+  (Container(..),Iterable(..),(|*>),(<|*>),Accessor(..),Accessors(..),Muxer(..),IdxPath(..),IdxPaths(..),Muxed(..),
+   at,update,field,lensA,focusAccessor,mapAccessor,depAcc,getUpdateList) where
 
 import Language.SMTLib2
 import Language.SMTLib2.Composite.Class
@@ -6,7 +8,9 @@ import Language.SMTLib2.Composite.Null (NoComp(..))
 
 import Data.GADT.Compare
 import Data.Foldable
+#if MIN_VERSION_base(4,9,0)
 import Data.Functor.Const
+#endif
 import Data.Functor.Identity
 import Prelude hiding (read)
 
@@ -16,6 +20,10 @@ class Container (c :: ((Type -> *) -> *) -> (Type -> *) -> *) where
              => CIndex c e -> c a e -> m (a e)
   elementSet :: (Embed m e,Monad m,GetType e,Composite a)
              => CIndex c e -> a e -> c a e -> m (c a e)
+
+#if !MIN_VERSION_base(4,9,0)
+newtype Const a b = Const { getConst :: a } deriving Functor
+#endif
 
 at :: (Container c,Embed m e,Monad m,GetType e,Composite a)
    => CIndex c e
@@ -40,22 +48,6 @@ update x cs y = do
   case res of
     Nothing -> error $ "Container.update: Incompatible element written."
     Just res' -> return res'
-
-{-read :: (Composite a,Embed m e,Monad m,GetType e,GCompare e)
-     => [(idx,[e BoolType],a e)]
-     -> m (a e)
-read xs = do
-  els <- mapM (\(_,cond,el) -> do
-                  rcond <- case cond of
-                    [] -> true
-                    [c] -> return c
-                    _ -> and' cond
-                  return (rcond,el)
-              ) xs
-  res <- compITEs els
-  case res of
-    Just res' -> return res'
-    Nothing -> error $ "Container.read: Incompatible elements read."-}
 
 field :: Monad m => (a e -> b e) -> (b e -> a e -> a e) -> Accessor a (NoComp ()) b m e
 field get set = Accessor { accessorGet = \x -> return [(NoComp (),[],get x)]
