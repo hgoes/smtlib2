@@ -1402,3 +1402,42 @@ instance (Composite a,Composite b,GShow e) => Show (ByteWrite a b e) where
        Nothing -> showString "Nothing"
        Just c -> showString "Just " . gshowsPrec 11 c) .
     showString " }"
+
+instance GEq Range where
+  geq (BoolRange f1 t1) (BoolRange f2 t2)
+    = if f1==f2 && t1==t2
+      then Just Refl
+      else Nothing
+  geq (IntRange r1) (IntRange r2)
+    = if r1==r2
+      then Just Refl
+      else Nothing
+  geq (BitVecRange bw1 r1) (BitVecRange bw2 r2) = do
+    Refl <- geq bw1 bw2
+    if r1==r2
+      then return Refl
+      else Nothing
+  geq _ _ = Nothing
+
+instance GCompare Range where
+  gcompare (BoolRange f1 t1) (BoolRange f2 t2)
+    = case compare (f1,t1) (f2,t2) of
+    EQ -> GEQ
+    LT -> GLT
+    GT -> GGT
+  gcompare (BoolRange _ _) _ = GLT
+  gcompare _ (BoolRange _ _) = GGT
+  gcompare (IntRange r1) (IntRange r2) = case compare r1 r2 of
+    EQ -> GEQ
+    LT -> GLT
+    GT -> GGT
+  gcompare (IntRange _) _ = GLT
+  gcompare _ (IntRange _) = GGT
+  gcompare (BitVecRange bw1 r1) (BitVecRange bw2 r2) = case gcompare bw1 bw2 of
+    GEQ -> case compare r1 r2 of
+      EQ -> GEQ
+      LT -> GLT
+      GT -> GGT
+    GLT -> GLT
+    GGT -> GGT
+

@@ -825,3 +825,7 @@ instance IsNatural bw => Integral (Value (BitVecType bw)) where
     where
       (d,m) = divMod x y
   toInteger (BitVecValue x _) = x
+
+instance GetType NumRepr where
+  getType NumInt = IntRepr
+  getType NumReal = RealRepr
