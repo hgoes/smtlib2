@@ -21,6 +21,14 @@ class (GCompare (RevComp arg),GShow (RevComp arg))
             -> m (arg e')
   getRev :: GetType e => RevComp arg tp -> arg e -> Maybe (e tp)
   setRev :: GetType e => RevComp arg tp -> e tp -> Maybe (arg e) -> Maybe (arg e)
+  withRev :: (GetType e,Monad m) => RevComp arg tp -> arg e -> (e tp -> m (e tp)) -> m (arg e)
+  withRev rev x f = case getRev rev x of
+    Nothing -> return x
+    Just e -> do
+      ne <- f e
+      case setRev rev ne (Just x) of
+        Nothing -> return x
+        Just nx -> return nx
   compCombine :: (Embed m e,Monad m,GetType e,GCompare e)
               => (forall tp. e tp -> e tp -> m (e tp))
               -> arg e -> arg e -> m (Maybe (arg e))

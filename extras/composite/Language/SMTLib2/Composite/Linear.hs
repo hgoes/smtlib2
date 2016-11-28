@@ -498,9 +498,9 @@ instance (IsNumeric c) => Composite (Linear c) where
     (_,el) <- safeGenericIndex lst i
     getRev r el
   setRev (RevFactor i r) x (Just (Linear c lst)) = do
-    nlst <- safeGenericUpdateAt i (\(cy,y) -> do
-                                      ny <- setRev r x (Just y)
-                                      return (cy,ny)) lst
+    nlst <- safeGenericUpdateAt Nothing i (\(cy,y) -> do
+                                              ny <- setRev r x (Just y)
+                                              return (cy,ny)) lst
     return $ Linear c nlst
   setRev _ _ Nothing = Nothing
   compCombine f (Linear c1 lin1) (Linear c2 lin2)

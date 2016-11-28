@@ -30,6 +30,9 @@ instance Composite a => Composite (CompList a) where
     nlst <- safeGenericInsertAt n nel lst
     return $ CompList nlst
   setRev _ _ _ = Nothing
+  withRev (RevList n r) (CompList lst) f = do
+    nlst <- safeGenericUpdateAt (return []) n (\el -> withRev r el f) lst
+    return (CompList nlst)
   compCombine f (CompList xs) (CompList ys) = fmap (fmap CompList) $ merge xs ys
     where
       merge [] ys = return (Just ys)
@@ -58,7 +61,7 @@ instance Container CompList where
     Nothing -> error $ "elementGet{CompList}: Index "++show i++" out of range."
     Just res -> return res
   elementSet (NoComp i) x (CompList lst)
-    = case safeGenericUpdateAt i (\_ -> Just x) lst of
+    = case safeGenericUpdateAt Nothing i (\_ -> Just x) lst of
     Just nlst -> return (CompList nlst)
     Nothing -> error $ "elementSet{CompList}: Index "++show i++" out of range."
 
@@ -163,14 +166,14 @@ safeGenericInsertAt n x (y:ys) = do
   return $ y:ys'
 safeGenericInsertAt _ _ [] = Nothing
 
-safeGenericUpdateAt :: (Num i,Eq i) => i -> (a -> Maybe a) -> [a] -> Maybe [a]
-safeGenericUpdateAt 0 f (x:xs) = do
+safeGenericUpdateAt :: (Num i,Eq i,Monad m) => m [a] -> i -> (a -> m a) -> [a] -> m [a]
+safeGenericUpdateAt def 0 f (x:xs) = do
   nx <- f x
   return $ nx:xs
-safeGenericUpdateAt n f (x:xs) = do
-  nxs <- safeGenericUpdateAt (n-1) f xs
+safeGenericUpdateAt def n f (x:xs) = do
+  nxs <- safeGenericUpdateAt def (n-1) f xs
   return $ x:nxs
-safeGenericUpdateAt _ _ [] = Nothing
+safeGenericUpdateAt def _ _ [] = def
 
 instance StaticByteWidth a => StaticByteWidth (CompList a) where
   staticByteWidth (CompList xs) = sum $ fmap staticByteWidth xs

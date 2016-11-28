@@ -135,23 +135,45 @@ instance (Composite c) => Composite (Choice enc c) where
     getRev r el
   getRev _ _ = Nothing
   setRev (RevChoiceBool i) x (Just (ChoiceBool lst)) = do
-    nlst <- safeGenericUpdateAt i (\(el,_) -> Just (el,x)) lst
+    nlst <- safeGenericUpdateAt Nothing i (\(el,_) -> Just (el,x)) lst
     return $ ChoiceBool nlst
   setRev RevChoiceValue x (Just (ChoiceValue lst _)) = Just $ ChoiceValue lst x
   setRev (RevChoiceElement 0 r) x (Just (ChoiceSingleton y)) = do
     ny <- setRev r x (Just y)
     return $ ChoiceSingleton ny
   setRev (RevChoiceElement n r) x (Just (ChoiceBool lst)) = do
-    nlst <- safeGenericUpdateAt n (\(el,cond) -> do
-                                      nel <- setRev r x (Just el)
-                                      return (nel,cond)) lst
+    nlst <- safeGenericUpdateAt Nothing n (\(el,cond) -> do
+                                              nel <- setRev r x (Just el)
+                                              return (nel,cond)) lst
     return $ ChoiceBool nlst
   setRev (RevChoiceElement n r) x (Just (ChoiceValue lst v)) = do
-    nlst <- safeGenericUpdateAt n (\(el,val) -> do
-                                      nel <- setRev r x (Just el)
-                                      return (nel,val)) lst
+    nlst <- safeGenericUpdateAt Nothing n (\(el,val) -> do
+                                              nel <- setRev r x (Just el)
+                                              return (nel,val)) lst
     return $ ChoiceValue nlst v
   setRev _ _ _ = Nothing
+  withRev (RevChoiceBool i) (ChoiceBool lst) f = do
+    nlst <- safeGenericUpdateAt (return []) i (\(el,cond) -> do
+                                                  ncond <- f cond
+                                                  return (el,ncond)) lst
+    return (ChoiceBool nlst)
+  withRev RevChoiceValue (ChoiceValue lst v) f = do
+    nv <- f v
+    return (ChoiceValue lst nv)
+  withRev (RevChoiceElement 0 r) (ChoiceSingleton x) f = do
+    nx <- withRev r x f
+    return $ ChoiceSingleton nx
+  withRev (RevChoiceElement n r) (ChoiceBool lst) f = do
+    nlst <- safeGenericUpdateAt (return []) n (\(el,cond) -> do
+                                                  nel <- withRev r el f
+                                                  return (nel,cond)) lst
+    return $ ChoiceBool nlst
+  withRev (RevChoiceElement n r) (ChoiceValue lst v) f = do
+    nlst <- safeGenericUpdateAt (return []) n (\(el,val) -> do
+                                                  nel <- withRev r el f
+                                                  return (nel,val)) lst
+    return $ ChoiceValue nlst v
+  withRev _ x _ = return x
   compCombine f (ChoiceSingleton x) (ChoiceSingleton y) = do
     z <- compCombine f x y
     case z of
