@@ -302,7 +302,9 @@ instance (Backend b) => Backend (DebugBackend b) where
     return (DebugExpr res,b2)
   comment msg b = do
     b1 <- outputLine b True msg
-    return ((),b1)
+    ((),nb) <- comment msg (debugBackend'' b1)
+    let b2 = b1 { debugBackend'' = nb }
+    return ((),b2)
     
 renderExpr :: (Backend b) => DebugBackend b -> Expr b tp
            -> L.Lisp

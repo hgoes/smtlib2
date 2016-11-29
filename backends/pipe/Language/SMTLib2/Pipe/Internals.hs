@@ -46,7 +46,7 @@ data PipeDatatype = forall a. IsDatatype a => PipeDatatype (Proxy a)
 
 data SMTPipe = SMTPipe { channelIn :: Handle
                        , channelOut :: Handle
-                       , processHandle :: ProcessHandle
+                       , processHandle :: Maybe ProcessHandle
                        , names :: Map String Int
                        , vars :: Map T.Text RevVar
                        , datatypes :: TypeRegistry T.Text T.Text T.Text
@@ -266,8 +266,15 @@ instance Backend SMTPipe where
     putRequest b (L.List [L.Symbol "exit"])
     hClose (channelIn b)
     hClose (channelOut b)
-    terminateProcess (processHandle b)
-    _ <- waitForProcess (processHandle b)
+    case processHandle b of
+      Nothing -> return ()
+      Just ph -> do
+        terminateProcess ph
+        _ <- waitForProcess ph
+        return ()
+    return ((),b)
+  comment msg b = do
+    hPutStrLn (channelIn b) ("; "++msg)
     return ((),b)
 
 renderDeclareFun :: Map String Int -> List Repr arg -> Repr ret -> Maybe String
@@ -612,7 +619,7 @@ createPipe solver args = do
   (Just hin,Just hout,_,handle) <- createProcess cmd
   let p0 = SMTPipe { channelIn = hin
                    , channelOut = hout
-                   , processHandle = handle
+                   , processHandle = Just handle
                    , names = Map.empty
                    , vars = Map.empty
                    , datatypes = emptyTypeRegistry
@@ -625,6 +632,19 @@ createPipe solver args = do
       "Z3" -> return $ p0 { interpolationMode = Z3Interpolation [] [] }
       _ -> return p0
     _ -> return p0
+
+-- | Create a SMT pipe by giving the input and output handle.
+createPipeFromHandle :: Handle -- ^ Input handle
+                     -> Handle -- ^ Output handle
+                     -> IO SMTPipe
+createPipeFromHandle hin hout = do
+  return SMTPipe { channelIn = hin
+                 , channelOut = hout
+                 , processHandle = Nothing
+                 , names = Map.empty
+                 , vars = Map.empty
+                 , datatypes = emptyTypeRegistry
+                 , interpolationMode = MathSATInterpolation }
 
 lispToExprUntyped :: SMTPipe -> L.Lisp
                   -> (forall (t::Type). Expr SMTPipe t -> LispParse a)

@@ -1,6 +1,7 @@
 module Language.SMTLib2.Pipe
        (SMTPipe(),
         createPipe,
+        createPipeFromHandle,
         withPipe
        ) where
 
