@@ -2,6 +2,7 @@ module Language.SMTLib2.Composite.Singleton where
 
 import Language.SMTLib2
 import Language.SMTLib2.Internals.Embed
+import Language.SMTLib2.Internals.Type
 import Language.SMTLib2.Internals.Type.Nat
 import Language.SMTLib2.Composite.Class hiding (defaultEq)
 import Language.SMTLib2.Composite.Domains
@@ -13,6 +14,8 @@ import Data.Maybe
 import Data.Constraint
 import qualified Data.Map as Map
 import Data.Foldable
+import qualified GHC.TypeLits as TL
+import Data.Proxy
 
 newtype Comp (tp :: Type) e = Comp { comp :: e tp }
 
@@ -70,7 +73,7 @@ instance IsNumeric (Comp IntType) where
 
 instance IsNumSingleton (Comp IntType)
 
-instance IsNatural bw => IsNumeric (Comp (BitVecType bw)) where
+instance TL.KnownNat bw => IsNumeric (Comp (BitVecType bw)) where
   compositeFromInteger i (Comp (BitVecRepr bw)) = Just $ Comp (BitVecValue i bw)
   compositeToInteger (Comp (BitVecValue i _)) = i
   compositePlus (Comp x) (Comp y) = fmap (Just . Comp) $ bvadd x y
@@ -83,18 +86,18 @@ instance (IsSingleton idx,Integral (Value (SingletonType idx)),IsNumeric idx) =>
     tp <- embedTypeOf
     case tp e of
       BitVecRepr bw -> let Just bw' = compositeFromInteger
-                                      (naturalToInteger bw `div` 8) r
+                                      (bwSize bw `div` 8) r
                        in foldExprs (const constant) bw'
 
 instance StaticByteWidth (Comp (BitVecType bw)) where
   staticByteWidth (Comp e) = case getType e of
-    BitVecRepr bw -> naturalToInteger bw `div` 8
+    BitVecRepr bw -> bwSize bw `div` 8
 
 data CompBV e = forall bw. CompBV { compBV :: e (BitVecType bw)
                                   , compBVWidth :: !Integer }
 
 data RevBV tp where
-  RevBV :: Natural bw -> RevBV (BitVecType bw)
+  RevBV :: BitWidth bw -> RevBV (BitVecType bw)
 
 instance GEq RevBV where
   geq (RevBV x) (RevBV y) = do
@@ -121,7 +124,7 @@ instance Composite CompBV where
     BitVecRepr bw' -> do
       Refl <- geq bw bw'
       return e
-  setRev (RevBV bw) e _ = Just (CompBV e (naturalToInteger bw))
+  setRev (RevBV bw) e _ = Just (CompBV e (bwSize bw))
   compCombine f (CompBV e1 w) (CompBV e2 _) = case geq (getType e1) (getType e2) of
     Just Refl -> do
       ne <- f e1 e2
@@ -135,10 +138,10 @@ instance (IsNumSingleton i) => ByteWidth CompBV i where
     where
       Just bw = compositeFromInteger (w `div` 8) r
 
-instance (IsRanged i,IsNumSingleton i)
+{-instance (IsRanged i,IsNumSingleton i)
          => ByteAccess (Comp (BitVecType bw)) i CompBV where
   byteRead = fromStaticByteRead
-  byteWrite = fromStaticByteWrite
+  byteWrite = fromStaticByteWrite-}
 
 instance CanConcat CompBV where
   compConcat (x:xs) = do
@@ -147,12 +150,12 @@ instance CanConcat CompBV where
                       return $ CompBV r (wcur+wn)) x xs
     return $ Just res
 
-instance StaticByteAccess (Comp (BitVecType bw)) CompBV where
+{-instance StaticByteAccess (Comp (BitVecType bw)) CompBV where
   staticByteRead (Comp e :: Comp (BitVecType bw) e) off len = do
     tp <- embedTypeOf
     case tp e of
       BitVecRepr bw -> do
-        let bw' = naturalToInteger bw
+        let bw' = bwSize bw
             (len',over) = if off+bw' > len
                           then (bw'-off,Just $ len-(bw'-off))
                           else (len,Nothing)
@@ -160,10 +163,10 @@ instance StaticByteAccess (Comp (BitVecType bw)) CompBV where
           then return Nothing
           else reifyNat (fromInteger off) $
                \roff -> reifyNat (fromInteger len') $
-               \rlen -> case naturalLEQ (naturalAdd roff rlen) bw of
-                 Just Dict -> case naturalLEQ roff bw of -- Redundant, but neccessary for the typechecker
+               \rlen -> case bwLEQ (BitWidth $ naturalAdd roff rlen) bw of
+                 Just Dict -> case bwLEQ (BitWidth roff) bw of -- Redundant, but neccessary for the typechecker
                    Just Dict -> do
-                     split <- splitBV roff rlen e
+                     split <- splitBV (BitWidth roff) (BitWidth rlen) e
                      let result = CompBV (splitBVGet split) len'
                      case over of
                        Nothing -> return $ Just (result,0)
@@ -183,35 +186,35 @@ instance StaticByteAccess (Comp (BitVecType bw)) CompBV where
                           reifyNat (fromInteger off) $
                             \roff -> reifyNat (fromInteger len) $
                             \rlen -> do
-                              Just splitTrg <- splitBVMaybe roff rlen trg
-                              Just (NoPrefix wr wrRest) <- splitBVMaybe Zero rlen src
+                              Just splitTrg <- splitBVMaybe (BitWidth roff) (BitWidth rlen) trg
+                              Just (NoPrefix wr wrRest) <- splitBVMaybe (BitWidth Zero) (BitWidth rlen) src
                               ntrg <- unsplitBV $ splitBVSet splitTrg wr
                               return $ Just (Comp ntrg,Just (CompBV wrRest rest)))
                  else (reifyNat (fromInteger off) $
                        \roff -> do
-                         Just splitTrg <- splitBVMaybe roff srcWidth trg
+                         Just splitTrg <- splitBVMaybe (BitWidth roff) srcWidth trg
                          ntrg <- unsplitBV $ splitBVSet splitTrg src
                          return $ Just (Comp ntrg,Nothing))
 
 bvSize :: Embed m e => e (BitVecType bw) -> m Integer
 bvSize e = (\tp -> case tp e of
-               BitVecRepr bw -> naturalToInteger bw) <$> embedTypeOf
+               BitVecRepr bw -> bwSize bw) <$> embedTypeOf
 
 data BVSplit start len size e where
-  NoSplit   :: e (BitVecType size) -> BVSplit Z size size e
-  NoPrefix  :: e (BitVecType len) -> e (BitVecType diff) -> BVSplit Z len (len+diff) e
-  NoPostfix :: e (BitVecType start) -> e (BitVecType len) -> BVSplit start len (start+len) e
+  NoSplit   :: e (BitVecType size) -> BVSplit 0 size size e
+  NoPrefix  :: e (BitVecType len) -> e (BitVecType diff) -> BVSplit 0 len (len TL.+ diff) e
+  NoPostfix :: e (BitVecType start) -> e (BitVecType len) -> BVSplit start len (start TL.+ len) e
   Split     :: e (BitVecType start) -> e (BitVecType len) -> e (BitVecType diff)
-            -> BVSplit start len (start + len + diff) e
+            -> BVSplit start len (start TL.+ (len TL.+ diff)) e
 
-bvWrite :: (Embed m e,Monad m) => Natural start
+bvWrite :: (Embed m e,Monad m) => BitWidth start
         -> e (BitVecType src)
         -> e (BitVecType trg)
         -> m (Maybe (e (BitVecType trg)))
-bvWrite (off :: Natural start) (src :: e (BitVecType src)) (trg :: e (BitVecType trg)) = do
+bvWrite (off :: BitWidth start) (src :: e (BitVecType src)) (trg :: e (BitVecType trg)) = do
   tp <- embedTypeOf
   case tp src of
-    BitVecRepr (srcSize :: Natural src) -> do
+    BitVecRepr (srcSize :: BitWidth src) -> do
       split <- splitBVMaybe off srcSize trg
       case split of
         Nothing -> return Nothing
@@ -220,43 +223,43 @@ bvWrite (off :: Natural start) (src :: e (BitVecType src)) (trg :: e (BitVecType
           return $ Just ntrg
             
 splitBVMaybe :: (Embed m e,Monad m)
-             => Natural start -> Natural len -> e (BitVecType size)
+             => BitWidth start -> BitWidth len -> e (BitVecType size)
              -> m (Maybe (BVSplit start len size e))
 splitBVMaybe start len e = do
   tp <- embedTypeOf
   case tp e of
-    BitVecRepr size -> case naturalLEQ (naturalAdd start len) size of
-      Just Dict -> case naturalLEQ start size of
+    BitVecRepr size -> case bwLEQ (bwAdd start len) size of
+      Just Dict -> case bwLEQ start size of
         Just Dict -> fmap Just $ splitBV start len e
       Nothing -> return Nothing
 
-splitBV :: (Embed m e,Monad m,(start + len <= size) ~ True,(start <= size) ~ True)
-        => Natural start -> Natural len -> e (BitVecType size)
+splitBV :: (Embed m e,Monad m,(start TL.+ len) TL.<= size,start TL.<= size)
+        => BitWidth start -> BitWidth len -> e (BitVecType size)
         -> m (BVSplit start len size e)
 splitBV start len e = do
   tp <- embedTypeOf
   case tp e of
     BitVecRepr size
       -> case start of
-           Zero -> case geq len size of
+           BitWidth Zero -> case geq len size of
              Just Refl -> return $ NoSplit e
-             Nothing -> case naturalLEQ size size of -- XXX: This should be obvious, but not to the typechecker
-               Just Dict -> naturalSub' size len $
+             Nothing -> case bwLEQ size size of -- XXX: This should be obvious, but not to the typechecker
+               Just Dict -> bwSub' size len $
                             \diff -> do
-                              obj <- extract' Zero len e
+                              obj <- extract' (BitWidth Zero) len e
                               post <- extract' len diff e
                               return $ NoPrefix obj post
-           _ -> case geq (naturalAdd start len) size of
+           _ -> case geq (bwAdd start len) size of
              Just Refl -> do
-               pre <- extract' Zero start e
-               obj <- extract' start len e
-               return $ NoPostfix pre obj
-             Nothing -> naturalSub' size (naturalAdd start len) $
-               \diff -> case naturalLEQ size size of -- XXX: See above
+                 pre <- extract' (bw (Proxy::Proxy 0)) start e
+                 obj <- extract' start len e
+                 return $ NoPostfix pre obj
+             Nothing -> bwSub' size (bwAdd start len) $
+               \diff -> case bwLEQ size size of -- XXX: See above
                  Just Dict -> do
-                   pre <- extract' Zero start e
+                   pre <- extract' (bw (Proxy::Proxy 0)) start e
                    obj <- extract' start len e
-                   post <- extract' (naturalAdd start len) diff e
+                   post <- extract' (bwAdd start len) diff e
                    return $ Split pre obj post
 
 unsplitBV :: (Embed m e,Monad m) => BVSplit start len size e -> m (e (BitVecType size))
@@ -318,6 +321,7 @@ splitBVRest start len e = do
                    Just Dict -> do
                      split <- splitBV start rlen e
                      return $ SplitRest split rest-}
+-}
 
 --instance (IsRanged idx,IsNumeric idx,Integral (Value (SingletonType idx)))
 --         => ByteAccess (Comp

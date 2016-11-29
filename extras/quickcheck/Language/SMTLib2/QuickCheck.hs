@@ -19,6 +19,7 @@ import Data.Functor.Identity
 import Data.GADT.Show
 import Data.GADT.Compare
 import Control.Monad.State.Strict
+import qualified GHC.TypeLits as TL
 
 data ExprGen m b var qvar fun farg lvar e tp
   = ExprGen ((forall t. Expression var qvar fun farg lvar e t
@@ -147,7 +148,7 @@ genExpr tp ctx = sized $ \sz -> if sz==0
         val <- arbitrary
         return $ ExprGen $ \f -> f (Const $ RealValue val)
       BitVecRepr bw -> do
-        val <- choose (0,2^(naturalToInteger bw)-1)
+        val <- choose (0,2^(bwSize bw)-1)
         return $ ExprGen $ \f -> f (Const $ BitVecValue val bw)
       ArrayRepr idx el -> do
         ExprGen c <- genConst el
@@ -203,8 +204,9 @@ genFunction tp ctx = oneof [ gen | Just gen <- [genFun
                   ,do
                       op <- elements [BVULE,BVULT,BVUGE,BVUGT,BVSLE,BVSLT,BVSGE,BVSGT]
                       sz <- arbitrarySizedNatural
-                      reifyNat sz $
-                        \bw -> return $ AnyFunction (BVComp op bw)
+                      case TL.someNatVal sz of
+                        Just (TL.SomeNat sz') -> return $ AnyFunction
+                                                 (BVComp op (bw sz'))
                   ,do
                       AnyTypes idx <- genTypes
                       return $ AnyFunction (Select idx tp)
@@ -267,7 +269,9 @@ genType = sized $ \sz -> oneof $ [return $ AnyType BoolRepr
                                  ,return $ AnyType RealRepr
                                  ,do
                                      sz <- arbitrarySizedNatural
-                                     reifyNat sz $ \bw -> return $ AnyType (BitVecRepr bw)]++
+                                     case TL.someNatVal sz of
+                                       Just (TL.SomeNat sz')
+                                         -> return $ AnyType (BitVecRepr (bw sz'))]++
                          (if sz>0
                           then [do
                                    AnyTypes tps <- resize (sz `div` 2) genTypes

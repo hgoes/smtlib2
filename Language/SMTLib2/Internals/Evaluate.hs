@@ -84,7 +84,7 @@ typeNumElements :: Repr t -> Maybe Integer
 typeNumElements BoolRepr = Just 2
 typeNumElements IntRepr = Nothing
 typeNumElements RealRepr = Nothing
-typeNumElements (BitVecRepr sz) = Just (2^(naturalToInteger sz))
+typeNumElements (BitVecRepr sz) = Just (2^(bwSize sz))
 typeNumElements (ArrayRepr idx el) = do
   ridx <- List.toList typeNumElements idx
   rel <- typeNumElements el
@@ -280,7 +280,7 @@ evaluateFun _ _ (ITE _) ((ValueResult (BoolValue c)) ::: x ::: y ::: Nil)
 evaluateFun _ _ (BVComp op _) ((ValueResult (BitVecValue x nx)) ::: (ValueResult (BitVecValue y ny)) ::: Nil)
   = return $ ValueResult $ BoolValue $ comp op
   where
-    bw = naturalToInteger nx
+    bw = bwSize nx
     sx = if x >= 2^(bw-1) then x-2^bw else x
     sy = if y >= 2^(bw-1) then y-2^bw else y
     comp BVULE = x <= y
@@ -294,7 +294,7 @@ evaluateFun _ _ (BVComp op _) ((ValueResult (BitVecValue x nx)) ::: (ValueResult
 evaluateFun _ _ (BVBin op _) ((ValueResult (BitVecValue x nx)) ::: (ValueResult (BitVecValue y ny)) ::: Nil)
   = return $ ValueResult $ BitVecValue (comp op) nx
   where
-    bw = naturalToInteger nx
+    bw = bwSize nx
     sx = if x >= 2^(bw-1) then x-2^bw else x
     sy = if y >= 2^(bw-1) then y-2^bw else y
     toU x = if x < 0
@@ -316,7 +316,7 @@ evaluateFun _ _ (BVBin op _) ((ValueResult (BitVecValue x nx)) ::: (ValueResult 
 evaluateFun _ _ (BVUn op _) ((ValueResult (BitVecValue x nx)) ::: Nil)
   = return $ ValueResult $ BitVecValue (comp op) nx
   where
-    bw = naturalToInteger nx
+    bw = bwSize nx
     comp BVNot = xor (2^bw-1) x
     comp BVNeg = 2^bw-x
 evaluateFun ev evf (Select _ _) ((ArrayResult mdl) ::: idx)
@@ -326,11 +326,11 @@ evaluateFun _ _ (Store _ _) ((ArrayResult mdl) ::: el ::: idx)
 evaluateFun _ _ (ConstArray idx _) (val ::: Nil)
   = return $ ArrayResult (ArrayConst val idx)
 evaluateFun _ _ (Concat _ _) ((ValueResult (BitVecValue x nx)) ::: (ValueResult (BitVecValue y ny)) ::: Nil)
-  = return $ ValueResult $ BitVecValue (x*(2^bw)+y) (naturalAdd nx ny)
+  = return $ ValueResult $ BitVecValue (x*(2^bw)+y) (bwAdd nx ny)
   where
-    bw = naturalToInteger nx
+    bw = bwSize nx
 evaluateFun _ _ (Extract bw start len) ((ValueResult (BitVecValue x nx)) ::: Nil)
-  = return $ ValueResult $ BitVecValue (x `div` (2^(naturalToInteger start))) len
+  = return $ ValueResult $ BitVecValue (x `div` (2^(bwSize start))) len
 evaluateFun _ _ (Constructor con) args = do
   rargs <- List.mapM (\(ValueResult v) -> return v) args
   return $ ValueResult $ ConstrValue con rargs

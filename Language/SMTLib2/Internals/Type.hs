@@ -1,7 +1,7 @@
 module Language.SMTLib2.Internals.Type where
 
 import Language.SMTLib2.Internals.Type.Nat
-import Language.SMTLib2.Internals.Type.List (List(..),reifyList)
+import Language.SMTLib2.Internals.Type.List (List(..))
 import qualified Language.SMTLib2.Internals.Type.List as List
 
 import Data.Proxy
@@ -18,13 +18,15 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe
 import Data.Bits
+import qualified GHC.TypeLits as TL
+import Unsafe.Coerce
 
 -- | Describes the kind of all SMT types.
 --   It is only used in promoted form, for a concrete representation see 'Repr'.
 data Type = BoolType
           | IntType
           | RealType
-          | BitVecType Nat
+          | BitVecType TL.Nat
           | ArrayType [Type] Type
           | forall a. DataType a
           deriving Typeable
@@ -278,12 +280,16 @@ instance GCompare (Constr (DynamicValue sig)) where
     GLT -> GLT
     GGT -> GGT
 
+newtype BitWidth (bw :: TL.Nat) = BitWidth { bwSize :: Integer }
+
 -- | Values that can be used as constants in expressions.
 data Value (a :: Type) where
   BoolValue :: Bool -> Value BoolType
   IntValue :: Integer -> Value IntType
   RealValue :: Rational -> Value RealType
-  BitVecValue :: Integer -> Natural n -> Value (BitVecType n)
+  BitVecValue :: Integer
+              -> BitWidth bw
+              -> Value (BitVecType bw)
   DataValue :: IsDatatype dt => Datatype dt -> dt Value -> Value (DataType dt)
 
 pattern ConstrValue con args <- DataValue tp (constrGet -> ConApp con args) where
@@ -297,7 +303,7 @@ data Repr (t :: Type) where
   BoolRepr :: Repr BoolType
   IntRepr :: Repr IntType
   RealRepr :: Repr RealType
-  BitVecRepr :: Natural n -> Repr (BitVecType n)
+  BitVecRepr :: BitWidth bw -> Repr (BitVecType bw)
   ArrayRepr :: List Repr idx -> Repr val -> Repr (ArrayType idx val)
   DataRepr :: IsDatatype dt => Datatype dt -> Repr (DataType dt)
 
@@ -313,6 +319,12 @@ class GetType v where
 
 class GetFunType fun where
   getFunType :: fun '(arg,res) -> (List Repr arg,Repr res)
+
+bw :: TL.KnownNat bw => Proxy bw -> BitWidth bw
+bw = BitWidth . TL.natVal
+
+instance Eq (BitWidth bw) where
+  (==) (BitWidth _) (BitWidth _) = True
 
 -- | A representation of the SMT Bool type.
 --   Holds the values 'Language.SMTLib2.true' or 'Language.SMTLib2.Internals.false'.
@@ -332,10 +344,10 @@ int = IntRepr
 real :: Repr RealType
 real = RealRepr
 
--- | A representation of the SMT BitVec type.
+-- | A typed representation of the SMT BitVec type.
 --   Holds bitvectors (a vector of booleans) of a certain bitwidth.
 --   Constants can be created using 'Language.SMTLib2.cbv'.
-bitvec :: Natural bw -- ^ The width of the bitvector
+bitvec :: BitWidth bw -- ^ The width of the bitvector
        -> Repr (BitVecType bw)
 bitvec = BitVecRepr
 
@@ -350,18 +362,17 @@ array = ArrayRepr
 dt :: IsDatatype dt => Datatype dt -> Repr (DataType dt)
 dt = DataRepr
 
--- | Get a concrete representation for a type.
-reifyType :: Type -> (forall tp. Repr tp -> a) -> a
-reifyType BoolType f = f BoolRepr
-reifyType IntType f = f IntRepr
-reifyType RealType f = f RealRepr
-reifyType (BitVecType bw) f
-  = reifyNat bw $ \bw' -> f (BitVecRepr bw')
-reifyType (ArrayType idx el) f
-  = reifyList reifyType idx $
-    \idx' -> reifyType el $
-             \el' -> f (ArrayRepr idx' el')
-reifyType (DataType _) _ = error $ "reifyType: Cannot reify user defined datatypes yet."
+instance GEq BitWidth where
+  geq (BitWidth bw1) (BitWidth bw2)
+    | bw1==bw2 = Just $ unsafeCoerce Refl
+    | otherwise = Nothing
+
+instance GCompare BitWidth where
+  gcompare (BitWidth bw1) (BitWidth bw2)
+    = case compare bw1 bw2 of
+    EQ -> unsafeCoerce GEQ
+    LT -> GLT
+    GT -> GGT
 
 instance GetType Repr where
   getType = id
@@ -512,28 +523,31 @@ instance Show (Value tp) where
   showsPrec p (IntValue i) = showsPrec p i
   showsPrec p (RealValue i) = showsPrec p i
   showsPrec p (BitVecValue v n)
-    | bw `mod` 4 == 0 = let str = showHex rv ""
-                            exp_len = bw `div` 4
-                            len = genericLength str
-                        in showString "#x" .
-                           showString (genericReplicate (exp_len-len) '0') .
-                           showString str
-    | otherwise = let str = showIntAtBase 2 (\x -> case x of
-                                              0 -> '0'
-                                              1 -> '1'
-                                            ) rv ""
-                      len = genericLength str
-                  in showString "#b" .
-                     showString (genericReplicate (bw-len) '0') .
-                     showString str
-    where
-      bw = naturalToInteger n
-      rv = v `mod` 2^bw
+    = showBitVec p v (bwSize n)
   showsPrec p (ConstrValue con args) = showParen (p>10) $
     showString "ConstrValue " .
     showString (constrName con).
     showChar ' ' .
     showsPrec 11 args
+
+showBitVec :: Int -> Integer -> Integer -> ShowS
+showBitVec p v bw
+  | bw `mod` 4 == 0 = let str = showHex rv ""
+                          exp_len = bw `div` 4
+                          len = genericLength str
+                      in showString "#x" .
+                         showString (genericReplicate (exp_len-len) '0') .
+                         showString str
+  | otherwise = let str = showIntAtBase 2 (\x -> case x of
+                                              0 -> '0'
+                                              1 -> '1'
+                                          ) rv ""
+                    len = genericLength str
+                in showString "#b" .
+                   showString (genericReplicate (bw-len) '0') .
+                   showString str
+  where
+    rv = v `mod` 2^bw
 
 instance GShow Value where
   gshowsPrec = showsPrec
@@ -544,7 +558,7 @@ instance Show (Repr t) where
   showsPrec _ RealRepr = showString "real"
   showsPrec p (BitVecRepr n) = showParen (p>10) $
     showString "bitvec " .
-    showsPrec 11 n
+    showsPrec 11 (bwSize n)
   showsPrec p (ArrayRepr idx el) = showParen (p>10) $
     showString "array " .
     showsPrec 11 idx . showChar ' ' .
@@ -591,7 +605,7 @@ typeSize :: Repr tp -> Maybe Integer
 typeSize BoolRepr = Just 2
 typeSize IntRepr = Nothing
 typeSize RealRepr = Nothing
-typeSize (BitVecRepr bw) = Just $ 2^(naturalToInteger bw)
+typeSize (BitVecRepr bw) = Just $ 2^(bwSize bw)
 typeSize (ArrayRepr idx el) = do
   idxSz <- List.toList typeSize idx
   elSz <- typeSize el
@@ -610,7 +624,7 @@ typeSize (DataRepr dt) = do
 typeFiniteDomain :: Repr tp -> Maybe [Value tp]
 typeFiniteDomain BoolRepr = Just [BoolValue False,BoolValue True]
 typeFiniteDomain (BitVecRepr bw) = Just [ BitVecValue n bw
-                                        | n <- [0..2^(naturalToInteger bw)-1] ]
+                                        | n <- [0..2^(bwSize bw)-1] ]
 typeFiniteDomain _ = Nothing
 
 instance Enum (Value BoolType) where
@@ -687,46 +701,58 @@ instance RealFrac (Value RealType) where
   ceiling (RealValue x) = ceiling x
   floor (RealValue x) = floor x
 
-withBW :: IsNatural bw => (Natural bw -> Value (BitVecType bw)) -> Value (BitVecType bw)
-withBW f = f getNatural
+withBW :: TL.KnownNat bw => (Proxy bw -> res (BitVecType bw))
+       -> res (BitVecType bw)
+withBW f = f Proxy
 
 bvAdd :: Value (BitVecType bw) -> Value (BitVecType bw) -> Value (BitVecType bw)
-bvAdd (BitVecValue x bw) (BitVecValue y _) = BitVecValue ((x+y) `mod` (2^(naturalToInteger bw))) bw
+bvAdd (BitVecValue x bw1) (BitVecValue y bw2)
+  | bw1 /= bw2 = error "bvAdd: Bitvector size mismatch"
+  | otherwise = BitVecValue ((x+y) `mod` (2^(bwSize bw1))) bw1
 
 bvSub :: Value (BitVecType bw) -> Value (BitVecType bw) -> Value (BitVecType bw)
-bvSub (BitVecValue x bw) (BitVecValue y _) = BitVecValue ((x-y) `mod` (2^(naturalToInteger bw))) bw
+bvSub (BitVecValue x bw1) (BitVecValue y bw2)
+  | bw1 /= bw2 = error "bvSub: Bitvector size mismatch"
+  | otherwise = BitVecValue ((x-y) `mod` (2^(bwSize bw1))) bw1
 
 bvMul :: Value (BitVecType bw) -> Value (BitVecType bw) -> Value (BitVecType bw)
-bvMul (BitVecValue x bw) (BitVecValue y _) = BitVecValue ((x*y) `mod` (2^(naturalToInteger bw))) bw
+bvMul (BitVecValue x bw1) (BitVecValue y bw2)
+  | bw1 /= bw2 = error "bvMul: Bitvector size mismatch"
+  | otherwise =  BitVecValue ((x*y) `mod` (2^(bwSize bw1))) bw1
 
 bvDiv :: Value (BitVecType bw) -> Value (BitVecType bw) -> Value (BitVecType bw)
-bvDiv (BitVecValue x bw) (BitVecValue y _) = BitVecValue (x `div` y) bw
+bvDiv (BitVecValue x bw1) (BitVecValue y bw2)
+  | bw1 /= bw2 = error "bvDiv: Bitvector size mismatch"
+  | otherwise = BitVecValue (x `div` y) bw1
 
 bvMod :: Value (BitVecType bw) -> Value (BitVecType bw) -> Value (BitVecType bw)
-bvMod (BitVecValue x bw) (BitVecValue y _) = BitVecValue (x `mod` y) bw
+bvMod (BitVecValue x bw1) (BitVecValue y bw2)
+  | bw1 /= bw2 = error "bvMod: Bitvector size mismatch"
+  | otherwise = BitVecValue (x `mod` y) bw1
 
 bvNegate :: Value (BitVecType bw) -> Value (BitVecType bw)
 bvNegate (BitVecValue x bw) = BitVecValue (if x==0
                                            then 0
-                                           else 2^(naturalToInteger bw)-x) bw
+                                           else 2^(bwSize bw)-x) bw
 
 bvSignum :: Value (BitVecType bw) -> Value (BitVecType bw)
 bvSignum (BitVecValue x bw) = BitVecValue (if x==0 then 0 else 1) bw
 
-instance IsNatural bw => Num (Value (BitVecType bw)) where
+instance TL.KnownNat bw => Num (Value (BitVecType bw)) where
   (+) = bvAdd
   (-) = bvSub
   (*) = bvMul
   negate = bvNegate
   abs = id
   signum = bvSignum
-  fromInteger x = withBW $ \bw -> BitVecValue (x `mod` (2^(naturalToInteger bw))) bw
+  fromInteger x = withBW $ \pr -> let bw = TL.natVal pr
+                                  in BitVecValue (x `mod` (2^bw)) (BitWidth bw)
 
 -- | Get the smallest bitvector value that is bigger than the given one.
 --   Also known as the successor.
 bvSucc :: Value (BitVecType bw) -> Value (BitVecType bw)
 bvSucc (BitVecValue i bw)
-  | i < 2^(naturalToInteger bw) - 1 = BitVecValue (i+1) bw
+  | i < 2^(bwSize bw) - 1 = BitVecValue (i+1) bw
   | otherwise = error "bvSucc: tried to take `succ' of maxBound"
 
 -- | Get the largest bitvector value that is smaller than the given one.
@@ -736,23 +762,25 @@ bvPred (BitVecValue i bw)
   | i > 0 = BitVecValue (i-1) bw
   | otherwise = error "bvPred: tried to take `pred' of minBound"
 
-instance IsNatural bw => Enum (Value (BitVecType bw)) where
+instance TL.KnownNat bw => Enum (Value (BitVecType bw)) where
   succ = bvSucc
   pred = bvPred
   toEnum i = withBW $ \bw -> let i' = toInteger i
-                             in if i >= 0 && i < 2^(naturalToInteger bw)
-                                then BitVecValue i' bw
+                                 bw' = TL.natVal bw
+                             in if i >= 0 && i < 2^bw'
+                                then BitVecValue i' (BitWidth bw')
                                 else error "Prelude.toEnum: argument out of range for bitvector value."
   fromEnum (BitVecValue i _) = fromInteger i
-  enumFrom (BitVecValue x bw) = [ BitVecValue i bw | i <- [x..2^(naturalToInteger bw)-1] ]
-  enumFromThen (BitVecValue x bw) (BitVecValue y _) = [ BitVecValue i bw | i <- [x,y..2^(naturalToInteger bw)-1] ]
+  enumFrom (BitVecValue x bw) = [ BitVecValue i bw | i <- [x..2^(bwSize bw)-1] ]
+  enumFromThen (BitVecValue x bw) (BitVecValue y _) = [ BitVecValue i bw | i <- [x,y..2^(bwSize bw)-1] ]
   enumFromTo (BitVecValue x bw) (BitVecValue y _) = [ BitVecValue i bw | i <- [x..y] ]
   enumFromThenTo (BitVecValue x bw) (BitVecValue y _) (BitVecValue z _)
     = [ BitVecValue i bw | i <- [x,y..z] ]
 
-instance IsNatural bw => Bounded (Value (BitVecType bw)) where
-  minBound = withBW $ \bw -> BitVecValue 0 bw
-  maxBound = withBW $ \bw -> BitVecValue (2^(naturalToInteger bw)-1) bw
+instance TL.KnownNat bw => Bounded (Value (BitVecType bw)) where
+  minBound = withBW $ \w -> BitVecValue 0 (bw w)
+  maxBound = withBW $ \bw -> let bw' = TL.natVal bw
+                             in BitVecValue (2^bw'-1) (BitWidth bw')
 
 -- | Get the minimal value for a bitvector.
 --   If unsigned, the value is 0, otherwise 2^(bw-1).
@@ -760,60 +788,61 @@ bvMinValue :: Bool -- ^ Signed bitvector?
            -> Repr (BitVecType bw)
            -> Value (BitVecType bw)
 bvMinValue False (BitVecRepr bw) = BitVecValue 0 bw
-bvMinValue True (BitVecRepr bw) = BitVecValue (2^(naturalToInteger bw-1)) bw
+bvMinValue True (BitVecRepr bw) = BitVecValue (2^(bwSize bw-1)) bw
 
 -- | Get the maximal value for a bitvector.
 --   If unsigned, the value is 2^(bw-1)-1, otherwise 2^bw-1.
 bvMaxValue :: Bool -- ^ Signed bitvector?
            -> Repr (BitVecType bw)
            -> Value (BitVecType bw)
-bvMaxValue False (BitVecRepr bw) = BitVecValue (2^(naturalToInteger bw)-1) bw
-bvMaxValue True (BitVecRepr bw) = BitVecValue (2^(naturalToInteger bw-1)-1) bw
+bvMaxValue False (BitVecRepr bw) = BitVecValue (2^(bwSize bw)-1) bw
+bvMaxValue True (BitVecRepr bw) = BitVecValue (2^(bwSize bw-1)-1) bw
 
-instance IsNatural bw => Bits (Value (BitVecType bw)) where
+instance TL.KnownNat bw => Bits (Value (BitVecType bw)) where
   (.&.) (BitVecValue x bw) (BitVecValue y _) = BitVecValue (x .&. y) bw
   (.|.) (BitVecValue x bw) (BitVecValue y _) = BitVecValue (x .|. y) bw
   xor (BitVecValue x bw) (BitVecValue y _)
     = BitVecValue ((x .|. max) `xor` (y .|. max)) bw
     where
-      max = bit $ fromInteger $ naturalToInteger bw
-  complement (BitVecValue x bw) = BitVecValue (2^(naturalToInteger bw)-1-x) bw
-  shift (BitVecValue x bw) i = BitVecValue ((x `shift` i) `mod` (2^(naturalToInteger bw))) bw
-  rotate (BitVecValue x bw) i = BitVecValue ((x `rotate` i) `mod` (2^(naturalToInteger bw))) bw
-  zeroBits = withBW $ \bw -> BitVecValue 0 bw
-  bit n = withBW $ \bw -> if toInteger n < naturalToInteger bw && n >= 0
-                          then BitVecValue (bit n) bw
-                          else BitVecValue 0 bw
-  setBit (BitVecValue x bw) i = if toInteger i < naturalToInteger bw && i >= 0
+      max = bit $ fromInteger $ bwSize bw
+  complement (BitVecValue x bw) = BitVecValue (2^(bwSize bw)-1-x) bw
+  shift (BitVecValue x bw) i = BitVecValue ((x `shift` i) `mod` (2^(bwSize bw))) bw
+  rotate (BitVecValue x bw) i = BitVecValue ((x `rotate` i) `mod` (2^(bwSize bw))) bw
+  zeroBits = withBW $ \w -> BitVecValue 0 (bw w)
+  bit n = withBW $ \bw -> let bw' = TL.natVal bw
+                          in if toInteger n < bw' && n >= 0
+                             then BitVecValue (bit n) (BitWidth bw')
+                             else BitVecValue 0 (BitWidth bw')
+  setBit (BitVecValue x bw) i = if toInteger i < bwSize bw && i >= 0
                                 then BitVecValue (setBit x i) bw
                                 else BitVecValue x bw
-  clearBit (BitVecValue x bw) i = if toInteger i < naturalToInteger bw && i >= 0
+  clearBit (BitVecValue x bw) i = if toInteger i < bwSize bw && i >= 0
                                   then BitVecValue (clearBit x i) bw
                                   else BitVecValue x bw
-  complementBit (BitVecValue x bw) i = if toInteger i < naturalToInteger bw && i >= 0
+  complementBit (BitVecValue x bw) i = if toInteger i < bwSize bw && i >= 0
                                        then BitVecValue (complementBit x i) bw
                                        else BitVecValue x bw
   testBit (BitVecValue x _) i = testBit x i
 #if MIN_VERSION_base(4,7,0)
-  bitSizeMaybe (BitVecValue _ bw) = Just (fromInteger $ naturalToInteger bw)
+  bitSizeMaybe (BitVecValue _ bw) = Just (fromInteger $ bwSize bw)
 #endif
-  bitSize (BitVecValue _ bw) = fromInteger $ naturalToInteger bw
+  bitSize (BitVecValue _ bw) = fromInteger $ bwSize bw
   isSigned _ = False
-  shiftL (BitVecValue x bw) i = BitVecValue ((shiftL x i) `mod` 2^(naturalToInteger bw)) bw
-  shiftR (BitVecValue x bw) i = BitVecValue ((shiftR x i) `mod` 2^(naturalToInteger bw)) bw
-  rotateL (BitVecValue x bw) i = BitVecValue ((rotateL x i) `mod` 2^(naturalToInteger bw)) bw
-  rotateR (BitVecValue x bw) i = BitVecValue ((rotateR x i) `mod` 2^(naturalToInteger bw)) bw
+  shiftL (BitVecValue x bw) i = BitVecValue ((shiftL x i) `mod` 2^(bwSize bw)) bw
+  shiftR (BitVecValue x bw) i = BitVecValue ((shiftR x i) `mod` 2^(bwSize bw)) bw
+  rotateL (BitVecValue x bw) i = BitVecValue ((rotateL x i) `mod` 2^(bwSize bw)) bw
+  rotateR (BitVecValue x bw) i = BitVecValue ((rotateR x i) `mod` 2^(bwSize bw)) bw
   popCount (BitVecValue x _) = popCount x
 
 #if MIN_VERSION_base(4,7,0)
-instance IsNatural bw => FiniteBits (Value (BitVecType bw)) where
-  finiteBitSize (BitVecValue _ bw) = fromInteger $ naturalToInteger bw
+instance TL.KnownNat bw => FiniteBits (Value (BitVecType bw)) where
+  finiteBitSize (BitVecValue _ bw) = fromInteger $ bwSize bw
 #endif
 
-instance IsNatural bw => Real (Value (BitVecType bw)) where
+instance TL.KnownNat bw => Real (Value (BitVecType bw)) where
   toRational (BitVecValue x _) = toRational x
 
-instance IsNatural bw => Integral (Value (BitVecType bw)) where
+instance TL.KnownNat bw => Integral (Value (BitVecType bw)) where
   quot (BitVecValue x bw) (BitVecValue y _) = BitVecValue (quot x y) bw
   rem (BitVecValue x bw) (BitVecValue y _) = BitVecValue (rem x y) bw
   div (BitVecValue x bw) (BitVecValue y _) = BitVecValue (div x y) bw
@@ -829,3 +858,9 @@ instance IsNatural bw => Integral (Value (BitVecType bw)) where
 instance GetType NumRepr where
   getType NumInt = IntRepr
   getType NumReal = RealRepr
+
+instance Show (BitWidth bw) where
+  showsPrec p bw = showsPrec p (bwSize bw)
+
+bwAdd :: BitWidth bw1 -> BitWidth bw2 -> BitWidth (bw1 TL.+ bw2)
+bwAdd (BitWidth w1) (BitWidth w2) = BitWidth (w1+w2)

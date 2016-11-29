@@ -3,7 +3,7 @@ module Language.SMTLib2.Composite.Domains where
 import Language.SMTLib2 hiding (select,store)
 import Language.SMTLib2.Composite.Class
 import Language.SMTLib2.Internals.Type.Nat
-import Language.SMTLib2.Internals.Type (bvPred,bvSucc,bvAdd,bvSub,bvMul,bvNegate,bvDiv,bvMod,bvMinValue,bvMaxValue)
+import Language.SMTLib2.Internals.Type (bvPred,bvSucc,bvAdd,bvSub,bvMul,bvNegate,bvDiv,bvMod,bvMinValue,bvMaxValue,bwSize,BitWidth(..),withBW)
 import Language.SMTLib2.Internals.Embed
 import Data.List (sortBy,sort)
 import Data.Ord (comparing)
@@ -16,6 +16,7 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Either (partitionEithers)
 import Text.Show
+import qualified GHC.TypeLits as TL
 
 class Composite c => IsSingleton c where
   type SingletonType c :: Type
@@ -435,7 +436,7 @@ type IntRange = (Bool,[Integer])
 data Range tp where
   BoolRange :: Bool -> Bool -> Range BoolType
   IntRange :: IntRange -> Range IntType
-  BitVecRange :: Natural bw -> [(Integer,Integer)] -> Range (BitVecType bw)
+  BitVecRange :: BitWidth bw -> [(Integer,Integer)] -> Range (BitVecType bw)
 
 deriving instance Eq (Range tp)
 --deriving instance Show (Range tp)
@@ -743,7 +744,7 @@ rangeInvariant (BitVecRange bw r) e
                       else [e `bvule` cbv upper bw])
                ) r
   where
-    bw' = naturalToInteger bw
+    bw' = bwSize bw
 
 rangeInvariant' :: Embed m e => (Bool -> Integer -> m (e BoolType)) -- ^ First parameter decides if the operator is <=x (True) or >=x (False).
                 -> IntRange
@@ -810,7 +811,7 @@ rangeFixpoint (BitVecRange bw r1) (BitVecRange _ r2)
 
     fixEnd [(l1,u1)] [(l2,u2)]
       | u1==u2 = [(l2,u2)]
-      | otherwise = [(l2,2^(naturalToInteger bw)-1)]
+      | otherwise = [(l2,2^(bwSize bw)-1)]
     fixEnd (x:xs) [y] = fixEnd xs [y]
     fixEnd [x] (y:ys) = y:fixEnd [x] ys
     fixEnd (_:xs) (y:ys) = y:fixEnd xs ys
@@ -862,7 +863,7 @@ includes (BitVecValue v _) (BitVecRange _ r)
 fullRange :: Repr tp -> Range tp
 fullRange BoolRepr        = BoolRange True True
 fullRange IntRepr         = IntRange (True,[])
-fullRange (BitVecRepr bw) = BitVecRange bw [(0,2^(naturalToInteger bw)-1)]
+fullRange (BitVecRepr bw) = BitVecRange bw [(0,2^(bwSize bw)-1)]
 
 emptyRange :: Repr tp -> Range tp
 emptyRange BoolRepr        = BoolRange False False
@@ -1137,8 +1138,8 @@ fromBounds tp bnd = case tp of
     intRange' [(Regular (IntValue x),PosInfinity)] = [x]
     intRange' ((Regular (IntValue l),Regular (IntValue u)):xs) = l:u:intRange' xs
 
-    bvRange :: Natural bw -> Bounds (Value (BitVecType bw)) -> Range (BitVecType bw)
-    bvRange bw xs = BitVecRange bw (bvRange' (naturalToInteger bw) xs)
+    bvRange :: BitWidth bw -> Bounds (Value (BitVecType bw)) -> Range (BitVecType bw)
+    bvRange bw xs = BitVecRange bw (bvRange' (bwSize bw) xs)
 
     bvRange' :: Integer -> Bounds (Value (BitVecType bw)) -> [(Integer,Integer)]
     bvRange' _ [] = []
@@ -1313,14 +1314,14 @@ instance Num (Range IntType) where
   signum r = fromBounds int $ signumBounds (toBounds r)
   fromInteger x = IntRange (False,[x,x])
 
-instance IsNatural bw => Num (Range (BitVecType bw)) where
+instance TL.KnownNat bw => Num (Range (BitVecType bw)) where
   (+) r1@(BitVecRange bw _) r2 = fromBounds (bitvec bw) $ addBounds (BitVecValue 0 bw) bvAdd (Just maxBound) (toBounds r1) (toBounds r2)
   (-) r1@(BitVecRange bw _) r2 = fromBounds (bitvec bw) $ subBounds (BitVecValue 0 bw) bvSub (Just maxBound) (toBounds r1) (toBounds r2)
   (*) r1@(BitVecRange bw _) r2 = fromBounds (bitvec bw) $ multBounds (BitVecValue 0 bw) bvMul bvDiv (Just maxBound) (toBounds r1) (toBounds r2)
   negate r@(BitVecRange bw _) = fromBounds (bitvec bw) $ negBounds negate (toBounds r)
   abs r@(BitVecRange bw _) = fromBounds (bitvec bw) $ absBounds (toBounds r)
   signum r@(BitVecRange bw _) = fromBounds (bitvec bw) $ signumBounds (toBounds r)
-  fromInteger x = BitVecRange getNatural [(x,x)]
+  fromInteger x = withBW $ \w -> BitVecRange (bw w) [(x,x)]
 
 betweenBounds :: Ord a => Bounds a -> Bounds a -> Bounds a
 betweenBounds b1 b2 = [ (min l1 l2,max u1 u2)
@@ -1353,7 +1354,7 @@ rangeNeg r@(BitVecRange bw _) = fromBounds (bitvec bw) $ negBounds bvNegate $ to
 rangeDiv :: Range tp -> Range tp -> Range tp
 rangeDiv r1@(IntRange {}) r2 = fromBounds int $ divBounds 0 (-1) div (toBounds r1) (toBounds r2)
 rangeDiv r1@(BitVecRange bw _) r2 = fromBounds (bitvec bw) $
-                                    divBounds (BitVecValue 0 bw) (BitVecValue (2^(naturalToInteger bw-1)) bw) bvDiv
+                                    divBounds (BitVecValue 0 bw) (BitVecValue (2^(bwSize bw-1)) bw) bvDiv
                                     (toBounds r1) (toBounds r2)
 
 rangeMod :: Range tp -> Range tp -> Range tp

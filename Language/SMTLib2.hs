@@ -48,7 +48,7 @@ module Language.SMTLib2 (
   -- *** Real constants
   pattern ConstReal,creal,
   -- *** Bitvector constants
-  pattern ConstBV,cbv,
+  BitWidth(),bw,pattern ConstBV,cbv,cbvUntyped,
   -- ** Quantification
   exists, forall,
   -- ** Functions
@@ -87,7 +87,7 @@ module Language.SMTLib2 (
   pattern BVBin,pattern BVAdd,pattern BVSub,pattern BVMul,pattern BVURem,pattern BVSRem,pattern BVUDiv,pattern BVSDiv,pattern BVSHL,pattern BVLSHR,pattern BVASHR,pattern BVXor,pattern BVAnd,pattern BVOr,bvbin,bvadd,bvsub,bvmul,bvurem,bvsrem,bvudiv,bvsdiv,bvshl,bvlshr,bvashr,bvxor,bvand,bvor,
   pattern BVUn,pattern BVNot,pattern BVNeg,
   bvun,bvnot,bvneg,
-  pattern Concat,pattern Extract,concat',extract',
+  pattern Concat,pattern Extract,concat',extract',extractChecked,extractUntypedStart,extractUntyped,
   -- *** Arrays
   pattern Select,pattern Store,pattern ConstArray,select,select1,store,store1,constArray,
   -- *** Datatypes
@@ -116,7 +116,7 @@ module Language.SMTLib2 (
   modelEvaluate,
   -- * Types
   registerDatatype,
-  Type(..),Repr(..),GetType(..),reifyType,bool,int,real,bitvec,array,dt,
+  Type(..),Repr(..),GetType(..),bool,int,real,bitvec,array,dt,
   -- ** Numbers
   Nat(..),Natural(..),nat,natT,reifyNat,
   -- ** Lists

@@ -26,6 +26,7 @@ import Data.Monoid
 import Data.Foldable (foldlM)
 import Control.Monad.Except
 import Data.Traversable
+import qualified GHC.TypeLits as TL
 
 import System.Process
 import System.IO
@@ -974,11 +975,16 @@ lispToFunction _ sort (L.List [L.Symbol "_",L.Symbol "extract",L.Number (L.I end
     (\args -> case args of
        [Just (Sort srt)] -> case srt of
          BitVecRepr size
-           -> reifyNat (fromInteger start) $
-              \start' -> reifyNat (fromInteger $ end-start+1) $
-                         \len' -> case naturalLEQ (naturalAdd start' len') size of
-                         Just Dict -> return $ AnyFunction (Extract size start' len')
-                         Nothing -> throwE $ "Invalid extract parameters."
+           | start <= end &&
+             end <= bwSize size
+             -> case TL.someNatVal start of
+               Just (TL.SomeNat start')
+                 -> case TL.someNatVal (end-start+1) of
+                      Just (TL.SomeNat len')
+                        -> return $ AnyFunction
+                            (Extract size (bw start')
+                              (bw len'))
+           | otherwise -> throwE $ "Invalid extract parameters."
          srt -> throwE $ "Invalid type of extract argument: "++show srt
        _ -> throwE $ "Wrong number of arguments to extract function.")
 lispToFunction _ sort (L.List [L.Symbol "_",L.Symbol "divisible",L.Number (L.I div)])
@@ -1101,7 +1107,8 @@ lispToSort r (L.List ((L.Symbol "Array"):tps)) = do
     splitLast (x:xs) = let (xs',y') = splitLast xs
                        in (x:xs',y')
 lispToSort _ (L.List [L.Symbol "_",L.Symbol "BitVec",L.Number (L.I n)])
-  = reifyNat (fromInteger n) $ \bw -> return (Sort (BitVecRepr bw))
+  = case TL.someNatVal n of
+      Just (TL.SomeNat w) -> return (Sort (BitVecRepr (bw w)))
 lispToSort r (L.Symbol name) = parseDatatype r name $
                                \pr -> Sort (DataRepr pr)
 lispToSort _ lsp = throwE $ "Invalid SMT type: "++show lsp
@@ -1126,7 +1133,8 @@ lispToConstant (L.Symbol "false") = return (AnyValue (BoolValue False))
 lispToConstant (lispToNumber -> Just n) = return (AnyValue (IntValue n))
 lispToConstant (lispToReal -> Just n) = return (AnyValue (RealValue n))
 lispToConstant (lispToBitVec -> Just (val,sz))
-  = reifyNat (fromInteger sz) $ \bw -> return (AnyValue (BitVecValue val bw))
+  = case TL.someNatVal sz of
+  Just (TL.SomeNat w) -> return (AnyValue (BitVecValue val (bw w)))
 lispToConstant l = throwE $ "Invalid constant "++show l
 
 lispToConstrConstant :: SMTPipe -> L.Lisp -> LispParse AnyValue
@@ -1282,11 +1290,12 @@ valueToLisp _ (RealValue n)
   = return $ L.List [L.Symbol "/"
                     ,numToLisp $ numerator n
                     ,numToLisp $ denominator n]
-valueToLisp _ (BitVecValue n bw) = return $ L.List [L.Symbol "_"
-                                                   ,L.Symbol (T.pack $ "bv"++show rn)
-                                                   ,L.Number $ L.I bw']
+valueToLisp _ (BitVecValue n bw)
+  = return $ L.List [L.Symbol "_"
+                    ,L.Symbol (T.pack $ "bv"++show rn)
+                    ,L.Number $ L.I bw']
   where
-    bw' = naturalToInteger bw
+    bw' = bwSize bw
     rn = n `mod` 2^bw'
 valueToLisp f (ConstrValue con args) = do
   con' <- f con
@@ -1385,8 +1394,8 @@ functionSymbol _ _ _ _ (Extract bw start len)
                     ,L.Number $ L.I $ start'+len'-1
                     ,L.Number $ L.I start']
   where
-    start' = naturalToInteger start
-    len' = naturalToInteger len
+    start' = bwSize start
+    len' = bwSize len
 functionSymbol _ g _ _ (Constructor con) = g con
 functionSymbol _ _ h _ (Test con) = h con
 functionSymbol _ _ _ i (Expr.Field f) = i f
@@ -1420,7 +1429,7 @@ typeSymbol IntRepr = L.Symbol "Int"
 typeSymbol RealRepr = L.Symbol "Real"
 typeSymbol (BitVecRepr n) = L.List [L.Symbol "_"
                                    ,L.Symbol "BitVec"
-                                   ,L.Number (L.I $ naturalToInteger n)]
+                                   ,L.Number (L.I $ bwSize n)]
 typeSymbol (ArrayRepr idx el) = L.List ((L.Symbol "Array"):
                                         runIdentity (List.toList (return.typeSymbol) idx) ++
                                         [typeSymbol el])

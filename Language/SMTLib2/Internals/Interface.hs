@@ -4,7 +4,7 @@ module Language.SMTLib2.Internals.Interface
         pattern Var,
         -- ** Constants
         pattern ConstBool,pattern ConstInt,pattern ConstReal,pattern ConstBV,
-        constant,asConstant,true,false,cbool,cint,creal,cbv,cdt,
+        constant,asConstant,true,false,cbool,cint,creal,cbv,cbvUntyped,cdt,
         -- ** Quantification
         exists,forall,
         -- ** Functions
@@ -43,7 +43,7 @@ module Language.SMTLib2.Internals.Interface
         pattern BVBin,pattern BVAdd,pattern BVSub,pattern BVMul,pattern BVURem,pattern BVSRem,pattern BVUDiv,pattern BVSDiv,pattern BVSHL,pattern BVLSHR,pattern BVASHR,pattern BVXor,pattern BVAnd,pattern BVOr,bvbin,bvadd,bvsub,bvmul,bvurem,bvsrem,bvudiv,bvsdiv,bvshl,bvlshr,bvashr,bvxor,bvand,bvor,
         pattern BVUn,pattern BVNot,pattern BVNeg,
         bvun,bvnot,bvneg,
-        pattern Concat,pattern Extract,concat',extract',
+        pattern Concat,pattern Extract,concat',extract',extractChecked,extractUntypedStart,extractUntyped,
         -- *** Arrays
         pattern Select,pattern Store,pattern ConstArray,select,select1,store,store1,constArray,
         -- *** Datatypes
@@ -64,6 +64,7 @@ import Language.SMTLib2.Internals.Embed
 
 import Data.Constraint
 import Data.Functor.Identity
+import qualified GHC.TypeLits as TL
 
 -- Helper classes
 
@@ -174,7 +175,7 @@ pattern ConstInt x = E.Const (IntValue x)
 MK_SIG((rtp ~ RealType),(),ConstReal,Rational,Expression v qv fun fv lv e rtp)
 pattern ConstReal x = E.Const (RealValue x)
 
-MK_SIG((rtp ~ BitVecType bw),(),ConstBV,Integer SEP (Natural bw),Expression v qv fun fv lv e rtp)
+MK_SIG((rtp ~ BitVecType bw),(),ConstBV,Integer SEP (BitWidth bw),Expression v qv fun fv lv e rtp)
 pattern ConstBV x bw = E.Const (BitVecValue x bw)
 
 pattern Fun f arg = App (E.Fun f) arg
@@ -354,13 +355,13 @@ MK_SIG((rtp ~ ArrayType idx val),(GetType e),ConstArray,(List Repr idx) SEP (e v
 pattern ConstArray idx el <- App (E.ConstArray idx _) (el ::: Nil) where
   ConstArray idx el = App (E.ConstArray idx (getType el)) (el ::: Nil)
 
-MK_SIG((rtp ~ BitVecType (n1+n2)),(GetType e),Concat,(e (BitVecType n1)) SEP (e (BitVecType n2)),Expression v qv fun fv lv e rtp)
+MK_SIG((rtp ~ BitVecType (n1 TL.+ n2)),(GetType e),Concat,(e (BitVecType n1)) SEP (e (BitVecType n2)),Expression v qv fun fv lv e rtp)
 pattern Concat lhs rhs <- App (E.Concat _ _) (lhs :::rhs ::: Nil) where
   Concat lhs rhs = case getType lhs of
     BitVecRepr n1 -> case getType rhs of
       BitVecRepr n2 -> App (E.Concat n1 n2) (lhs ::: rhs ::: Nil)
 
-MK_SIG((rtp ~ BitVecType len,((start + len) <= bw) ~ True),(GetType e),Extract,(Natural start) SEP (Natural len) SEP (e (BitVecType bw)),Expression v qv fun fv lv e rtp)
+MK_SIG((rtp ~ BitVecType len),(GetType e),Extract,(BitWidth start) SEP (BitWidth len) SEP (e (BitVecType bw)),Expression v qv fun fv lv e rtp)
 pattern Extract start len arg <- App (E.Extract _ start len) (arg ::: Nil) where
   Extract start len arg = case getType arg of
     BitVecRepr bw -> App (E.Extract bw start len) (arg ::: Nil)
@@ -382,7 +383,7 @@ sameApp f lst = App (f (sameType $ runIdentity $
                        ) (List.length lst))
                 (sameToAllEq lst)
 
-getBW :: GetType e => e (BitVecType bw) -> Natural bw
+getBW :: GetType e => e (BitVecType bw) -> BitWidth bw
 getBW e = case getType e of
   BitVecRepr bw -> bw
 
@@ -420,10 +421,21 @@ creal :: Embed m e => Rational -> m (e RealType)
 creal x = embed $ pure $ E.Const (RealValue x)
 
 -- | Create a constant bitvector expression.
-cbv :: Embed m e => Integer -- ^ The value (negative values will be stored in two's-complement.
-    -> Natural bw -- ^ The bitwidth of the bitvector value.
+cbv :: Embed m e => Integer -- ^ The value (negative values will be stored in two's-complement).
+    -> BitWidth bw -- ^ The bitwidth of the bitvector value.
     -> m (e (BitVecType bw))
 cbv i bw = embed $ pure $ E.Const (BitVecValue i bw)
+
+-- | Create an untyped constant bitvector expression.
+cbvUntyped :: (Embed m e,Monad m) => Integer -- ^ The value (negative values will be stored in two's-complement).
+           -> Integer -- ^ The bitwidth (must be >= 0).
+           -> (forall bw. e (BitVecType bw) -> m b)
+           -> m b
+cbvUntyped val w f = case TL.someNatVal w of
+  Just (TL.SomeNat rw) -> do
+    bv <- embed $ pure $ E.Const (BitVecValue val (bw rw))
+    f bv
+  Nothing -> error "cbvUntyped: Negative bitwidth"
 
 cdt :: (Embed m e,IsDatatype t) => t Value -> m (e (DataType t))
 cdt v = case constrGet v of
@@ -875,7 +887,7 @@ concat' :: forall m e a b n1 n2.
            (Embed m e,HasMonad a,HasMonad b,
             MatchMonad a m,MatchMonad b m,
             MonadResult a ~ e (BitVecType n1),MonadResult b ~ e (BitVecType n2))
-        => a -> b -> m (e (BitVecType (n1 + n2)))
+        => a -> b -> m (e (BitVecType (n1 TL.+ n2)))
 concat' x y = embed $ f <$>
               embedM x <*>
               embedM y <*>
@@ -885,7 +897,7 @@ concat' x y = embed $ f <$>
     f :: e (BitVecType n1) -> e (BitVecType n2)
       -> (e (BitVecType n1) -> Repr (BitVecType n1))
       -> (e (BitVecType n2) -> Repr (BitVecType n2))
-      -> Expression v qv fun fv lv e (BitVecType (n1 + n2))
+      -> Expression v qv fun fv lv e (BitVecType (n1 TL.+ n2))
     f x' y' tp1 tp2 = case tp1 x' of
       BitVecRepr bw1 -> case tp2 y' of
         BitVecRepr bw2 -> App (E.Concat bw1 bw2) (x' ::: y' ::: Nil)
@@ -894,8 +906,8 @@ concat' x y = embed $ f <$>
 extract' :: forall m e a bw start len.
             (Embed m e,HasMonad a,MatchMonad a m,
              MonadResult a ~ e (BitVecType bw),
-             ((start + len) <= bw) ~ True)
-         => Natural start -> Natural len -> a
+             (start TL.+ len) TL.<= bw)
+         => BitWidth start -> BitWidth len -> a
          -> m (e (BitVecType len))
 extract' start len arg = embed $ f <$> embedM arg <*> embedTypeOf
   where
@@ -904,6 +916,46 @@ extract' start len arg = embed $ f <$> embedM arg <*> embedTypeOf
     f arg' tp = case tp arg' of
       BitVecRepr bw -> App (E.Extract bw start len) (arg' ::: Nil)
 {-# INLINEABLE extract' #-}
+
+extractChecked :: forall m e a bw start len.
+                  (Embed m e,HasMonad a,MatchMonad a m,TL.KnownNat start,TL.KnownNat len,
+                   MonadResult a ~ e (BitVecType bw))
+               => BitWidth start -> BitWidth len -> a
+               -> m (e (BitVecType len))
+extractChecked start len arg
+  = embed $ f <$> embedM arg <*> embedTypeOf
+  where
+    f :: e (BitVecType bw) -> (e (BitVecType bw) -> Repr (BitVecType bw))
+      -> Expression v qv fun fv lv e (BitVecType len)
+    f arg' tp = case tp arg' of
+      BitVecRepr bw
+        | bwSize start + bwSize len <= bwSize bw
+          -> App (E.Extract bw start len) (arg' ::: Nil)
+        | otherwise -> error $ "extractChecked: Invalid parameters"
+{-# INLINEABLE extractChecked #-}
+
+extractUntypedStart :: forall m e a bw len.
+                       (Embed m e,HasMonad a,MatchMonad a m,TL.KnownNat len,
+                        MonadResult a ~ e (BitVecType bw))
+                    => Integer -> BitWidth len -> a
+                    -> m (e (BitVecType len))
+extractUntypedStart start len arg = case TL.someNatVal start of
+  Just (TL.SomeNat start') -> extractChecked (bw start') len arg
+  Nothing -> error "extractUntypedStart: Negative start value"
+
+extractUntyped :: forall m e a bw b.
+                  (Embed m e,Monad m,HasMonad a,MatchMonad a m,
+                    MonadResult a ~ e (BitVecType bw))
+               => Integer -> Integer -> a
+               -> (forall len. e (BitVecType len) -> m b)
+               -> m b
+extractUntyped start len arg f = case TL.someNatVal start of
+  Just (TL.SomeNat start') -> case TL.someNatVal len of
+    Just (TL.SomeNat len') -> do
+      bv <- extractChecked (bw start') (bw len') arg
+      f bv
+    Nothing -> error "extractUntyped: Negative length"
+  Nothing -> error "extractUntyped: Negative start value"
 
 divisible :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e IntType)
           => Integer -> a -> m (e BoolType)

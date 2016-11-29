@@ -17,6 +17,7 @@ import Data.Functor.Identity
 import System.IO.Unsafe
 import Data.GADT.Show
 import Data.GADT.Compare
+import qualified GHC.TypeLits as TL
 
 data Z3SolverState = Unconfigured Z3Options
                    | Configured Context Z3Options
@@ -222,7 +223,7 @@ typeToZ3 :: Context -> Repr t -> IO Sort
 typeToZ3 ctx BoolRepr = mkBoolSort ctx
 typeToZ3 ctx IntRepr = mkIntSort ctx
 typeToZ3 ctx RealRepr = mkRealSort ctx
-typeToZ3 ctx (BitVecRepr bw) = mkBvSort ctx (naturalToInteger bw)
+typeToZ3 ctx (BitVecRepr bw) = mkBvSort ctx (bwSize bw)
 typeToZ3 ctx (ArrayRepr (idx ::: Nil) el) = do
   idx' <- typeToZ3 ctx idx
   el' <- typeToZ3 ctx el
@@ -327,8 +328,9 @@ z3Sort ctx s f = do
     Z3_REAL_SORT -> f RealRepr
     Z3_BV_SORT -> do
       sz <- getBvSortSize ctx s
-      reifyNat (fromIntegral sz) $
-        \bw -> f (BitVecRepr bw)
+      case TL.someNatVal (toInteger sz) of
+        Just (TL.SomeNat w)
+          -> f (BitVecRepr (bw w))
     Z3_ARRAY_SORT -> do
       dom <- getArraySortDomain ctx s
       range <- getArraySortRange ctx s
@@ -381,6 +383,6 @@ toZ3Const ctx (BoolValue True) = mkTrue ctx
 toZ3Const ctx (IntValue v) = mkInteger ctx v
 toZ3Const ctx (RealValue v) = mkRational ctx v
 toZ3Const ctx (BitVecValue v bw)
-  = mkBitvector ctx (fromInteger $ naturalToInteger bw) v
+  = mkBitvector ctx (fromInteger $ bwSize bw) v
 toZ3Const ctx val = error $ "toZ3Const: "++show val
 

@@ -12,6 +12,7 @@ import Data.GADT.Compare
 import Data.GADT.Show
 import Data.Functor.Identity
 import Data.Ratio
+import qualified GHC.TypeLits as TL
 
 type family AllEq (tp :: Type) (n :: Nat) :: [Type] where
   AllEq tp Z = '[]
@@ -56,15 +57,14 @@ data Function (fun :: ([Type],Type) -> *) (sig :: ([Type],Type)) where
   ToReal :: Function fun '( '[IntType],RealType)
   ToInt :: Function fun '( '[RealType],IntType)
   ITE :: Repr a -> Function fun '([BoolType,a,a],a)
-  BVComp :: BVCompOp -> Natural a -> Function fun '([BitVecType a,BitVecType a],BoolType)
-  BVBin :: BVBinOp -> Natural a -> Function fun '([BitVecType a,BitVecType a],BitVecType a)
-  BVUn :: BVUnOp -> Natural a -> Function fun '( '[BitVecType a],BitVecType a)
+  BVComp :: BVCompOp -> BitWidth a -> Function fun '([BitVecType a,BitVecType a],BoolType)
+  BVBin :: BVBinOp -> BitWidth a -> Function fun '([BitVecType a,BitVecType a],BitVecType a)
+  BVUn :: BVUnOp -> BitWidth a -> Function fun '( '[BitVecType a],BitVecType a)
   Select :: List Repr idx -> Repr val -> Function fun '(ArrayType idx val ': idx,val)
   Store :: List Repr idx -> Repr val -> Function fun '(ArrayType idx val ': val ': idx,ArrayType idx val)
   ConstArray :: List Repr idx -> Repr val -> Function fun '( '[val],ArrayType idx val)
-  Concat :: Natural n1 -> Natural n2 -> Function fun '([BitVecType n1,BitVecType n2],BitVecType (n1 + n2))
-  Extract :: (((start + len) <= bw) ~ True)
-          => Natural bw -> Natural start -> Natural len -> Function fun '( '[BitVecType bw],BitVecType len)
+  Concat :: BitWidth n1 -> BitWidth n2 -> Function fun '([BitVecType n1,BitVecType n2],BitVecType (n1 TL.+ n2))
+  Extract :: BitWidth bw -> BitWidth start -> BitWidth len -> Function fun '( '[BitVecType bw],BitVecType len)
   Constructor :: IsDatatype dt => Constr dt sig
               -> Function fun '(sig,DataType dt)
   Test :: IsDatatype dt => Constr dt sig -> Function fun '( '[DataType dt],BoolType)
@@ -232,7 +232,7 @@ functionType _ (Select idx el) = return (ArrayRepr idx el ::: idx,el)
 functionType _ (Store idx el) = return (ArrayRepr idx el ::: el ::: idx,ArrayRepr idx el)
 functionType _ (ConstArray idx el) = return (el ::: Nil,ArrayRepr idx el)
 functionType _ (Concat bw1 bw2) = return (BitVecRepr bw1 ::: BitVecRepr bw2 ::: Nil,
-                                          BitVecRepr (naturalAdd bw1 bw2))
+                                          BitVecRepr (bwAdd bw1 bw2))
 functionType _ (Extract bw start len) = return (BitVecRepr bw ::: Nil,BitVecRepr len)
 functionType _ (Constructor con) = return (constrSig con,DataRepr (constrDatatype con))
 functionType _ (Test con) = return (DataRepr (constrDatatype con) ::: Nil,BoolRepr)
@@ -525,7 +525,7 @@ renderValue SMTRendering (BitVecValue n bw)
   = showString "(_ bv" .
     showsPrec 0 n .
     showChar ' ' .
-    showsPrec 0 (naturalToInteger bw) .
+    showsPrec 0 (bwSize bw) .
     showChar ')'
 renderValue SMTRendering (ConstrValue con Nil) = showString (constrName con)
 renderValue SMTRendering (ConstrValue con xs)
@@ -606,8 +606,8 @@ renderFunction SMTRendering _ (Extract _ start len)
     showString (show start') .
     showChar ')'
   where
-    start' = naturalToInteger start
-    len' = naturalToInteger len
+    start' = bwSize start
+    len' = bwSize len
 renderFunction SMTRendering _ (Constructor con) = showString (constrName con)
 renderFunction SMTRendering _ (Test con) = showString "is-" . showString (constrName con)
 renderFunction SMTRendering _ (Field field) = showString (fieldName field)
@@ -620,7 +620,7 @@ renderType SMTRendering BoolRepr = showString "Bool"
 renderType SMTRendering IntRepr = showString "Int"
 renderType SMTRendering RealRepr = showString "Real"
 renderType SMTRendering (BitVecRepr bw) = showString "(BitVec " .
-                                          showString (show $ naturalToInteger bw) .
+                                          showString (show $ bwSize bw) .
                                           showChar ')'
 renderType SMTRendering (ArrayRepr idx el) = showString "(Array (" .
                                              renderTypes idx .

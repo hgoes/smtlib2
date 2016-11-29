@@ -32,6 +32,7 @@ import Data.Ord (comparing)
 import Control.Monad.Except
 import Text.Show
 import Data.Maybe
+import qualified GHC.TypeLits as TL
 
 data ChoiceEncoding = BoolEncoding
                     | ValueEncoding Type
@@ -59,10 +60,12 @@ intEncoding xs = ChoiceValue (zip (normalizeList compCompare xs) [ IntValue n | 
 bvEncoding :: Composite c => [c Repr]
            -> (forall bw. Choice (ValueEncoding (BitVecType bw)) c Repr -> a)
            -> a
-bvEncoding xs f = reifyNat bits $ \bw -> f $ ChoiceValue
-                                         (zip (normalizeList compCompare xs)
-                                          [ BitVecValue n bw | n <- [0..] ])
-                                         (bitvec bw)
+bvEncoding xs f = case TL.someNatVal bits of
+  Just (TL.SomeNat w) -> let bw' = bw w
+                         in f $ ChoiceValue
+                            (zip (normalizeList compCompare xs)
+                             [ BitVecValue n bw' | n <- [0..] ])
+                            (bitvec bw')
   where
     bits = ceiling $ logBase 2 (fromIntegral size :: Double)
     size = length xs
