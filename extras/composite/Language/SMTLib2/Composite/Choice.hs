@@ -5,6 +5,8 @@ module Language.SMTLib2.Composite.Choice
    boolEncoding,intEncoding,bvEncoding,dtEncoding,possibleChoices,
    -- * Constructor
    singleton,initial,
+   -- * Accessors
+   chosen,
    -- * Functions
    getChosen,setChosen,getChoiceValues,getChoices,mapChoices
   ) where
@@ -261,6 +263,25 @@ instance (Composite c) => Composite (Choice enc c) where
         c <- and' (xs'++y:ys')
         return $ c:cs
 
+instance (Composite c) => Container (Choice enc c) where
+  data Index (Choice enc c) el e where
+    ChoiceIndex :: Integer -> Index (Choice enc c) c e
+  elementGet (ChoiceSingleton x) (ChoiceIndex 0) = return x
+  elementGet (ChoiceBool lst) (ChoiceIndex i) = case safeGenericIndex lst i of
+    Just (el,_) -> return el
+  elementGet (ChoiceValue lst _) (ChoiceIndex i)
+    = case safeGenericIndex lst i of
+        Just (el,_) -> return el
+
+  elementSet (ChoiceSingleton _) (ChoiceIndex 0) x
+    = return $ ChoiceSingleton x
+  elementSet (ChoiceBool lst) (ChoiceIndex i) x
+    = case safeGenericUpdateAt Nothing i (\(_,val) -> Just (x,val)) lst of
+    Just nlst -> return $ ChoiceBool nlst
+  elementSet (ChoiceValue lst var) (ChoiceIndex i) x
+    = case safeGenericUpdateAt Nothing i (\(_,val) -> Just (x,val)) lst of
+    Just nlst -> return $ ChoiceValue nlst var
+
 compareChoice :: (Composite c,GCompare e) => Choice enc c e -> Choice enc c e -> Ordering
 compareChoice (ChoiceSingleton x) (ChoiceSingleton y) = compCompare x y
 compareChoice (ChoiceSingleton _) _ = LT
@@ -512,32 +533,15 @@ initial f (ChoiceValue xs tp) = do
       ifF <- mkITE rest
       ite cond (constant val) ifF
 
-chosen :: (Embed m e,Monad m) => Accessor (Choice enc c) (NoComp Integer) c m e
-chosen = Accessor get set
-  where
-    get :: (Embed m e,Monad m)
-        => Choice enc c e
-        -> m [(NoComp Integer e,[e BoolType],c e)]
-    get (ChoiceSingleton x) = return [(NoComp 0,[],x)]
-    get (ChoiceBool xs) = return $ fmap (\((el,c),n) -> (NoComp n,[c],el)
-                                        ) $ zip xs [0..]
-    get (ChoiceValue xs var) = mapM (\((el,val),n) -> do
-                                        cond <- var .==. constant val
-                                        return (NoComp n,[cond],el)
-                                    ) $ zip xs [0..]
-
-    set :: (Embed m e,Monad m)
-        => [(NoComp Integer e,c e)]
-        -> Choice enc c e
-        -> m (Choice enc c e)
-    set [] ch = return ch
-    set [(_,nel)] (ChoiceSingleton _) = return $ ChoiceSingleton nel
-    set upd (ChoiceBool xs) = return $ ChoiceBool $ merge upd 0 xs
-    set upd (ChoiceValue xs var) = return $ ChoiceValue (merge upd 0 xs) var
-
-    merge [] _ xs = xs
-    merge upd@((NoComp i,nel):upd') p ((el,cond):xs)
-      | p==i      = (nel,cond):merge upd' (p+1) xs
-      | otherwise = (el,cond):merge upd (p+1) xs
-
-                                          
+chosen :: (Embed m e,Monad m,Composite c) => Access (Choice enc c) ('Seq c 'Id) c m e
+chosen (ChoiceSingleton x) = return $ AccSeq [(ChoiceIndex 0,[],AccId)]
+chosen (ChoiceBool xs)
+  = return $ AccSeq $
+    fmap (\(i,(_,cond)) -> (ChoiceIndex i,[cond],AccId))
+    (zip [0..] xs)
+chosen (ChoiceValue xs var)
+  = fmap AccSeq $
+    mapM (\(i,(_,val)) -> do
+             cond <- var .==. constant val
+             return (ChoiceIndex i,[cond],AccId)
+         ) (zip [0..] xs)

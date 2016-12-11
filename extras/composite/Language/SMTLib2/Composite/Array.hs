@@ -88,29 +88,16 @@ instance Composite c => Composite (CompArray i c) where
     invarr <- runReaderT (compInvariant arr) idx
     mapM (\(Arrayed x) -> x .==. constArray idx true) invarr
 
-newtype CompArrayIdx (i::[Type]) e = CompArrayIdx (List e i)
+instance (Composite el) => Container (CompArray i el) where
+  data Index (CompArray i el) el' e where
+    ArrayIndex :: List e i -> Index (CompArray i el) el e
 
-instance Container (CompArray i) where
-  type CIndex (CompArray i) = CompArrayIdx i
-  elementGet (CompArrayIdx idx) arr = selectArray arr idx
-  elementSet (CompArrayIdx idx) x arr = do
+  elementGet arr (ArrayIndex idx) = selectArray arr idx
+  elementSet arr (ArrayIndex idx) x = do
     narr <- storeArray arr idx x
     case narr of
       Nothing -> error $ "elementSet{CompArray}: Incompatible updates."
       Just res -> return res
-
-atArray :: (Composite a,Embed m e,Monad m,GetType e)
-        => List e i
-        -> Accessor (CompArray i a) (NoComp ()) a m e
-atArray idx = Accessor get set
-  where
-    get arr = do
-      el <- selectArray arr idx
-      return [(NoComp (),[],el)]
-    set [(_,el)] arr = do
-      narr <- storeArray arr idx el
-      case narr of
-        Just res -> return res
 
 instance Composite c => Show (RevArray i c tp) where
   showsPrec p (RevArray r) = showParen (p>10) $

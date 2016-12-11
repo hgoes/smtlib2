@@ -3,6 +3,7 @@ module Language.SMTLib2.Composite.Tuple where
 import Language.SMTLib2
 import Language.SMTLib2.Composite.Class
 import Language.SMTLib2.Composite.Domains
+import Language.SMTLib2.Composite.Container
 
 import Data.GADT.Show
 import Data.GADT.Compare
@@ -62,6 +63,19 @@ instance (Composite a,Composite b) => Composite (CompTuple2 a b) where
     return $ invX++invY
   revName (_::Proxy (CompTuple2 a b)) (RevTuple2_1 r) = "t0_"++revName (Proxy::Proxy a) r
   revName (_::Proxy (CompTuple2 a b)) (RevTuple2_2 r) = "t1_"++revName (Proxy::Proxy b) r
+
+instance (Composite a,Composite b) => Container (CompTuple2 a b) where
+  data Index (CompTuple2 a b) el e where
+    Tuple2_1 :: Index (CompTuple2 a b) a e
+    Tuple2_2 :: Index (CompTuple2 a b) b e
+  elementGet (CompTuple2 x _) Tuple2_1 = return x
+  elementGet (CompTuple2 _ y) Tuple2_2 = return y
+
+  elementSet (CompTuple2 _ y) Tuple2_1 x = return (CompTuple2 x y)
+  elementSet (CompTuple2 x _) Tuple2_2 y = return (CompTuple2 x y)
+
+  showIndex _ Tuple2_1 = showString "[1/2]"
+  showIndex _ Tuple2_2 = showString "[2/2]"
 
 instance (CompositeExtract a,CompositeExtract b)
   => CompositeExtract (CompTuple2 a b) where

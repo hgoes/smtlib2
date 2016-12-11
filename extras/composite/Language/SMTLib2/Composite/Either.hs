@@ -51,27 +51,32 @@ instance (Composite a,Composite b) => Composite (CompEither a b) where
   compInvariant (CompEither (Left x)) = compInvariant x
   compInvariant (CompEither (Right x)) = compInvariant x
 
-eitherA :: Monad m
-        => Accessor a idx1 c m e
-        -> Accessor b idx2 c m e
-        -> Accessor (CompEither a b) (CompEither idx1 idx2) c m e
-eitherA accL accR = Accessor get set
-  where
-    get (CompEither (Left x)) = do
-      els <- accessorGet accL x
-      return $ fmap (\(idx,cond,el) -> (CompEither $ Left idx,cond,el)) els
-    get (CompEither (Right x)) = do
-      els <- accessorGet accR x
-      return $ fmap (\(idx,cond,el) -> (CompEither $ Right idx,cond,el)) els
+instance (Composite a,Composite b) => Container (CompEither a b) where
+  data Index (CompEither a b) el e where
+    Left'  :: Index (CompEither a b) a e
+    Right' :: Index (CompEither a b) b e
+  elementGet (CompEither (Left x)) Left' = return x
+  elementGet (CompEither (Right x)) Right' = return x
+  elementGet _ _ = error $ "elementGet{CompEither}: Invalid index."
 
-    set upd (CompEither (Left x)) = do
-      let nupd = fmap (\(CompEither (Left idx),el) -> (idx,el)) upd
-      nx <- accessorSet accL nupd x
-      return $ CompEither $ Left nx
-    set upd (CompEither (Right x)) = do
-      let nupd = fmap (\(CompEither (Right idx),el) -> (idx,el)) upd
-      nx <- accessorSet accR nupd x
-      return $ CompEither $ Right nx
+  elementSet _ Left'  x = return (CompEither $ Left x)
+  elementSet _ Right' x = return (CompEither $ Right x)
+
+eitherAcc :: (Embed m e,Monad m,GetType e,Composite a,Composite b,Composite c)
+          => Access a idx1 c m e
+          -> Access b idx2 c m e
+          -> Access (CompEither a b) ('Br '[ 'Seq a idx1,
+                                             'Seq b idx2]) c m e
+eitherAcc f _ (CompEither (Left x)) = do
+  acc <- f x
+  return (AccFork (Fork (Just ([],AccSeq [(Left',[],acc)]))
+                   (Fork Nothing
+                    NilFork)))
+eitherAcc _ f (CompEither (Right x)) = do
+  acc <- f x
+  return (AccFork (Fork Nothing
+                   (Fork (Just ([],AccSeq [(Right',[],acc)]))
+                    NilFork)))
 
 eitherDescr :: Either (CompDescr a) (CompDescr b) -> CompDescr (CompEither a b)
 eitherDescr = CompEither

@@ -55,38 +55,59 @@ instance Composite a => Composite (CompList a) where
   compShow = showsPrec
   compInvariant (CompList xs) = fmap concat $ mapM compInvariant xs
 
-instance Container CompList where
-  type CIndex CompList = NoComp Integer
-  elementGet (NoComp i) (CompList lst) = case safeGenericIndex lst i of
+instance Composite el => Container (CompList el) where
+  data Index (CompList el) el' e where
+    ListIndex :: Integer -> Index (CompList el) el e
+  elementGet (CompList lst) (ListIndex i) = case safeGenericIndex lst i of
     Nothing -> error $ "elementGet{CompList}: Index "++show i++" out of range."
     Just res -> return res
-  elementSet (NoComp i) x (CompList lst)
+  elementsGet lst [] = return []
+  elementsGet (CompList lst) idxs@(ListIndex _:_)
+    = return $ get 0 lst
+      (fmap (\(ListIndex i) -> i) idxs)
+    where
+      get :: Integer -> [a] -> [Integer] -> [a]
+      get _ _ [] = []
+      get n (x:xs) (i:is)
+        | i==n      = x:get (n+1) xs is
+        | otherwise = get (n+1) xs (i:is)
+      get _ [] _ = error "elementsGet{CompList}: Index out of range."
+  elementSet (CompList lst) (ListIndex i) x
     = case safeGenericUpdateAt Nothing i (\_ -> Just x) lst of
     Just nlst -> return (CompList nlst)
     Nothing -> error $ "elementSet{CompList}: Index "++show i++" out of range."
+  elementsSet lst [] = return lst
+  elementsSet (CompList lst) upd@((ListIndex _,_):_)
+    = return $ CompList $ set 0 lst
+      (fmap (\(ListIndex i,x) -> (i,x)) upd)
+    where
+      set _ xs [] = xs
+      set n (x:xs) is'@((i,nx):is)
+        | n==i      = nx:set (n+1) xs is
+        | otherwise =  x:set (n+1) xs is'
+  withElement (CompList lst) (ListIndex i) f
+    = fmap CompList $ safeGenericUpdateAt
+      (error $ "withElement{CompList}: Index "++show i++" out of range.")
+      i (\x -> f x) lst
+  showIndex p (ListIndex i) = showsPrec p i
 
 dynamicAt :: (Composite a,Integral (Value tp),Embed m e,Monad m,GetType e)
           => Maybe (Range tp) -> e tp
-          -> Accessor (CompList a) (NoComp Integer) a m e
+          -> Access (CompList a) ('Seq a 'Id) a m e
 dynamicAt (Just (asFiniteRange -> Just [val])) _
-  = at (NoComp $ toInteger val)
-dynamicAt rng i = Accessor get set
-  where
-    get (CompList lst) = fmap catMaybes $
-                         mapM (\(el,idx) -> do
-                                  let vidx = fromInteger idx
-                                  case rng of
-                                    Just rng'
-                                      | includes vidx rng' -> do
-                                          cond <- i .==. constant vidx
-                                          return $ Just (NoComp idx,[cond],el)
-                                    _ -> return Nothing
-                              ) (zip lst [0..])
-    set upd (CompList lst) = return $ CompList $ merge upd 0 lst
-    merge [] _ lst = lst
-    merge upd@((NoComp i,el):upd') p (x:xs)
-      | i==p      = el:merge upd' (p+1) xs
-      | otherwise = x:merge upd (p+1) xs
+  = at (ListIndex $ toInteger val)
+dynamicAt rng i = \(CompList lst)
+                  -> fmap (AccSeq . catMaybes) $
+                     mapM (\(el,idx) -> do
+                              let vidx = fromInteger idx
+                              case rng of
+                                Just rng'
+                                  | not (includes vidx rng')
+                                    -> return Nothing
+                                _ -> do
+                                  cond <- i .==. constant vidx
+                                  return $ Just (ListIndex idx,[cond],AccId)
+                          ) (zip lst [0..])
 
 instance (Composite a,GShow e) => Show (CompList a e) where
   showsPrec _ (CompList xs) = showListWith (compShow 0) xs

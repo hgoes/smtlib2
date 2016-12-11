@@ -1,41 +1,78 @@
-module Language.SMTLib2.Composite.Container
-  (Container(..),Iterable(..),(|*>),(<|*>),Accessor(..),Accessors(..),Muxer(..),IdxPath(..),IdxPaths(..),Muxed(..),
-   at,update,field,lensA,focusAccessor,mapAccessor,depAcc,getUpdateList) where
+{-# LANGUAGE PolyKinds #-}
+module Language.SMTLib2.Composite.Container (
+  -- * Container class
+  Container(..),
+  -- * Accessors
+  Acc(..),
+  Accessor(..),
+  AccessorFork(..),
+  Path(..),
+  withAccessor,
+  access,
+  -- ** Construction
+  Access,(|*>),idAcc,field,
+  at,
+  -- * Muxer
+  Muxer(..),
+  Paths(..),
+  Muxed(..),
+  withMuxer,
+  mux,
+  -- ** Construction
+  (<|*>),idMux,
+  -- * Helper functions
+  update,updateList
+  ) where
 
 import Language.SMTLib2
 import Language.SMTLib2.Composite.Class
 import Language.SMTLib2.Composite.Null (NoComp(..))
+import qualified Language.SMTLib2.Internals.Type.List as L
+import Language.SMTLib2.Internals.Type.Nat
 
 import Data.GADT.Compare
+import Data.GADT.Show
 import Data.Foldable
-#if MIN_VERSION_base(4,9,0)
-import Data.Functor.Const
-#endif
 import Data.Functor.Identity
 import Prelude hiding (read)
+import Text.Show
 
-class Container (c :: ((Type -> *) -> *) -> (Type -> *) -> *) where
-  type CIndex c :: (Type -> *) -> *
-  elementGet :: (Embed m e,Monad m,GetType e,Composite a)
-             => CIndex c e -> c a e -> m (a e)
-  elementSet :: (Embed m e,Monad m,GetType e,Composite a)
-             => CIndex c e -> a e -> c a e -> m (c a e)
+data Acc a = Id
+           | Seq a (Acc a)
+           | Br [Acc a]
 
-#if !MIN_VERSION_base(4,9,0)
-newtype Const a b = Const { getConst :: a } deriving Functor
-#endif
-
-at :: (Container c,Embed m e,Monad m,GetType e,Composite a)
-   => CIndex c e
-   -> Accessor (c a) (CIndex c) a m e
-at idx = Accessor { accessorGet = \cont -> do
-                      el <- elementGet idx cont
-                      return [(idx,[],el)]
-                  , accessorSet = \els cont
-                                  -> foldlM (\cont (idx,el)
-                                              -> elementSet idx el cont
-                                            ) cont els
-                  }
+class Composite c => Container c where
+  data Index c :: ((Type -> *) -> *) -> (Type -> *) -> *
+  elementGet :: (Embed m e,Monad m,GetType e,Composite el)
+             => c e
+             -> Index c el e
+             -> m (el e)
+  elementsGet :: (Embed m e,Monad m,GetType e,Composite el)
+              => c e
+              -> [Index c el e]
+              -> m [el e]
+  elementsGet x = mapM (elementGet x)
+  elementSet :: (Embed m e,Monad m,GetType e,Composite el)
+             => c e
+             -> Index c el e
+             -> el e
+             -> m (c e)
+  elementsSet :: (Embed m e,Monad m,GetType e,Composite el)
+              => c e
+              -> [(Index c el e,el e)]
+              -> m (c e)
+  elementsSet c upd = foldlM (\cc (idx,el) -> elementSet cc idx el
+                             ) c upd
+  withElement :: (Embed m e,Monad m,GetType e,Composite el)
+              => c e
+              -> Index c el e
+              -> (el e -> m (el e))
+              -> m (c e)
+  withElement c idx f = do
+    el <- elementGet c idx
+    nel <- f el
+    elementSet c idx nel
+  showIndex :: GShow e => Int -> Index c el e -> ShowS
 
 update :: (Composite a,Embed m e,Monad m,GetType e,GCompare e)
        => a e -> [e BoolType] -> a e -> m (a e)
@@ -49,378 +86,364 @@ update x cs y = do
     Nothing -> error $ "Container.update: Incompatible element written."
     Just res' -> return res'
 
-field :: Monad m => (a e -> b e) -> (b e -> a e -> a e) -> Accessor a (NoComp ()) b m e
-field get set = Accessor { accessorGet = \x -> return [(NoComp (),[],get x)]
-                         , accessorSet = \upd x -> return $
-                                                   foldl' (\cx (_,el)
-                                                           -> set el cx
-                                                          ) x upd }
+data Path a (idx :: Acc ((Type -> *) -> *)) b e where
+  PathId   :: Path a 'Id a e
+  PathSeq  :: (Container a,Composite b)
+           => Index a b e
+           -> Path b idx c e
+           -> Path a ('Seq b idx) c e
+  PathBr   :: Composite b
+           => Natural n
+           -> Path a (L.Index idxs n) b e
+           -> Path a (Br idxs) b e
+  PathFun  :: (a e -> b e)
+           -> (b e -> a e)
+           -> Path b idx c e
+           -> Path a idx c e
 
-lensA :: Monad m
-      => (forall f. Functor f => (b e -> f (b e)) -> a e -> f (a e))
-      -> Accessor a (NoComp ()) b m e
-lensA l = Accessor { accessorGet = \x -> return [(NoComp (),[],getConst (l Const x))]
-                   , accessorSet = \upd x -> return $
-                                             foldl' (\cx (_,el)
-                                                     -> runIdentity $ l (\_ -> Identity el) cx
-                                                    ) x upd
-                   }
+data AccessorFork a (idxs :: [Acc ((Type -> *) -> *)]) b e where
+  NilFork :: AccessorFork a '[] b e
+  Fork    :: Maybe ([e BoolType],Accessor a idx b e)
+          -> AccessorFork a idxs b e
+          -> AccessorFork a (idx ': idxs) b e
 
-data Accessor a idx b m e
-  = Accessor { accessorGet :: a e -> m [(idx e,[e BoolType],b e)]
-             , accessorSet :: [(idx e,b e)] -> a e -> m (a e) }
+data Accessor a (idx :: Acc ((Type -> *) -> *)) b e where
+  AccId   :: Accessor a 'Id a e
+  AccSeq  :: (Container a,Composite b)
+          => [(Index a b e,[e BoolType],Accessor b idx c e)]
+          -> Accessor a ('Seq b idx) c e
+  AccFork :: Composite b
+          => AccessorFork a idxs b e
+          -> Accessor a ('Br idxs) b e
+  AccFun  :: (a e -> b e)
+          -> (b e -> a e)
+          -> Accessor b idx c e
+          -> Accessor a idx c e
 
-data Accessors a idxs b m e where
-  NilAcc  :: Accessors a '[] a m e
-  ConsAcc :: Accessor a idx b m e
-          -> Accessors b idxs c m e
-          -> Accessors a ('(idx,b) ': idxs) c m e
+withAccessor :: (Embed m e,Monad m,GetType e)
+             => Accessor a idx b e
+             -> a e
+             -> (Path a idx b e -> [e BoolType] -> b e -> m (b e))
+             -> m (a e)
+withAccessor AccId x f = f PathId [] x
+withAccessor (AccSeq acc) x f = do
+  els <- elementsGet x (fmap (\(idx,_,_) -> idx) acc)
+  nels <- mapM (\((idx,cond,acc),el) -> do
+                   nel <- withAccessor acc el
+                          (\path cond' -> f (PathSeq idx path) (cond++cond'))
+                   return (idx,nel)
+               ) (zip acc els)
+  elementsSet x nels
+withAccessor (AccFork fork) x f
+  = withAccessorFork fork x (\n path -> f (PathBr n path))
+  where
+    withAccessorFork :: (Embed m e,Monad m,GetType e)
+                     => AccessorFork a idxs b e
+                     -> a e
+                     -> (forall n. Natural n ->
+                         Path a (L.Index idxs n) b e ->
+                         [e BoolType] -> b e -> m (b e))
+                     -> m (a e)
+    withAccessorFork NilFork x _ = return x
+    withAccessorFork (Fork Nothing rest) x f
+      = withAccessorFork rest x (\n -> f (Succ n))
+    withAccessorFork (Fork (Just (cond,acc)) rest) x f = do
+      nx <- withAccessor acc x (\path cond'
+                                -> f Zero path (cond++cond'))
+      withAccessorFork rest nx (\n -> f (Succ n))
+withAccessor (AccFun g h acc) x f
+  = fmap h $ withAccessor acc (g x) (\path -> f (PathFun g h path))
 
-data Muxer a paths els m e where
-  NoMux :: Muxer a '[] '[] m e
-  Mux :: Accessors a path b m e
-      -> Muxer a paths els m e
-      -> Muxer a (path ': paths) (b ': els) m e
+data Paths a (idxs :: [Acc ((Type -> *) -> *)]) bs e where
+  NilPaths :: Paths a '[] '[] e
+  Paths :: Path a idx b e
+        -> Paths a idxs bs e
+        -> Paths a (idx ': idxs) (b ': bs) e
 
-data IdxPath i a path b (e :: Type -> *) where
-  NilIdx  :: IdxPath i a '[] a e
-  ConsIdx :: [(idx e,i,b e,IdxPath i b path c e)]
-          -> IdxPath i a ('(idx,b) ': path) c e
-
-data IdxPaths i a paths bs (e :: Type -> *) where
-  NilPaths  :: IdxPaths i a '[] '[] e
-  ConsPaths :: IdxPath i a path b e
-            -> IdxPaths i a paths bs e
-            -> IdxPaths i a (path ': paths) (b ': bs) e
+data Muxer a (idxs :: [Acc ((Type -> *) -> *)]) bs e where
+  NoMux :: Muxer a '[] '[] e
+  Mux :: Accessor a idx b e
+      -> Muxer a idxs bs e
+      -> Muxer a (idx ': idxs) (b ': bs) e
 
 data Muxed els (e :: Type -> *) where
-  NilMuxed :: Muxed '[] e
-  Muxed    :: a e -> Muxed as e -> Muxed (a ': as) e
+  NoMuxed :: Muxed '[] e
+  Muxed :: a e -> Muxed as e -> Muxed (a ': as) e
 
-withAccessors :: Monad m
-              => Accessors a idxs b m e
-              -> a e
-              -> ([e BoolType] -> b e -> m (b e))
-              -> m (a e)
-withAccessors acc x f = do
-  path <- accessorsGet acc x
-  npath <- withPath path f
-  accessorsSet acc npath x
+accessorHead :: Accessor a idx b e
+             -> Maybe (Path a idx b e,
+                       [e BoolType],
+                       Accessor a idx b e)
+accessorHead AccId = Nothing
+accessorHead (AccSeq []) = Nothing
+accessorHead (AccSeq ((idx,cond,AccId):accs))
+  = Just (PathSeq idx PathId,cond,AccSeq accs)
+accessorHead (AccSeq ((idx,cond,acc):accs))
+  = case accessorHead acc of
+  Just (path,cond',acc') -> Just (PathSeq idx path,cond++cond'
+                                 ,AccSeq ((idx,cond,acc'):accs))
+  Nothing -> accessorHead (AccSeq accs)
+accessorHead (AccFork NilFork) = Nothing
+accessorHead (AccFork (Fork Nothing rest)) = do
+  (PathBr n path,cond,AccFork nrest) <- accessorHead (AccFork rest)
+  return (PathBr (Succ n) path,cond,AccFork (Fork Nothing nrest))
+accessorHead (AccFork (Fork (Just (cond,acc)) rest))
+  = case accessorHead acc of
+  Nothing -> accessorHead (AccFork (Fork Nothing rest))
+  Just (path,cond',acc') -> Just (PathBr Zero path,cond++cond',
+                                  AccFork (Fork (Just (cond,acc')) rest))
+accessorHead (AccFun f g acc) = do
+  (path,cond,acc') <- accessorHead acc
+  return (PathFun f g path,cond,AccFun f g acc')
 
-withPath :: (Monoid i,Monad m)
-         => IdxPath i a path b e
-         -> (i -> b e -> m (b e))
-         -> m (IdxPath i a path b e)
-withPath p f = do
-  res <- withPathHead p (\c h t -> do
-                            nh <- f c h
-                            nt <- withPath t f
-                            return ((),nh,nt)
-                        )
-  case res of
-    Nothing -> return p
-    Just ((),np) -> return np
-
-accessorsGet :: Monad m
-             => Accessors a idxs b m e
-             -> a e
-             -> m (IdxPath [e BoolType] a idxs b e)
-accessorsGet NilAcc x = return NilIdx
-accessorsGet (ConsAcc acc accs) x = do
-  els <- accessorGet acc x
-  fmap ConsIdx $
-    mapM (\(idx,cond,el) -> do
-             path <- accessorsGet accs el
-             return (idx,cond,el,path)
-         ) els
-
-accessorsSet :: Monad m
-             => Accessors a idxs b m e
-             -> IdxPath i a idxs b e
-             -> a e
-             -> m (a e)
-accessorsSet NilAcc NilIdx x = return x
-accessorsSet (ConsAcc acc accs) (ConsIdx els) x = do
-  nels <- mapM (\(idx,_,el,path) -> do
-                   nel <- accessorsSet accs path el
-                   return (idx,nel)
-               ) els
-  accessorSet acc nels x
-
-pathHead :: Monoid i
-         => IdxPath i a path b e
-         -> Maybe (i,b e,IdxPath i a path b e)
-pathHead NilIdx = Nothing
-pathHead (ConsIdx []) = Nothing
-pathHead (ConsIdx ((idx,cond,el,NilIdx):xs))
-  = Just (cond,el,ConsIdx xs)
-pathHead (ConsIdx ((idx,cond,el,path):xs)) = case pathHead path of
-  Just (cond',res,path') -> Just (mappend cond cond',res,
-                                  ConsIdx ((idx,cond,el,path'):xs))
-  Nothing -> pathHead (ConsIdx xs)
-
-pathHead' :: (Monoid i,Monad m)
-          => Accessors a path b m e
-          -> IdxPath i a path b e
-          -> Maybe (i,b e,b e -> a e -> m (a e),IdxPath i a path b e)
-pathHead' _ NilIdx = Nothing
-pathHead' _ (ConsIdx []) = Nothing
-pathHead' (ConsAcc acc NilAcc) (ConsIdx ((idx,cond,el,NilIdx):xs))
-  = Just (cond,el,\nel -> accessorSet acc [(idx,nel)],ConsIdx xs)
-pathHead' (ConsAcc acc accs) (ConsIdx ((idx,cond,el,path):xs))
-  = case pathHead' accs path of
-  Just (cond',res,f,path')
-    -> Just (mappend cond cond',res,
-             \new src -> do
-               nel <- f new el
-               accessorSet acc [(idx,nel)] src,
-             ConsIdx ((idx,cond,el,path'):xs))
-  Nothing -> pathHead' (ConsAcc acc accs) (ConsIdx xs)
-
-withPathHead :: (Monoid i,Monad m)
-             => IdxPath i a path b e
-             -> (i -> b e -> IdxPath i a path b e ->
-                 m (res,b e,IdxPath i a path b e))
-             -> m (Maybe (res,IdxPath i a path b e))
-withPathHead NilIdx _ = return Nothing
-withPathHead (ConsIdx []) _ = return Nothing
-withPathHead (ConsIdx ((idx,cond,el,NilIdx):xs)) f = do
-  (res,nel,ConsIdx nxs) <- f cond el (ConsIdx xs)
-  return $ Just (res,ConsIdx ((idx,cond,nel,NilIdx):nxs))
-withPathHead (ConsIdx ((idx,cond,el,path):xs)) f = do
-  r1 <- withPathHead path (\cond' phead ptail -> do
-                              (res,nhead,ConsIdx ((nidx,ncond,nel,npath):nxs))
-                                <- f (mappend cond cond') phead
-                                   (ConsIdx ((idx,cond,el,ptail):xs))
-                              return ((res,(nidx,ncond,nel,nxs)),nhead,npath)
-                          )
-  case r1 of
-    Just ((res,(nidx,ncond,nel,nxs)),npath)
-      -> return $ Just (res,ConsIdx ((nidx,ncond,nel,npath):nxs))
-    Nothing -> do
-      r2 <- withPathHead (ConsIdx xs) f
-      case r2 of
-        Nothing -> return Nothing
-        Just (res,ConsIdx nxs)
-          -> return $ Just (res,ConsIdx ((idx,cond,el,path):nxs))
-
-combine :: (Monad m,Monoid i)
-        => c
-        -> IdxPaths i a paths bs e
-        -> (c -> i -> Muxed bs e -> m (c,Muxed bs e))
-        -> m (c,IdxPaths i a paths bs e)
-combine c NilPaths f = do
-  (nc,NilMuxed) <- f c mempty NilMuxed
-  return (nc,NilPaths)
-combine c (ConsPaths p ps) f = do
-  res <- withPathHead p
-         (\cond phead ptail -> do
-             ((c1,nhead),ps1)
-               <- combine (c,phead) ps
-                  (\(c,phead) cond' row -> do
-                      (nc,Muxed nhead nrow)
-                        <- f c (mappend cond cond')
-                           (Muxed phead row)
-                      return ((nc,nhead),nrow))
-             (c2,ConsPaths ntail ps2)
-               <- combine c1 (ConsPaths ptail ps1) f
-             return ((c2,ps2),nhead,ntail)
-         )
-  case res of
-    Just ((nc,nps),np) -> return (nc,ConsPaths np nps)
-    Nothing -> return (c,ConsPaths p ps)
-
-withMux :: Monad m
-        => Muxer a paths els m e
+pathGet :: (Embed m e,Monad m,GetType e)
+        => Path a idx b e
         -> a e
-        -> ([e BoolType] -> Muxed els e -> m (Muxed els e))
+        -> m (b e)
+pathGet PathId x = return x
+pathGet (PathSeq idx path) x = do
+  nx <- elementGet x idx
+  pathGet path nx
+pathGet (PathBr _ path) x = pathGet path x
+pathGet (PathFun f g path) x = pathGet path (f x)
+
+pathSet :: (Embed m e,Monad m,GetType e)
+        => Path a idx b e
+        -> a e
+        -> b e
         -> m (a e)
-withMux muxer x f = do
-  paths <- muxerGet muxer x
-  ((),npaths) <- combine () paths (\_ cond m -> do
-                                      nm <- f cond m
-                                      return ((),nm)
-                                  )
-  muxerSet muxer npaths x
+pathSet PathId _ x = return x
+pathSet (PathSeq idx path) x y = do
+  el <- elementGet x idx
+  nel <- pathSet path el y
+  elementSet x idx nel
+pathSet (PathBr _ path) x y = pathSet path x y
+pathSet (PathFun f g path) x y = fmap g $ pathSet path (f x) y
 
-muxerGet :: Monad m
-         => Muxer a paths els m e
+withPath :: (Embed m e,Monad m,GetType e)
+         => Path a idx b e
          -> a e
-         -> m (IdxPaths [e BoolType] a paths els e)
-muxerGet NoMux _ = return NilPaths
-muxerGet (Mux acc accs) x = do
-  p <- accessorsGet acc x
-  ps <- muxerGet accs x
-  return (ConsPaths p ps)
-
-muxerSet :: Monad m
-         => Muxer a paths els m e
-         -> IdxPaths [e BoolType] a paths els e
-         -> a e
+         -> (b e -> m (b e))
          -> m (a e)
-muxerSet NoMux NilPaths x = return x
-muxerSet (Mux acc accs) (ConsPaths p ps) x = do
-  nx <- accessorsSet acc p x
-  muxerSet accs ps nx
+withPath PathId x f = f x
+withPath (PathSeq idx path) x f = withElement x idx $
+                                  \el -> withPath path el f
+withPath (PathBr _ path) x f = withPath path x f
+withPath (PathFun g h path) x f = fmap h $ withPath path (g x) f
 
-depAcc :: (a e -> Accessor a idx b m e)
-       -> Accessor a idx b m e
-depAcc f = Accessor get set
+withMuxer' :: (Embed m e,Monad m,GetType e)
+           => Muxer a idxs bs e
+           -> a e
+           -> st
+           -> (Paths a idxs bs e -> [e BoolType] ->
+               Muxed bs e -> st -> m (Muxed bs e,st))
+           -> m (a e,st)
+withMuxer' NoMux x st f = do
+  (NoMuxed,nst) <- f NilPaths [] NoMuxed st
+  return (x,nst)
+withMuxer' (Mux acc accs) x st f = case accessorHead acc of
+  Nothing -> return (x,st)
+  Just (path,cond,acc') -> do
+    el <- pathGet path x
+    (x1,(nel,nst)) <- withMuxer' accs x (el,st) $
+      \paths cond' muxed (el,st) -> do
+        (Muxed nel nmuxed,nst) <- f (Paths path paths) (cond++cond')
+                                  (Muxed el muxed) st
+        return (nmuxed,(nel,nst))
+    x2 <- pathSet path x1 nel
+    withMuxer' (Mux acc' accs) x2 nst f
+
+withMuxer :: (Embed m e,Monad m,GetType e)
+          => Muxer a idxs bs e
+          -> a e
+          -> (Paths a idxs bs e -> [e BoolType] ->
+              Muxed bs e -> m (Muxed bs e))
+          -> m (a e)
+withMuxer mux x f = do
+  (nx,()) <- withMuxer' mux x () $
+             \paths cond muxed () -> do
+               nmuxed <- f paths cond muxed
+               return (nmuxed,())
+  return nx
+
+access :: (Container a,Embed m e,Monad m,GetType e)
+       => Access a idx b m e
+       -> a e
+       -> (Path a idx b e -> [e BoolType] -> b e -> m (b e))
+       -> m (a e)
+access getAcc x f = do
+  acc <- getAcc x
+  withAccessor acc x f
+
+type Access a idx b m e = a e -> m (Accessor a idx b e)
+
+type family PathConcats (p1 :: [Acc a]) (p2 :: Acc a) :: [Acc a] where
+  PathConcats '[] ys = '[]
+  PathConcats (x ': xs) ys = PathConcat x ys ': PathConcats xs ys
+
+type family PathConcat (p1 :: Acc a) (p2 :: Acc a) :: Acc a where
+  PathConcat 'Id acc = acc
+  PathConcat ('Seq x xs) ys = 'Seq x (PathConcat xs ys)
+  PathConcat ('Br xs) ys = 'Br (PathConcats xs ys)
+
+(|*>) :: (Embed m e,Monad m,GetType e,Composite c)
+       => Access a idx1 b m e
+       -> Access b idx2 c m e
+       -> Access a (PathConcat idx1 idx2) c m e
+(|*>) f g x = do
+  acc <- f x
+  concatAcc acc x g
   where
-    get x = accessorGet (f x) x
-    set upd x = accessorSet (f x) upd x
+    concatAcc :: (Embed m e,Monad m,GetType e,Composite c)
+              => Accessor a idx1 b e
+              -> a e
+              -> (b e -> m (Accessor b idx2 c e))
+              -> m (Accessor a (PathConcat idx1 idx2) c e)
+    concatAcc AccId x f = f x
+    concatAcc (AccSeq lst) x f = do
+      nlst <- mapM (\(idx,cond,acc) -> do
+                       nx <- elementGet x idx
+                       nacc <- concatAcc acc nx f
+                       return (idx,cond,nacc)
+                   ) lst
+      return (AccSeq nlst)
+    concatAcc (AccFork fork) x f = do
+      nfork <- concatFork fork x f
+      return (AccFork nfork)
+    concatAcc (AccFun g h acc) x f = do
+      nacc <- concatAcc acc (g x) f
+      return (AccFun g h nacc)
 
-mapAccessor :: Monad m
-            => (b e -> a e)
-            -> (a e -> b e -> b e)
-            -> Accessor a idx c m e
-            -> Accessor b idx c m e
-mapAccessor f g acc = Accessor get set
-  where
-    get x = accessorGet acc (f x)
-    set upd x = do
-      y <- accessorSet acc upd (f x)
-      return $ g y x
-
-focusAccessor :: Monad m
-              => (forall f. Functor f => (b e -> f (b e)) -> a e -> f (a e))
-              -> Accessor b idx c m e
-              -> Accessor a idx c m e
-focusAccessor l acc = Accessor get set
-  where
-    get x = accessorGet acc (getConst (l Const x))
-    set upd x = do
-      y <- accessorSet acc upd (getConst (l Const x))
-      return $ runIdentity $ l (\_ -> return y) x
-
-class Iterable it where
-  data It it :: (Type -> *) -> *
-  type ItSrc it :: (Type -> *) -> *
-  type ItTrg it :: (Type -> *) -> *
-  with :: Monad m
-       => it m e
-       -> ItSrc it e
-       -> ([e BoolType] -> ItTrg it e -> m (ItTrg it e))
-       -> m (ItSrc it e)
-  read :: Monad m => it m e -> ItSrc it e -> m (It it e)
-  write :: Monad m => it m e -> It it e -> ItSrc it e -> m (ItSrc it e)
-  toList :: It it e -> [([e BoolType],ItTrg it e)]
-  toUpdateList :: Monad m => it m e -> It it e
-               -> [([e BoolType],ItTrg it e,
-                    ItTrg it e -> ItSrc it e -> m (ItSrc it e))]
-
-getUpdateList :: (Iterable it,Monad m)
-              => it m e
-              -> ItSrc it e
-              -> m [([e BoolType],ItTrg it e,
-                     ItTrg it e -> ItSrc it e -> m (ItSrc it e))]
-getUpdateList acc src = do
-  it <- read acc src
-  return $ toUpdateList acc it
-
-instance Iterable (Accessor a idx b) where
-  newtype It (Accessor a idx b) e = Iterator [(idx e,[e BoolType],b e)]
-  type ItSrc (Accessor a idx b) = a
-  type ItTrg (Accessor a idx b) = b
-  with acc x f = do
-    els <- accessorGet acc x
-    nels <- mapM (\(idx,cond,el) -> do
-                     nel <- f cond el
-                     return (idx,nel)
-                 ) els
-    accessorSet acc nels x
-  read acc src = do
-    els <- accessorGet acc src
-    return $ Iterator els
-  write acc (Iterator els) src
-    = accessorSet acc (fmap (\(idx,_,el) -> (idx,el)) els) src
-  toList (Iterator els) = fmap (\(_,cond,el) -> (cond,el)) els
-  toUpdateList acc (Iterator els)
-    = fmap (\(idx,cond,el)
-            -> (cond,el,\nel -> accessorSet acc [(idx,nel)])
-           ) els
-
-instance Iterable (Accessors a idx b) where
-  newtype It (Accessors a idx b) e = Iterators (IdxPath [e BoolType] a idx b e)
-  type ItSrc (Accessors a idx b) = a
-  type ItTrg (Accessors a idx b) = b
-  with = withAccessors
-  read acc src = fmap Iterators $ accessorsGet acc src
-  write acc (Iterators it) = accessorsSet acc it
-  toList (Iterators it) = toList' it
-    where
-      toList' it = case pathHead it of
-        Nothing -> []
-        Just (cond,el,it') -> (cond,el):toList' it'
-  toUpdateList acc (Iterators it) = toList' acc it
-    where
-      toList' acc it = case pathHead' acc it of
-        Nothing -> []
-        Just (cond,el,upd,nit) -> (cond,el,upd):toList' acc nit
-      
-instance Iterable (Muxer a paths els) where
-  newtype It (Muxer a paths els) e
-    = MuxIterator (IdxPaths [e BoolType] a paths els e)
-  type ItSrc (Muxer a paths els) = a
-  type ItTrg (Muxer a paths els) = Muxed els
-  with = withMux
-  read mux src = fmap MuxIterator $ muxerGet mux src
-  write mux (MuxIterator it) = muxerSet mux it
-
-class (Iterable it,Iterable (LinResult it a idx)
-      ) => LinIterable it a idx where
-  type LinResult it a idx :: (* -> *) -> (Type -> *) -> *
-  (|*>) :: Accessor a idx (ItSrc it) m e
-        -> it m e
-        -> LinResult it a idx m e
+    concatFork :: (Embed m e,Monad m,GetType e,Composite c)
+               => AccessorFork a idx1 b e
+               -> a e
+               -> (b e -> m (Accessor b idx2 c e))
+               -> m (AccessorFork a (PathConcats idx1 idx2) c e)
+    concatFork NilFork _ _ = return NilFork
+    concatFork (Fork Nothing xs) obj f = do
+      xs' <- concatFork xs obj f
+      return (Fork Nothing xs')
+    concatFork (Fork (Just (cond,acc)) xs) obj f = do
+      nacc <- concatAcc acc obj f
+      nxs <- concatFork xs obj f
+      return (Fork (Just (cond,nacc)) nxs)
 
 infixr 5 |*>
+  
+idAcc :: Monad m => Access a 'Id a m e
+idAcc _ = return AccId
 
-instance LinIterable (Accessor b idx2 c) a idx1 where
-  type LinResult (Accessor b idx2 c) a idx1
-    = Accessors a '[ '(idx1,b), '(idx2,c) ] c
-  (|*>) acc1 acc2 = ConsAcc acc1 (ConsAcc acc2 NilAcc)
+at :: (Container c,Composite el,Monad m,Embed m e,GetType e)
+   => Index c el e -> Access c ('Seq el 'Id) el m e
+at idx x = do
+  el <- elementGet x idx
+  return $ AccSeq [(idx,[],AccId)]
 
-instance LinIterable (Accessors b idx2 c) a idx1 where
-  type LinResult (Accessors b idx2 c) a idx1
-    = Accessors a ( '(idx1,b) ': idx2) c
-  (|*>) acc1 acc2 = ConsAcc acc1 acc2
+field :: Monad m => (a e -> b e) -> (b e -> a e) -> Access a 'Id b m e
+field f g _ = return $ AccFun f g AccId
 
-class (Iterable a,Iterable b,Iterable (ParResult a b)
-      ) => ParIterable a b where
-  type ParResult a b :: (* -> *) -> (Type -> *) -> *
-  (<|*>) :: a m e -> b m e -> ParResult a b m e
+(<|*>) :: (Embed m e,Monad m,GetType e)
+       => Access a idx b m e
+       -> (a e -> m (Muxer a idxs bs e))
+       -> a e
+       -> m (Muxer a (idx ': idxs) (b ': bs) e)
+(<|*>) f g x = do
+  acc <- f x
+  accs <- g x
+  return (Mux acc accs)
 
 infixr 4 <|*>
 
-instance ParIterable (Accessor a idx1 b) (Accessor a idx2 c) where
-  type ParResult (Accessor a idx1 b) (Accessor a idx2 c)
-    = Muxer a '[ '[ '(idx1,b)],'[ '(idx2,c)]] '[b,c]
-  (<|*>) acc1 acc2 = Mux (ConsAcc acc1 NilAcc)
-                     (Mux (ConsAcc acc2 NilAcc) NoMux)
+idMux :: Monad m => a e -> m (Muxer a '[] '[] e)
+idMux _ = return NoMux
 
-instance ParIterable (Accessor a idx1 b) (Accessors a idx2 c) where
-  type ParResult (Accessor a idx1 b) (Accessors a idx2 c)
-    = Muxer a '[ '[ '(idx1,b)],idx2] '[b,c]
-  (<|*>) acc1 acc2 = Mux (ConsAcc acc1 NilAcc)
-                     (Mux acc2 NoMux)
+mux :: (Embed m e,Monad m,GetType e)
+    => (a e -> m (Muxer a idxs bs e))
+    -> a e
+    -> (Paths a idxs bs e -> [e BoolType] ->
+        Muxed bs e -> m (Muxed bs e))
+    -> m (a e)
+mux f x g = do
+  muxer <- f x
+  withMuxer muxer x g
 
-instance ParIterable (Accessor a idx1 b) (Muxer a idx2 els) where
-  type ParResult (Accessor a idx1 b) (Muxer a idx2 els)
-    = Muxer a ( '[ '(idx1,b)] ': idx2) (b ': els)
-  (<|*>) acc1 acc2 = Mux (ConsAcc acc1 NilAcc) acc2
+updateList' :: (Embed m e,Monad m,GetType e)
+            => Accessor a idx b e
+            -> a e
+            -> m [(Path a idx b e,[e BoolType],b e,a e -> b e -> m (a e))]
+updateList' AccId x = return [(PathId,[],x,const return)]
+updateList' (AccSeq lst) x
+  = fmap concat $
+    mapM (\(idx,cond,acc) -> do
+             el <- elementGet x idx
+             nlst <- updateList' acc el
+             return (fmap (\(path,cond',el',wr)
+                           -> (PathSeq idx path,cond++cond',el',
+                               \cx nel' -> withElement cx idx
+                                           (\cel -> wr cel nel'))
+                          ) nlst)
+         ) lst
+updateList' (AccFork fork) x = fromFork fork x
+  where
+    fromFork :: (Embed m e,Monad m,GetType e,Composite b)
+             => AccessorFork a idxs b e
+             -> a e
+             -> m [((Path a ('Br idxs) b e),[e BoolType],b e,a e -> b e -> m (a e))]
+    fromFork NilFork _ = return []
+    fromFork (Fork Nothing rest) x = do
+      lst <- fromFork rest x
+      return $ fmap (\(PathBr n path,cond,el,up)
+                     -> (PathBr (Succ n) path,cond,el,up)
+                    ) lst
+    fromFork (Fork (Just (cond,acc)) rest) x = do
+      lst1 <- updateList' acc x
+      let lst1' = fmap (\(path,cond',el,up)
+                        -> (PathBr Zero path,cond++cond',el,up)
+                       ) lst1
+      lst2 <- fromFork rest x
+      let lst2' = fmap (\(PathBr n path,cond',el,up)
+                        -> (PathBr (Succ n) path,cond',el,up)
+                       ) lst2
+      return $ lst1'++lst2'
+updateList' (AccFun f g acc) x = do
+  lst <- updateList' acc (f x)
+  return $ fmap (\(path,cond,el,upd)
+                 -> (PathFun f g path,cond,el,
+                     \cx nel -> do
+                       ny <- upd (f cx) nel
+                       return $ g ny)
+                ) lst
+    
+updateList :: (Embed m e,Monad m,GetType e)
+           => Access a idx b m e
+           -> a e
+           -> m [(Path a idx b e,[e BoolType],b e,a e -> b e -> m (a e))]
+updateList f x = do
+  acc <- f x
+  updateList' acc x
 
-instance ParIterable (Accessors a idx1 b) (Accessor a idx2 c) where
-  type ParResult (Accessors a idx1 b) (Accessor a idx2 c)
-    = Muxer a '[ idx1, '[ '(idx2,c)] ] '[b,c]
-  (<|*>) acc1 acc2 = Mux acc1 (Mux (ConsAcc acc2 NilAcc) NoMux)
+instance GShow e => Show (Accessor a idx b e) where
+  showsPrec _ AccId = showString "id"
+  showsPrec _ (AccSeq lst)
+    = showListWith (\(idx,cond,acc)
+                    -> showIndex 5 idx .
+                       showString ": " .
+                       showListWith (gshowsPrec 0) cond .
+                       showString " -> " .
+                       showsPrec 5 acc) lst
+  showsPrec p (AccFork fork) = showsPrec p fork
+  showsPrec p (AccFun _ _ acc) = showsPrec p acc
 
-instance ParIterable (Accessors a idx1 b) (Accessors a idx2 c) where
-  type ParResult (Accessors a idx1 b) (Accessors a idx2 c)
-    = Muxer a '[idx1,idx2] '[b,c]
-  (<|*>) acc1 acc2 = Mux acc1 (Mux acc2 NoMux)
-
-instance ParIterable (Accessors a idx1 b) (Muxer a idx2 els) where
-  type ParResult (Accessors a idx1 b) (Muxer a idx2 els)
-    = Muxer a (idx1 ': idx2) (b ': els)
-  (<|*>) acc1 acc2 = Mux acc1 acc2
+instance GShow e => Show (AccessorFork a idxs b e) where
+  showsPrec _ NilFork = showString "empty"
+  showsPrec p (Fork acc fork)
+    = (case acc of
+         Nothing -> showString "empty"
+         Just (cond,acc') -> showListWith (gshowsPrec 0) cond .
+                             showString " -> " .
+                             showsPrec 5 acc'
+      ) .
+      (case fork of
+          NilFork -> id
+          _ -> showString " | " .
+               showsPrec 5 fork)

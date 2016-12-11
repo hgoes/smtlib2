@@ -36,21 +36,13 @@ instance (Show k,Ord k,Composite a) => Composite (CompMap k a) where
   compShow = showsPrec
   compInvariant (CompMap mp) = fmap concat $ mapM compInvariant $ Map.elems mp
 
-instance Ord k => Container (CompMap k) where
-  type CIndex (CompMap k) = NoComp k
-  elementGet (NoComp k) (CompMap mp) = return $ mp Map.! k
-  elementSet (NoComp k) x (CompMap mp) = return $ CompMap $ Map.insert k x mp
+instance (Ord k,Show k,Composite el) => Container (CompMap k el) where
+  data Index (CompMap k el) el' e where
+    MapIndex :: k -> Index (CompMap k el) el e
 
-atMap :: (Ord k,Monad m) => k -> Accessor (CompMap k a) (NoComp k) a m e
-atMap k = Accessor get set
-  where
-    get (CompMap mp) = case Map.lookup k mp of
-      Just el -> return [(NoComp k,[],el)]
-      Nothing -> return []
-    set xs (CompMap mp) = return $ CompMap $
-                          foldl' (\cmp (NoComp k,nel)
-                                   -> Map.insert k nel cmp
-                                 ) mp xs
+  elementGet (CompMap mp) (MapIndex k) = return $ mp Map.! k
+  elementSet (CompMap mp) (MapIndex k) x = return $ CompMap $ Map.insert k x mp
+  showIndex p (MapIndex k) = showsPrec p k
 
 instance (Show k,Composite a,GShow e) => Show (CompMap k a e) where
   showsPrec p (CompMap mp)
