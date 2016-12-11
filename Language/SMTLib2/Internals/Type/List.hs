@@ -2,7 +2,7 @@ module Language.SMTLib2.Internals.Type.List where
 
 import Language.SMTLib2.Internals.Type.Nat
 
-import Prelude hiding (head,tail,length,mapM,insert,drop,take,last,reverse,map,traverse)
+import Prelude hiding (head,tail,length,mapM,insert,drop,take,last,reverse,map,traverse,concat)
 import Data.GADT.Compare
 import Data.GADT.Show
 import Language.Haskell.TH
@@ -60,6 +60,10 @@ type family Reverse (lst :: [a]) :: [a] where
 type family Map (lst :: [a]) (f :: a -> b) :: [b] where
   Map '[] f = '[]
   Map (x ': xs) f = (f x) ': (Map xs f)
+
+type family Concat (xs :: [a]) (ys :: [a]) :: [a] where
+  Concat '[] ys = ys
+  Concat (x ': xs) ys = x ': (Concat xs ys)
 
 -- | Strongly typed heterogenous lists.
 --
@@ -222,6 +226,10 @@ mapM' (x ::: xs) f = do
   x' <- f x
   xs' <- mapM' xs f
   return (x' ::: xs')
+
+concat :: List e xs -> List e ys -> List e (Concat xs ys)
+concat Nil ys = ys
+concat (x ::: xs) ys = x ::: concat xs ys
 
 toList :: Monad m => (forall x. e x -> m a) -> List e lst -> m [a]
 toList f Nil = return []
