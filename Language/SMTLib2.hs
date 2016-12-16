@@ -13,8 +13,8 @@ program = do
   assert $ x .>. cint 0
   assert $ y .>. cint 0
   checkSat
-  IntValueC vx <- getValue x
-  IntValueC vy <- getValue y
+  IntValue vx <- getValue x
+  IntValue vy <- getValue y
   return (vx,vy)
 
 main = withBackend (createPipe "z3" ["-smt2","-in"]) program >>= print
