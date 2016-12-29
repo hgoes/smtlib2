@@ -34,4 +34,4 @@ before_install:
   - export PATH=/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:/opt/happy/$HAPPYVER/bin:$PATH
 
 script:
-  - stack --no-terminal --skip-ghc-check build --resolver $RESOLVER
+  - stack --no-terminal --skip-ghc-check --system-ghc build --resolver $RESOLVER
