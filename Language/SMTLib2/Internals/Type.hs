@@ -751,11 +751,12 @@ instance Show (Value tp) where
   showsPrec p (RealValue i) = showsPrec p i
   showsPrec p (BitVecValue v n)
     = showBitVec p v (bwSize n)
-  showsPrec p (ConstrValue par con args) = showParen (p>10) $
-    showString "ConstrValue " .
-    showString (constrName con).
-    showChar ' ' .
-    showsPrec 11 args
+  showsPrec p (DataValue val) = case deconstruct val of
+    ConApp par con args -> showParen (p>10) $
+                           showString "ConstrValue " .
+                           showString (constrName con).
+                           showChar ' ' .
+                           showsPrec 11 args
 
 showBitVec :: Int -> Integer -> Integer -> ShowS
 showBitVec p v bw
