@@ -488,8 +488,13 @@ data Value (a :: Type) where
   DataValue :: (IsDatatype dt,List.Length par ~ Parameters dt)
             => dt par Value -> Value (DataType dt par)
 
+#if __GLASGOW_HASKELL__ >= 800
 pattern ConstrValue :: ()
                     => (List.Length par ~ Parameters dt,a ~ DataType dt par,IsDatatype dt)
+#else
+pattern ConstrValue :: (List.Length par ~ Parameters dt,a ~ DataType dt par,IsDatatype dt)
+                    => ()
+#endif
                     => List Repr par
                     -> Constr dt csig
                     -> List Value (Instantiated csig par)
