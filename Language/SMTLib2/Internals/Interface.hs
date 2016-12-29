@@ -47,7 +47,7 @@ module Language.SMTLib2.Internals.Interface
         -- *** Arrays
         pattern Select,pattern Store,pattern ConstArray,select,select1,store,store1,constArray,
         -- *** Datatypes
-        pattern Mk,mk,pattern Is,is,pattern (:#:),(.#.),
+        pattern Mk,mk,pattern Is,is,(.#.),
         -- *** Misc
         pattern Divisible,divisible,
         -- * Lists
@@ -369,9 +369,17 @@ pattern Extract start len arg <- App (E.Extract _ start len) (arg ::: Nil) where
 MK_SIG((rtp ~ BoolType),(),Divisible,Integer SEP (e IntType),Expression v qv fun fv lv e rtp)
 pattern Divisible n e = App (E.Divisible n) (e ::: Nil)
 
-pattern Mk con args = App (E.Constructor con) args
-pattern Is con e = App (E.Test con) (e ::: Nil)
-pattern (:#:) e field = App (E.Field field) (e ::: Nil)
+pattern Mk dt par con args = App (E.Constructor dt par con) args
+
+MK_SIG((rtp ~ BoolType),(GetType e),Is,(Constr dt sig) SEP (e (DataType dt par)),Expression v qv fun fv lv e rtp)
+pattern Is con e <- App (E.Test _ _ con) (e ::: Nil) where
+  Is con e = case getType e of
+    DataRepr dt par -> App (E.Test dt par con) (e ::: Nil)
+
+{-MK_SIG((),(GetType e),(:#:),(e (DataType dt par)) SEP (Field dt tp),Expression v qv fun fv lv e (CType tp par))
+pattern (:#:) e field <- App (E.Field _ _ field) (e ::: Nil) where
+  (:#:) e field = case getType e of
+    DataRepr dt par -> App (E.Field dt par field) (e ::: Nil)-}
 
 sameApp :: (Same tps,GetType e)
         => (Repr (SameType tps) -> Natural (List.Length tps)
@@ -437,9 +445,9 @@ cbvUntyped val w f = case TL.someNatVal w of
     f bv
   Nothing -> error "cbvUntyped: Negative bitwidth"
 
-cdt :: (Embed m e,IsDatatype t) => t Value -> m (e (DataType t))
-cdt v = case constrGet v of
-  ConApp con args -> embed $ pure $ E.Const (ConstrValue con args)
+cdt :: (Embed m e,IsDatatype t,List.Length par ~ Parameters t)
+    => t par Value -> m (e (DataType t par))
+cdt v = embed $ pure $ E.Const $ DataValue v
 
 asConstant :: Expression v qv fun fv lv e tp -> Maybe (Value tp)
 asConstant (E.Const v) = Just v
@@ -968,22 +976,32 @@ false = embed $ pure $ E.Const (BoolValue False)
 {-# INLINEABLE true #-}
 {-# INLINEABLE false #-}
 
-mk :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ List e sig,IsDatatype dt)
-   => Constr dt sig -> a -> m (e (DataType dt))
-mk con args = embed $ E.App (E.Constructor con) <$>
-              embedM args
+mk :: (Embed m e,HasMonad a,MatchMonad a m,
+       MonadResult a ~ List e (Instantiated sig par),
+       IsDatatype dt,List.Length par ~ Parameters dt)
+   => Datatype dt -> List Repr par -> Constr dt sig -> a
+   -> m (e (DataType dt par))
+mk dt par con args = embed $ E.App (E.Constructor dt par con) <$>
+                     embedM args
 {-# INLINEABLE mk #-}
 
-is :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e (DataType dt),IsDatatype dt)
+is :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e (DataType dt par),IsDatatype dt)
    => a -> Constr dt sig -> m (e BoolType)
-is e con = embed $ E.App (E.Test con) . (::: Nil) <$>
-           embedM e
+is e con = embed $ (\re tp -> case tp re of
+                       DataRepr dt par -> E.App (E.Test dt par con) ( re ::: Nil)
+                   ) <$>
+           embedM e <*>
+           embedTypeOf
 {-# INLINEABLE is #-}
 
-(.#.) :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e (DataType dt),IsDatatype dt)
-      => a -> Field dt sig tp -> m (e tp)
-(.#.) e f = embed $ E.App (E.Field f) . (::: Nil) <$>
-            embedM e
+(.#.) :: (Embed m e,HasMonad a,MatchMonad a m,
+          MonadResult a ~ e (DataType dt par),IsDatatype dt)
+      => a -> Field dt tp -> m (e (CType tp par))
+(.#.) e f = embed $ (\re tp -> case tp re of
+                        DataRepr dt par -> E.App (E.Field dt par f) (re ::: Nil)
+                    ) <$>
+            embedM e <*>
+            embedTypeOf
 {-# INLINEABLE (.#.) #-}
 
 exists :: (Embed m e,Monad m) => List Repr tps

@@ -6,7 +6,7 @@ import Language.SMTLib2.Composite.Container
 import Language.SMTLib2.Composite.Domains
 import Language.SMTLib2.Composite.Null
 
-import Data.List (genericIndex)
+import Data.List (genericIndex,genericLength)
 import Data.Maybe (catMaybes)
 import Data.GADT.Show
 import Data.GADT.Compare
@@ -95,7 +95,11 @@ dynamicAt :: (Composite a,Integral (Value tp),Embed m e,Monad m,GetType e)
           => Maybe (Range tp) -> e tp
           -> Access (CompList a) ('Seq a 'Id) a m e
 dynamicAt (Just (asFiniteRange -> Just [val])) _
-  = at (ListIndex $ toInteger val)
+  = \l@(CompList lst)
+    -> if val >= 0 &&
+          val < genericLength lst
+       then at (ListIndex $ toInteger val) l
+       else return $ AccSeq []
 dynamicAt rng i = \(CompList lst)
                   -> fmap (AccSeq . catMaybes) $
                      mapM (\(el,idx) -> do

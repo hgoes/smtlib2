@@ -220,7 +220,7 @@ instance (Backend b) => Backend (DebugBackend b) where
     b1 <- outputLisp b (L.List [L.Symbol "get-value"
                                ,L.List [l]])
     (res,nb) <- getValue expr (debugBackend'' b1)
-    str <- valueToLisp (\con -> case Map.lookup (AnyConstr con) (revConstructors $ debugDatatypes b1) of
+    str <- valueToLisp (\dt con -> case Map.lookup (AnyConstr dt con) (revConstructors $ debugDatatypes b1) of
                           Just sym -> return $ L.Symbol sym) res
     outputResponse b1 (show str)
     return (res,b1 { debugBackend'' = nb })
@@ -316,11 +316,11 @@ renderExpr b expr
              Just (UntypedVar r _) -> return $ L.Symbol r)
     (\v -> case DMap.lookup v (debugFuns nb) of
              Just (UntypedFun r _ _) -> return $ L.Symbol r)
-    (\v -> case Map.lookup (AnyConstr v) (revConstructors $ debugDatatypes nb) of
+    (\dt con -> case Map.lookup (AnyConstr dt con) (revConstructors $ debugDatatypes nb) of
              Just sym -> return $ L.Symbol sym)
-    (\v -> case Map.lookup (AnyConstr v) (revConstructors $ debugDatatypes nb) of
+    (\dt con -> case Map.lookup (AnyConstr dt con) (revConstructors $ debugDatatypes nb) of
              Just sym -> return $ L.Symbol $ T.append "is-" sym)
-    (\v -> case Map.lookup (AnyField v) (revFields $ debugDatatypes nb) of
+    (\dt f -> case Map.lookup (AnyField dt f) (revFields $ debugDatatypes nb) of
              Just sym -> return $ L.Symbol sym)
     (\v -> case DMap.lookup v (debugFVars nb) of
              Just (UntypedVar r _) -> return $ L.Symbol r)

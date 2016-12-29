@@ -65,10 +65,21 @@ data Function (fun :: ([Type],Type) -> *) (sig :: ([Type],Type)) where
   ConstArray :: List Repr idx -> Repr val -> Function fun '( '[val],ArrayType idx val)
   Concat :: BitWidth n1 -> BitWidth n2 -> Function fun '([BitVecType n1,BitVecType n2],BitVecType (n1 TL.+ n2))
   Extract :: BitWidth bw -> BitWidth start -> BitWidth len -> Function fun '( '[BitVecType bw],BitVecType len)
-  Constructor :: IsDatatype dt => Constr dt sig
-              -> Function fun '(sig,DataType dt)
-  Test :: IsDatatype dt => Constr dt sig -> Function fun '( '[DataType dt],BoolType)
-  Field :: IsDatatype dt => Type.Field dt sig t -> Function fun '( '[DataType dt],t)
+  Constructor :: (IsDatatype dt,List.Length par ~ Parameters dt)
+              => Datatype dt
+              -> List Repr par
+              -> Constr dt sig
+              -> Function fun '(Instantiated sig par,DataType dt par)
+  Test :: (IsDatatype dt,List.Length par ~ Parameters dt)
+       => Datatype dt
+       -> List Repr par
+       -> Constr dt sig
+       -> Function fun '( '[DataType dt par],BoolType)
+  Field :: (IsDatatype dt,List.Length par ~ Parameters dt)
+        => Datatype dt
+        -> List Repr par
+        -> Type.Field dt t
+        -> Function fun '( '[DataType dt par],CType t par)
   Divisible :: Integer -> Function fun '( '[IntType],BoolType)
 
 data AnyFunction (fun :: ([Type],Type) -> *) where
@@ -234,10 +245,11 @@ functionType _ (ConstArray idx el) = return (el ::: Nil,ArrayRepr idx el)
 functionType _ (Concat bw1 bw2) = return (BitVecRepr bw1 ::: BitVecRepr bw2 ::: Nil,
                                           BitVecRepr (bwAdd bw1 bw2))
 functionType _ (Extract bw start len) = return (BitVecRepr bw ::: Nil,BitVecRepr len)
-functionType _ (Constructor con) = return (constrSig con,DataRepr (constrDatatype con))
-functionType _ (Test con) = return (DataRepr (constrDatatype con) ::: Nil,BoolRepr)
-functionType _ (Field field)
-  = return (DataRepr (constrDatatype $ fieldConstr field) ::: Nil,fieldType field)
+functionType _ (Constructor dt par con) = case instantiate (constrSig con) par of
+  (res,Refl) -> return (res,DataRepr dt par)
+functionType _ (Test dt par con) = return (DataRepr dt par ::: Nil,BoolRepr)
+functionType _ (Field dt par field)
+  = return (DataRepr dt par ::: Nil,ctype (fieldType field) par)
 functionType _ (Divisible _) = return (IntRepr ::: Nil,BoolRepr)
 
 expressionType :: (Monad m,Functor m)
@@ -321,9 +333,9 @@ mapFunction _ (Store idx el) = return (Store idx el)
 mapFunction _ (ConstArray idx el) = return (ConstArray idx el)
 mapFunction _ (Concat bw1 bw2) = return (Concat bw1 bw2)
 mapFunction _ (Extract bw start len) = return (Extract bw start len)
-mapFunction _ (Constructor con) = return (Constructor con)
-mapFunction _ (Test con) = return (Test con)
-mapFunction _ (Field x) = return (Field x)
+mapFunction _ (Constructor dt par con) = return (Constructor dt par con)
+mapFunction _ (Test dt par con) = return (Test dt par con)
+mapFunction _ (Field dt par x) = return (Field dt par x)
 mapFunction _ (Divisible x) = return (Divisible x)
 
 instance (GShow v,GShow qv,GShow fun,GShow fv,GShow lv,GShow e)
@@ -425,15 +437,15 @@ instance (GShow fun)
       showsPrec 11 start .
       showChar ' ' .
       showsPrec 11 len
-  showsPrec p (Constructor con) = showParen (p>10) $
-                                  showString "Constructor " .
-                                  showString (constrName con)
-  showsPrec p (Test con) = showParen (p>10) $
-                           showString "Test " .
-                           showString (constrName con)
-  showsPrec p (Field x) = showParen (p>10) $
-                          showString "Field " .
-                          showString (fieldName x)
+  showsPrec p (Constructor _ _ con) = showParen (p>10) $
+                                      showString "Constructor " .
+                                      showString (constrName con)
+  showsPrec p (Test _ _ con) = showParen (p>10) $
+                               showString "Test " .
+                               showString (constrName con)
+  showsPrec p (Field _ _ x) = showParen (p>10) $
+                              showString "Field " .
+                              showString (fieldName x)
   showsPrec p (Divisible x) = showParen (p>10) $
                               showString "Divisible " .
                               showsPrec 11 x
@@ -527,8 +539,8 @@ renderValue SMTRendering (BitVecValue n bw)
     showChar ' ' .
     showsPrec 0 (bwSize bw) .
     showChar ')'
-renderValue SMTRendering (ConstrValue con Nil) = showString (constrName con)
-renderValue SMTRendering (ConstrValue con xs)
+renderValue SMTRendering (ConstrValue par con Nil) = showString (constrName con)
+renderValue SMTRendering (ConstrValue par con xs)
   = showChar '(' . showString (constrName con) . renderValues xs . showChar ')'
   where
     renderValues :: List Value arg -> ShowS
@@ -608,9 +620,15 @@ renderFunction SMTRendering _ (Extract _ start len)
   where
     start' = bwSize start
     len' = bwSize len
-renderFunction SMTRendering _ (Constructor con) = showString (constrName con)
-renderFunction SMTRendering _ (Test con) = showString "is-" . showString (constrName con)
-renderFunction SMTRendering _ (Field field) = showString (fieldName field)
+renderFunction SMTRendering _ (Constructor dt par con)
+  | determines dt con = showString (constrName con)
+  | otherwise = showString "(as " .
+                showString (constrName con) .
+                renderType SMTRendering (DataRepr dt par) .
+                showChar ')'
+renderFunction SMTRendering _ (Test _ _ con)
+  = showString "is-" . showString (constrName con)
+renderFunction SMTRendering _ (Field _ _ field) = showString (fieldName field)
 renderFunction SMTRendering _ (Divisible n) = showString "(_ divisible " .
   showsPrec 10 n .
   showChar ')'
@@ -627,15 +645,21 @@ renderType SMTRendering (ArrayRepr idx el) = showString "(Array (" .
                                              showString ") " .
                                              renderType SMTRendering el .
                                              showChar ')'
-  where
-    renderTypes :: List Repr tps -> ShowS
-    renderTypes Nil = id
-    renderTypes (tp ::: Nil) = renderType SMTRendering tp
-    renderTypes (tp ::: tps) = renderType SMTRendering tp .
-                               showChar ' ' .
-                               renderTypes tps
-renderType _ (DataRepr dt) = showString (datatypeName dt)
+renderType _ (DataRepr dt Nil) = showString (datatypeName dt)
+renderType SMTRendering (DataRepr dt par)
+  = showChar '(' .
+    showString (datatypeName dt) .
+    showChar ' ' .
+    renderTypes par .
+    showChar ')'
 
+renderTypes :: List Repr tps -> ShowS
+renderTypes Nil = id
+renderTypes (tp ::: Nil) = renderType SMTRendering tp
+renderTypes (tp ::: tps) = renderType SMTRendering tp .
+                           showChar ' ' .
+                           renderTypes tps
+  
 instance GShow fun => GShow (Function fun) where
   gshowsPrec = showsPrec
 
@@ -807,15 +831,21 @@ instance GEq fun => GEq (Function fun) where
     Refl <- geq start1 start2
     Refl <- geq len1 len2
     return Refl
-  geq (Constructor (c1 :: Constr dt1 sig1)) (Constructor (c2 :: Constr dt2 sig2)) = do
-    Refl <- eqT :: Maybe (Datatype dt1 :~: Datatype dt2)
+  geq (Constructor d1 par1 (c1 :: Constr dt1 sig1)) (Constructor d2 par2 (c2 :: Constr dt2 sig2)) = do
+    Refl <- datatypeEq d1 d2
+    Refl <- geq par1 par2
     Refl <- geq c1 c2
     return Refl
-  geq (Test c1) (Test c2) = do
-    Refl <- constrEq c1 c2
+  geq (Test d1 par1 (c1 :: Constr dt1 sig1)) (Test d2 par2 (c2 :: Constr dt2 sig2)) = do
+    Refl <- datatypeEq d1 d2
+    Refl <- geq par1 par2
+    Refl <- geq c1 c2
     return Refl
-  geq (Field f1) (Field f2) = do
-    Refl <- fieldEq f1 f2
+  geq (Field d1 par1 (f1 :: Type.Field dt1 tp1))
+    (Field d2 par2 (f2 :: Type.Field dt2 tp2)) = do
+    Refl <- datatypeEq d1 d2
+    Refl <- geq par1 par2
+    Refl <- geq f1 f2
     return Refl
   geq (Divisible n1) (Divisible n2) = if n1==n2 then Just Refl else Nothing
   geq _ _ = Nothing
@@ -987,24 +1017,45 @@ instance GCompare fun => GCompare (Function fun) where
     GGT -> GGT
   gcompare (Extract _ _ _) _ = GLT
   gcompare _ (Extract _ _ _) = GGT
-  gcompare (Constructor c1) (Constructor c2) = case constrCompare c1 c2 of
-    GEQ -> GEQ
+  gcompare (Constructor d1 par1 c1) (Constructor d2 par2 c2)
+    = case datatypeCompare d1 d2 of
+    GEQ -> case gcompare par1 par2 of
+      GEQ -> case gcompare c1 c2 of
+        GEQ -> GEQ
+        GLT -> GLT
+        GGT -> GGT
+      GLT -> GLT
+      GGT -> GGT
     GLT -> GLT
     GGT -> GGT
-  gcompare (Constructor _) _ = GLT
-  gcompare _ (Constructor _) = GGT
-  gcompare (Test c1) (Test c2) = case constrCompare c1 c2 of
-    GEQ -> GEQ
+  gcompare (Constructor _ _ _) _ = GLT
+  gcompare _ (Constructor _ _ _) = GGT
+  gcompare (Test d1 par1 c1) (Test d2 par2 c2)
+    = case datatypeCompare d1 d2 of
+    GEQ -> case gcompare par1 par2 of
+      GEQ -> case gcompare c1 c2 of
+        GEQ -> GEQ
+        GLT -> GLT
+        GGT -> GGT
+      GLT -> GLT
+      GGT -> GGT
     GLT -> GLT
     GGT -> GGT
-  gcompare (Test _) _ = GLT
-  gcompare _ (Test _) = GGT
-  gcompare (Field f1) (Field f2) = case fieldCompare f1 f2 of
-    GEQ -> GEQ
+  gcompare (Test _ _ _) _ = GLT
+  gcompare _ (Test _ _ _) = GGT
+  gcompare (Field d1 par1 f1) (Field d2 par2 f2)
+    = case datatypeCompare d1 d2 of
+    GEQ -> case gcompare par1 par2 of
+      GEQ -> case gcompare f1 f2 of
+        GEQ -> GEQ
+        GLT -> GLT
+        GGT -> GGT
+      GLT -> GLT
+      GGT -> GGT
     GLT -> GLT
     GGT -> GGT
-  gcompare (Field _) _ = GLT
-  gcompare _ (Field _) = GGT
+  gcompare (Field _ _ _) _ = GLT
+  gcompare _ (Field _ _ _) = GGT
   gcompare (Divisible n1) (Divisible n2) = case compare n1 n2 of
     EQ -> GEQ
     LT -> GLT

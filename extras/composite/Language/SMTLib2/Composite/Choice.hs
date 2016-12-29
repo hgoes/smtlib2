@@ -2,7 +2,7 @@
 module Language.SMTLib2.Composite.Choice
   (Choice(),ChoiceEncoding(..),
    -- * Encodings
-   boolEncoding,intEncoding,bvEncoding,dtEncoding,possibleChoices,
+   boolEncoding,intEncoding,bvEncoding,{-dtEncoding,-}possibleChoices,
    -- * Constructor
    singleton,initial,
    -- * Accessors
@@ -72,8 +72,8 @@ bvEncoding xs f = case TL.someNatVal bits of
     bits = ceiling $ logBase 2 (fromIntegral size :: Double)
     size = length xs
 
-data EncodingElement a (sig :: [Type]) where
-  EncodingElement :: a -> DynamicConstructor '[] -> EncodingElement a '[]
+{-data EncodingElement a (sig :: [Type]) where
+  EncodingElement :: a -> DynamicConstructor '[] '[] -> EncodingElement a '[]
 
 -- | Like `reifyList`, but specialized on Type-kinded lists so we can have Typeable instances
 reifyTypeList :: (forall r'. a -> (forall (tp::[Type]). Typeable tp => e tp -> r') -> r')
@@ -99,7 +99,7 @@ dtEncoding dtName (els :: [(String,c Repr)]) g
            (\idx (EncodingElement el con) -> return (el,DataValue tp' (DynValue tp idx Nil))) cons
      in do
     registerDatatype tp'
-    g $ ChoiceValue vals (DataRepr tp')
+    g $ ChoiceValue vals (DataRepr tp')-}
 
 data RevChoice enc c t where
   RevChoiceBool :: Integer -> RevChoice BoolEncoding c BoolType
@@ -195,39 +195,62 @@ instance (Composite c) => Composite (Choice enc c) where
   compCombine f (ChoiceSingleton x) (ChoiceBool ys) = do
     cf <- false
     ct <- true
-    cond <- f ct cf
-    nlst <- runExceptT $ insertByWith (\(x,_) (y,_) -> compCompare x y)
-            (\(x,cx) (y,cy) -> do
+    nlst <- runExceptT $ mergeChoiceList (\x (y,_) -> compCompare x y)
+            (\x (y,cy) -> do
                 z <- lift $ compCombine f x y
-                cz <- lift $ f cx cy
                 case z of
                   Nothing -> throwError ()
-                  Just z' -> return (z',cz)) (x,cond) ys
+                  Just z' -> do
+                    cz <- lift $ f ct cy
+                    return (z',cz))
+            (\x -> do
+                cx <- lift $ f ct cf
+                return (x,cx))
+            (\(y,cy) -> do
+                cy' <- lift $ f cf cy
+                return (y,cy'))
+            [x] ys
     case nlst of
       Left () -> return Nothing
       Right nlst' -> return $ Just $ ChoiceBool nlst'
   compCombine f (ChoiceBool xs) (ChoiceSingleton y) = do
     cf <- false
     ct <- true
-    cond <- f cf ct
-    nlst <- runExceptT $ insertByWith (\(x,_) (y,_) -> compCompare x y)
-            (\(x,cx) (y,cy) -> do
+    nlst <- runExceptT $ mergeChoiceList (\(x,_) y -> compCompare x y)
+            (\(x,cx) y -> do
                 z <- lift $ compCombine f x y
-                cz <- lift $ f cx cy
                 case z of
                   Nothing -> throwError ()
-                  Just z' -> return (z',cz)) (y,cond) xs
+                  Just z' -> do
+                    cz <- lift $ f cx ct
+                    return (z',cz))
+            (\(x,cx) -> do
+                cx' <- lift $ f cf cx
+                return (x,cx'))
+            (\y -> do
+                cy <- lift $ f cf ct
+                return (y,cy))
+            xs [y]
     case nlst of
       Left () -> return Nothing
       Right nlst' -> return $ Just $ ChoiceBool nlst'
   compCombine f (ChoiceBool xs) (ChoiceBool ys) = do
-    zs <- runExceptT $ mergeByWith (\(x,_) (y,_) -> compCompare x y)
+    cf <- false
+    zs <- runExceptT $ mergeChoiceList (\(x,_) (y,_) -> compCompare x y)
           (\(x,cx) (y,cy) -> do
               z <- lift $ compCombine f x y
-              cz <- lift $ f cx cy
               case z of
                 Nothing -> throwError ()
-                Just z' -> return (z',cz)) xs ys
+                Just z' -> do
+                  cz <- lift $ f cx cy
+                  return (z',cz))
+          (\(x,cx) -> do
+              cx' <- lift $ f cx cf
+              return (x,cx'))
+          (\(y,cy) -> do
+              cy' <- lift $ f cf cy
+              return (y,cy'))
+          xs ys
     case zs of
       Left () -> return Nothing
       Right zs' -> return $ Just (ChoiceBool zs')
@@ -281,6 +304,8 @@ instance (Composite c) => Container (Choice enc c) where
   elementSet (ChoiceValue lst var) (ChoiceIndex i) x
     = case safeGenericUpdateAt Nothing i (\(_,val) -> Just (x,val)) lst of
     Just nlst -> return $ ChoiceValue nlst var
+
+  showIndex p (ChoiceIndex i) = showsPrec p i
 
 compareChoice :: (Composite c,GCompare e) => Choice enc c e -> Choice enc c e -> Ordering
 compareChoice (ChoiceSingleton x) (ChoiceSingleton y) = compCompare x y
@@ -417,6 +442,27 @@ mergeByWith comp comb (x:xs) (y:ys) = case comp x y of
   EQ -> do
     z <- comb x y
     zs <- mergeByWith comp comb xs ys
+    return $ z:zs
+
+mergeChoiceList :: Monad m => (a -> b -> Ordering)
+                -> (a -> b -> m c)
+                -> (a -> m c)
+                -> (b -> m c)
+                -> [a] -> [b] -> m [c]
+mergeChoiceList comp comb f g [] ys = mapM g ys
+mergeChoiceList comp comb f g xs [] = mapM f xs
+mergeChoiceList comp comb f g (x:xs) (y:ys) = case comp x y of
+  LT -> do
+    nx <- f x
+    zs <- mergeChoiceList comp comb f g xs (y:ys)
+    return $ nx:zs
+  GT -> do
+    ny <- g y
+    zs <- mergeChoiceList comp comb f g (x:xs) ys
+    return $ ny:zs
+  EQ -> do
+    z <- comb x y
+    zs <- mergeChoiceList comp comb f g xs ys
     return $ z:zs
 
 lookupBy :: (a -> Ordering) -> [a] -> Maybe a

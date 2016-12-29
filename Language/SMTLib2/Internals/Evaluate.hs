@@ -41,11 +41,11 @@ type FunctionEval m fun
     -> m (EvalResult fun r)
 
 type FieldEval m fun
-  = forall dt args tp. (IsDatatype dt)
-    => Type.Field dt args tp
-    -> Constr dt args
+  = forall dt par args tp. (IsDatatype dt)
+    => List Repr par
+    -> Type.Field dt tp
     -> List Value args
-    -> m (EvalResult fun tp)
+    -> m (EvalResult fun (CType tp par))
 
 evalResultType :: (GetFunType fun)
                => EvalResult fun res -> Repr res
@@ -89,7 +89,7 @@ typeNumElements (ArrayRepr idx el) = do
   ridx <- List.toList typeNumElements idx
   rel <- typeNumElements el
   return (product (rel:ridx))
-typeNumElements (DataRepr dt) = error "typeNumElements not implemented for datatypes"
+typeNumElements (DataRepr _ _) = error "typeNumElements not implemented for datatypes"
 
 evalResultEq :: (Monad m,GetFunType fun)
              => FunctionEval m fun
@@ -331,10 +331,10 @@ evaluateFun _ _ (Concat _ _) ((ValueResult (BitVecValue x nx)) ::: (ValueResult 
     bw = bwSize nx
 evaluateFun _ _ (Extract bw start len) ((ValueResult (BitVecValue x nx)) ::: Nil)
   = return $ ValueResult $ BitVecValue (x `div` (2^(bwSize start))) len
-evaluateFun _ _ (Constructor con) args = do
+evaluateFun _ _ (Constructor dt par con) args = do
   rargs <- List.mapM (\(ValueResult v) -> return v) args
-  return $ ValueResult $ ConstrValue con rargs
-evaluateFun _ _ (Test con) ((ValueResult (ConstrValue con' _)) ::: Nil)
+  return $ ValueResult $ DataValue (construct par con rargs)
+evaluateFun _ _ (Test dt par con) ((ValueResult (ConstrValue par' con' _)) ::: Nil)
   = return $ ValueResult $ BoolValue $ case geq con con' of
   Just Refl -> True
   Nothing -> False

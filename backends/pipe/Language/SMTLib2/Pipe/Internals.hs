@@ -1,7 +1,7 @@
 module Language.SMTLib2.Pipe.Internals where
 
 import Language.SMTLib2.Internals.Backend as B
-import Language.SMTLib2.Internals.Type hiding (Constr,Field,Datatype)
+import Language.SMTLib2.Internals.Type --hiding (Constr,Field,Datatype)
 import qualified Language.SMTLib2.Internals.Type as Type
 import Language.SMTLib2.Internals.Type.Nat as Type
 import Language.SMTLib2.Internals.Type.List (List(..))
@@ -15,8 +15,11 @@ import qualified Data.Text as T
 import qualified Data.Text.Read as T
 import Data.Map (Map)
 import qualified Data.Map.Strict as Map
+import Data.Set (Set)
+import qualified Data.Set as Set
+import Data.IntMap (IntMap)
+import qualified Data.IntMap as IMap
 import Data.Proxy
-import Data.Constraint
 import Data.Typeable
 import Data.GADT.Compare
 import Data.GADT.Show
@@ -284,7 +287,7 @@ renderDeclareFun names args ret name
   = (name'',L.List [L.Symbol "declare-fun"
                    ,L.Symbol name''
                    ,typeList args
-                   ,typeSymbol ret],nnames)
+                   ,typeSymbol Set.empty ret],nnames)
   where
     name' = case name of
               Just n -> n
@@ -302,7 +305,7 @@ renderDefineFun renderFV renderE names name args body
   = (name'',L.List [L.Symbol "define-fun"
                    ,L.Symbol name''
                    ,L.List $ mkList renderFV args
-                   ,typeSymbol (getType body)
+                   ,typeSymbol Set.empty (getType body)
                    ,renderE body],nnames)
   where
     name' = case name of
@@ -312,7 +315,7 @@ renderDefineFun renderFV renderE names name args body
     mkList :: GetType fv => (forall t. fv t -> L.Lisp) -> List fv ts -> [L.Lisp]
     mkList _ Nil = []
     mkList renderFV (v ::: xs)
-      = (L.List [renderFV v,typeSymbol (getType v)]):
+      = (L.List [renderFV v,typeSymbol Set.empty (getType v)]):
         mkList renderFV xs
 
 renderCheckSat :: Maybe Tactic -> CheckSatLimits -> L.Lisp
@@ -340,10 +343,15 @@ renderCheckSat tactic limits
           Just _ -> True
           _ -> False
 
-renderDeclareDatatype' :: [(T.Text,[(T.Text,[(T.Text,L.Lisp)])])] -> L.Lisp
-renderDeclareDatatype' coll
+renderDeclareDatatype' :: Integer
+                       -> [(T.Text,[(T.Text,[(T.Text,L.Lisp)])])]
+                       -> L.Lisp
+renderDeclareDatatype' npar coll
   = L.List [L.Symbol "declare-datatypes"
-           ,L.Symbol "()"
+           ,case npar of
+              0 -> L.Symbol "()"
+              _ -> L.List [L.Symbol $ T.pack $ "a"++show i
+                          | i <- [0..npar-1]]
            ,L.List [ L.List ((L.Symbol name):
                              [L.List ((L.Symbol con):
                                       [ L.List [L.Symbol field
@@ -355,7 +363,10 @@ renderDeclareDatatype' coll
 renderDeclareDatatype :: Map String Int -> TypeRegistry T.Text T.Text T.Text -> [AnyDatatype]
                       -> (L.Lisp,Map String Int,TypeRegistry T.Text T.Text T.Text)
 renderDeclareDatatype names reg dts
-  = (renderDeclareDatatype' str,nnames,nreg)
+  = (renderDeclareDatatype' (case dts of
+                               AnyDatatype dt : _ -> naturalToInteger (parameters dt)
+                               [] -> 0)
+      str,nnames,nreg)
   where
     ((nnames,nreg),str) = mapAccumL mkDt (names,reg) dts
     mkDt (names,reg) dt'@(AnyDatatype dt)
@@ -368,19 +379,34 @@ renderDeclareDatatype names reg dts
     mkCon dt con = do
       (names,reg) <- get
       let (name,names1) = genName' names (constrName con)
-          reg1 = reg { allConstructors = Map.insert name (AnyConstr con) (allConstructors reg)
-                     , revConstructors = Map.insert (AnyConstr con) name (revConstructors reg) }
+          reg1 = reg { allConstructors = Map.insert name (AnyConstr dt con) (allConstructors reg)
+                     , revConstructors = Map.insert (AnyConstr dt con) name (revConstructors reg) }
       put (names1,reg1)
-      fields <- List.toList (mkField dt) (constrFields con)
-      return (name,fields)
+      fs <- List.toList (mkField dt) (fields con)
+      return (name,fs)
     mkField dt field = do
       (names,reg) <- get
       let (name,names1) = genName' names (fieldName field)
-          reg1 = reg { allFields = Map.insert name (AnyField field) (allFields reg)
-                     , revFields = Map.insert (AnyField field) name (revFields reg) }
+          reg1 = reg { allFields = Map.insert name (AnyField dt field) (allFields reg)
+                     , revFields = Map.insert (AnyField dt field) name (revFields reg) }
       put (names1,reg1)
-      return (name,typeSymbol (fieldType field))
-                                            
+      return (name,typeSymbol allTypes (fieldType field))
+
+    allParameters :: (forall n. Natural n -> a) -> a
+    allParameters f = case dts of
+      AnyDatatype dt : dts'
+        | all (\(AnyDatatype dt') -> case geq (parameters dt') (parameters dt) of
+                  Just Refl -> True
+                  Nothing -> False) dts' -> f (parameters dt)
+      _ -> error "Not all datatypes in a cycle share the same parameters."
+
+    isRecType :: IsDatatype dt => Datatype dt -> Bool
+    isRecType dt = Set.member (datatypeName dt) allTypes
+    
+    allTypes :: Set String
+    allTypes = Set.fromList [ datatypeName dt
+                            | AnyDatatype dt <- dts ]
+    
 renderSetOption :: SMTOption -> L.Lisp
 renderSetOption (SMTLogic name) = L.List [L.Symbol "set-logic",L.Symbol $ T.pack name]
 renderSetOption opt
@@ -411,7 +437,7 @@ renderDeclareVar names tp name
   = (name'',L.List [L.Symbol "declare-fun"
                    ,L.Symbol name''
                    ,L.Symbol "()"
-                   ,typeSymbol tp
+                   ,typeSymbol Set.empty tp
                    ],nnames)
   where
     name' = case name of
@@ -426,7 +452,7 @@ renderDefineVar names tp name lexpr
      L.List [L.Symbol "define-fun"
             ,L.Symbol name''
             ,L.Symbol "()"
-            ,typeSymbol tp
+            ,typeSymbol Set.empty tp
             ,lexpr],
      nnames)
   where
@@ -440,7 +466,8 @@ renderGetValue b (PipeExpr e) = L.List [L.Symbol "get-value"
                                        ,L.List [exprToLisp (datatypes b) e]]
 
 parseGetValue :: SMTPipe -> Repr t -> L.Lisp -> Value t
-parseGetValue b repr (L.List [L.List [_,val]]) = case runExcept $ lispToValue b val of
+parseGetValue b repr (L.List [L.List [_,val]])
+  = case runExcept $ lispToValue b (Just $ Sort repr) val of
   Right (AnyValue v) -> case geq repr (valueType v) of
     Just Refl -> v
     Nothing -> error $ "smtlib2: Wrong type of returned value."
@@ -582,13 +609,14 @@ instance GShow e => Show (AnyExpr e) where
 
 data LispParser (v :: Type -> *) (qv :: Type -> *) (fun :: ([Type],Type) -> *) (fv :: Type -> *) (lv :: Type -> *) (e :: Type -> *)
   = LispParser { parseFunction :: forall a. Maybe Sort -> T.Text
-                               -> (forall args res. fun '(args,res) -> a)
-                               -> (forall args res. (IsDatatype res) => Type.Constr res args -> a) -- constructor
-                               -> (forall args res. (IsDatatype res) => Type.Constr res args -> a) -- constructor test
-                               -> (forall t args res. (IsDatatype t) => Type.Field t args res -> a)
+                               -> (forall args res. fun '(args,res) -> LispParse a)
+                               -> (forall args res. (IsDatatype res) => Type.Datatype res -> Type.Constr res args -> LispParse a) -- constructor
+                               -> (forall args res. (IsDatatype res) => Type.Datatype res -> Type.Constr res args -> LispParse a) -- constructor test
+                               -> (forall t args res. (IsDatatype t) => Type.Datatype t -> Type.Field t res -> LispParse a)
                                -> LispParse a
                , parseDatatype :: forall a. T.Text
-                               -> (forall t. IsDatatype t => Type.Datatype t -> a)
+                               -> (forall dt. IsDatatype dt
+                                   => Type.Datatype dt -> LispParse a)
                                -> LispParse a
                , parseVar :: forall a. Maybe Sort -> T.Text
                           -> (forall t. v t -> LispParse a)
@@ -666,18 +694,18 @@ pipeParser st = parse
   parse = LispParser { parseFunction = \srt name fun con test field
                                        -> case T.stripPrefix "is-" name of
                                        Just con -> case Map.lookup name (allConstructors $ datatypes st) of
-                                         Just (AnyConstr con) -> return $ test con
+                                         Just (AnyConstr dt con) -> test dt con
                                          _ -> throwE $ "Unknown constructor: "++show name
                                        Nothing -> case Map.lookup name (allConstructors $ datatypes st) of
-                                         Just (AnyConstr c) -> return $ con c
+                                         Just (AnyConstr dt c) -> con dt c
                                          Nothing -> case Map.lookup name (allFields $ datatypes st) of
-                                           Just (AnyField f) -> return $ field f
+                                           Just (AnyField dt f) -> field dt f
                                            Nothing -> case Map.lookup name (vars st) of
                                              Just (Fun arg tp)
-                                               -> return $ fun (UntypedFun name arg tp)
+                                               -> fun (UntypedFun name arg tp)
                                              _ -> throwE $ "Unknown symbol "++show name
                      , parseDatatype = \name res -> case Map.lookup name (allDatatypes $ datatypes st) of
-                                         Just (AnyDatatype p) -> return $ res p
+                                         Just (AnyDatatype p) -> res p
                                          _ -> throwE $ "Unknown datatype "++show name
                      , parseVar = \srt name v qv fv lv -> case Map.lookup name (vars st) of
                                     Just (Var tp)
@@ -712,7 +740,13 @@ lispToExprWith :: (GShow fun,GShow e,GetFunType fun,GetType e)
 lispToExprWith p hint (runExcept . lispToConstant -> Right (AnyValue val)) res
   = res (Const val)
 lispToExprWith p hint (L.Symbol sym) res
-  = parseVar p hint sym (res . Expr.Var) (res . Expr.QVar) (res . Expr.FVar) (res . Expr.LVar)
+  = parseVar p hint sym (res . Expr.Var) (res . Expr.QVar) (res . Expr.FVar) (res . Expr.LVar) `catchError`
+    (\_ -> do
+        parsed <- lispToFunction p hint (L.Symbol sym)
+        AnyFunction f <- getParsedFunction parsed []
+        case getFunType f of
+          (Nil,_) -> res $ App f Nil
+          _ -> throwError $ "Arguments expected for function "++show sym)
 lispToExprWith p hint (L.List [L.Symbol "_",L.Symbol "as-array",fsym]) res = do
   parsed <- lispToFunction p el_hint fsym
   AnyFunction fun <- getParsedFunction parsed idx_hint
@@ -738,6 +772,9 @@ lispToExprWith p hint (L.List [L.Symbol "let",L.List args,body]) res
   = mkLet p args $
     \np args' -> parseRecursive np np hint body $
                  \body' -> res (Let args' body')
+lispToExprWith p hint (L.List [L.Symbol "as",expr,tp]) res = do
+  srt <- lispToSort p tp
+  lispToExprWith p (Just srt) expr res
 lispToExprWith p hint (L.List (fun:args)) res = do
   parsed <- lispToFunction p hint fun
   args' <- matchList (argumentTypeRequired parsed) 0 args
@@ -994,17 +1031,90 @@ lispToFunction rf sort (L.List [sym,lispToList -> Just sig,tp]) = do
   nsort <- lispToSort rf tp
   fun <- lispToFunction rf (Just nsort) sym
   rsig <- lispToSorts rf sig $
-          \sig' -> runIdentity $ List.toList (\tp -> return $ Just (Sort tp)) sig'
+          \sig' -> return $ runIdentity $ List.toList (\tp -> return $ Just (Sort tp)) sig'
   return $ ParsedFunction (const False) (\_ -> getParsedFunction fun rsig)
 lispToFunction rf sort (L.Symbol name)
   = parseFunction rf sort name
     (p . Expr.Fun)
-    (p . Expr.Constructor)
-    (p . Expr.Test)
-    (p . Expr.Field)
+    getCon
+    getTest
+    getField
   where
-    p f = ParsedFunction (const False) (const (return $ AnyFunction f))
+    p f = return $ ParsedFunction (const False) (const (return $ AnyFunction f))
+
+    getCon :: IsDatatype dt
+           => Datatype dt -> Constr dt csig
+           -> LispParse (ParsedFunction fun)
+    getCon (dt :: Datatype dt) con
+      = return $
+        ParsedFunction (case sort of
+                           Just _ -> const False
+                           Nothing -> \i -> List.indexDyn (fields con) i $
+                                            \f -> not $ Set.null $
+                                                  containedParameter
+                                                  (fieldType f) Set.empty)
+        (\argSorts -> case sort of
+            Just (Sort (DataRepr (dt'::Datatype dt') par)) -> case eqT :: Maybe (dt :~: dt') of
+              Nothing -> throwError "Type mismatch"
+              Just Refl -> return $ AnyFunction $ Expr.Constructor dt par con
+            Nothing -> case inferArgs argSorts (fields con) IMap.empty of
+              Nothing -> throwError "Cannot infer parameter type"
+              Just mp -> case fullArgs 0 (IMap.toList mp) (parameters dt) $
+                              \par -> AnyFunction $ Expr.Constructor
+                                      dt par con of
+                           Nothing -> throwError "Cannot infer parameter type"
+                           Just res -> return res)
+
+    getTest :: IsDatatype dt => Datatype dt -> Constr dt csig
+            -> LispParse (ParsedFunction fun)
+    getTest (dt :: Datatype dt) con
+      = return $
+        ParsedFunction (\i -> i==0 && (case parameters dt of
+                                         Zero -> False
+                                         _ -> True))
+        (\argSorts -> case parameters dt of
+            Zero -> return $ AnyFunction $ Expr.Test dt Nil con
+            _ -> case argSorts of
+              [Just (Sort (DataRepr (dt'::Datatype dt') par))] -> case eqT :: Maybe (dt :~: dt') of
+                Nothing -> throwError "Type mismatch"
+                Just Refl -> return $ AnyFunction $ Expr.Test dt par con)
+
+    getField :: IsDatatype dt => Datatype dt -> Field dt tp
+             -> LispParse (ParsedFunction fun)
+    getField (dt::Datatype dt) f
+      = return $
+        ParsedFunction (\i -> i==0 && (case parameters dt of
+                                         Zero -> False
+                                         _ -> True))
+        (\argSorts -> case parameters dt of
+            Zero -> return $ AnyFunction $ Expr.Field dt Nil f
+            _ -> case argSorts of
+              [Just (Sort (DataRepr (dt'::Datatype dt') par))] -> case eqT :: Maybe (dt :~: dt') of
+                Nothing -> throwError "Type mismatch"
+                Just Refl -> return $ AnyFunction $ Expr.Field dt par f
+              _ -> throwError "Cannot infer field type")
+                                       
+    inferArgs :: IsDatatype dt => [Maybe Sort] -> List (Field dt) tps -> IntMap Sort -> Maybe (IntMap Sort)
+    inferArgs [] Nil mp = Just mp
+    inferArgs (Nothing : args) (_ ::: fs) mp = inferArgs args fs mp
+    inferArgs (Just (Sort arg) : args) (f ::: fs) mp = do
+      mp1 <- typeInference arg (fieldType f)
+             (\p tp cmp -> let p' = fromInteger $ naturalToInteger p
+                           in case IMap.lookup p' cmp of
+                                Nothing -> Just $ IMap.insert p' (Sort tp) cmp
+                                Just (Sort tp') -> do
+                                  Refl <- geq tp tp'
+                                  return cmp) mp
+      inferArgs args fs mp1
 lispToFunction _ _ lsp = throwE $ "Unknown function: "++show lsp
+
+fullArgs :: Int -> [(Int,Sort)] -> Natural len -> (forall tps. (List.Length tps ~ len) => List Repr tps -> a) -> Maybe a
+fullArgs cpos [] Zero f = Just $ f Nil
+fullArgs cpos ((pos,Sort srt):srts) (Succ n) f
+  = if cpos==pos
+    then fullArgs (cpos+1) srts n $ \lst -> f (srt ::: lst)
+    else Nothing
+fullArgs _ _ _ _ = Nothing
 
 lispToOrdFunction :: OrdOp -> LispParse (ParsedFunction fun)
 lispToOrdFunction op
@@ -1100,7 +1210,7 @@ lispToSort _ (L.Symbol "Int") = return (Sort IntRepr)
 lispToSort _ (L.Symbol "Real") = return (Sort RealRepr)
 lispToSort r (L.List ((L.Symbol "Array"):tps)) = do
   Sort rtp' <- lispToSort r rtp
-  lispToSorts r idx (\idx' -> Sort (ArrayRepr idx' rtp'))
+  lispToSorts r idx (\idx' -> return $ Sort (ArrayRepr idx' rtp'))
   where
     (idx,rtp) = splitLast tps
     splitLast [x] = ([],x)
@@ -1109,23 +1219,31 @@ lispToSort r (L.List ((L.Symbol "Array"):tps)) = do
 lispToSort _ (L.List [L.Symbol "_",L.Symbol "BitVec",L.Number (L.I n)])
   = case TL.someNatVal n of
       Just (TL.SomeNat w) -> return (Sort (BitVecRepr (bw w)))
-lispToSort r (L.Symbol name) = parseDatatype r name $
-                               \pr -> Sort (DataRepr pr)
+lispToSort r (L.Symbol name)
+  = parseDatatype r name $ \dt -> case geq (parameters dt) Zero of
+  Just Refl -> return $ Sort (DataRepr dt Nil)
+  Nothing -> throwE $ "Wrong sort for type "++show name
+lispToSort r (L.List (L.Symbol name:args))
+  = parseDatatype r name $
+    \dt -> lispToSorts r args $
+           \args' -> case geq (List.length args') (parameters dt) of
+             Just Refl -> return $ Sort (DataRepr dt args')
+             Nothing -> throwE $ "Wrong number of arguments for type "++show name
 lispToSort _ lsp = throwE $ "Invalid SMT type: "++show lsp
 
 lispToSorts :: LispParser v qv fun fv lv e -> [L.Lisp]
-            -> (forall (arg :: [Type]). List Repr arg -> a)
+            -> (forall (arg :: [Type]). List Repr arg -> LispParse a)
             -> LispParse a
-lispToSorts _ [] f = return (f Nil)
+lispToSorts _ [] f = f Nil
 lispToSorts r (x:xs) f = do
   Sort tp <- lispToSort r x
   lispToSorts r xs $
     \tps -> f (tp ::: tps)
 
-lispToValue :: SMTPipe -> L.Lisp -> LispParse AnyValue
-lispToValue b l = case runExcept $ lispToConstant l of
+lispToValue :: SMTPipe -> Maybe Sort -> L.Lisp -> LispParse AnyValue
+lispToValue b hint l = case runExcept $ lispToConstant l of
   Right r -> return r
-  Left e -> lispToConstrConstant b l
+  Left e -> lispToConstrConstant b hint l
 
 lispToConstant :: L.Lisp -> LispParse AnyValue
 lispToConstant (L.Symbol "true") = return (AnyValue (BoolValue True))
@@ -1137,29 +1255,64 @@ lispToConstant (lispToBitVec -> Just (val,sz))
   Just (TL.SomeNat w) -> return (AnyValue (BitVecValue val (bw w)))
 lispToConstant l = throwE $ "Invalid constant "++show l
 
-lispToConstrConstant :: SMTPipe -> L.Lisp -> LispParse AnyValue
-lispToConstrConstant b sym = do
+lispToConstrConstant :: SMTPipe -> Maybe Sort -> L.Lisp
+                     -> LispParse AnyValue
+lispToConstrConstant b hint sym = do
   (constr,args) <- case sym of
     L.Symbol s -> return (s,[])
     L.List ((L.Symbol s):args) -> return (s,args)
     _ -> throwE $ "Invalid constant: "++show sym
   case Map.lookup constr (allConstructors $ datatypes b) of
-    Just (AnyConstr con) -> do
-      args' <- makeList (constrFields con) args
-      return (AnyValue (ConstrValue con args'))
+    Just (AnyConstr (dt::Datatype dt) con)
+      -> makeList (case hint of
+                     Just (Sort (DataRepr dt' par))
+                       -> IMap.fromList $ runIdentity $ List.toListIndex
+                          (\i srt -> return (fromInteger $ naturalToInteger i,
+                                             Sort srt))
+                          par
+                     Nothing -> IMap.empty) (fields con) args $
+         \par rargs -> case fullArgs 0 (IMap.toList par) (parameters dt) $
+                            \rpar -> case instantiate
+                                          (runIdentity $ List.mapM
+                                           (return.fieldType) (fields con))
+                                          rpar of
+                              (tsig,Refl) -> do
+                                Refl <- geq tsig
+                                        (runIdentity $ List.mapM
+                                         (return.getType) rargs)
+                                return $ AnyValue $ DataValue $
+                                  construct rpar con rargs of
+           Just (Just res) -> return res
+           _ -> throwE "Type error in constructor"
     Nothing -> throwE $ "Invalid constructor "++show constr
   where
-    makeList :: IsDatatype dt => List (Type.Field dt csig) arg -> [L.Lisp] -> LispParse (List Value arg)
-    makeList Nil [] = return Nil
-    makeList Nil _  = throwE $ "Too many arguments to constructor."
-    makeList (p ::: args) (l:ls) = do
-      AnyValue v <- lispToValue b l
-      v' <- case geq (fieldType p) (valueType v) of
-        Just Refl -> return v
-        Nothing -> throwE $ "Type error in constructor arguments."
-      vs <- makeList args ls
-      return (v' ::: vs)
-    makeList (_ ::: _) [] = throwE $ "Not enough arguments to constructor."
+    makeList :: IsDatatype dt
+             => IntMap Sort
+             -> List (Type.Field dt) arg
+             -> [L.Lisp]
+             -> (forall narg. List.Length arg ~ List.Length narg
+                 => IntMap Sort -> List Value narg -> LispParse a)
+             -> LispParse a
+    makeList par Nil [] res = res par Nil
+    makeList _ Nil _ _ = throwE $ "Too many arguments to constructor."
+    makeList par (f ::: fs) (l:ls) res
+      = partialInstantiation (fieldType f)
+        (\n g -> do
+            Sort parTp <- IMap.lookup (fromInteger $ naturalToInteger n) par
+            return $ g parTp) $
+        \ftp -> do
+          AnyValue v <- lispToValue b (Just $ Sort ftp) l
+          case typeInference ftp (valueType v)
+               (\pos ptp cpar -> let pos' = fromInteger $ naturalToInteger pos
+                                 in case IMap.lookup pos' cpar of
+                   Just (Sort ptp') -> case geq ptp ptp' of
+                     Just Refl -> return cpar
+                     Nothing -> Nothing
+                   Nothing -> return $ IMap.insert pos' (Sort ptp) cpar) par of
+            Nothing -> throwE "Type error in constructor arguments."
+            Just npar -> makeList npar fs ls $
+                         \rpar rest -> res rpar (v ::: rest)
+    makeList _ (_ ::: _) [] _ = throwE $ "Not enough arguments to constructor."
 
 lispToNumber :: L.Lisp -> Maybe Integer
 lispToNumber (L.Number (L.I n)) = Just n
@@ -1204,29 +1357,32 @@ exprToLisp reg
     (\(UntypedVar v _) -> return $ L.Symbol v)
     (\(UntypedVar v _) -> return $ L.Symbol v)
     (\(UntypedFun v _ _) -> return $ L.Symbol v)
-    (\con -> case Map.lookup (AnyConstr con) (revConstructors reg) of
+    (\dt con -> case Map.lookup (AnyConstr dt con) (revConstructors reg) of
         Just sym -> return $ L.Symbol sym)
-    (\con -> case Map.lookup (AnyConstr con) (revConstructors reg) of
+    (\dt con -> case Map.lookup (AnyConstr dt con) (revConstructors reg) of
         Just sym -> return $ L.Symbol $ T.append "is-" sym)
-    (\field -> case Map.lookup (AnyField field) (revFields reg) of
+    (\dt field -> case Map.lookup (AnyField dt field) (revFields reg) of
         Just sym -> return $ L.Symbol sym)
     (\(UntypedVar v _) -> return $ L.Symbol v)
     (\(UntypedVar v _) -> return $ L.Symbol v)
     (\(PipeExpr v) -> return $ exprToLisp reg v)
 
-exprToLispWith :: (Monad m,GetType qv,GetFunType fun)
+exprToLispWith :: (Monad m,GetType v,GetType qv,GetType fv,GetType lv,GetFunType fun,GetType e)
                => (forall (t' :: Type).
                    v t' -> m L.Lisp)                         -- ^ variables
                -> (forall (t' :: Type).
                    qv t' -> m L.Lisp)                        -- ^ quantified variables
                -> (forall (arg :: [Type]) (res :: Type).
                    fun '(arg,res) -> m L.Lisp) -- ^ functions
-               -> (forall (arg :: [Type]) (dt :: (Type -> *) -> *). IsDatatype dt =>
-                   Type.Constr dt arg -> m L.Lisp)     -- ^ constructor
-               -> (forall (arg :: [Type]) (dt :: (Type -> *) -> *). IsDatatype dt =>
-                   Type.Constr dt arg -> m L.Lisp)     -- ^ constructor tests
-               -> (forall (dt :: (Type -> *) -> *) args (res :: Type). IsDatatype dt =>
-                   Type.Field dt args res -> m L.Lisp) -- ^ field accesses
+               -> (forall (arg :: [Type]) (dt :: [Type] -> (Type -> *) -> *).
+                   IsDatatype dt =>
+                   Datatype dt -> Type.Constr dt arg -> m L.Lisp)     -- ^ constructor
+               -> (forall (arg :: [Type]) (dt :: [Type] -> (Type -> *) -> *).
+                   IsDatatype dt =>
+                   Datatype dt -> Type.Constr dt arg -> m L.Lisp)     -- ^ constructor tests
+               -> (forall (dt :: [Type] -> (Type -> *) -> *) (res :: Type).
+                   IsDatatype dt =>
+                   Datatype dt -> Type.Field dt res -> m L.Lisp) -- ^ field accesses
                -> (forall t.
                    fv t -> m L.Lisp)                                              -- ^ function variables
                -> (forall t.
@@ -1245,12 +1401,20 @@ exprToLispWith _ _ f g h i _ _ j (Expr.App (Store _ _) (arr ::: val ::: idx)) = 
   idx' <- List.toList j idx
   val' <- j val
   return $ L.List ((L.Symbol "store"):arr':idx'++[val'])
-exprToLispWith _ _ f g h i _ _ j (Expr.App fun args) = do
+exprToLispWith _ _ f g h i _ _ j e@(Expr.App fun args) = do
+  let needAs = case fun of
+        Constructor dt par con -> not $ determines dt con
+        _ -> False
   args' <- List.toList j args
   sym <- functionSymbol f g h i fun
-  case args' of
-    [] -> return sym
-    _ -> return $ L.List $ sym:args'
+  let c = case args' of
+            [] -> sym
+            _ -> L.List $ sym:args'
+      rc = if needAs
+           then L.List [L.Symbol "as",c,typeSymbol Set.empty (getType e)]
+           else c
+  return rc
+
 exprToLispWith _ _ _ f _ _ _ _ _ (Expr.Const val) = valueToLisp f val
 exprToLispWith _ _ f g h i _ _ _ (Expr.AsArray fun) = do
   sym <- functionSymbolWithSig f g h i fun
@@ -1260,7 +1424,7 @@ exprToLispWith _ _ f g h i _ _ _ (Expr.AsArray fun) = do
 exprToLispWith _ f _ _ _ _ _ _ g (Expr.Quantification q args body) = do
   bind <- List.toList (\arg -> do
                           sym <- f arg
-                          return $ L.List [sym,typeSymbol $ getType arg]
+                          return $ L.List [sym,typeSymbol Set.empty $ getType arg]
                       ) args
   body' <- g body
   return $ L.List [L.Symbol (case q of
@@ -1281,7 +1445,7 @@ exprToLispWith _ _ _ _ _ _ _ f g (Expr.Let args body) = do
 
 valueToLisp :: Monad m
             => (forall arg tp. (IsDatatype tp)
-                => Type.Constr tp arg -> m L.Lisp)
+                => Datatype tp -> Type.Constr tp arg -> m L.Lisp)
             -> Value t -> m L.Lisp
 valueToLisp _ (BoolValue True) = return $ L.Symbol "true"
 valueToLisp _ (BoolValue False) = return $ L.Symbol "false"
@@ -1297,12 +1461,22 @@ valueToLisp _ (BitVecValue n bw)
   where
     bw' = bwSize bw
     rn = n `mod` 2^bw'
-valueToLisp f (ConstrValue con args) = do
-  con' <- f con
-  args' <- List.toList (valueToLisp f) args
-  case args' of
-    [] -> return con'
-    xs -> return $ L.List (con' : xs)
+valueToLisp f v@(DataValue val) = do
+  let (dt,par) = datatypeGet val
+  case deconstruct val of
+    ConApp { constructor = con
+           , arguments = args } -> do
+      let needAs = not $ determines dt con
+      con' <- f dt con
+      args' <- List.toList (valueToLisp f) args
+      let c = case args' of
+                [] -> con'
+                xs -> L.List (con' : xs)
+          rc = if needAs
+               then L.List [L.Symbol "as",c,typeSymbol Set.empty
+                                            (getType v)]
+               else c
+      return rc
 
 isOverloaded :: Function fun sig -> Bool
 isOverloaded (Expr.Eq _ _) = True
@@ -1323,15 +1497,18 @@ isOverloaded (Expr.Extract _ _ _) = True
 isOverloaded _ = False
 
 functionSymbol :: (Monad m,GetFunType fun)
-                  => (forall (arg' :: [Type]) (res' :: Type).
-                      fun '(arg',res') -> m L.Lisp) -- ^ How to render user functions
-                  -> (forall (arg' :: [Type]) (dt :: (Type -> *) -> *). IsDatatype dt =>
-                      Type.Constr dt arg' -> m L.Lisp)    -- ^ How to render constructor applications
-                  -> (forall (arg' :: [Type]) (dt :: (Type -> *) -> *). IsDatatype dt =>
-                      Type.Constr dt arg' -> m L.Lisp)    -- ^ How to render constructor tests
-                  -> (forall (dt :: (Type -> *) -> *) arg' (res' :: Type). IsDatatype dt =>
-                      Type.Field dt arg' res' -> m L.Lisp)          -- ^ How to render field acceses
-                  -> Function fun '(arg,res) -> m L.Lisp
+               => (forall (arg' :: [Type]) (res' :: Type).
+                   fun '(arg',res') -> m L.Lisp) -- ^ How to render user functions
+               -> (forall (arg' :: [Type]) (dt :: [Type] -> (Type -> *) -> *).
+                   IsDatatype dt =>
+                   Datatype dt -> Type.Constr dt arg' -> m L.Lisp)    -- ^ How to render constructor applications
+               -> (forall (arg' :: [Type]) (dt :: [Type] -> (Type -> *) -> *).
+                   IsDatatype dt =>
+                   Datatype dt -> Type.Constr dt arg' -> m L.Lisp)    -- ^ How to render constructor tests
+               -> (forall (dt :: [Type] -> (Type -> *) -> *) (res' :: Type).
+                   IsDatatype dt =>
+                   Datatype dt -> Type.Field dt res' -> m L.Lisp)          -- ^ How to render field acceses
+               -> Function fun '(arg,res) -> m L.Lisp
 functionSymbol f _ _ _ (Expr.Fun g) = f g
 functionSymbol _ _ _ _ (Expr.Eq _ _) = return $ L.Symbol "="
 functionSymbol _ _ _ _ (Expr.Distinct _ _) = return $ L.Symbol "distinct"
@@ -1386,7 +1563,7 @@ functionSymbol _ _ _ _ (Store _ _) = return $ L.Symbol "store"
 functionSymbol _ _ _ _ (ConstArray idx el)
   = return $ L.List [L.Symbol "as"
                     ,L.Symbol "const"
-                    ,typeSymbol (ArrayRepr idx el)]
+                    ,typeSymbol Set.empty (ArrayRepr idx el)]
 functionSymbol _ _ _ _ (Concat _ _) = return $ L.Symbol "concat"
 functionSymbol _ _ _ _ (Extract bw start len)
   = return $ L.List [L.Symbol "_"
@@ -1396,9 +1573,9 @@ functionSymbol _ _ _ _ (Extract bw start len)
   where
     start' = bwSize start
     len' = bwSize len
-functionSymbol _ g _ _ (Constructor con) = g con
-functionSymbol _ _ h _ (Test con) = h con
-functionSymbol _ _ _ i (Expr.Field f) = i f
+functionSymbol _ g _ _ (Constructor dt par con) = g dt con
+functionSymbol _ _ h _ (Test dt par con) = h dt con
+functionSymbol _ _ _ i (Expr.Field dt par f) = i dt f
 functionSymbol _ _ _ _ (Divisible n) = return $ L.List [L.Symbol "_"
                                                        ,L.Symbol "divisible"
                                                        ,L.Number $ L.I n]
@@ -1406,38 +1583,53 @@ functionSymbol _ _ _ _ (Divisible n) = return $ L.List [L.Symbol "_"
 functionSymbolWithSig :: (Monad m,GetFunType fun)
                       => (forall (arg' :: [Type]) (res' :: Type).
                           fun '(arg',res') -> m L.Lisp) -- ^ How to render user functions
-                      -> (forall (arg' :: [Type]) (dt :: (Type -> *) -> *). IsDatatype dt =>
-                          Type.Constr dt arg' -> m L.Lisp)    -- ^ How to render constructor applications
-                      -> (forall (arg' :: [Type]) (dt :: (Type -> *) -> *). IsDatatype dt =>
-                          Type.Constr dt arg' -> m L.Lisp)    -- ^ How to render constructor tests
-                      -> (forall (dt :: (Type -> *) -> *) arg' (res' :: Type). IsDatatype dt =>
-                          Type.Field dt arg' res' -> m L.Lisp)          -- ^ How to render field acceses
+                      -> (forall (arg' :: [Type])
+                          (dt :: [Type] -> (Type -> *) -> *).
+                          IsDatatype dt =>
+                          Datatype dt -> Type.Constr dt arg' -> m L.Lisp)    -- ^ How to render constructor applications
+                      -> (forall (arg' :: [Type])
+                          (dt :: [Type] -> (Type -> *) -> *).
+                          IsDatatype dt =>
+                          Datatype dt -> Type.Constr dt arg' -> m L.Lisp)    -- ^ How to render constructor tests
+                      -> (forall (dt :: [Type] -> (Type -> *) -> *)
+                          (res' :: Type).
+                          IsDatatype dt =>
+                          Datatype dt -> Type.Field dt res' -> m L.Lisp)          -- ^ How to render field acceses
                       -> Function fun '(arg,res) -> m L.Lisp
 functionSymbolWithSig f g h i j = do
   sym <- functionSymbol f g h i j
   if isOverloaded j
     then return $ L.List [sym
                          ,typeList arg
-                         ,typeSymbol res]
+                         ,typeSymbol Set.empty res]
     else return sym
   where
     (arg,res) = getFunType j
 
-typeSymbol :: Repr t -> L.Lisp
-typeSymbol BoolRepr = L.Symbol "Bool"
-typeSymbol IntRepr = L.Symbol "Int"
-typeSymbol RealRepr = L.Symbol "Real"
-typeSymbol (BitVecRepr n) = L.List [L.Symbol "_"
-                                   ,L.Symbol "BitVec"
-                                   ,L.Number (L.I $ bwSize n)]
-typeSymbol (ArrayRepr idx el) = L.List ((L.Symbol "Array"):
-                                        runIdentity (List.toList (return.typeSymbol) idx) ++
-                                        [typeSymbol el])
-typeSymbol (DataRepr dt) = L.Symbol (T.pack $ datatypeName dt)
+typeSymbol :: Set String -> Repr t -> L.Lisp
+typeSymbol _ BoolRepr = L.Symbol "Bool"
+typeSymbol _ IntRepr = L.Symbol "Int"
+typeSymbol _ RealRepr = L.Symbol "Real"
+typeSymbol _ (BitVecRepr n) = L.List [L.Symbol "_"
+                                     ,L.Symbol "BitVec"
+                                     ,L.Number (L.I $ bwSize n)]
+typeSymbol recDt (ArrayRepr idx el)
+  = L.List ((L.Symbol "Array"):
+            runIdentity (List.toList (return.typeSymbol recDt) idx) ++
+            [typeSymbol recDt el])
+typeSymbol recDt (DataRepr dt par)
+  | Set.member (datatypeName dt) recDt
+    = L.Symbol (T.pack $ datatypeName dt)
+  | otherwise = L.List $ [L.Symbol (T.pack $ datatypeName dt)]++
+                (runIdentity $ List.toList (return.typeSymbol recDt) par)
+typeSymbol _ (ParameterRepr n)
+  = L.Symbol (T.pack $ "a"++show (naturalToInteger n))
+                       
 
 typeList :: List Repr t -> L.Lisp
 typeList Nil = L.Symbol "()"
-typeList args = L.List (runIdentity $ List.toList (return.typeSymbol) args)
+typeList args = L.List (runIdentity $ List.toList
+                        (return.typeSymbol Set.empty) args)
 
 ordSymbol :: OrdOp -> L.Lisp
 ordSymbol Ge = L.Symbol ">="

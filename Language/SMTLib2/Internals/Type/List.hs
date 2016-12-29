@@ -2,7 +2,7 @@ module Language.SMTLib2.Internals.Type.List where
 
 import Language.SMTLib2.Internals.Type.Nat
 
-import Prelude hiding (head,tail,length,mapM,insert,drop,take,last,reverse,map,traverse,concat)
+import Prelude hiding (head,tail,length,mapM,insert,drop,take,last,reverse,map,traverse,concat,replicate)
 import Data.GADT.Compare
 import Data.GADT.Show
 import Language.Haskell.TH
@@ -64,6 +64,10 @@ type family Map (lst :: [a]) (f :: a -> b) :: [b] where
 type family Concat (xs :: [a]) (ys :: [a]) :: [a] where
   Concat '[] ys = ys
   Concat (x ': xs) ys = x ': (Concat xs ys)
+
+type family Replicate (n :: Nat) (x :: a) :: [a] where
+  Replicate 'Z x = '[]
+  Replicate ('S n) x = x ': Replicate n x
 
 -- | Strongly typed heterogenous lists.
 --
@@ -137,6 +141,16 @@ tail (x ::: xs) = xs
 index :: List e lst -> Natural idx -> e (Index lst idx)
 index (x ::: xs) Zero = x
 index (x ::: xs) (Succ n) = index xs n
+
+indexDyn :: Integral i => List e tps -> i -> (forall tp. e tp -> a) -> a
+indexDyn es i f
+  | i < 0 = error $ "indexDyn: Negative index"
+  | otherwise = indexDyn' es i f
+  where
+    indexDyn' :: Integral i => List e tps -> i -> (forall tp. e tp -> a) -> a
+    indexDyn' Nil _ _ = error $ "indexDyn: Index out of range"
+    indexDyn' (e ::: _) 0 f = f e
+    indexDyn' (_ ::: es) n f = indexDyn' es (n-1) f
 
 insert :: List e lst -> Natural idx -> e tp -> List e (Insert lst idx tp)
 insert (x ::: xs) Zero y = y ::: xs
@@ -230,6 +244,10 @@ mapM' (x ::: xs) f = do
 concat :: List e xs -> List e ys -> List e (Concat xs ys)
 concat Nil ys = ys
 concat (x ::: xs) ys = x ::: concat xs ys
+
+replicate :: Natural n -> e x -> List e (Replicate n x)
+replicate Zero _ = Nil
+replicate (Succ n) x = x ::: replicate n x
 
 toList :: Monad m => (forall x. e x -> m a) -> List e lst -> m [a]
 toList f Nil = return []

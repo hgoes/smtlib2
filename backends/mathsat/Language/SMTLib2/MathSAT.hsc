@@ -24,7 +24,7 @@ import Data.Maybe (mapMaybe)
 import System.IO.Unsafe
 import Data.GADT.Show
 import Data.GADT.Compare
-import Data.Constraint
+import GHC.TypeLits
 
 newtype Config = Config (Ptr Config) deriving Storable
 newtype Env = Env (Ptr Env) deriving Storable
@@ -252,8 +252,8 @@ sortToMSat :: Repr t -> Env -> IO Type
 sortToMSat BoolRepr env = getBoolType env
 sortToMSat IntRepr env = getIntegerType env
 sortToMSat RealRepr env = getRationalType env
-sortToMSat (BitVecRepr w) env
-  = getBVType env (fromInteger $ naturalToInteger w)
+sortToMSat (BitVecRepr (BitWidth w)) env
+  = getBVType env (fromInteger w)
 sortToMSat (ArrayRepr (idx ::: Nil) el) env = do
   idxTp <- sortToMSat idx env
   elTp <- sortToMSat el env
@@ -273,8 +273,8 @@ sortFromMSat env tp f = do
         else do
         isBV <- isBVType env tp
         case isBV of
-         Just sz -> reifyNat (fromIntegral sz) $
-                    \sz' -> f (BitVecRepr sz')
+         Just sz -> case someNatVal (fromIntegral sz) of
+           Just (SomeNat pr) -> f (BitVecRepr (bw pr))
          Nothing -> do
            isArr <- isArrayType env tp
            case isArr of
@@ -303,8 +303,8 @@ exprToMSat env (Const val) = valueToMSat val
     valueToMSat (IntValue n) = makeNumber env (show n)
     valueToMSat (RealValue n) = makeNumber env ((show $ numerator n)++"/"++(show $ denominator n))
     valueToMSat (BitVecValue val bw) = makeBVNumber env (show val)
-                                       (fromInteger $ naturalToInteger bw) 10
-    valueToMSat (ConstrValue _ _) = error "smtlib2-mathsat: No support for datatypes."
+                                       (fromInteger $ bwSize bw) 10
+    valueToMSat (ConstrValue _ _ _) = error "smtlib2-mathsat: No support for datatypes."
 exprToMSat env (Quantification _ _ _) = error "smtlib2-mathsat: No support for quantification."
 exprToMSat env (Let _ _) = error "smtlib2-mathsat: No support for let-expressions."
 exprToMSat env (App (Logic op n) args) = do
@@ -413,8 +413,8 @@ exprToMSat env (App (Concat _ _) (x ::: y ::: Nil))
 exprToMSat env (App f@(Extract bw start len) (x ::: Nil))
   = makeBVExtract env (fromIntegral (start'+len'-1)) (fromIntegral start') (getTerm x)
   where
-    start' = naturalToInteger start
-    len' = naturalToInteger len
+    start' = bwSize start
+    len' = bwSize len
 exprToMSat env (App (Divisible n) (x ::: Nil)) = do
   y <- makeNumber env "0"
   makeCongruence env (show n) (getTerm x) y
@@ -558,41 +558,41 @@ exprFromMSat env (MathSATExpr (UntypedVar term tp)) = do
               rhs <- termGetArg term 1
               tp <- termGetType lhs
               Just sz <- isBVType env tp
-              reifyNat (fromIntegral sz) $
-                \bw -> return $ App (BVComp BVULT bw)
-                       ((mkExpr lhs (BitVecRepr bw)) :::
-                        (mkExpr rhs (BitVecRepr bw)) :::
+              getBw (fromIntegral sz) $
+                \sz' -> return $ App (BVComp BVULT sz')
+                        ((mkExpr lhs (BitVecRepr sz')) :::
+                         (mkExpr rhs (BitVecRepr sz')) :::
                          Nil)
             #{const MSAT_TAG_BV_SLT} -> do
               lhs <- termGetArg term 0
               rhs <- termGetArg term 1
               tp <- termGetType lhs
               Just sz <- isBVType env tp
-              reifyNat (fromIntegral sz) $
-                \bw -> return $ App (BVComp BVSLT bw)
-                       ((mkExpr lhs (BitVecRepr bw)) :::
-                        (mkExpr rhs (BitVecRepr bw)) :::
-                         Nil)
+              getBw (fromIntegral sz) $
+                \sz' -> return $ App (BVComp BVSLT sz')
+                        ((mkExpr lhs (BitVecRepr sz')) :::
+                         (mkExpr rhs (BitVecRepr sz')) :::
+                          Nil)
             #{const MSAT_TAG_BV_ULE} -> do
               lhs <- termGetArg term 0
               rhs <- termGetArg term 1
               tp <- termGetType lhs
               Just sz <- isBVType env tp
-              reifyNat (fromIntegral sz) $
-                \bw -> return $ App (BVComp BVULE bw)
-                       ((mkExpr lhs (BitVecRepr bw)) :::
-                        (mkExpr rhs (BitVecRepr bw)) :::
-                         Nil)
+              getBw (fromIntegral sz) $
+                \sz' -> return $ App (BVComp BVULE sz')
+                        ((mkExpr lhs (BitVecRepr sz')) :::
+                         (mkExpr rhs (BitVecRepr sz')) :::
+                          Nil)
             #{const MSAT_TAG_BV_SLE} -> do
               lhs <- termGetArg term 0
               rhs <- termGetArg term 1
               tp <- termGetType lhs
               Just sz <- isBVType env tp
-              reifyNat (fromIntegral sz) $
-                \bw -> return $ App (BVComp BVSLE bw)
-                       ((mkExpr lhs (BitVecRepr bw)) :::
-                        (mkExpr rhs (BitVecRepr bw)) :::
-                        Nil)
+              getBw (fromIntegral sz) $
+                \sz' -> return $ App (BVComp BVSLE sz')
+                        ((mkExpr lhs (BitVecRepr sz')) :::
+                         (mkExpr rhs (BitVecRepr sz')) :::
+                         Nil)
           IntRepr -> case tag of
             #{const MSAT_TAG_PLUS} -> do
               lhs <- termGetArg term 0
@@ -634,9 +634,9 @@ exprFromMSat env (MathSATExpr (UntypedVar term tp)) = do
               tpR <- termGetType rhs
               Just szL <- isBVType env tpL
               Just szR <- isBVType env tpR
-              reifyNat (fromIntegral szL) $
-                \bw1 -> reifyNat (fromIntegral szR) $
-                        \bw2 -> case geq bw (naturalAdd bw1 bw2) of
+              getBw (fromIntegral szL) $
+                \bw1 -> getBw (fromIntegral szR) $
+                        \bw2 -> case geq bw (bwAdd bw1 bw2) of
                         Just Refl -> return $ App (Concat bw1 bw2)
                                      ((mkExpr lhs (BitVecRepr bw1)) :::
                                       (mkExpr rhs (BitVecRepr bw2)) :::
@@ -645,11 +645,10 @@ exprFromMSat env (MathSATExpr (UntypedVar term tp)) = do
               Just (msb,lsb) <- termIsBVExtract env term
               arg <- termGetArg term 0
               Just sz <- termGetType arg >>= isBVType env
-              reifyNat (fromIntegral lsb) $
-                \start -> reifyNat (fromIntegral sz) $
-                          \rsz -> case naturalLEQ (naturalAdd start bw) rsz of
-                          Just Dict -> return $ App (Extract rsz start bw)
-                                       ((mkExpr arg (BitVecRepr rsz)) ::: Nil)
+              getBw (fromIntegral lsb) $
+                \start -> getBw (fromIntegral sz) $
+                          \rsz -> return $ App (Extract rsz start bw)
+                                  ((mkExpr arg (BitVecRepr rsz)) ::: Nil)
             #{const MSAT_TAG_BV_NOT} -> do
               arg <- termGetArg term 0
               return $ App (BVUn BVNot bw) ((mkExpr arg (BitVecRepr bw)) ::: Nil)

@@ -49,6 +49,8 @@ module Language.SMTLib2 (
   pattern ConstReal,creal,
   -- *** Bitvector constants
   BitWidth(),bw,pattern ConstBV,cbv,cbvUntyped,
+  -- *** Datatype constants
+  cdt,
   -- ** Quantification
   exists, forall,
   -- ** Functions
@@ -91,7 +93,7 @@ module Language.SMTLib2 (
   -- *** Arrays
   pattern Select,pattern Store,pattern ConstArray,select,select1,store,store1,constArray,
   -- *** Datatypes
-  pattern Mk,mk,pattern Is,is,pattern (:#:),(.#.),
+  pattern Mk,mk,pattern Is,is,(.#.),
   -- *** Misc
   pattern Divisible,divisible,
   -- ** Analyzation
@@ -116,7 +118,7 @@ module Language.SMTLib2 (
   modelEvaluate,
   -- * Types
   registerDatatype,
-  Type(..),Repr(..),GetType(..),bool,int,real,bitvec,array,dt,
+  Type(..),Repr(..),GetType(..),bool,int,real,bitvec,array,dt,dt',
   -- ** Numbers
   Nat(..),Natural(..),nat,natT,reifyNat,
   -- ** Lists

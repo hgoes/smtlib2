@@ -16,7 +16,6 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Maybe
 import Data.Bits
 import qualified GHC.TypeLits as TL
 import Unsafe.Coerce
@@ -28,7 +27,8 @@ data Type = BoolType
           | RealType
           | BitVecType TL.Nat
           | ArrayType [Type] Type
-          | forall a. DataType a
+          | forall a. DataType a [Type]
+          | ParameterType Nat
           deriving Typeable
 
 type family Lifted (tps :: [Type]) (idx :: [Type]) :: [Type] where
@@ -55,34 +55,70 @@ type family Fst (a :: (p,q)) :: p where
 type family Snd (a :: (p,q)) :: q where
   Snd '(x,y) = y
 
-class (Typeable (Datatype dt),GCompare (Constr dt),Show (Datatype dt))
-      => IsDatatype (dt :: (Type -> *) -> *) where
+class (Typeable dt,Ord (Datatype dt),GCompare (Constr dt),GCompare (Field dt))
+      => IsDatatype (dt :: [Type] -> (Type -> *) -> *) where
+  type Parameters dt :: Nat
   type Signature dt :: [[Type]]
-  data Datatype dt
+  data Datatype dt :: *
   data Constr dt (csig :: [Type])
-  data Field dt (csig :: [Type]) (tp :: Type)
+  data Field dt (tp :: Type)
+  -- | Get the data type from a value
+  datatypeGet    :: (GetType e,List.Length par ~ Parameters dt)
+                 => dt par e -> (Datatype dt,List Repr par)
+  -- | How many polymorphic parameters does this datatype have
+  parameters     :: Datatype dt -> Natural (Parameters dt)
   -- | The name of the datatype. Must be unique.
   datatypeName   :: Datatype dt -> String
+  -- | Get all of the constructors of this datatype
   constructors   :: Datatype dt -> List (Constr dt) (Signature dt)
+  -- | Get the name of a constructor
   constrName     :: Constr dt csig -> String
-  constrTest     :: dt e -> Constr dt csig -> Bool
-  constrFields   :: Constr dt csig -> List (Field dt csig) csig
-  constrApply    :: ConApp dt e -> dt e
-  constrGet      :: dt e -> ConApp dt e
-  constrDatatype :: Constr dt csig -> Datatype dt
-  fieldName      :: Field dt csig tp -> String
-  fieldType      :: Field dt csig tp -> Repr tp
-  fieldGet       :: dt e -> Field dt csig tp -> e tp
-  fieldConstr    :: Field dt csig tp -> Constr dt csig
-  compareField   :: Field dt csig1 tp1 -> Field dt csig2 tp2
-                 -> (GOrdering csig1 csig2,Maybe (tp1 :~: tp2))
+  -- | Test if a value is constructed using a specific constructor
+  test           :: dt par e -> Constr dt csig -> Bool
+  -- | Get all the fields of a constructor
+  fields         :: Constr dt csig -> List (Field dt) csig
+  -- | Construct a value using a constructor
+  construct      :: (List.Length par ~ Parameters dt)
+                 => List Repr par
+                 -> Constr dt csig
+                 -> List e (Instantiated csig par)
+                 -> dt par e
+  -- | Deconstruct a value into a constructor and a list of arguments
+  deconstruct    :: GetType e => dt par e -> ConApp dt par e
+  -- | Get the name of a field
+  fieldName      :: Field dt tp -> String
+  -- | Get the type of a field
+  fieldType      :: Field dt tp -> Repr tp
+  -- | Extract a field value from a value
+  fieldGet       :: dt par e -> Field dt tp -> e (CType tp par)
 
-data ConApp dt e = forall csig. ConApp { constructor :: Constr dt csig
-                                       , arguments   :: List e csig }
+type family CType (tp :: Type) (par :: [Type]) :: Type where
+  CType 'BoolType par = 'BoolType
+  CType 'IntType par = 'IntType
+  CType 'RealType par = 'RealType
+  CType ('BitVecType w) par = 'BitVecType w
+  CType ('ArrayType idx el) par = 'ArrayType (Instantiated idx par) (CType el par)
+  CType ('DataType dt arg) par = 'DataType dt (Instantiated arg par)
+  CType ('ParameterType n) par = List.Index par n
+
+type family Instantiated (sig :: [Type]) (par :: [Type]) :: [Type] where
+  Instantiated '[] par = '[]
+  Instantiated (tp ': tps) par = (CType tp par) ': Instantiated tps par
+
+data ConApp dt par e
+  = forall csig.
+    (List.Length par ~ Parameters dt) =>
+    ConApp { parameters' :: List Repr par
+           , constructor :: Constr dt csig
+           , arguments   :: List e (Instantiated csig par) }
+
+--data FieldType tp where
+--  FieldType :: Repr tp -> FieldType ('Left tp)
+--  ParType :: Natural n -> FieldType ('Right n)
 
 data AnyDatatype = forall dt. IsDatatype dt => AnyDatatype (Datatype dt)
-data AnyConstr = forall dt csig. IsDatatype dt => AnyConstr (Constr dt csig)
-data AnyField = forall dt csig tp. IsDatatype dt => AnyField (Field dt csig tp)
+data AnyConstr = forall dt csig. IsDatatype dt => AnyConstr (Datatype dt) (Constr dt csig)
+data AnyField = forall dt csig tp. IsDatatype dt => AnyField (Datatype dt) (Field dt tp)
 
 data TypeRegistry dt con field = TypeRegistry { allDatatypes :: Map dt AnyDatatype
                                               , revDatatypes :: Map AnyDatatype dt
@@ -104,85 +140,191 @@ dependencies known p = (known',dts)
     sccs = stronglyConnCompR edges
     (known',edges) = dependencies' known p
     
-    dependencies' :: IsDatatype dt => Set String -> Datatype dt -> (Set String,[(AnyDatatype,String,[String])])
+    dependencies' :: IsDatatype dt => Set String -> Datatype dt
+                   -> (Set String,[(AnyDatatype,String,[String])])
     dependencies' known dt
       | Set.member (datatypeName dt) known = (known,[])
       | otherwise = let name = datatypeName dt
                         known1 = Set.insert name known
-                        deps = concat $ runIdentity $ List.toList
-                               (\con -> return $ catMaybes $ runIdentity $ List.toList
-                                        (\field -> case fieldType field of
-                                                     DataRepr dep -> return $ Just (AnyDatatype dep)
-                                                     _ -> return $ Nothing
-                                        ) (constrFields con)
-                               ) (constructors dt)
-                        (known2,edges) = foldl (\(known,lst) (AnyDatatype dt)
-                                                -> let (nknown,edges) = dependencies' known dt
-                                                   in (nknown,edges++lst)
-                                               ) (known1,[]) deps
+                        deps = dependenciesCons (constructors dt)
+                        (known2,edges) = foldl (\(cknown,cedges) (AnyDatatype dt)
+                                                -> dependencies' cknown dt
+                                               ) (known1,[])
+                                         deps
                     in (known2,(AnyDatatype dt,name,[ datatypeName dt | AnyDatatype dt <- deps ]):edges)
+
+    dependenciesCons :: IsDatatype dt => List (Constr dt) tps
+                     -> [AnyDatatype]
+    dependenciesCons Nil = []
+    dependenciesCons (con ::: cons)
+      = let dep1 = dependenciesFields (fields con)
+            dep2 = dependenciesCons cons
+        in dep1++dep2
+
+    dependenciesFields :: IsDatatype dt => List (Field dt) tps
+                       -> [AnyDatatype]
+    dependenciesFields Nil = []
+    dependenciesFields (f ::: fs)
+      = let dep1 = dependenciesTp (fieldType f)
+            dep2 = dependenciesFields fs
+        in dep1++dep2
+
+    dependenciesTp :: Repr tp
+                   -> [AnyDatatype]
+    dependenciesTp (ArrayRepr idx el)
+      = let dep1 = dependenciesTps idx
+            dep2 = dependenciesTp el
+        in dep1++dep2
+    dependenciesTp (DataRepr dt par)
+      = let dep1 = [AnyDatatype dt]
+            dep2 = dependenciesTps par
+        in dep1++dep2
+    dependenciesTp _ = []
+
+    dependenciesTps :: List Repr tps
+                    -> [AnyDatatype]
+    dependenciesTps Nil = []
+    dependenciesTps (tp ::: tps)
+      = let dep1 = dependenciesTp tp
+            dep2 = dependenciesTps tps
+        in dep1++dep2
 
 signature :: IsDatatype dt => Datatype dt -> List (List Repr) (Signature dt)
 signature dt
   = runIdentity $ List.mapM (\con -> List.mapM (\f -> return (fieldType f)
-                                               ) (constrFields con)
+                                               ) (fields con)
                             ) (constructors dt)
 
 constrSig :: IsDatatype dt => Constr dt sig -> List Repr sig
-constrSig constr = runIdentity $ List.mapM (\f -> return (fieldType f)) (constrFields constr)
+constrSig constr
+  = runIdentity $ List.mapM (\f -> return (fieldType f)) (fields constr)
 
-constrEq :: (IsDatatype dt1,IsDatatype dt2) => Constr dt1 sig1 -> Constr dt2 sig2
-         -> Maybe (Constr dt1 sig1 :~: Constr dt2 sig2)
-constrEq (c1 :: Constr dt1 sig1) (c2 :: Constr dt2 sig2) = do
-  Refl <- eqT :: Maybe (Datatype dt1 :~: Datatype dt2)
-  Refl <- geq c1 c2
-  return Refl
-  
-constrCompare :: (IsDatatype dt1,IsDatatype dt2) => Constr dt1 sig1 -> Constr dt2 sig2
-              -> GOrdering (Constr dt1 sig1) (Constr dt2 sig2)
-constrCompare (c1 :: Constr dt1 sig1) (c2 :: Constr dt2 sig2)
-  = case eqT :: Maybe (Datatype dt1 :~: Datatype dt2) of
-  Just Refl -> case gcompare c1 c2 of
-    GEQ -> GEQ
-    GLT -> GLT
-    GGT -> GGT
-  Nothing -> case compare (typeOf (Proxy::Proxy (Datatype dt1))) (typeOf (Proxy::Proxy (Datatype dt2))) of
-    LT -> GLT
-    GT -> GGT
+instantiate :: List Repr sig
+            -> List Repr par
+            -> (List Repr (Instantiated sig par),
+                List.Length sig :~: List.Length (Instantiated sig par))
+instantiate Nil _ = (Nil,Refl)
+instantiate (tp ::: tps) par = case instantiate tps par of
+  (ntps,Refl) -> (ctype tp par ::: ntps,Refl)
 
-fieldEq :: (IsDatatype dt1,IsDatatype dt2) => Field dt1 sig1 tp1 -> Field dt2 sig2 tp2
-        -> Maybe (Field dt1 sig1 tp1 :~: Field dt2 sig2 tp2)
-fieldEq (f1 :: Field dt1 sig1 tp1) (f2 :: Field dt2 sig2 tp2) = do
-  Refl <- eqT :: Maybe (Datatype dt1 :~: Datatype dt2)
-  case compareField f1 f2 of
-    (GEQ,Just Refl) -> return Refl
-    _ -> Nothing
+ctype :: Repr tp
+      -> List Repr par
+      -> Repr (CType tp par)
+ctype BoolRepr _ = BoolRepr
+ctype IntRepr _ = IntRepr
+ctype RealRepr _ = RealRepr
+ctype (BitVecRepr w) _ = BitVecRepr w
+ctype (ArrayRepr idx el) par = case instantiate idx par of
+  (nidx,Refl) -> ArrayRepr nidx (ctype el par)
+ctype (DataRepr dt args) par = case instantiate args par of
+  (nargs,Refl) -> DataRepr dt nargs
+ctype (ParameterRepr p) par = List.index par p
 
-fieldCompare :: (IsDatatype dt1,IsDatatype dt2) => Field dt1 sig1 tp1 -> Field dt2 sig2 tp2
-             -> GOrdering (Field dt1 sig1 tp1) (Field dt2 sig2 tp2)
-fieldCompare (f1 :: Field dt1 sig1 tp1) (f2 :: Field dt2 sig2 tp2) = case eqT :: Maybe (Datatype dt1 :~: Datatype dt2) of
-  Just Refl -> case compareField f1 f2 of
-    (GEQ,Just Refl) -> GEQ
-    (GLT,_) -> GLT
-    (GGT,_) -> GGT
-  Nothing -> case compare (typeOf (Proxy::Proxy (Datatype dt1))) (typeOf (Proxy::Proxy (Datatype dt2))) of
-    LT -> GLT
-    GT -> GGT
+determines :: IsDatatype dt
+           => Datatype dt
+           -> Constr dt sig
+           -> Bool
+determines dt con = allDetermined (fromInteger $ naturalToInteger $
+                                   parameters dt) $
+                    determines' (fields con) Set.empty
+  where
+    determines' :: IsDatatype dt => List (Field dt) tps
+                -> Set Integer -> Set Integer
+    determines' Nil mp = mp
+    determines' (f ::: fs) mp = determines' fs (containedParameter (fieldType f) mp)
+
+    allDetermined sz mp = Set.size mp == sz
+
+containedParameter :: Repr tp -> Set Integer -> Set Integer
+containedParameter (ArrayRepr idx el) det
+  = runIdentity $ List.foldM (\det tp -> return $ containedParameter tp det
+                             ) (containedParameter el det) idx
+containedParameter (DataRepr i args) det
+  = runIdentity $ List.foldM (\det tp -> return $ containedParameter tp det
+                             ) det args
+containedParameter (ParameterRepr p) det
+  = Set.insert (naturalToInteger p) det
+containedParameter _ det = det
+
+typeInference :: Repr atp -- ^ The type containing parameters
+              -> Repr ctp -- ^ The concrete type without parameters
+              -> (forall n ntp. Natural n -> Repr ntp -> a -> Maybe a) -- ^ Action to execute when a parameter is assigned
+              -> a
+              -> Maybe a
+typeInference BoolRepr BoolRepr _ x = Just x
+typeInference IntRepr IntRepr _ x = Just x
+typeInference RealRepr RealRepr _ x = Just x
+typeInference (BitVecRepr w1) (BitVecRepr w2) _ x = do
+  Refl <- geq w1 w2
+  return x
+typeInference (ParameterRepr n) tp f x = f n tp x
+typeInference (ArrayRepr idx el) (ArrayRepr idx' el') f x = do
+  x1 <- typeInferences idx idx' f x
+  typeInference el el' f x1
+typeInference (DataRepr (_::Datatype dt) par) (DataRepr (_::Datatype dt') par') f x = do
+  Refl <- eqT :: Maybe (dt :~: dt')
+  typeInferences par par' f x
+typeInference _ _ _ _ = Nothing
+
+typeInferences :: List Repr atps
+               -> List Repr ctps
+               -> (forall n ntp. Natural n -> Repr ntp -> a -> Maybe a)
+               -> a
+               -> Maybe a
+typeInferences Nil Nil _ x = Just x
+typeInferences (atp ::: atps) (ctp ::: ctps) f x = do
+  x1 <- typeInference atp ctp f x
+  typeInferences atps ctps f x1
+typeInferences _ _ _ _ = Nothing
+
+partialInstantiation :: Repr tp
+                     -> (forall n a. Natural n ->
+                         (forall ntp. Repr ntp -> a) -> Maybe a)
+                     -> (forall rtp. Repr rtp -> a)
+                     -> a
+partialInstantiation BoolRepr _ res = res BoolRepr
+partialInstantiation IntRepr _ res = res IntRepr
+partialInstantiation RealRepr _ res = res RealRepr
+partialInstantiation (BitVecRepr w) _ res = res (BitVecRepr w)
+partialInstantiation (ArrayRepr idx el) f res
+  = partialInstantiations idx f $
+    \nidx -> partialInstantiation el f $
+             \nel -> res $ ArrayRepr nidx nel
+partialInstantiation (DataRepr dt par) f res
+  = partialInstantiations par f $
+    \npar -> res $ DataRepr dt npar
+partialInstantiation (ParameterRepr n) f res
+  = case f n res of
+  Just r -> r
+  Nothing -> res (ParameterRepr n)
+
+partialInstantiations :: List Repr tp
+                      -> (forall n a. Natural n ->
+                          (forall ntp. Repr ntp -> a) -> Maybe a)
+                      -> (forall rtp. List.Length tp ~ List.Length rtp
+                          => List Repr rtp -> a)
+                      -> a
+partialInstantiations Nil _ res = res Nil
+partialInstantiations (tp ::: tps) f res
+  = partialInstantiation tp f $
+    \ntp -> partialInstantiations tps f $
+            \ntps -> res (ntp ::: ntps)
+
 
 registerType :: (Monad m,IsDatatype tp,Ord dt,Ord con,Ord field) => dt
              -> (forall sig. Constr tp sig -> m con)
-             -> (forall sig tp'. Field tp sig tp' -> m field)
+             -> (forall sig tp'. Field tp tp' -> m field)
              -> Datatype tp -> TypeRegistry dt con field
              -> m (TypeRegistry dt con field)
 registerType i f g dt reg
   = List.foldM
     (\reg con -> do
         c <- f con
-        let reg' = reg { allConstructors = Map.insert c (AnyConstr con) (allConstructors reg) }
+        let reg' = reg { allConstructors = Map.insert c (AnyConstr dt con) (allConstructors reg) }
         List.foldM (\reg field -> do
                        fi <- g field
-                       return $ reg { allFields = Map.insert fi (AnyField field) (allFields reg) }
-                   ) reg' (constrFields con)
+                       return $ reg { allFields = Map.insert fi (AnyField dt field) (allFields reg) }
+                   ) reg' (fields con)
     ) reg1 (constructors dt)
   where
     reg1 = reg { allDatatypes = Map.insert i (AnyDatatype dt) (allDatatypes reg)
@@ -197,90 +339,143 @@ instance Eq AnyDatatype where
   (==) (AnyDatatype x) (AnyDatatype y) = datatypeName x == datatypeName y
 
 instance Eq AnyConstr where
-  (==) (AnyConstr c1) (AnyConstr c2) = constrName c1 == constrName c2
+  (==) (AnyConstr _ c1) (AnyConstr _ c2) = constrName c1 == constrName c2
 
 instance Eq AnyField where
-  (==) (AnyField f1) (AnyField f2) = fieldName f1 == fieldName f2
+  (==) (AnyField _ f1) (AnyField _ f2) = fieldName f1 == fieldName f2
 
 instance Ord AnyDatatype where
   compare (AnyDatatype x) (AnyDatatype y) = compare (datatypeName x) (datatypeName y)
 
 instance Ord AnyConstr where
-  compare (AnyConstr c1) (AnyConstr c2) = compare (constrName c1) (constrName c2)
+  compare (AnyConstr _ c1) (AnyConstr _ c2) = compare (constrName c1) (constrName c2)
 
 instance Ord AnyField where
-  compare (AnyField f1) (AnyField f2) = compare (fieldName f1) (fieldName f2)
+  compare (AnyField _ f1) (AnyField _ f2) = compare (fieldName f1) (fieldName f2)
 
-data DynamicDatatype (sig :: [[Type]])
-  = DynDatatype { dynDatatypeSig :: List DynamicConstructor sig
+data DynamicDatatype (par :: Nat) (sig :: [[Type]])
+  = DynDatatype { dynDatatypeParameters :: Natural par
+                , dynDatatypeSig :: List (DynamicConstructor sig) sig
                 , dynDatatypeName :: String }
+  deriving (Eq,Ord)
 
-data DynamicConstructor (sig :: [Type])
-  = DynConstructor { dynConstrSig :: List DynamicField sig
-                   , dynConstrName :: String }
+data DynamicConstructor
+     (sig :: [[Type]])
+     (csig :: [Type]) where
+  DynConstructor :: Natural idx -> String
+                 -> List (DynamicField sig) (List.Index sig idx)
+                 -> DynamicConstructor sig (List.Index sig idx)
 
-data DynamicField (sig :: Type)
-  = DynField { dynFieldType :: Repr sig
-             , dynFieldName :: String }
+data DynamicField
+     (sig :: [[Type]])
+     (tp :: Type) where
+  DynField :: Natural idx -> Natural fidx -> String
+           -> Repr (List.Index (List.Index sig idx) fidx)
+           -> DynamicField sig (List.Index (List.Index sig idx) fidx)
 
-data DynamicValue (sig :: [[Type]]) e
-  = forall n. DynValue { dynValueType :: DynamicDatatype sig
-                       , dynValueConstr :: Natural n
-                       , dynValueArgs :: List e (List.Index sig n) }
+data DynamicValue
+     (plen :: Nat)
+     (sig :: [[Type]])
+     (par :: [Type]) e where
+  DynValue :: DynamicDatatype (List.Length par) sig
+           -> List Repr par
+           -> DynamicConstructor sig csig
+           -> List e (Instantiated csig par)
+           -> DynamicValue (List.Length par) sig par e
 
-instance Typeable sig => IsDatatype (DynamicValue sig) where
-  type Signature (DynamicValue sig) = sig
-  data Datatype (DynamicValue sig) = DynDatatypeInfo (DynamicDatatype sig)
-  data Constr (DynamicValue sig) csig where
-    DynConstr :: DynamicDatatype sig -> Natural n
-              -> Constr (DynamicValue sig) (List.Index sig n)
-  data Field (DynamicValue sig) csig fsig where
-    DynField' :: DynamicDatatype sig -> Natural n -> Natural m
-              -> Field (DynamicValue sig) (List.Index sig n) (List.Index (List.Index sig n) m)
-  datatypeName (DynDatatypeInfo dt) = dynDatatypeName dt
-  constructors (DynDatatypeInfo dt) = runIdentity $ List.mapIndexM
-    (\idx _ -> return (DynConstr dt idx))
+instance (Typeable l,Typeable sig) => IsDatatype (DynamicValue l sig) where
+  type Parameters (DynamicValue l sig) = l
+  type Signature (DynamicValue l sig) = sig
+  newtype Datatype (DynamicValue l sig)
+    = DynDatatypeInfo { dynDatatypeInfo :: DynamicDatatype l sig }
+    deriving (Eq,Ord)
+  data Constr (DynamicValue l sig) csig
+    = DynConstr (DynamicDatatype l sig) (DynamicConstructor sig csig)
+  newtype Field (DynamicValue l sig) tp
+    = DynField' (DynamicField sig tp)
+  parameters = dynDatatypeParameters . dynDatatypeInfo
+  datatypeGet (DynValue dt par _ _) = (DynDatatypeInfo dt,par)
+  datatypeName = dynDatatypeName . dynDatatypeInfo
+  constructors (DynDatatypeInfo dt) = runIdentity $ List.mapM
+    (\con -> return (DynConstr dt con))
     (dynDatatypeSig dt)
-  constrName (DynConstr dt idx) = dynConstrName $ List.index (dynDatatypeSig dt) idx
-  constrTest (DynValue { dynValueConstr = con }) (DynConstr _ idx) = case geq con idx of
-    Just Refl -> True
-    Nothing -> False
-  constrFields (DynConstr dt idx) = runIdentity $ List.mapIndexM
-    (\idx' _ -> return (DynField' dt idx idx'))
-    (dynConstrSig $ List.index (dynDatatypeSig dt) idx)
-  constrApply (ConApp (DynConstr dt idx) arg) = DynValue { dynValueType = dt
-                                                         , dynValueConstr = idx
-                                                         , dynValueArgs = arg }
-  constrGet (DynValue dt idx arg) = ConApp (DynConstr dt idx) arg
-  constrDatatype (DynConstr dt _) = DynDatatypeInfo dt
-  fieldName (DynField' dt n m) = dynFieldName $ List.index (dynConstrSig $ List.index (dynDatatypeSig dt) n) m
-  fieldType (DynField' dt n m) = dynFieldType $ List.index (dynConstrSig $ List.index (dynDatatypeSig dt) n) m
-  fieldGet (DynValue dt idx arg) (DynField' dt' n m) = case geq n idx of
-    Just Refl -> List.index arg m
-  fieldConstr (DynField' dt n m) = DynConstr dt n
-  compareField (DynField' _ n1 m1) (DynField' _ n2 m2) = case gcompare n1 n2 of
-    GEQ -> case gcompare m1 m2 of
-      GEQ -> (GEQ,Just Refl)
-      GLT -> (GLT,Nothing)
-      GGT -> (GGT,Nothing)
-    GLT -> (GLT,Nothing)
-    GGT -> (GGT,Nothing)
+  constrName (DynConstr _ (DynConstructor _ n _)) = n
+  test (DynValue _ _ (DynConstructor n _ _) _)
+    (DynConstr _ (DynConstructor m _ _))
+    = case geq n m of
+        Just Refl -> True
+        Nothing -> False
+  fields (DynConstr _ (DynConstructor _ _ fs)) = runIdentity $ List.mapM
+    (\f -> return (DynField' f)) fs
+  construct par (DynConstr dt con) args
+    = DynValue dt par con args
+  deconstruct (DynValue dt par con args) = ConApp par (DynConstr dt con) args
+  fieldName (DynField' (DynField _ _ n _)) = n
+  fieldType (DynField' (DynField _ _ _ tp)) = tp
+  fieldGet (DynValue dt par con@(DynConstructor cidx _ fs) args)
+    (DynField' (DynField cidx' fidx _ _))
+    = case geq cidx cidx' of
+    Just Refl -> index par fs args fidx
+    where
+      index :: List Repr par
+            -> List (DynamicField sig) csig
+            -> List e (Instantiated csig par)
+            -> Natural n
+            -> e (CType (List.Index csig n) par)
+      index _ (_ ::: _) (tp ::: _) Zero = tp
+      index par (_ ::: sig) (_ ::: tps) (Succ n) = index par sig tps n
 
-instance Show (Datatype (DynamicValue sig)) where
+instance Show (Datatype (DynamicValue l sig)) where
   showsPrec p (DynDatatypeInfo dt) = showString (dynDatatypeName dt)
 
-instance GEq (Constr (DynamicValue sig)) where
-  geq (DynConstr _ x) (DynConstr _ y) = do
-    Refl <- geq x y
+instance GEq (DynamicConstructor sig) where
+  geq (DynConstructor i1 _ _) (DynConstructor i2 _ _) = do
+    Refl <- geq i1 i2
     return Refl
 
-instance GCompare (Constr (DynamicValue sig)) where
-  gcompare (DynConstr _ x) (DynConstr _ y) = case gcompare x y of
+instance GCompare (DynamicConstructor sig) where
+  gcompare (DynConstructor i1 _ _) (DynConstructor i2 _ _)
+    = case gcompare i1 i2 of
     GEQ -> GEQ
     GLT -> GLT
     GGT -> GGT
 
+instance GEq (Constr (DynamicValue l sig)) where
+  geq (DynConstr _ (DynConstructor n _ _)) (DynConstr _ (DynConstructor m _ _)) = do
+    Refl <- geq n m
+    return Refl
+
+instance GCompare (Constr (DynamicValue l sig)) where
+  gcompare (DynConstr _ (DynConstructor n _ _))
+    (DynConstr _ (DynConstructor m _ _)) = case gcompare n m of
+    GEQ -> GEQ
+    GLT -> GLT
+    GGT -> GGT
+
+instance GEq (Field (DynamicValue l sig)) where
+  geq (DynField' (DynField cidx1 fidx1 _ _))
+    (DynField' (DynField cidx2 fidx2 _ _)) = do
+    Refl <- geq cidx1 cidx2
+    Refl <- geq fidx1 fidx2
+    return Refl
+
+instance GCompare (Field (DynamicValue l sig)) where
+  gcompare (DynField' (DynField cidx1 fidx1 _ _))
+    (DynField' (DynField cidx2 fidx2 _ _))
+    = case gcompare cidx1 cidx2 of
+    GEQ -> case gcompare fidx1 fidx2 of
+      GEQ -> GEQ
+      GLT -> GLT
+      GGT -> GGT
+    GLT -> GLT
+    GGT -> GGT
+
 newtype BitWidth (bw :: TL.Nat) = BitWidth { bwSize :: Integer }
+
+getBw :: Integer -> (forall bw. TL.KnownNat bw => BitWidth bw -> a) -> a
+getBw w f = case TL.someNatVal w of
+  Just (TL.SomeNat (_::Proxy bw))
+    -> f (BitWidth w::BitWidth bw)
 
 -- | Values that can be used as constants in expressions.
 data Value (a :: Type) where
@@ -290,10 +485,17 @@ data Value (a :: Type) where
   BitVecValue :: Integer
               -> BitWidth bw
               -> Value (BitVecType bw)
-  DataValue :: IsDatatype dt => Datatype dt -> dt Value -> Value (DataType dt)
+  DataValue :: (IsDatatype dt,List.Length par ~ Parameters dt)
+            => dt par Value -> Value (DataType dt par)
 
-pattern ConstrValue con args <- DataValue tp (constrGet -> ConApp con args) where
-  ConstrValue con args = DataValue (constrDatatype con) (constrApply (ConApp con args))
+pattern ConstrValue :: ()
+                    => (List.Length par ~ Parameters dt,a ~ DataType dt par,IsDatatype dt)
+                    => List Repr par
+                    -> Constr dt csig
+                    -> List Value (Instantiated csig par)
+                    -> Value a
+pattern ConstrValue par con args <- DataValue (deconstruct -> ConApp par con args) where
+  ConstrValue par con args = DataValue (construct par con args)
 
 data AnyValue = forall (t :: Type). AnyValue (Value t)
 
@@ -305,7 +507,8 @@ data Repr (t :: Type) where
   RealRepr :: Repr RealType
   BitVecRepr :: BitWidth bw -> Repr (BitVecType bw)
   ArrayRepr :: List Repr idx -> Repr val -> Repr (ArrayType idx val)
-  DataRepr :: IsDatatype dt => Datatype dt -> Repr (DataType dt)
+  DataRepr :: (IsDatatype dt,List.Length par ~ Parameters dt) => Datatype dt -> List Repr par -> Repr (DataType dt par)
+  ParameterRepr :: Natural p -> Repr (ParameterType p)
 
 data NumRepr (t :: Type) where
   NumInt :: NumRepr IntType
@@ -358,9 +561,13 @@ bitvec = BitVecRepr
 array :: List Repr idx -> Repr el -> Repr (ArrayType idx el)
 array = ArrayRepr
 
--- | A representation of a user-defined datatype.
-dt :: IsDatatype dt => Datatype dt -> Repr (DataType dt)
-dt = DataRepr
+-- | A representation of a user-defined datatype without parameters.
+dt :: (IsDatatype dt,Parameters dt ~ 'Z) => Datatype dt -> Repr (DataType dt '[])
+dt dt = DataRepr dt List.Nil
+
+-- | A representation of a user-defined datatype with parameters.
+dt' :: (IsDatatype dt,List.Length par ~ Parameters dt) => Datatype dt -> List Repr par -> Repr (DataType dt par)
+dt' = DataRepr
 
 instance GEq BitWidth where
   geq (BitWidth bw1) (BitWidth bw2)
@@ -389,10 +596,15 @@ instance GEq Value where
     if v1==v2
       then return Refl
       else Nothing
-  geq (ConstrValue c1 arg1) (ConstrValue c2 arg2) = do
-    Refl <- constrEq c1 c2
-    Refl <- geq arg1 arg2
-    return Refl
+  geq (DataValue (v1::dt1 par1 Value)) (DataValue (v2::dt2 par2 Value)) = do
+    Refl <- eqT :: Maybe (dt1 :~: dt2)
+    case deconstruct v1 of
+      ConApp p1 c1 arg1 -> case deconstruct v2 of
+        ConApp p2 c2 arg2 -> do
+          Refl <- geq p1 p2
+          Refl <- geq c1 c2
+          Refl <- geq arg1 arg2
+          return Refl
   geq _ _ = Nothing
 
 instance Eq (Value t) where
@@ -427,13 +639,24 @@ instance GCompare Value where
     GGT -> GGT
   gcompare (BitVecValue _ _) _ = GLT
   gcompare _ (BitVecValue _ _) = GGT
-  gcompare (ConstrValue c1 arg1) (ConstrValue c2 arg2) = case constrCompare c1 c2 of
-    GEQ -> case gcompare arg1 arg2 of
-      GEQ -> GEQ
-      GLT -> GLT
-      GGT -> GGT
-    GLT -> GLT
-    GGT -> GGT
+  gcompare (DataValue (v1::dt1 par1 Value)) (DataValue (v2::dt2 par2 Value))
+    = case eqT :: Maybe (dt1 :~: dt2) of
+    Just Refl -> case deconstruct v1 of
+      ConApp p1 c1 arg1 -> case deconstruct v2 of
+        ConApp p2 c2 arg2 -> case gcompare p1 p2 of
+          GEQ -> case gcompare c1 c2 of
+            GEQ -> case gcompare arg1 arg2 of
+              GEQ -> GEQ
+              GLT -> GLT
+              GGT -> GGT
+            GLT -> GLT
+            GGT -> GGT
+          GLT -> GLT
+          GGT -> GGT
+    Nothing -> case compare (typeRep (Proxy::Proxy dt1))
+                            (typeRep (Proxy::Proxy dt2)) of
+      LT -> GLT
+      GT -> GGT
 
 instance Ord (Value t) where
   compare = defaultCompare
@@ -449,10 +672,10 @@ instance GEq Repr where
     Refl <- geq idx1 idx2
     Refl <- geq val1 val2
     return Refl
-  geq (DataRepr (_::Datatype dt1)) (DataRepr (_::Datatype dt2))
-    = case eqT :: Maybe (Datatype dt1 :~: Datatype dt2) of
-    Just Refl -> Just Refl
-    Nothing -> Nothing
+  geq (DataRepr (_::Datatype dt1) p1) (DataRepr (_::Datatype dt2) p2) = do
+    Refl <- eqT :: Maybe (Datatype dt1 :~: Datatype dt2)
+    Refl <- geq p1 p2
+    return Refl
   geq _ _ = Nothing
 
 instance Eq (Repr tp) where
@@ -494,8 +717,12 @@ instance GCompare Repr where
     GGT -> GGT
   gcompare (ArrayRepr _ _) _ = GLT
   gcompare _ (ArrayRepr _ _) = GGT
-  gcompare (DataRepr (dt1 :: Datatype dt1)) (DataRepr (dt2 :: Datatype dt2)) = case eqT of
-    Just (Refl :: Datatype dt1 :~: Datatype dt2) -> GEQ
+  gcompare (DataRepr (dt1 :: Datatype dt1) p1 ) (DataRepr (dt2 :: Datatype dt2) p2)
+    = case eqT of
+    Just (Refl :: Datatype dt1 :~: Datatype dt2) -> case gcompare p1 p2 of
+      GEQ -> GEQ
+      GLT -> GLT
+      GGT -> GGT
     Nothing -> case compare (datatypeName dt1) (datatypeName dt2) of
       LT -> GLT
       GT -> GGT
@@ -524,7 +751,7 @@ instance Show (Value tp) where
   showsPrec p (RealValue i) = showsPrec p i
   showsPrec p (BitVecValue v n)
     = showBitVec p v (bwSize n)
-  showsPrec p (ConstrValue con args) = showParen (p>10) $
+  showsPrec p (ConstrValue par con args) = showParen (p>10) $
     showString "ConstrValue " .
     showString (constrName con).
     showChar ' ' .
@@ -563,7 +790,7 @@ instance Show (Repr t) where
     showString "array " .
     showsPrec 11 idx . showChar ' ' .
     showsPrec 11 el
-  showsPrec p (DataRepr dt) = showParen (p>10) $
+  showsPrec p (DataRepr dt par) = showParen (p>10) $
     showString "dt " .
     showString (datatypeName dt)
 
@@ -580,7 +807,8 @@ valueType (BoolValue _) = BoolRepr
 valueType (IntValue _) = IntRepr
 valueType (RealValue _) = RealRepr
 valueType (BitVecValue _ bw) = BitVecRepr bw
-valueType (DataValue tp _) = DataRepr tp
+valueType (DataValue v) = let (dt,par) = datatypeGet v
+                          in DataRepr dt par
 
 liftType :: List Repr tps -> List Repr idx -> List Repr (Lifted tps idx)
 liftType Nil idx = Nil
@@ -601,25 +829,28 @@ getTypes (x ::: xs) = getType x ::: getTypes xs
 
 -- | Determine the number of elements a type contains.
 --   'Nothing' means the type has infinite elements.
-typeSize :: Repr tp -> Maybe Integer
-typeSize BoolRepr = Just 2
-typeSize IntRepr = Nothing
-typeSize RealRepr = Nothing
-typeSize (BitVecRepr bw) = Just $ 2^(bwSize bw)
-typeSize (ArrayRepr idx el) = do
-  idxSz <- List.toList typeSize idx
-  elSz <- typeSize el
+typeSize :: Maybe (List Repr par) -> Repr tp -> Maybe Integer
+typeSize _ BoolRepr = Just 2
+typeSize _ IntRepr = Nothing
+typeSize _ RealRepr = Nothing
+typeSize _ (BitVecRepr bw) = Just $ 2^(bwSize bw)
+typeSize par (ArrayRepr idx el) = do
+  idxSz <- List.toList (typeSize par) idx
+  elSz <- typeSize par el
   return $ product (elSz:idxSz)
-typeSize (DataRepr dt) = do
-  conSz <- List.toList constrSize (constructors dt)
+typeSize _ (DataRepr dt par) = do
+  conSz <- List.toList (constrSize dt par) (constructors dt)
   return $ sum conSz
   where
-    constrSize :: IsDatatype dt => Constr dt sig -> Maybe Integer
-    constrSize con = do
-      fieldSz <- List.toList fieldSize (constrFields con)
+    constrSize :: IsDatatype dt => Datatype dt -> List Repr par
+               -> Constr dt sig -> Maybe Integer
+    constrSize dt par con = do
+      fieldSz <- List.toList (fieldSize dt par) (fields con)
       return $ product fieldSz
-    fieldSize :: IsDatatype dt => Field dt csig tp -> Maybe Integer
-    fieldSize field = typeSize $ fieldType field
+    fieldSize :: IsDatatype dt => Datatype dt -> List Repr par
+              -> Field dt tp -> Maybe Integer
+    fieldSize dt par field = typeSize (Just par) (fieldType field)
+typeSize (Just par) (ParameterRepr p) = typeSize Nothing (List.index par p)
 
 typeFiniteDomain :: Repr tp -> Maybe [Value tp]
 typeFiniteDomain BoolRepr = Just [BoolValue False,BoolValue True]
@@ -864,3 +1095,26 @@ instance Show (BitWidth bw) where
 
 bwAdd :: BitWidth bw1 -> BitWidth bw2 -> BitWidth (bw1 TL.+ bw2)
 bwAdd (BitWidth w1) (BitWidth w2) = BitWidth (w1+w2)
+
+datatypeEq :: (IsDatatype dt1,IsDatatype dt2)
+           => Datatype dt1 -> Datatype dt2 -> Maybe (dt1 :~: dt2)
+datatypeEq (d1 :: Datatype dt1) (d2 :: Datatype dt2) = do
+  Refl <- eqT :: Maybe (dt1 :~: dt2)
+  if d1==d2
+    then return Refl
+    else Nothing
+
+datatypeCompare :: (IsDatatype dt1,IsDatatype dt2)
+                => Datatype dt1 -> Datatype dt2
+                -> GOrdering dt1 dt2
+datatypeCompare (d1 :: Datatype dt1) (d2 :: Datatype dt2)
+  = case eqT of
+  Just (Refl :: dt1 :~: dt2) -> case compare d1 d2 of
+    EQ -> GEQ
+    LT -> GLT
+    GT -> GGT
+  Nothing -> case compare
+                  (typeRep (Proxy::Proxy dt1))
+                  (typeRep (Proxy::Proxy dt2)) of
+    LT -> GLT
+    GT -> GGT
