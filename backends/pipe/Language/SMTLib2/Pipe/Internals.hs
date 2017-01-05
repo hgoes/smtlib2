@@ -43,7 +43,6 @@ import qualified Data.Attoparsec.Number as L
 import Data.Ratio
 
 import Control.Monad.Identity
-import Control.Monad.Trans.Except
 import Control.Monad.State
 
 data PipeDatatype = forall a. IsDatatype a => PipeDatatype (Proxy a)
@@ -583,7 +582,7 @@ parseGetModel b (L.List ((L.Symbol "model"):mdl)) = do
             \b' tps args' -> do
               body' <- lispToExprTyped b' tp body
               return $ FunAssignment (UntypedFun fname tps tp) args' body'
-    parseAssignment _ lsp = throwE $ "Invalid model entry: "++show lsp
+    parseAssignment _ lsp = throwError $ "Invalid model entry: "++show lsp
     withFunList :: SMTPipe -> [L.Lisp]
                 -> (forall arg. SMTPipe -> List Repr arg -> List PipeVar arg -> LispParse a) -> LispParse a
     withFunList b [] f = f b Nil Nil
@@ -591,8 +590,8 @@ parseGetModel b (L.List ((L.Symbol "model"):mdl)) = do
       Sort tp <- lispToSort (pipeParser b) tp
       withFunList (b { vars = Map.insert v (FunArg tp) (vars b) }) ls $
         \b' tps args -> f b' (tp ::: tps) ((UntypedVar v tp) ::: args)
-    withFunList _ lsp _ = throwE $ "Invalid fun args: "++show lsp
-parseGetModel _ lsp = throwE $ "Invalid model: "++show lsp
+    withFunList _ lsp _ = throwError $ "Invalid fun args: "++show lsp
+parseGetModel _ lsp = throwError $ "Invalid model: "++show lsp
 
 data Sort = forall (t :: Type). Sort (Repr t)
 data Sorts = forall (t :: [Type]). Sorts (List Repr t)
@@ -685,7 +684,7 @@ lispToExprTyped :: SMTPipe -> Repr t -> L.Lisp -> LispParse (Expr SMTPipe t)
 lispToExprTyped st tp l = lispToExprWith (pipeParser st) (Just (Sort tp)) l $
                           \e -> case geq tp (getType e) of
                           Just Refl -> return (PipeExpr e)
-                          Nothing -> throwE $ show l++" has type "++show (getType e)++", but "++show tp++" was expected."
+                          Nothing -> throwError $ show l++" has type "++show (getType e)++", but "++show tp++" was expected."
 
 pipeParser :: SMTPipe
            -> LispParser PipeVar PipeVar PipeFun PipeVar PipeVar (Expr SMTPipe)
@@ -695,7 +694,7 @@ pipeParser st = parse
                                        -> case T.stripPrefix "is-" name of
                                        Just con -> case Map.lookup name (allConstructors $ datatypes st) of
                                          Just (AnyConstr dt con) -> test dt con
-                                         _ -> throwE $ "Unknown constructor: "++show name
+                                         _ -> throwError $ "Unknown constructor: "++show name
                                        Nothing -> case Map.lookup name (allConstructors $ datatypes st) of
                                          Just (AnyConstr dt c) -> con dt c
                                          Nothing -> case Map.lookup name (allFields $ datatypes st) of
@@ -703,10 +702,10 @@ pipeParser st = parse
                                            Nothing -> case Map.lookup name (vars st) of
                                              Just (Fun arg tp)
                                                -> fun (UntypedFun name arg tp)
-                                             _ -> throwE $ "Unknown symbol "++show name
+                                             _ -> throwError $ "Unknown symbol "++show name
                      , parseDatatype = \name res -> case Map.lookup name (allDatatypes $ datatypes st) of
                                          Just (AnyDatatype p) -> res p
-                                         _ -> throwE $ "Unknown datatype "++show name
+                                         _ -> throwError $ "Unknown datatype "++show name
                      , parseVar = \srt name v qv fv lv -> case Map.lookup name (vars st) of
                                     Just (Var tp)
                                       -> v (UntypedVar name tp)
@@ -716,7 +715,7 @@ pipeParser st = parse
                                       -> fv (UntypedVar name tp)
                                     Just (LVar tp)
                                       -> lv (UntypedVar name tp)
-                                    _ -> throwE $ "Unknown variable "++show name
+                                    _ -> throwError $ "Unknown variable "++show name
                      , parseRecursive = \parse srt l res -> lispToExprWith parse srt l $
                                                             \e -> res (PipeExpr e)
                      , registerQVar = \name tp
@@ -784,8 +783,8 @@ lispToExprWith p hint (L.List (fun:args)) res = do
                    ) args'
   AnyFunction fun' <- getParsedFunction parsed hints
   let (argTps,ret) = getFunType fun'
-  args'' <- catchE (makeList p argTps args') $
-            \err -> throwE $ "While parsing arguments of function: "++
+  args'' <- catchError (makeList p argTps args') $
+            \err -> throwError $ "While parsing arguments of function: "++
                     show fun'++": "++err
   res $ App fun' args''
   where
@@ -801,23 +800,23 @@ lispToExprWith p hint (L.List (fun:args)) res = do
     makeList :: (GShow e,GetType e) => LispParser v qv fun fv lv e
              -> List Repr arg -> [Either L.Lisp (AnyExpr e)] -> LispParse (List e arg)
     makeList _ Nil [] = return Nil
-    makeList _ Nil _  = throwE $ "Too many arguments to function."
+    makeList _ Nil _  = throwError $ "Too many arguments to function."
     makeList p (tp ::: args) (e:es) = case e of
       Right (AnyExpr e') -> do
         r <- case geq tp (getType e') of
            Just Refl -> return e'
-           Nothing -> throwE $ "Argument "++gshowsPrec 11 e' ""++" has wrong type."
+           Nothing -> throwError $ "Argument "++gshowsPrec 11 e' ""++" has wrong type."
         rs <- makeList p args es
         return (r ::: rs)
       Left l -> parseRecursive p p (Just $ Sort tp) l $
                 \e' -> do
                   r <- case geq tp (getType e') of
                      Just Refl -> return e'
-                     Nothing -> throwE $ "Argument "++gshowsPrec 11 e' ""++" has wrong type."
+                     Nothing -> throwError $ "Argument "++gshowsPrec 11 e' ""++" has wrong type."
                   rs <- makeList p args es
                   return (r ::: rs)
-    makeList _ (_ ::: _) [] = throwE $ "Not enough arguments to function."
-lispToExprWith _ _ lsp _ = throwE $ "Invalid SMT expression: "++show lsp
+    makeList _ (_ ::: _) [] = throwError $ "Not enough arguments to function."
+lispToExprWith _ _ lsp _ = throwError $ "Invalid SMT expression: "++show lsp
 
 mkQuant :: LispParser v qv fun fv lv e -> [L.Lisp]
         -> (forall arg. LispParser v qv fun fv lv e -> List qv arg -> LispParse a)
@@ -827,7 +826,7 @@ mkQuant p ((L.List [L.Symbol name,sort]):args) f = do
   Sort srt <- lispToSort p sort
   let (qvar,np) = registerQVar p name srt
   mkQuant np args $ \p args -> f p (qvar ::: args)
-mkQuant _ lsp _ = throwE $ "Invalid forall/exists parameter: "++show lsp
+mkQuant _ lsp _ = throwError $ "Invalid forall/exists parameter: "++show lsp
 
 mkLet :: GetType e
       => LispParser v qv fun fv lv e -> [L.Lisp]
@@ -840,7 +839,7 @@ mkLet p ((L.List [L.Symbol name,expr]):args) f
     \expr' -> do
       let (lvar,np) = registerLetVar p name (getType expr')
       mkLet np args $ \p args -> f p ((LetBinding lvar expr') ::: args)
-mkLet _ lsp _ = throwE $ "Invalid let parameter: "++show lsp
+mkLet _ lsp _ = throwError $ "Invalid let parameter: "++show lsp
 
 withEq :: Repr t -> [b]
        -> (forall n. Natural n -> List Repr (AllEq t n) -> a)
@@ -857,13 +856,13 @@ lispToFunction _ _ (L.Symbol "=")
        Just (Sort tp):_ -> withEq tp args $
                            \n args
                            -> return $ AnyFunction (Eq tp n)
-       _ -> throwE $ "Cannot derive type of = parameters.")
+       _ -> throwError $ "Cannot derive type of = parameters.")
 lispToFunction _ _ (L.Symbol "distinct")
   = return $ ParsedFunction (==0)
     (\args -> case args of
        Just (Sort tp):_ -> withEq tp args $
                            \n args' -> return $ AnyFunction (Distinct tp n)
-       _ -> throwE $ "Cannot derive type of \"distinct\" parameters.")
+       _ -> throwError $ "Cannot derive type of \"distinct\" parameters.")
 lispToFunction rf sort (L.List [L.Symbol "_",L.Symbol "map",sym]) = do
   f <- lispToFunction rf sort' sym
   let reqList 0 = case idx' of
@@ -876,14 +875,14 @@ lispToFunction rf sort (L.List [L.Symbol "_",L.Symbol "map",sym]) = do
           Nothing -> case args of
             Just srt:_ -> case asArraySort srt of
               Just (idx,_) -> return idx
-              Nothing -> throwE $ "Could not derive type of the array index in map function."
-            _ -> throwE $ "Could not derive type of the array index in map function."
+              Nothing -> throwError $ "Could not derive type of the array index in map function."
+            _ -> throwError $ "Could not derive type of the array index in map function."
         argSorts <- mapM (\prx -> case prx of
                             Nothing -> return Nothing
                             Just srt -> do
                               (_,elsrt) <- case asArraySort srt of
                                 Just srt' -> return srt'
-                                Nothing -> throwE $ "Argument to map function isn't an array."
+                                Nothing -> throwError $ "Argument to map function isn't an array."
                               return (Just elsrt)
                          ) args
         fun' <- getParsedFunction f argSorts
@@ -916,14 +915,14 @@ lispToFunction _ sort (L.Symbol "abs") = case sort of
   Just (Sort tp) -> case tp of
     IntRepr -> return $ ParsedFunction (const False) (\_ -> return $ AnyFunction (Abs NumInt))
     RealRepr -> return $ ParsedFunction (const False) (\_ -> return $ AnyFunction (Abs NumReal))
-    exp -> throwE $ "abs function can't have type "++show exp
+    exp -> throwError $ "abs function can't have type "++show exp
   Nothing -> return $ ParsedFunction (==0) $
              \args -> case args of
                 [Just (Sort tp)] -> case tp of
                   IntRepr -> return $ AnyFunction (Abs NumInt)
                   RealRepr -> return $ AnyFunction (Abs NumReal)
-                  srt -> throwE $ "abs can't take argument of type "++show srt
-                _ -> throwE $ "abs function takes exactly one argument."
+                  srt -> throwError $ "abs can't take argument of type "++show srt
+                _ -> throwError $ "abs function takes exactly one argument."
 lispToFunction _ _ (L.Symbol "not")
   = return $ ParsedFunction (const False) (\_ -> return $ AnyFunction Not)
 lispToFunction _ _ (L.Symbol "and") = return $ lispToLogicFunction And
@@ -942,7 +941,7 @@ lispToFunction _ sort (L.Symbol "ite") = case sort of
              \args -> case args of
                [_,Just (Sort tp),_]
                  -> return $ AnyFunction (ITE tp)
-               _ -> throwE $ "Invalid arguments to ite function."
+               _ -> throwError $ "Invalid arguments to ite function."
 lispToFunction _ _ (L.Symbol "bvule") = return $ lispToBVCompFunction BVULE
 lispToFunction _ _ (L.Symbol "bvult") = return $ lispToBVCompFunction BVULT
 lispToFunction _ _ (L.Symbol "bvuge") = return $ lispToBVCompFunction BVUGE
@@ -972,23 +971,23 @@ lispToFunction _ _ (L.Symbol "select")
        Just (Sort arr):_ -> case arr of
          ArrayRepr idx el
            -> return $ AnyFunction (Select idx el)
-         srt -> throwE $ "Invalid argument type to select function: "++show srt
-       _ -> throwE $ "Invalid arguments to select function.")
+         srt -> throwError $ "Invalid argument type to select function: "++show srt
+       _ -> throwError $ "Invalid arguments to select function.")
 lispToFunction _ sort (L.Symbol "store") = case sort of
   Just (Sort srt) -> case srt of
     ArrayRepr idx el
       -> return (ParsedFunction (const False)
                  (\_ -> return $ AnyFunction
                         (Store idx el)))
-    srt' -> throwE $ "Invalid argument types to store function: "++show srt'
+    srt' -> throwError $ "Invalid argument types to store function: "++show srt'
   Nothing -> return $ ParsedFunction (==0)
              (\args -> case args of
                 Just (Sort arr):_ -> case arr of
                   ArrayRepr idx el
                     -> return $ AnyFunction
                        (Store idx el)
-                  srt -> throwE $ "Invalid first argument type to store function: "++show srt
-                _ -> throwE $ "Invalid arguments to store function.")
+                  srt -> throwError $ "Invalid first argument type to store function: "++show srt
+                _ -> throwError $ "Invalid arguments to store function.")
 lispToFunction r sort (L.List [L.Symbol "as",L.Symbol "const",sig]) = do
   Sort rsig <- case sort of
     Just srt -> return srt
@@ -997,7 +996,7 @@ lispToFunction r sort (L.List [L.Symbol "as",L.Symbol "const",sig]) = do
     ArrayRepr idx el
       -> return $ ParsedFunction (const False)
          (\_ -> return $ AnyFunction (ConstArray idx el))
-    _ -> throwE $ "Invalid signature for (as const ...) function."
+    _ -> throwError $ "Invalid signature for (as const ...) function."
 lispToFunction _ sort (L.Symbol "concat")
   = return $ ParsedFunction (const True)
     (\args -> case args of
@@ -1005,8 +1004,8 @@ lispToFunction _ sort (L.Symbol "concat")
          -> case (tp1,tp2) of
          (BitVecRepr sz1,BitVecRepr sz2)
            -> return $ AnyFunction (Concat sz1 sz2)
-         _ -> throwE $ "Invalid argument types to concat function."
-       _ -> throwE $ "Wrong number of arguments to concat function.")
+         _ -> throwError $ "Invalid argument types to concat function."
+       _ -> throwError $ "Wrong number of arguments to concat function.")
 lispToFunction _ sort (L.List [L.Symbol "_",L.Symbol "extract",L.Number (L.I end),L.Number (L.I start)])
   = return $ ParsedFunction (==0)
     (\args -> case args of
@@ -1021,9 +1020,9 @@ lispToFunction _ sort (L.List [L.Symbol "_",L.Symbol "extract",L.Number (L.I end
                         -> return $ AnyFunction
                             (Extract size (bw start')
                               (bw len'))
-           | otherwise -> throwE $ "Invalid extract parameters."
-         srt -> throwE $ "Invalid type of extract argument: "++show srt
-       _ -> throwE $ "Wrong number of arguments to extract function.")
+           | otherwise -> throwError $ "Invalid extract parameters."
+         srt -> throwError $ "Invalid type of extract argument: "++show srt
+       _ -> throwError $ "Wrong number of arguments to extract function.")
 lispToFunction _ sort (L.List [L.Symbol "_",L.Symbol "divisible",L.Number (L.I div)])
   = return $ ParsedFunction (const False)
     (\_ -> return $ AnyFunction (Divisible div))
@@ -1106,7 +1105,7 @@ lispToFunction rf sort (L.Symbol name)
                                   Refl <- geq tp tp'
                                   return cmp) mp
       inferArgs args fs mp1
-lispToFunction _ _ lsp = throwE $ "Unknown function: "++show lsp
+lispToFunction _ _ lsp = throwError $ "Unknown function: "++show lsp
 
 fullArgs :: Int -> [(Int,Sort)] -> Natural len -> (forall tps. (List.Length tps ~ len) => List Repr tps -> a) -> Maybe a
 fullArgs cpos [] Zero f = Just $ f Nil
@@ -1123,8 +1122,8 @@ lispToOrdFunction op
                (Just (Sort srt)):_ -> case srt of
                  IntRepr -> return $ AnyFunction (Ord NumInt op)
                  RealRepr -> return $ AnyFunction (Ord NumReal op)
-                 srt' -> throwE $ "Invalid argument to "++show op++" function: "++show srt'
-               _ -> throwE $ "Wrong number of arguments to "++show op++" function."))
+                 srt' -> throwError $ "Invalid argument to "++show op++" function: "++show srt'
+               _ -> throwError $ "Wrong number of arguments to "++show op++" function."))
 
 lispToArithFunction :: Maybe Sort -> ArithOp -> LispParse (ParsedFunction fun)
 lispToArithFunction sort op = case sort of
@@ -1135,7 +1134,7 @@ lispToArithFunction sort op = case sort of
     RealRepr -> return (ParsedFunction (const False)
                         (\args -> withEq RealRepr args $
                                  \n _ -> return $ AnyFunction (Arith NumReal op n)))
-    srt -> throwE $ "Invalid type of "++show op++" function: "++show srt
+    srt -> throwError $ "Invalid type of "++show op++" function: "++show srt
   Nothing -> return (ParsedFunction (==0)
                      (\argSrt -> case argSrt of
                         (Just (Sort srt)):_ -> case srt of
@@ -1145,8 +1144,8 @@ lispToArithFunction sort op = case sort of
                            RealRepr -> withEq RealRepr argSrt $
                                        \n args
                                        -> return $ AnyFunction (Arith NumReal op n)
-                           srt' -> throwE $ "Wrong argument type to "++show op++" function: "++show srt'
-                        _ -> throwE $ "Wrong number of arguments to "++show op++" function."))
+                           srt' -> throwError $ "Wrong argument type to "++show op++" function: "++show srt'
+                        _ -> throwError $ "Wrong number of arguments to "++show op++" function."))
 
 lispToLogicFunction :: LogicOp -> ParsedFunction fun
 lispToLogicFunction op
@@ -1161,34 +1160,34 @@ lispToBVCompFunction op
     (\args -> case args of
        [Just (Sort srt),_] -> case srt of
          BitVecRepr bw -> return $ AnyFunction (BVComp op bw)
-         srt -> throwE $ "Invalid argument type to "++show op++" function: "++show srt
-       _ -> throwE $ "Wrong number of arguments to "++show op++" function.")
+         srt -> throwError $ "Invalid argument type to "++show op++" function: "++show srt
+       _ -> throwError $ "Wrong number of arguments to "++show op++" function.")
 
 lispToBVBinFunction :: Maybe Sort -> BVBinOp -> LispParse (ParsedFunction fun)
 lispToBVBinFunction (Just (Sort srt)) op = case srt of
   BitVecRepr bw -> return $ ParsedFunction (const False) $
                    \_ -> return $ AnyFunction (BVBin op bw)
-  srt' -> throwE $ "Invalid argument type to "++show op++" function: "++show srt'
+  srt' -> throwError $ "Invalid argument type to "++show op++" function: "++show srt'
 lispToBVBinFunction Nothing op
   = return $ ParsedFunction (==0) $
     \args -> case args of
       [Just (Sort srt),_] -> case srt of
         BitVecRepr bw -> return $ AnyFunction (BVBin op bw)
-        srt' -> throwE $ "Invalid argument type to "++show op++" function: "++show srt'
-      _ -> throwE $ "Wrong number of arguments to "++show op++" function."
+        srt' -> throwError $ "Invalid argument type to "++show op++" function: "++show srt'
+      _ -> throwError $ "Wrong number of arguments to "++show op++" function."
 
 lispToBVUnFunction :: Maybe Sort -> BVUnOp -> LispParse (ParsedFunction fun)
 lispToBVUnFunction (Just (Sort srt)) op = case srt of
   BitVecRepr bw -> return $ ParsedFunction (const False) $
                    \_ -> return $ AnyFunction (BVUn op bw)
-  srt' -> throwE $ "Invalid argument type to "++show op++" function: "++show srt'
+  srt' -> throwError $ "Invalid argument type to "++show op++" function: "++show srt'
 lispToBVUnFunction Nothing op
   = return $ ParsedFunction (==0) $
     \args -> case args of
       [Just (Sort srt)] -> case srt of
         BitVecRepr bw -> return $ AnyFunction (BVUn op bw)
-        srt' -> throwE $ "Invalid argument type to "++show op++" function: "++show srt'
-      _ -> throwE $ "Wrong number of arguments to "++show op++" function."
+        srt' -> throwError $ "Invalid argument type to "++show op++" function: "++show srt'
+      _ -> throwError $ "Wrong number of arguments to "++show op++" function."
 
 mkMap :: List Repr idx -> AnyFunction fun -> AnyFunction fun
 mkMap idx (AnyFunction f) = AnyFunction (Map idx f)
@@ -1222,14 +1221,14 @@ lispToSort _ (L.List [L.Symbol "_",L.Symbol "BitVec",L.Number (L.I n)])
 lispToSort r (L.Symbol name)
   = parseDatatype r name $ \dt -> case geq (parameters dt) Zero of
   Just Refl -> return $ Sort (DataRepr dt Nil)
-  Nothing -> throwE $ "Wrong sort for type "++show name
+  Nothing -> throwError $ "Wrong sort for type "++show name
 lispToSort r (L.List (L.Symbol name:args))
   = parseDatatype r name $
     \dt -> lispToSorts r args $
            \args' -> case geq (List.length args') (parameters dt) of
              Just Refl -> return $ Sort (DataRepr dt args')
-             Nothing -> throwE $ "Wrong number of arguments for type "++show name
-lispToSort _ lsp = throwE $ "Invalid SMT type: "++show lsp
+             Nothing -> throwError $ "Wrong number of arguments for type "++show name
+lispToSort _ lsp = throwError $ "Invalid SMT type: "++show lsp
 
 lispToSorts :: LispParser v qv fun fv lv e -> [L.Lisp]
             -> (forall (arg :: [Type]). List Repr arg -> LispParse a)
@@ -1253,7 +1252,7 @@ lispToConstant (lispToReal -> Just n) = return (AnyValue (RealValue n))
 lispToConstant (lispToBitVec -> Just (val,sz))
   = case TL.someNatVal sz of
   Just (TL.SomeNat w) -> return (AnyValue (BitVecValue val (bw w)))
-lispToConstant l = throwE $ "Invalid constant "++show l
+lispToConstant l = throwError $ "Invalid constant "++show l
 
 lispToConstrConstant :: SMTPipe -> Maybe Sort -> L.Lisp
                      -> LispParse AnyValue
@@ -1261,7 +1260,7 @@ lispToConstrConstant b hint sym = do
   (constr,args) <- case sym of
     L.Symbol s -> return (s,[])
     L.List ((L.Symbol s):args) -> return (s,args)
-    _ -> throwE $ "Invalid constant: "++show sym
+    _ -> throwError $ "Invalid constant: "++show sym
   case Map.lookup constr (allConstructors $ datatypes b) of
     Just (AnyConstr (dt::Datatype dt) con)
       -> makeList (case hint of
@@ -1283,8 +1282,8 @@ lispToConstrConstant b hint sym = do
                                 return $ AnyValue $ DataValue $
                                   construct rpar con rargs of
            Just (Just res) -> return res
-           _ -> throwE "Type error in constructor"
-    Nothing -> throwE $ "Invalid constructor "++show constr
+           _ -> throwError "Type error in constructor"
+    Nothing -> throwError $ "Invalid constructor "++show constr
   where
     makeList :: IsDatatype dt
              => IntMap Sort
@@ -1294,7 +1293,7 @@ lispToConstrConstant b hint sym = do
                  => IntMap Sort -> List Value narg -> LispParse a)
              -> LispParse a
     makeList par Nil [] res = res par Nil
-    makeList _ Nil _ _ = throwE $ "Too many arguments to constructor."
+    makeList _ Nil _ _ = throwError $ "Too many arguments to constructor."
     makeList par (f ::: fs) (l:ls) res
       = partialInstantiation (fieldType f)
         (\n g -> do
@@ -1309,10 +1308,10 @@ lispToConstrConstant b hint sym = do
                      Just Refl -> return cpar
                      Nothing -> Nothing
                    Nothing -> return $ IMap.insert pos' (Sort ptp) cpar) par of
-            Nothing -> throwE "Type error in constructor arguments."
+            Nothing -> throwError "Type error in constructor arguments."
             Just npar -> makeList npar fs ls $
                          \rpar rest -> res rpar (v ::: rest)
-    makeList _ (_ ::: _) [] _ = throwE $ "Not enough arguments to constructor."
+    makeList _ (_ ::: _) [] _ = throwError $ "Not enough arguments to constructor."
 
 lispToNumber :: L.Lisp -> Maybe Integer
 lispToNumber (L.Number (L.I n)) = Just n
