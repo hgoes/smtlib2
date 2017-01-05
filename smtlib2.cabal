@@ -17,7 +17,7 @@ Source-Repository head
   Location:     https://github.com/hguenther/smtlib2.git
 
 Library
-  Build-Depends: base >= 4, constraints, mtl, containers, template-haskell, dependent-sum, dependent-map
+  Build-Depends: base >= 4 && < 5, constraints, mtl, containers, template-haskell, dependent-sum, dependent-map
   Extensions:
              GADTs
              FlexibleContexts
