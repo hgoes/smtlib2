@@ -17,6 +17,10 @@ import qualified Data.Dependent.Map as DMap
 
 type EmbedExpr m e tp = Expression (EmVar m e) (EmQVar m e) (EmFun m e) (EmFunArg m e) (EmLVar m e) e tp
 
+-- | A class of 'Monad's that can be used to form SMTLib expressions.
+--   The default instance of this class is the 'SMT' monad, together with its
+--   associated 'Expr' type. An interesting instance is the 'Identity' monad
+--   with the 'Value' type, which allows evaluation of SMTLib expressions.
 class (Applicative m,
        GCompare (EmVar m e),
        GCompare (EmQVar m e),

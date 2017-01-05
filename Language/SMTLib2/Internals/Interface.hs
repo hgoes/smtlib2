@@ -166,6 +166,7 @@ matchNumRepr' r = (matchNumRepr r,r)
 #define MK_SIG(PROV,REQ,NAME,LHS,RHS) pattern PROV => NAME LHS :: REQ => RHS
 #endif
 
+-- | Matches constant boolean expressions ('true' or 'false').
 MK_SIG((rtp ~ BoolType),(),ConstBool,Bool,Expression v qv fun fv lv e rtp)
 pattern ConstBool x = E.Const (BoolValue x)
 
@@ -844,6 +845,12 @@ bvneg = bvun E.BVNeg
 {-# INLINEABLE bvnot #-}
 {-# INLINEABLE bvneg #-}
 
+-- | Access an array element.
+--   The following law holds:
+--
+-- @
+--    select (store arr i e) i .==. e
+-- @
 select :: (Embed m e,HasMonad arr,MatchMonad arr m,MonadResult arr ~ e (ArrayType idx el),
            HasMonad i,MatchMonad i m,MonadResult i ~ List e idx)
        => arr -> i -> m (e el)
@@ -854,6 +861,7 @@ select arr idx = embed $ (\arr' idx' tp -> case tp arr' of
                  embedTypeOf
 {-# INLINEABLE select #-}
 
+-- | A specialized version of 'select' when the index is just a single element.
 select1 :: (Embed m e,HasMonad arr,HasMonad idx,
             MatchMonad arr m,MatchMonad idx m,
             MonadResult arr ~ e (ArrayType '[idx'] el),
@@ -862,6 +870,13 @@ select1 :: (Embed m e,HasMonad arr,HasMonad idx,
 select1 arr idx = select arr (idx .:. nil)
 {-# INLINEABLE select1 #-}
 
+-- | Write an element into an array and return the resulting array.
+--   The following laws hold (forall i/=j):
+--
+-- @
+--    select (store arr i e) i .==. e
+--    select (store arr i e) j .==. select arr j
+-- @
 store :: (Embed m e,HasMonad arr,MatchMonad arr m,MonadResult arr ~ e (ArrayType idx el),
           HasMonad i,MatchMonad i m,MonadResult i ~ List e idx,
           HasMonad nel,MatchMonad nel m,MonadResult nel ~ e el)
@@ -874,6 +889,7 @@ store arr idx nel = embed $ (\arr' idx' nel' tp -> case tp arr' of
                     embedTypeOf
 {-# INLINEABLE store #-}
 
+-- | A specialized version of 'store' when the index is just a single element.
 store1 :: (Embed m e,HasMonad arr,HasMonad idx,HasMonad el,
            MatchMonad arr m,MatchMonad idx m,MatchMonad el m,
            MonadResult arr ~ e (ArrayType '[idx'] el'),
@@ -883,6 +899,12 @@ store1 :: (Embed m e,HasMonad arr,HasMonad idx,HasMonad el,
 store1 arr idx el = store arr (idx .:. nil) el
 {-# INLINEABLE store1 #-}
 
+-- | Create an array where every element is the same.
+--   The following holds:
+--
+-- @
+--    select (constArray tp e) i .==. e
+-- @
 constArray :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e tp)
            => List Repr idx -> a
            -> m (e (ArrayType idx tp))
@@ -970,10 +992,14 @@ divisible :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e IntType)
 divisible n x = embed $ Divisible n <$> embedM x
 {-# INLINEABLE divisible #-}
 
-true,false :: Embed m e => m (e BoolType)
+-- | Create the boolean expression "true".
+true :: Embed m e => m (e BoolType)
 true = embed $ pure $ E.Const (BoolValue True)
-false = embed $ pure $ E.Const (BoolValue False)
 {-# INLINEABLE true #-}
+
+-- | Create the boolean expression "false".
+false :: Embed m e => m (e BoolType)
+false = embed $ pure $ E.Const (BoolValue False)
 {-# INLINEABLE false #-}
 
 mk :: (Embed m e,HasMonad a,MatchMonad a m,
