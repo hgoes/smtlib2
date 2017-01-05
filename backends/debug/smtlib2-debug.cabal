@@ -6,18 +6,10 @@ License-File:   LICENSE
 Build-Type:     Simple
 Cabal-Version:  >=1.2
 
-Flag Base4_8
-  Description: Build with a newer base module
-  Default: True
-  Manual: False
-
 Library
-  Build-Depends:        smtlib2 >= 1.0 && < 1.1, smtlib2-pipe >= 1.0 && < 1.1, ansi-terminal >= 0.5,
-                        atto-lisp, mtl,containers,text, dependent-map >= 0.2, dependent-sum
-  if flag(Base4_8)
-     Build-Depends: base >= 4.8 && < 5
-  else
-     Build-Depends: base >= 4 && < 5, transformers  
+  Build-Depends:        base >= 4 && < 5, smtlib2 >= 1.0 && < 1.1, smtlib2-pipe >= 1.0 && < 1.1,
+                        ansi-terminal >= 0.5, atto-lisp, mtl,containers,text, dependent-map >= 0.2,
+                        dependent-sum
   Extensions:		FlexibleContexts,TypeFamilies,GADTs,ExistentialQuantification,OverloadedStrings,DeriveDataTypeable,GeneralizedNewtypeDeriving,StandaloneDeriving,FlexibleInstances
   GHC-Options: -fwarn-unused-imports
   Exposed-Modules:
