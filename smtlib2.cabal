@@ -14,17 +14,8 @@ Source-Repository head
   Type:         git
   Location:     https://github.com/hguenther/smtlib2.git
 
-Flag Base4_8
-  Description: Build with a newer base module
-  Default: True
-  Manual: False
-  
 Library
-  Build-Depends: constraints, mtl, containers, template-haskell, dependent-sum, dependent-map
-  if flag(Base4_8)
-     Build-Depends: base >= 4.8 && < 5
-  else
-     Build-Depends: base >= 4 && < 5, transformers
+  Build-Depends: base >= 4, constraints, mtl, containers, template-haskell, dependent-sum, dependent-map
   Extensions:
              GADTs
              FlexibleContexts
