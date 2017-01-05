@@ -9,6 +9,8 @@ License:        GPL-3
 License-File:   LICENSE
 Build-Type:     Simple
 Cabal-Version:  >=1.6
+Extra-Source-Files:
+  README.org
 
 Source-Repository head
   Type:         git
