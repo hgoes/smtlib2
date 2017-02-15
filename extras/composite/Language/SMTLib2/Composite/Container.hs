@@ -2,11 +2,15 @@
 module Language.SMTLib2.Composite.Container (
   -- * Container class
   Container(..),
+  -- * Paths
+  Path(..),
+  pathGet,
+  pathSet,
+  withPath,
   -- * Accessors
   Acc(..),
   Accessor(..),
   AccessorFork(..),
-  Path(..),
   withAccessor,
   access,
   -- ** Construction
