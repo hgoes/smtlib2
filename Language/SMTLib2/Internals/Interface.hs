@@ -4,7 +4,7 @@ module Language.SMTLib2.Internals.Interface
         pattern Var,
         -- ** Constants
         pattern ConstBool,pattern ConstInt,pattern ConstReal,pattern ConstBV,
-        constant,asConstant,true,false,cbool,cint,creal,cbv,cbvUntyped,cdt,
+        constant,asConstant,true,false,cbool,cint,creal,cbv,cbvUntyped,cbvUntyped',cdt,
         -- ** Quantification
         exists,forall,
         -- ** Functions
@@ -43,7 +43,7 @@ module Language.SMTLib2.Internals.Interface
         pattern BVBin,pattern BVAdd,pattern BVSub,pattern BVMul,pattern BVURem,pattern BVSRem,pattern BVUDiv,pattern BVSDiv,pattern BVSHL,pattern BVLSHR,pattern BVASHR,pattern BVXor,pattern BVAnd,pattern BVOr,bvbin,bvadd,bvsub,bvmul,bvurem,bvsrem,bvudiv,bvsdiv,bvshl,bvlshr,bvashr,bvxor,bvand,bvor,
         pattern BVUn,pattern BVNot,pattern BVNeg,
         bvun,bvnot,bvneg,
-        pattern Concat,pattern Extract,concat',extract',extractChecked,extractUntypedStart,extractUntyped,
+        pattern Concat,pattern Extract,concat',extract',extractChecked,extractUntypedStart,extractUntyped,extractUntyped',
         -- *** Arrays
         pattern Select,pattern Store,pattern ConstArray,select,select1,store,store1,constArray,
         -- *** Datatypes
@@ -445,6 +445,14 @@ cbvUntyped val w f = case TL.someNatVal w of
     bv <- embed $ pure $ E.Const (BitVecValue val (bw rw))
     f bv
   Nothing -> error "cbvUntyped: Negative bitwidth"
+
+cbvUntyped' :: (Embed m e,Monad m) => Integer -- ^ The value (negative values will be stored in two's-complement).
+            -> Integer -- ^ The bitwidth (must be >= 0).
+            -> (forall bw. BitWidth bw -> e (BitVecType bw) -> m b)
+            -> m b
+cbvUntyped' val w f = getBw w $ \rw -> do
+  bv <- embed $ pure $ E.Const (BitVecValue val rw)
+  f rw bv
 
 cdt :: (Embed m e,IsDatatype t,List.Length par ~ Parameters t)
     => t par Value -> m (e (DataType t par))
@@ -986,6 +994,19 @@ extractUntyped start len arg f = case TL.someNatVal start of
       f bv
     Nothing -> error "extractUntyped: Negative length"
   Nothing -> error "extractUntyped: Negative start value"
+
+extractUntyped' :: forall m e a bw b.
+                   (Embed m e,Monad m,HasMonad a,MatchMonad a m,
+                    MonadResult a ~ e (BitVecType bw))
+                => Integer -> Integer -> a
+                -> (forall len. BitWidth len -> e (BitVecType len) -> m b)
+                -> m b
+extractUntyped' start len arg f
+  = getBw start $
+    \start' -> getBw len $
+    \len' -> do
+      bv <- extractChecked start' len' arg
+      f len' bv
 
 divisible :: (Embed m e,HasMonad a,MatchMonad a m,MonadResult a ~ e IntType)
           => Integer -> a -> m (e BoolType)
