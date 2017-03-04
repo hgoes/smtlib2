@@ -41,46 +41,46 @@ mapAllEq f (Succ n) (x ::: xs) = do
   return (x' ::: xs')
 
 data Function (fun :: ([Type],Type) -> *) (sig :: ([Type],Type)) where
-  Fun :: fun '(arg,res) -> Function fun '(arg,res)
-  Eq :: Repr tp -> Natural n -> Function fun '(AllEq tp n,BoolType)
-  Distinct :: Repr tp -> Natural n -> Function fun '(AllEq tp n,BoolType)
-  Map :: List Repr idx -> Function fun '(arg,res)
+  Fun :: !(fun '(arg,res)) -> Function fun '(arg,res)
+  Eq :: !(Repr tp) -> !(Natural n) -> Function fun '(AllEq tp n,BoolType)
+  Distinct :: !(Repr tp) -> !(Natural n) -> Function fun '(AllEq tp n,BoolType)
+  Map :: !(List Repr idx) -> !(Function fun '(arg,res))
       -> Function fun '(Lifted arg idx,ArrayType idx res)
-  Ord :: NumRepr tp -> OrdOp -> Function fun '([tp,tp],BoolType)
-  Arith :: NumRepr tp -> ArithOp -> Natural n
+  Ord :: !(NumRepr tp) -> !OrdOp -> Function fun '([tp,tp],BoolType)
+  Arith :: !(NumRepr tp) -> !ArithOp -> !(Natural n)
         -> Function fun '(AllEq tp n,tp)
-  ArithIntBin :: ArithOpInt -> Function fun '([IntType,IntType],IntType)
+  ArithIntBin :: !ArithOpInt -> Function fun '([IntType,IntType],IntType)
   Divide :: Function fun '([RealType,RealType],RealType)
-  Abs :: NumRepr tp -> Function fun '( '[tp],tp)
+  Abs :: !(NumRepr tp) -> Function fun '( '[tp],tp)
   Not :: Function fun '( '[BoolType],BoolType)
-  Logic :: LogicOp -> Natural n -> Function fun '(AllEq BoolType n,BoolType)
+  Logic :: !LogicOp -> !(Natural n) -> Function fun '(AllEq BoolType n,BoolType)
   ToReal :: Function fun '( '[IntType],RealType)
   ToInt :: Function fun '( '[RealType],IntType)
-  ITE :: Repr a -> Function fun '([BoolType,a,a],a)
-  BVComp :: BVCompOp -> BitWidth a -> Function fun '([BitVecType a,BitVecType a],BoolType)
-  BVBin :: BVBinOp -> BitWidth a -> Function fun '([BitVecType a,BitVecType a],BitVecType a)
-  BVUn :: BVUnOp -> BitWidth a -> Function fun '( '[BitVecType a],BitVecType a)
-  Select :: List Repr idx -> Repr val -> Function fun '(ArrayType idx val ': idx,val)
-  Store :: List Repr idx -> Repr val -> Function fun '(ArrayType idx val ': val ': idx,ArrayType idx val)
-  ConstArray :: List Repr idx -> Repr val -> Function fun '( '[val],ArrayType idx val)
-  Concat :: BitWidth n1 -> BitWidth n2 -> Function fun '([BitVecType n1,BitVecType n2],BitVecType (n1 TL.+ n2))
-  Extract :: BitWidth bw -> BitWidth start -> BitWidth len -> Function fun '( '[BitVecType bw],BitVecType len)
+  ITE :: !(Repr a) -> Function fun '([BoolType,a,a],a)
+  BVComp :: !BVCompOp -> !(BitWidth a) -> Function fun '([BitVecType a,BitVecType a],BoolType)
+  BVBin :: !BVBinOp -> !(BitWidth a) -> Function fun '([BitVecType a,BitVecType a],BitVecType a)
+  BVUn :: !BVUnOp -> !(BitWidth a) -> Function fun '( '[BitVecType a],BitVecType a)
+  Select :: !(List Repr idx) -> !(Repr val) -> Function fun '(ArrayType idx val ': idx,val)
+  Store :: !(List Repr idx) -> !(Repr val) -> Function fun '(ArrayType idx val ': val ': idx,ArrayType idx val)
+  ConstArray :: !(List Repr idx) -> !(Repr val) -> Function fun '( '[val],ArrayType idx val)
+  Concat :: !(BitWidth n1) -> !(BitWidth n2) -> Function fun '([BitVecType n1,BitVecType n2],BitVecType (n1 TL.+ n2))
+  Extract :: !(BitWidth bw) -> !(BitWidth start) -> BitWidth len -> Function fun '( '[BitVecType bw],BitVecType len)
   Constructor :: (IsDatatype dt,List.Length par ~ Parameters dt)
               => Datatype dt
-              -> List Repr par
-              -> Constr dt sig
+              -> !(List Repr par)
+              -> !(Constr dt sig)
               -> Function fun '(Instantiated sig par,DataType dt par)
   Test :: (IsDatatype dt,List.Length par ~ Parameters dt)
        => Datatype dt
-       -> List Repr par
-       -> Constr dt sig
+       -> !(List Repr par)
+       -> !(Constr dt sig)
        -> Function fun '( '[DataType dt par],BoolType)
   Field :: (IsDatatype dt,List.Length par ~ Parameters dt)
         => Datatype dt
-        -> List Repr par
-        -> Type.Field dt t
+        -> !(List Repr par)
+        -> !(Type.Field dt t)
         -> Function fun '( '[DataType dt par],CType t par)
-  Divisible :: Integer -> Function fun '( '[IntType],BoolType)
+  Divisible :: !Integer -> Function fun '( '[IntType],BoolType)
 
 data AnyFunction (fun :: ([Type],Type) -> *) where
   AnyFunction :: Function fun '(arg,t) -> AnyFunction fun
@@ -130,39 +130,39 @@ data Expression (v :: Type -> *) (qv :: Type -> *) (fun :: ([Type],Type) -> *) (
 #if __GLASGOW_HASKELL__>=712
   -- | Free variable.
 #endif
-  Var :: v res -> Expression v qv fun fv lv e res
+  Var :: !(v res) -> Expression v qv fun fv lv e res
 #if __GLASGOW_HASKELL__>=712
   -- | Quantified variable, i.e. a variable that's bound by a forall/exists quantor.
 #endif
-  QVar :: qv res -> Expression v qv fun fv lv e res
+  QVar :: !(qv res) -> Expression v qv fun fv lv e res
 #if __GLASGOW_HASKELL__>=712
   -- | A function argument variable. Only used in function bodies.
 #endif
-  FVar :: fv res -> Expression v qv fun fv lv e res
+  FVar :: !(fv res) -> Expression v qv fun fv lv e res
 #if __GLASGOW_HASKELL__>=712
   -- | A variable bound by a let binding.
 #endif
-  LVar :: lv res -> Expression v qv fun fv lv e res
+  LVar :: !(lv res) -> Expression v qv fun fv lv e res
 #if __GLASGOW_HASKELL__>=712
   -- | Function application
 #endif
-  App :: Function fun '(arg,res)
+  App :: !(Function fun '(arg,res))
       -> List e arg
       -> Expression v qv fun fv lv e res
 #if __GLASGOW_HASKELL__>=712
   -- | Constant
 #endif
-  Const :: Value a -> Expression v qv fun fv lv e a
+  Const :: !(Value a) -> Expression v qv fun fv lv e a
 #if __GLASGOW_HASKELL__>=712
   -- | AsArray converts a function into an array by using the function
   --   arguments as array indices and the return type as array element.
 #endif
-  AsArray :: Function fun '(arg,res)
+  AsArray :: !(Function fun '(arg,res))
           -> Expression v qv fun fv lv e (ArrayType arg res)
 #if __GLASGOW_HASKELL__>=712
   -- | Bind variables using a forall or exists quantor.
 #endif
-  Quantification :: Quantifier -> List qv arg -> e BoolType
+  Quantification :: !Quantifier -> List qv arg -> e BoolType
                  -> Expression v qv fun fv lv e BoolType
 #if __GLASGOW_HASKELL__>=712
   -- | Bind variables to expressions.
