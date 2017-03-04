@@ -7,13 +7,123 @@ import Language.SMTLib2.Composite.Domains
 import Language.SMTLib2.Composite.Null
 
 import Data.List (genericIndex,genericLength)
+import Data.Vector (Vector)
+import qualified Data.Vector as Vec
 import Data.Maybe (catMaybes)
 import Data.GADT.Show
 import Data.GADT.Compare
 import Text.Show
 import Data.Foldable
+import Control.Monad.Except
 
-data RevList a tp = RevList Integer (RevComp a tp)
+data RevList a tp = RevList !Int !(RevComp a tp)
+
+newtype CompList a (e :: Type -> *) = CompList { compList :: Vector (a e) }
+
+instance Composite a => Composite (CompList a) where
+  type RevComp (CompList a) = RevList a
+  foldExprs f (CompList vec) = do
+    nvec <- Vec.imapM (\n -> foldExprs (f . RevList n)) vec
+    return $ CompList nvec
+  getRev (RevList n r) (CompList lst) = do
+    el <- lst Vec.!? n
+    getRev r el
+  setRev (RevList n r) x (Just (CompList lst)) = do
+    nel <- setRev r x (lst Vec.!? n)
+    let nlst = lst Vec.// [(n,nel)]
+    return $ CompList nlst
+  setRev _ _ _ = Nothing
+  compCombine f (CompList xs) (CompList ys) = do
+    res <- runExceptT (do
+                          zs <- Vec.zipWithM (\x y -> do
+                                                 z <- lift $ compCombine f x y
+                                                 case z of
+                                                   Just nz -> return nz
+                                                   Nothing -> throwError ()
+                                             ) xs ys
+                          let lx = Vec.length xs
+                              ly = Vec.length ys
+                          return $ case compare lx ly of
+                            EQ -> zs
+                            LT -> zs Vec.++ Vec.drop lx ys
+                            GT -> zs Vec.++ Vec.drop ly xs)
+    case res of
+      Right r -> return (Just $ CompList r)
+      Left () -> return Nothing
+  compCompare (CompList xs) (CompList ys)
+    = case compare (Vec.length xs) (Vec.length ys) of
+    EQ -> let zs = Vec.zipWith compCompare xs ys
+          in mconcat $ Vec.toList zs
+  compShow = showsPrec
+  compInvariant (CompList xs) = fmap concat $ mapM compInvariant $ Vec.toList xs
+
+instance Composite el => Container (CompList el) where
+  data Index (CompList el) el' e where
+    ListIndex :: !Int -> Index (CompList el) el e
+  elementGet (CompList lst) (ListIndex i) = case lst Vec.!? i of
+    Nothing -> error $ "elementGet{CompList}: Index "++show i++" out of range."
+    Just res -> return res
+  elementSet (CompList lst) (ListIndex i) x
+    = return $ CompList $ lst Vec.// [(i,x)]
+  elementsSet (CompList lst) upd
+    = return $ CompList $ lst Vec.// [ (i,nel) | (ListIndex i,nel) <- upd ]
+  showIndex p (ListIndex i) = showsPrec p i
+
+dynamicAt :: (Composite a,Integral (Value tp),Embed m e,Monad m)
+          => Maybe (Range tp) -> e tp
+          -> Access (CompList a) ('Seq a 'Id) a m e
+dynamicAt (Just (asFiniteRange -> Just [val])) _
+  = \l@(CompList lst)
+    -> let idx = fromIntegral val
+       in if idx >= 0 &&
+             idx < Vec.length lst
+       then at (ListIndex idx) l
+       else return $ AccSeq []
+dynamicAt rng i = \(CompList lst)
+                  -> fmap (AccSeq . catMaybes) $
+                     mapM (\(el,idx) -> do
+                              let vidx = fromIntegral idx
+                              case rng of
+                                Just rng'
+                                  | not (includes vidx rng')
+                                    -> return Nothing
+                                _ -> do
+                                  cond <- i .==. constant vidx
+                                  return $ Just (ListIndex idx,[cond],AccId)
+                          ) (zip (Vec.toList lst) [0..])
+
+instance (Composite a,GShow e) => Show (CompList a e) where
+  showsPrec _ (CompList xs) = showListWith (compShow 0) (Vec.toList xs)
+
+instance CompositeExtract a => CompositeExtract (CompList a) where
+  type CompExtract (CompList a) = Vector (CompExtract a)
+  compExtract f (CompList xs) = Vec.mapM (compExtract f) xs
+
+instance Composite a => Show (RevList a tp) where
+  showsPrec p (RevList n r)
+    = showParen (p>10) $ showString "RevList " .
+      showsPrec 11 n . showChar ' ' . gshowsPrec 11 r
+
+instance Composite a => GShow (RevList a) where
+  gshowsPrec = showsPrec
+
+instance Composite a => GEq (RevList a) where
+  geq (RevList n1 r1) (RevList n2 r2) = if n1==n2
+                                        then do
+    Refl <- geq r1 r2
+    return Refl
+                                        else Nothing
+
+instance Composite a => GCompare (RevList a) where
+  gcompare (RevList n1 r1) (RevList n2 r2) = case compare n1 n2 of
+    EQ -> case gcompare r1 r2 of
+      GEQ -> GEQ
+      GLT -> GLT
+      GGT -> GGT
+    LT -> GLT
+    GT -> GGT
+
+{-data RevList a tp = RevList !Integer !(RevComp a tp)
 
 newtype CompList a (e :: Type -> *) = CompList { compList :: [a e] }
 
@@ -91,7 +201,7 @@ instance Composite el => Container (CompList el) where
       i (\x -> f x) lst
   showIndex p (ListIndex i) = showsPrec p i
 
-dynamicAt :: (Composite a,Integral (Value tp),Embed m e,Monad m,GetType e)
+dynamicAt :: (Composite a,Integral (Value tp),Embed m e,Monad m)
           => Maybe (Range tp) -> e tp
           -> Access (CompList a) ('Seq a 'Id) a m e
 dynamicAt (Just (asFiniteRange -> Just [val])) _
@@ -178,6 +288,7 @@ instance Composite a => GCompare (RevList a) where
       GGT -> GGT
     LT -> GLT
     GT -> GGT
+-}
 
 safeGenericIndex :: (Num i,Eq i) => [a] -> i -> Maybe a
 safeGenericIndex (x:xs) 0 = Just x
@@ -200,5 +311,10 @@ safeGenericUpdateAt def n f (x:xs) = do
   return $ x:nxs
 safeGenericUpdateAt def _ _ [] = def
 
-instance StaticByteWidth a => StaticByteWidth (CompList a) where
-  staticByteWidth (CompList xs) = sum $ fmap staticByteWidth xs
+--instance StaticByteWidth a => StaticByteWidth (CompList a) where
+--  staticByteWidth (CompList xs) = sum $ fmap staticByteWidth xs
+
+{-# SPECIALIZE safeGenericIndex :: [a] -> Integer -> Maybe a #-}
+{-# SPECIALIZE safeGenericInsertAt :: Integer -> a -> [a] -> Maybe [a] #-}
+{-# SPECIALIZE safeGenericUpdateAt :: Monad m => m [a] -> Integer -> (a -> m a) -> [a] -> m [a] #-}
+

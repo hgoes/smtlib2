@@ -20,7 +20,7 @@ import qualified GHC.TypeLits as TL
 
 class Composite c => IsSingleton c where
   type SingletonType c :: Type
-  getSingleton :: (Embed m e,Monad m,GetType e) => c e -> m (e (SingletonType c))
+  getSingleton :: (Embed m e,Monad m) => c e -> m (e (SingletonType c))
   compositeFromValue :: (Embed m e,Monad m) => Value (SingletonType c) -> m (c e)
 
 class IsSingleton c => ToSingleton c where
@@ -40,11 +40,11 @@ class IsSingleton c => IsRanged c where
 class (Composite c) => IsNumeric c where
   compositeFromInteger :: Integer -> c Repr -> Maybe (c Value)
   compositeToInteger :: c Value -> Integer
-  compositePlus :: (Embed m e,Monad m,GetType e)
+  compositePlus :: (Embed m e,Monad m)
                 => c e -> c e -> m (Maybe (c e))
-  compositeMinus :: (Embed m e,Monad m,GetType e)
+  compositeMinus :: (Embed m e,Monad m)
                  => c e -> c e -> m (Maybe (c e))
-  compositeSum :: (Embed m e,Monad m,GetType e)
+  compositeSum :: (Embed m e,Monad m)
                => [c e] -> m (Maybe (c e))
   compositeSum (x:xs) = sum' x xs
     where
@@ -54,18 +54,18 @@ class (Composite c) => IsNumeric c where
         case ncur of
           Nothing -> return Nothing
           Just ncur' -> sum' ncur' xs
-  compositeNegate :: (Embed m e,Monad m,GetType e)
+  compositeNegate :: (Embed m e,Monad m)
                   => c e -> m (Maybe (c e))
   --compositeNegate x = do
   --  zero <- compositeFromValue (fromInteger 0)
   --  compositeMinus zero x
-  compositeMult :: (Embed m e,Monad m,GetType e)
+  compositeMult :: (Embed m e,Monad m)
                 => c e -> c e -> m (Maybe (c e))
-  compositeGEQ :: (Embed m e,Monad m,GetType e)
+  compositeGEQ :: (Embed m e,Monad m)
                => c e -> c e -> m (Maybe (e BoolType))
-  compositeDiv :: (Embed m e,Monad m,GetType e)
+  compositeDiv :: (Embed m e,Monad m)
                => c e -> c e -> m (Maybe (c e))
-  compositeMod :: (Embed m e,Monad m,GetType e)
+  compositeMod :: (Embed m e,Monad m)
                => c e -> c e -> m (Maybe (c e))
 
 class (IsSingleton c,IsNumeric c,Integral (Value (SingletonType c))) => IsNumSingleton c
@@ -108,7 +108,7 @@ class (Composite c,IsNumeric idx) => ByteWidth c idx where
   byteWidth :: (Embed m e,Monad m,GetType e) => c e -> idx Repr -> m (idx e)
 
 class StaticByteWidth (c :: (Type -> *) -> *) where
-  staticByteWidth :: GetType e => c e -> Integer
+  staticByteWidth :: c e -> Integer
 
 data ByteRead a e
   = ByteRead { overreads :: Map Integer (a e,e BoolType) -- ^ Maps remaining bytes to incomplete reads
@@ -147,13 +147,13 @@ class (Composite c,Composite el) => StaticByteAccess c el where
                   -> m (Maybe (c e,Maybe (el e)))
 
 class Composite c => CanConcat c where
-  withConcat :: (Embed m e,Monad m,GetType e)
+  withConcat :: (Embed m e,Monad m)
              => (c e -> m (a,c e)) -> [c e] -> m (Maybe (a,[c e]))
   withConcat f [c] = do
     (res,nc) <- f c
     return $ Just (res,[nc])
   withConcat _ _ = return Nothing
-  compConcat :: (Embed m e,Monad m,GetType e)
+  compConcat :: (Embed m e,Monad m)
              => [c e] -> m (Maybe (c e))
   compConcat xs = do
     res <- withConcat (\c -> return (c,c)) xs

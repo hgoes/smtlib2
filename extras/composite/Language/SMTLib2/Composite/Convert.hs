@@ -9,7 +9,7 @@ import Data.GADT.Compare
 import Data.Functor.Identity
 
 class (Composite from,Composite to) => Convert from to where
-  convert :: (Embed m e,Monad m,GetType e) => from e -> m (Maybe (to e))
+  convert :: (Embed m e,Monad m) => from e -> m (Maybe (to e))
 
 data Fallback start alt (e :: Type -> *)
   = Start { _start :: start e }
@@ -20,7 +20,7 @@ data Fallback2 start alt1 alt2 (e :: Type -> *)
   | Alternative2_1 { _alternative2_1 :: alt1 e }
   | Alternative2_2 { _alternative2_2 :: alt2 e }
 
-fallback :: (Embed m e,Monad m,Convert start alt,GetType e)
+fallback :: (Embed m e,Monad m,Convert start alt)
          => (start e -> start e -> m (Maybe (start e)))
          -> (alt e -> alt e -> m (Maybe (alt e)))
          -> Fallback start alt e
@@ -32,7 +32,7 @@ fallback f g fb1 fb2 = do
          fb1 fb2
   return $ fmap fst res
 
-fallbackExtra :: (Embed m e,Monad m,Convert start alt,GetType e)
+fallbackExtra :: (Embed m e,Monad m,Convert start alt)
               => (start e -> start e -> m (Maybe (start e,a)))
               -> (alt e -> alt e -> m (Maybe (alt e,a)))
               -> Fallback start alt e
@@ -75,7 +75,7 @@ mapFallback f g (Alternative x) = do
   nx <- g x
   return $ Alternative nx
 
-fallback2 :: (Embed m e,Monad m,GetType e,
+fallback2 :: (Embed m e,Monad m,
               Convert start alt1,Convert start alt2,Convert alt1 alt2)
           => (start e -> start e -> m (Maybe (start e)))
           -> (alt1 e -> alt1 e -> m (Maybe (alt1 e)))
@@ -90,7 +90,7 @@ fallback2 f g h fb1 fb2 = do
     adj c p q = fmap (fmap (\x -> (x,()))) $ c p q
 
 
-fallbackExtra2 :: (Embed m e,Monad m,GetType e,
+fallbackExtra2 :: (Embed m e,Monad m,
                    Convert start alt1,Convert start alt2,Convert alt1 alt2)
                => (start e -> start e -> m (Maybe (start e,a)))
                -> (alt1 e -> alt1 e -> m (Maybe (alt1 e,a)))
@@ -180,7 +180,7 @@ mapFallback2 f g h (Alternative2_2 x) = do
   nx <- h x
   return $ Alternative2_2 nx
 
-convertFallback :: (Convert a b,Embed m e,Monad m,GetType e)
+convertFallback :: (Convert a b,Embed m e,Monad m)
                 => Fallback a b e
                 -> m (Maybe (Fallback a b e))
 convertFallback (Start x) = do

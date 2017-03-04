@@ -11,22 +11,22 @@ import Data.Proxy
 import qualified Data.Map as Map
 
 data CompTuple2 (a :: (Type -> *) -> *) (b :: (Type -> *) -> *) e
-  = CompTuple2 { ctuple2_1 :: a e
-               , ctuple2_2 :: b e }
+  = CompTuple2 { ctuple2_1 :: !(a e)
+               , ctuple2_2 :: !(b e) }
 
 data CompTuple3 (a :: (Type -> *) -> *) (b :: (Type -> *) -> *) (c :: (Type -> *) -> *) e
-  = CompTuple3 { ctuple3_1 :: a e
-               , ctuple3_2 :: b e
-               , ctuple3_3 :: c e }
+  = CompTuple3 { ctuple3_1 :: !(a e)
+               , ctuple3_2 :: !(b e)
+               , ctuple3_3 :: !(c e) }
 
 data RevTuple2 a b tp
-  = RevTuple2_1 (RevComp a tp)
-  | RevTuple2_2 (RevComp b tp)
+  = RevTuple2_1 !(RevComp a tp)
+  | RevTuple2_2 !(RevComp b tp)
 
 data RevTuple3 a b c tp
-  = RevTuple3_1 (RevComp a tp)
-  | RevTuple3_2 (RevComp b tp)
-  | RevTuple3_3 (RevComp c tp)
+  = RevTuple3_1 !(RevComp a tp)
+  | RevTuple3_2 !(RevComp b tp)
+  | RevTuple3_3 !(RevComp c tp)
 
 instance (Composite a,Composite b,GShow e) => Show (CompTuple2 a b e) where
   showsPrec p (CompTuple2 x y) = showChar '(' . compShow 0 x . showChar ',' . compShow 0 y . showChar ')'

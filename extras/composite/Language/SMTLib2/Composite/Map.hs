@@ -5,14 +5,14 @@ import Language.SMTLib2.Composite.Class
 import Language.SMTLib2.Composite.Container
 import Language.SMTLib2.Composite.Null
 
-import Data.Map (Map)
-import qualified Data.Map as Map
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Data.GADT.Show
 import Data.GADT.Compare
 import Text.Show
 import Data.List (foldl')
 
-data RevMap k a tp = RevMap k (RevComp a tp)
+data RevMap k a tp = RevMap !k !(RevComp a tp)
 
 newtype CompMap k a (e :: Type -> *) = CompMap { compMap :: Map k (a e) }
 
@@ -40,7 +40,9 @@ instance (Ord k,Show k,Composite el) => Container (CompMap k el) where
   data Index (CompMap k el) el' e where
     MapIndex :: k -> Index (CompMap k el) el e
 
-  elementGet (CompMap mp) (MapIndex k) = return $ mp Map.! k
+  elementGet (CompMap mp) (MapIndex k) = case Map.lookup k mp of
+    Just r -> return r
+    Nothing -> error $ "CompMap.elementGet: Key "++show k++" not in map."
   elementSet (CompMap mp) (MapIndex k) x = return $ CompMap $ Map.insert k x mp
   showIndex p (MapIndex k) = showsPrec p k
 

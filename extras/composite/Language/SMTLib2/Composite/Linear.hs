@@ -22,7 +22,7 @@ data Linear c (e :: Type -> *) = Linear { linConst :: c Value
 data RevLinear c tp where
   RevFactor :: Integer -> RevComp c tp -> RevLinear c tp
 
-delinear :: (IsNumeric c,Embed m e,Monad m,GetType e) => Linear c e -> m (c e)
+delinear :: (IsNumeric c,Embed m e,Monad m) => Linear c e -> m (c e)
 delinear lin = do
   const' <- foldExprs (const constant) (linConst lin)
   ps <- mapM (\(c,x) -> do
@@ -579,7 +579,7 @@ instance (IsNumSingleton c,IsConstant c) => IsConstant (Linear c) where
                       return $ c*rx) lin
     return $ sum $ c:nlins-}
 
-mergeFactors :: (IsNumeric c,Embed m e,Monad m,GetType e,GCompare e)
+mergeFactors :: (IsNumeric c,Embed m e,Monad m,GCompare e)
              => (forall tp. e tp -> e tp -> m (e tp))
              -> [(c Value,c e)]
              -> [(c Value,c e)]

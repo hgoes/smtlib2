@@ -16,7 +16,7 @@ Source-Repository head
 
 Library
   Build-Depends: smtlib2 >= 1.0 && < 1.1, base, dependent-sum, dependent-map,
-                 mtl, containers, template-haskell, constraints
+                 mtl, containers, template-haskell, constraints, vector
   Exposed-Modules:
                   Language.SMTLib2.Composite
                   Language.SMTLib2.Composite.Class

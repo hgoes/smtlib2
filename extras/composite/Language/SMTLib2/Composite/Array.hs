@@ -133,7 +133,7 @@ instance (Composite c,IsSingleton idx,SingletonType idx ~ i) => IsArray (CompArr
     ridx <- getSingleton idx
     storeArray arr (ridx ::: Nil) el
 
-newConstantArray :: (Composite el,Embed m e,Monad m,GetType e) => List Repr idx -> el e -> m (CompArray idx el e)
+newConstantArray :: (Composite el,Embed m e,Monad m) => List Repr idx -> el e -> m (CompArray idx el e)
 newConstantArray idx el = do
   arr <- foldExprs (\_ e -> do
                        ne <- constArray idx e
@@ -141,13 +141,13 @@ newConstantArray idx el = do
                    ) el
   return $ CompArray idx arr
 
-selectArray :: (Composite c,Embed m e,Monad m,GetType e) => CompArray i c e -> List e i -> m (c e)
+selectArray :: (Composite c,Embed m e,Monad m) => CompArray i c e -> List e i -> m (c e)
 selectArray (CompArray _ c) i = foldExprs (\_ (Arrayed e) -> SMT.select e i) c
 
-storeArray :: (Composite c,Embed m e,Monad m,GetType e) => CompArray i c e -> List e i -> c e -> m (Maybe (CompArray i c e))
+storeArray :: (Composite c,Embed m e,Monad m) => CompArray i c e -> List e i -> c e -> m (Maybe (CompArray i c e))
 storeArray = storeArrayCond Nothing
 
-storeArrayCond :: (Composite c,Embed m e,Monad m,GetType e)
+storeArrayCond :: (Composite c,Embed m e,Monad m)
                => Maybe (e BoolType)
                -> CompArray i c e
                -> List e i

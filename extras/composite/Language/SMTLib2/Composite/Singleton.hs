@@ -89,15 +89,15 @@ instance (IsSingleton idx,Integral (Value (SingletonType idx)),IsNumeric idx) =>
                                       (bwSize bw `div` 8) r
                        in foldExprs (const constant) bw'
 
-instance StaticByteWidth (Comp (BitVecType bw)) where
+{-instance StaticByteWidth (Comp (BitVecType bw)) where
   staticByteWidth (Comp e) = case getType e of
-    BitVecRepr bw -> bwSize bw `div` 8
+    BitVecRepr bw -> bwSize bw `div` 8-}
 
 data CompBV e = forall bw. CompBV { compBV :: e (BitVecType bw)
-                                  , compBVWidth :: !Integer }
+                                  , compBVWidth :: !(BitWidth bw) }
 
 data RevBV tp where
-  RevBV :: BitWidth bw -> RevBV (BitVecType bw)
+  RevBV :: !(BitWidth bw) -> RevBV (BitVecType bw)
 
 instance GEq RevBV where
   geq (RevBV x) (RevBV y) = do
@@ -116,19 +116,17 @@ instance GShow RevBV where
 
 instance Composite CompBV where
   type RevComp CompBV = RevBV
-  foldExprs f (CompBV e w) = case getType e of
-    BitVecRepr bw -> do
-      ne <- f (RevBV bw) e
+  foldExprs f (CompBV e w) = do
+      ne <- f (RevBV w) e
       return $ CompBV ne w
-  getRev (RevBV bw) (CompBV e _) = case getType e of
-    BitVecRepr bw' -> do
-      Refl <- geq bw bw'
-      return e
-  setRev (RevBV bw) e _ = Just (CompBV e (bwSize bw))
-  compCombine f (CompBV e1 w) (CompBV e2 _) = case geq (getType e1) (getType e2) of
+  getRev (RevBV bw) (CompBV e w) = do
+    Refl <- geq bw w
+    return e
+  setRev (RevBV bw) e _ = Just (CompBV e bw)
+  compCombine f (CompBV e1 w1) (CompBV e2 w2) = case geq w1 w2 of
     Just Refl -> do
       ne <- f e1 e2
-      return $ Just $ CompBV ne w
+      return $ Just $ CompBV ne w1
     Nothing -> return Nothing
   compCompare (CompBV e1 _) (CompBV e2 _) = defaultCompare e1 e2
   compShow p (CompBV e _) = gshowsPrec p e
@@ -136,7 +134,7 @@ instance Composite CompBV where
 instance (IsNumSingleton i) => ByteWidth CompBV i where
   byteWidth (CompBV _ w) r = foldExprs (const constant) bw
     where
-      Just bw = compositeFromInteger (w `div` 8) r
+      Just bw = compositeFromInteger ((bwSize w) `div` 8) r
 
 {-instance (IsRanged i,IsNumSingleton i)
          => ByteAccess (Comp (BitVecType bw)) i CompBV where
@@ -147,7 +145,8 @@ instance CanConcat CompBV where
   compConcat (x:xs) = do
     res <- foldlM (\(CompBV cur wcur) (CompBV n wn) -> do
                       r <- concat' cur n
-                      return $ CompBV r (wcur+wn)) x xs
+                      return $ CompBV r (bwAdd wcur wn)
+                  ) x xs
     return $ Just res
 
 {-instance StaticByteAccess (Comp (BitVecType bw)) CompBV where

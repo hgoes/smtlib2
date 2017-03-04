@@ -15,13 +15,13 @@ type CompDescr arg = arg Repr
 class (GCompare (RevComp arg),GShow (RevComp arg))
       => Composite (arg :: (Type -> *) -> *) where
   type RevComp arg :: Type -> *
-  foldExprs :: (Monad m,GetType e)
+  foldExprs :: (Monad m)
             => (forall t. RevComp arg t -> e t -> m (e' t))
             -> arg e
             -> m (arg e')
-  getRev :: GetType e => RevComp arg tp -> arg e -> Maybe (e tp)
-  setRev :: GetType e => RevComp arg tp -> e tp -> Maybe (arg e) -> Maybe (arg e)
-  withRev :: (GetType e,Monad m) => RevComp arg tp -> arg e -> (e tp -> m (e tp)) -> m (arg e)
+  getRev :: RevComp arg tp -> arg e -> Maybe (e tp)
+  setRev :: RevComp arg tp -> e tp -> Maybe (arg e) -> Maybe (arg e)
+  withRev :: (Monad m) => RevComp arg tp -> arg e -> (e tp -> m (e tp)) -> m (arg e)
   withRev rev x f = case getRev rev x of
     Nothing -> return x
     Just e -> do
@@ -29,7 +29,7 @@ class (GCompare (RevComp arg),GShow (RevComp arg))
       case setRev rev ne (Just x) of
         Nothing -> return x
         Just nx -> return nx
-  compCombine :: (Embed m e,Monad m,GetType e,GCompare e)
+  compCombine :: (Embed m e,Monad m,GCompare e)
               => (forall tp. e tp -> e tp -> m (e tp))
               -> arg e -> arg e -> m (Maybe (arg e))
 
@@ -38,7 +38,7 @@ class (GCompare (RevComp arg),GShow (RevComp arg))
   compCompare :: GCompare e => arg e -> arg e -> Ordering
   compShow :: GShow e => Int -> arg e -> ShowS
 
-  compInvariant :: (Embed m e,Monad m,GetType e) => arg e -> m [e BoolType]
+  compInvariant :: (Embed m e,Monad m) => arg e -> m [e BoolType]
   compInvariant _ = return []
 
 {-
@@ -57,10 +57,12 @@ instance (Composite arg,GShow e) => Show (arg e) where
 unionDescr :: Composite arg => arg Repr -> arg Repr -> Maybe (arg Repr)
 unionDescr x y = runIdentity $ compCombine (\tp _ -> return tp) x y
 
-compITE :: (Composite arg,Embed m e,Monad m,GetType e,GCompare e) => e BoolType -> arg e -> arg e -> m (Maybe (arg e))
-compITE cond = compCombine (ite cond)
+compITE :: (Composite arg,Embed m e,Monad m,GCompare e) => e BoolType -> arg e -> arg e -> m (Maybe (arg e))
+compITE cond = compCombine (\x y -> case geq x y of
+                               Just Refl -> return x
+                               Nothing -> ite cond x y)
 
-compITEs :: (Composite arg,Embed m e,Monad m,GetType e,GCompare e) => [(e BoolType,arg e)] -> m (Maybe (arg e))
+compITEs :: (Composite arg,Embed m e,Monad m,GCompare e) => [(e BoolType,arg e)] -> m (Maybe (arg e))
 compITEs [] = return Nothing
 compITEs [(_,x)] = return (Just x)
 compITEs ((c,x):xs) = do
@@ -71,6 +73,11 @@ compITEs ((c,x):xs) = do
 
 compType :: (Composite arg,GetType e) => arg e -> arg Repr
 compType = runIdentity . foldExprs (const $ return . getType)
+
+compTypeM :: (Composite arg,Embed m e,Monad m) => arg e -> m (arg Repr)
+compTypeM = foldExprs (\_ x -> do
+                          tp <- embedTypeOf
+                          return $ tp x)
 
 newtype EqT e m a = EqT (WriterT [e BoolType] m a) deriving (Applicative,Functor,Monad,MonadWriter [e BoolType])
 
@@ -87,7 +94,7 @@ instance (Embed m e,Monad m) => Embed (EqT e m) e where
     = EqT (lift $ embedQuantifier q arg f)
   embedTypeOf = EqT (lift embedTypeOf)
 
-compEq :: (Composite arg,Embed m e,Monad m,GetType e,GCompare e) => arg e -> arg e -> m (Maybe (e BoolType))
+compEq :: (Composite arg,Embed m e,Monad m,GCompare e) => arg e -> arg e -> m (Maybe (e BoolType))
 compEq x y = do
   let EqT wr = compCombine (\vx vy -> do
                                eq <- vx .==. vy

@@ -13,6 +13,7 @@ module Language.SMTLib2.Composite.Container (
   AccessorFork(..),
   withAccessor,
   access,
+  accessorPaths,
   -- ** Construction
   Access,(|*>),idAcc,field,
   at,
@@ -47,27 +48,27 @@ data Acc a = Id
 
 class Composite c => Container c where
   data Index c :: ((Type -> *) -> *) -> (Type -> *) -> *
-  elementGet :: (Embed m e,Monad m,GetType e,Composite el)
+  elementGet :: (Embed m e,Monad m,Composite el)
              => c e
              -> Index c el e
              -> m (el e)
-  elementsGet :: (Embed m e,Monad m,GetType e,Composite el)
+  elementsGet :: (Embed m e,Monad m,Composite el)
               => c e
               -> [Index c el e]
               -> m [el e]
   elementsGet x = mapM (elementGet x)
-  elementSet :: (Embed m e,Monad m,GetType e,Composite el)
+  elementSet :: (Embed m e,Monad m,Composite el)
              => c e
              -> Index c el e
              -> el e
              -> m (c e)
-  elementsSet :: (Embed m e,Monad m,GetType e,Composite el)
+  elementsSet :: (Embed m e,Monad m,Composite el)
               => c e
               -> [(Index c el e,el e)]
               -> m (c e)
   elementsSet c upd = foldlM (\cc (idx,el) -> elementSet cc idx el
                              ) c upd
-  withElement :: (Embed m e,Monad m,GetType e,Composite el)
+  withElement :: (Embed m e,Monad m,Composite el)
               => c e
               -> Index c el e
               -> (el e -> m (el e))
@@ -78,7 +79,7 @@ class Composite c => Container c where
     elementSet c idx nel
   showIndex :: GShow e => Int -> Index c el e -> ShowS
 
-update :: (Composite a,Embed m e,Monad m,GetType e,GCompare e)
+update :: (Composite a,Embed m e,Monad m,GCompare e)
        => a e -> [e BoolType] -> a e -> m (a e)
 update x [] _ = return x
 update x cs y = do
@@ -124,7 +125,7 @@ data Accessor a (idx :: Acc ((Type -> *) -> *)) b e where
           -> Accessor b idx c e
           -> Accessor a idx c e
 
-withAccessor :: (Embed m e,Monad m,GetType e)
+withAccessor :: (Embed m e,Monad m)
              => Accessor a idx b e
              -> a e
              -> (Path a idx b e -> [e BoolType] -> b e -> m (b e))
@@ -141,7 +142,7 @@ withAccessor (AccSeq acc) x f = do
 withAccessor (AccFork fork) x f
   = withAccessorFork fork x (\n path -> f (PathBr n path))
   where
-    withAccessorFork :: (Embed m e,Monad m,GetType e)
+    withAccessorFork :: (Embed m e,Monad m)
                      => AccessorFork a idxs b e
                      -> a e
                      -> (forall n. Natural n ->
@@ -157,6 +158,30 @@ withAccessor (AccFork fork) x f
       withAccessorFork rest nx (\n -> f (Succ n))
 withAccessor (AccFun g h acc) x f
   = fmap h $ withAccessor acc (g x) (\path -> f (PathFun g h path))
+
+accessorPaths :: Accessor a idx b e -> [([e BoolType],Path a idx b e)]
+accessorPaths AccId = [([],PathId)]
+accessorPaths (AccSeq lst)
+  = [ (cond++cond',PathSeq idx path)
+    | (idx,cond,acc) <- lst
+    , (cond',path) <- accessorPaths acc ]
+accessorPaths (AccFork fork)
+  = forkPaths fork
+  where
+    forkPaths :: (Composite b)
+              => AccessorFork a idxs b e
+              -> [([e BoolType],Path a ('Br idxs) b e)]
+    forkPaths NilFork = []
+    forkPaths (Fork f fs)
+      = (case f of
+           Nothing -> []
+           Just (cond,acc) -> [ (cond++cond',PathBr Zero path)
+                              | (cond',path) <- accessorPaths acc ])++
+        [ (cond,PathBr (Succ n) path)
+        | (cond,PathBr n path) <- forkPaths fs ]
+accessorPaths (AccFun f g acc)
+  = [ (cond,PathFun f g path)
+    | (cond,path) <- accessorPaths acc ]
 
 data Paths a (idxs :: [Acc ((Type -> *) -> *)]) bs e where
   NilPaths :: Paths a '[] '[] e
@@ -200,7 +225,7 @@ accessorHead (AccFun f g acc) = do
   (path,cond,acc') <- accessorHead acc
   return (PathFun f g path,cond,AccFun f g acc')
 
-pathGet :: (Embed m e,Monad m,GetType e)
+pathGet :: (Embed m e,Monad m)
         => Path a idx b e
         -> a e
         -> m (b e)
@@ -211,7 +236,7 @@ pathGet (PathSeq idx path) x = do
 pathGet (PathBr _ path) x = pathGet path x
 pathGet (PathFun f g path) x = pathGet path (f x)
 
-pathSet :: (Embed m e,Monad m,GetType e)
+pathSet :: (Embed m e,Monad m)
         => Path a idx b e
         -> a e
         -> b e
@@ -224,7 +249,7 @@ pathSet (PathSeq idx path) x y = do
 pathSet (PathBr _ path) x y = pathSet path x y
 pathSet (PathFun f g path) x y = fmap g $ pathSet path (f x) y
 
-withPath :: (Embed m e,Monad m,GetType e)
+withPath :: (Embed m e,Monad m)
          => Path a idx b e
          -> a e
          -> (b e -> m (b e))
@@ -235,7 +260,7 @@ withPath (PathSeq idx path) x f = withElement x idx $
 withPath (PathBr _ path) x f = withPath path x f
 withPath (PathFun g h path) x f = fmap h $ withPath path (g x) f
 
-withMuxer' :: (Embed m e,Monad m,GetType e)
+withMuxer' :: (Embed m e,Monad m)
            => Muxer a idxs bs e
            -> a e
            -> st
@@ -257,7 +282,7 @@ withMuxer' (Mux acc accs) x st f = case accessorHead acc of
     x2 <- pathSet path x1 nel
     withMuxer' (Mux acc' accs) x2 nst f
 
-withMuxer :: (Embed m e,Monad m,GetType e)
+withMuxer :: (Embed m e,Monad m)
           => Muxer a idxs bs e
           -> a e
           -> (Paths a idxs bs e -> [e BoolType] ->
@@ -270,7 +295,7 @@ withMuxer mux x f = do
                return (nmuxed,())
   return nx
 
-access :: (Container a,Embed m e,Monad m,GetType e)
+access :: (Container a,Embed m e,Monad m)
        => Access a idx b m e
        -> a e
        -> (Path a idx b e -> [e BoolType] -> b e -> m (b e))
@@ -290,7 +315,7 @@ type family PathConcat (p1 :: Acc a) (p2 :: Acc a) :: Acc a where
   PathConcat ('Seq x xs) ys = 'Seq x (PathConcat xs ys)
   PathConcat ('Br xs) ys = 'Br (PathConcats xs ys)
 
-(|*>) :: (Embed m e,Monad m,GetType e,Composite c)
+(|*>) :: (Embed m e,Monad m,Composite c)
        => Access a idx1 b m e
        -> Access b idx2 c m e
        -> Access a (PathConcat idx1 idx2) c m e
@@ -298,7 +323,7 @@ type family PathConcat (p1 :: Acc a) (p2 :: Acc a) :: Acc a where
   acc <- f x
   concatAcc acc x g
   where
-    concatAcc :: (Embed m e,Monad m,GetType e,Composite c)
+    concatAcc :: (Embed m e,Monad m,Composite c)
               => Accessor a idx1 b e
               -> a e
               -> (b e -> m (Accessor b idx2 c e))
@@ -318,7 +343,7 @@ type family PathConcat (p1 :: Acc a) (p2 :: Acc a) :: Acc a where
       nacc <- concatAcc acc (g x) f
       return (AccFun g h nacc)
 
-    concatFork :: (Embed m e,Monad m,GetType e,Composite c)
+    concatFork :: (Embed m e,Monad m,Composite c)
                => AccessorFork a idx1 b e
                -> a e
                -> (b e -> m (Accessor b idx2 c e))
@@ -337,7 +362,7 @@ infixr 5 |*>
 idAcc :: Monad m => Access a 'Id a m e
 idAcc _ = return AccId
 
-at :: (Container c,Composite el,Monad m,Embed m e,GetType e)
+at :: (Container c,Composite el,Monad m,Embed m e)
    => Index c el e -> Access c ('Seq el 'Id) el m e
 at idx x = do
   el <- elementGet x idx
@@ -346,7 +371,7 @@ at idx x = do
 field :: Monad m => (a e -> b e) -> (b e -> a e) -> Access a 'Id b m e
 field f g _ = return $ AccFun f g AccId
 
-(<|*>) :: (Embed m e,Monad m,GetType e)
+(<|*>) :: (Embed m e,Monad m)
        => Access a idx b m e
        -> (a e -> m (Muxer a idxs bs e))
        -> a e
@@ -361,7 +386,7 @@ infixr 4 <|*>
 idMux :: Monad m => a e -> m (Muxer a '[] '[] e)
 idMux _ = return NoMux
 
-mux :: (Embed m e,Monad m,GetType e)
+mux :: (Embed m e,Monad m)
     => (a e -> m (Muxer a idxs bs e))
     -> a e
     -> (Paths a idxs bs e -> [e BoolType] ->
@@ -371,7 +396,7 @@ mux f x g = do
   muxer <- f x
   withMuxer muxer x g
 
-updateList' :: (Embed m e,Monad m,GetType e)
+updateList' :: (Embed m e,Monad m)
             => Accessor a idx b e
             -> a e
             -> m [(Path a idx b e,[e BoolType],b e,a e -> b e -> m (a e))]
@@ -389,7 +414,7 @@ updateList' (AccSeq lst) x
          ) lst
 updateList' (AccFork fork) x = fromFork fork x
   where
-    fromFork :: (Embed m e,Monad m,GetType e,Composite b)
+    fromFork :: (Embed m e,Monad m,Composite b)
              => AccessorFork a idxs b e
              -> a e
              -> m [((Path a ('Br idxs) b e),[e BoolType],b e,a e -> b e -> m (a e))]
@@ -418,7 +443,7 @@ updateList' (AccFun f g acc) x = do
                        return $ g ny)
                 ) lst
     
-updateList :: (Embed m e,Monad m,GetType e)
+updateList :: (Embed m e,Monad m)
            => Access a idx b m e
            -> a e
            -> m [(Path a idx b e,[e BoolType],b e,a e -> b e -> m (a e))]

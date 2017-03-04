@@ -20,7 +20,16 @@ import qualified Data.Dependent.Map as DMap
 import Data.Functor.Identity
 import Data.Proxy
 
-data CompositeExpr a t
+newtype CompositeExpr a t = CompositeExpr { compositeExpr :: E.Expression (RevComp a) E.NoVar E.NoFun E.NoVar E.NoVar (CompositeExpr a) t }
+
+compositeExprType :: Composite a => CompDescr a -> CompositeExpr a t -> Repr t
+compositeExprType descr (CompositeExpr e)
+  = runIdentity $ E.expressionType
+    (return . revType descr)
+    (return.getType) (return.getFunType) (return.getType)
+    (return.getType) (return.compositeExprType descr) e
+
+{-data CompositeExpr a t
   = CompositeExpr { compositeDescr :: CompDescr a
                   , compositeExpr :: E.Expression (RevComp a) E.NoVar E.NoFun E.NoVar E.NoVar (CompositeExpr a) t }
 
@@ -29,7 +38,7 @@ instance Composite a => GetType (CompositeExpr a) where
     = runIdentity $ E.expressionType
       (return . revType descr)
       (return.getType) (return.getFunType) (return.getType)
-      (return.getType) (return.getType) e
+      (return.getType) (return.getType) e-}
 
 createRevComp :: (Composite arg,Embed m e,Monad m,GetType e)
               => (forall t. Repr t -> RevComp arg t -> m (EmVar m e t))
@@ -44,7 +53,7 @@ createRevComp f descr
                                ) descr
               ) DMap.empty
 
-instance Composite a => GEq (CompositeExpr a) where
+{-instance Composite a => GEq (CompositeExpr a) where
   geq (CompositeExpr dx x) (CompositeExpr dy y)
     = case compCompare dx dy of
         EQ -> geq x y
@@ -54,14 +63,18 @@ instance Composite a => GCompare (CompositeExpr a) where
     = case compCompare dx dy of
     EQ -> gcompare x y
     LT -> GLT
-    GT -> GGT
+    GT -> GGT-}
+instance Composite a => GEq (CompositeExpr a) where
+  geq (CompositeExpr x) (CompositeExpr y) = geq x y
+instance Composite a => GCompare (CompositeExpr a) where
+  gcompare (CompositeExpr x) (CompositeExpr y) = gcompare x y
 instance Composite a => Eq (CompositeExpr a t) where
   (==) = GComp.defaultEq
 instance Composite a => Ord (CompositeExpr a t) where
   compare = defaultCompare
 
 instance Composite a => Show (CompositeExpr a t) where
-  showsPrec p (CompositeExpr _ e) = E.renderExprDefault E.SMTRendering e
+  showsPrec p (CompositeExpr e) = E.renderExprDefault E.SMTRendering e
 
 instance Composite a => GShow (CompositeExpr a) where
   gshowsPrec = showsPrec
@@ -74,10 +87,11 @@ instance (Composite a,Monad m) => Embed (ReaderT (a Repr) m) (CompositeExpr a) w
   type EmLVar (ReaderT (a Repr) m) (CompositeExpr a) = E.NoVar
   embed e = do
     re <- e
-    descr <- ask
-    return (CompositeExpr descr re)
+    return (CompositeExpr re)
   embedQuantifier _ _ _ = error "CompositeExpr does not support quantifier"
-  embedTypeOf = return getType
+  embedTypeOf = do
+    descr <- ask
+    return $ compositeExprType descr
 
 instance Composite a => Extract () (CompositeExpr a) where
   type ExVar () (CompositeExpr a) = RevComp a
@@ -85,7 +99,7 @@ instance Composite a => Extract () (CompositeExpr a) where
   type ExFun () (CompositeExpr a) = E.NoFun
   type ExFunArg () (CompositeExpr a) = E.NoVar
   type ExLVar () (CompositeExpr a) = E.NoVar
-  extract _ (CompositeExpr _ x) = Just x
+  extract _ (CompositeExpr x) = Just x
 
 mkCompExpr :: Composite arg
            => (arg (CompositeExpr arg) -> Reader (CompDescr arg) (CompositeExpr arg tp))
@@ -93,22 +107,22 @@ mkCompExpr :: Composite arg
            -> CompositeExpr arg tp
 mkCompExpr f descr
   = runReader (do
-                  arg <- createComposite (\_ rev -> return (CompositeExpr descr (E.Var rev))) descr
+                  arg <- createComposite (\_ rev -> return (CompositeExpr (E.Var rev))) descr
                   f arg) descr
 
-concretizeExpr :: (Embed m e,Monad m,Composite arg,GetType e)
+concretizeExpr :: (Embed m e,Monad m,Composite arg)
                => arg e
                -> CompositeExpr arg tp
                -> m (e tp)
-concretizeExpr arg (CompositeExpr _ (E.Var rev)) = case getRev rev arg of
+concretizeExpr arg (CompositeExpr (E.Var rev)) = case getRev rev arg of
   Just r -> return r
   Nothing -> error $ "concretizeExpr: Unknown key "++gshow rev
-concretizeExpr arg (CompositeExpr _ (E.App fun args)) = do
+concretizeExpr arg (CompositeExpr (E.App fun args)) = do
   nfun <- E.mapFunction undefined fun
   nargs <- List.mapM (concretizeExpr arg) args
   embed $ pure $ E.App nfun nargs
-concretizeExpr arg (CompositeExpr _ (E.Const c)) = embed $ pure $ E.Const c
-concretizeExpr arg (CompositeExpr _ (E.AsArray fun)) = do
+concretizeExpr arg (CompositeExpr (E.Const c)) = embed $ pure $ E.Const c
+concretizeExpr arg (CompositeExpr (E.AsArray fun)) = do
   nfun <- E.mapFunction undefined fun
   embed $ pure $ E.AsArray nfun
 
@@ -130,18 +144,18 @@ relativizeExpr' :: (Extract i e,Composite arg,GShow (ExVar i e))
                 -> CompositeExpr arg tp
 relativizeExpr' descr mp lmp info e = case extract info e of
   Just (E.Var v) -> case DMap.lookup v mp of
-    Just rev -> CompositeExpr descr (E.Var rev)
+    Just rev -> CompositeExpr (E.Var rev)
     Nothing -> error $ "Failed to relativize: "++gshowsPrec 0 v ""
   Just (E.LVar v) -> case DMap.lookup v lmp of
     Just e -> e
   Just (E.App fun args)
     -> let nfun = runIdentity $ E.mapFunction undefined fun
            nargs = runIdentity $ List.mapM (return . relativizeExpr' descr mp lmp info) args
-       in CompositeExpr descr (E.App nfun nargs)
-  Just (E.Const c) -> CompositeExpr descr (E.Const c)
+       in CompositeExpr (E.App nfun nargs)
+  Just (E.Const c) -> CompositeExpr (E.Const c)
   Just (E.AsArray fun)
     -> let nfun = runIdentity $ E.mapFunction undefined fun
-       in CompositeExpr descr (E.AsArray nfun)
+       in CompositeExpr (E.AsArray nfun)
   -- TODO: Find a way not to flatten let bindings
   Just (E.Let bind body) -> relativizeExpr' descr mp nlmp info body
     where
@@ -153,9 +167,9 @@ collectRevVars :: Composite arg
                => DMap (RevComp arg) E.NoVar
                -> CompositeExpr arg tp
                -> DMap (RevComp arg) E.NoVar
-collectRevVars mp (CompositeExpr _ (E.Var v))
+collectRevVars mp (CompositeExpr (E.Var v))
   = DMap.insert v E.NoVar' mp
-collectRevVars mp (CompositeExpr _ (E.App fun args))
+collectRevVars mp (CompositeExpr (E.App fun args))
   = runIdentity $ List.foldM (\mp e -> return $ collectRevVars mp e) mp args
-collectRevVars mp (CompositeExpr _ (E.Const _)) = mp
-collectRevVars mp (CompositeExpr _ (E.AsArray _)) = mp
+collectRevVars mp (CompositeExpr (E.Const _)) = mp
+collectRevVars mp (CompositeExpr (E.AsArray _)) = mp
