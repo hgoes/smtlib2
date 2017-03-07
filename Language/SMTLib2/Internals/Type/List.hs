@@ -160,12 +160,9 @@ remove :: List e lst -> Natural idx -> List e (Remove lst idx)
 remove (x ::: xs) Zero = xs
 remove (x ::: xs) (Succ n) = x ::: (remove xs n)
 
-mapM :: Monad m => (forall x. e x -> m (e' x)) -> List e lst -> m (List e' lst)
-mapM _ Nil = return Nil
-mapM f (x ::: xs) = do
-  nx <- f x
-  nxs <- mapM f xs
-  return (nx ::: nxs)
+mapM :: Applicative m => (forall x. e x -> m (e' x)) -> List e lst -> m (List e' lst)
+mapM _ Nil = pure Nil
+mapM f (x ::: xs) = (:::) <$> f x <*> mapM f xs
 
 mapIndexM :: Monad m => (forall n. Natural n -> e (Index lst n) -> m (e' (Index lst n)))
           -> List e lst

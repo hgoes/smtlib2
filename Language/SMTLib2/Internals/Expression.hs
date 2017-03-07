@@ -273,7 +273,7 @@ expressionType _ _ f _ _ _ (AsArray fun) = do
 expressionType _ _ _ _ _ _ (Quantification _ _ _) = return BoolRepr
 expressionType _ _ _ _ _ f (Let _ body) = f body
 
-mapExpr :: (Functor m,Monad m)
+mapExpr :: (Functor m,Applicative m)
         => (forall t. v1 t -> m (v2 t)) -- ^ How to translate variables
         -> (forall t. qv1 t -> m (qv2 t)) -- ^ How to translate quantified variables
         -> (forall arg t. fun1 '(arg,t) -> m (fun2 '(arg,t))) -- ^ How to translate functions
@@ -286,57 +286,52 @@ mapExpr f _ _ _ _ _ (Var v) = fmap Var (f v)
 mapExpr _ f _ _ _ _ (QVar v) = fmap QVar (f v)
 mapExpr _ _ _ f _ _ (FVar v) = fmap FVar (f v)
 mapExpr _ _ _ _ f _ (LVar v) = fmap LVar (f v)
-mapExpr _ _ f _ _ i (App fun args) = do
-  fun' <- mapFunction f fun
-  args' <- List.mapM i args
-  return (App fun' args')
-mapExpr _ _ _ _ _ _ (Const val) = return (Const val)
+mapExpr _ _ f _ _ i (App fun args)
+  = App <$> mapFunction f fun <*> List.mapM i args
+mapExpr _ _ _ _ _ _ (Const val) = pure (Const val)
 mapExpr _ _ f _ _ _ (AsArray fun) = fmap AsArray (mapFunction f fun)
-mapExpr _ f _ _ _ g (Quantification q args body) = do
-  args' <- List.mapM f args
-  body' <- g body
-  return (Quantification q args' body')
-mapExpr _ _ _ _ f g (Let args body) = do
-  args' <- List.mapM (\bind -> do
-                         nv <- f (letVar bind)
-                         nexpr <- g (letExpr bind)
-                         return $ LetBinding nv nexpr
-                     ) args
-  body' <- g body
-  return (Let args' body')
+mapExpr _ f _ _ _ g (Quantification q args body)
+  = Quantification q <$>
+    List.mapM f args <*>
+    g body
+mapExpr _ _ _ _ f g (Let args body)
+  = Let <$>
+    List.mapM (\bind -> LetBinding <$>
+                        f (letVar bind) <*>
+                        g (letExpr bind)
+              ) args <*>
+    g body
 
-mapFunction :: (Functor m,Monad m)
+mapFunction :: (Functor m,Applicative m)
             => (forall arg t. fun1 '(arg,t) -> m (fun2 '(arg,t)))
             -> Function fun1 '(arg,res)
             -> m (Function fun2 '(arg,res))
 mapFunction f (Fun x) = fmap Fun (f x)
-mapFunction _ (Eq tp n) = return (Eq tp n)
-mapFunction _ (Distinct tp n) = return (Distinct tp n)
-mapFunction f (Map idx x) = do
-  x' <- mapFunction f x
-  return (Map idx x')
-mapFunction _ (Ord tp op) = return (Ord tp op)
-mapFunction _ (Arith tp op n) = return (Arith tp op n)
-mapFunction _ (ArithIntBin op) = return (ArithIntBin op)
-mapFunction _ Divide = return Divide
-mapFunction _ (Abs tp) = return (Abs tp)
-mapFunction _ Not = return Not
-mapFunction _ (Logic op n) = return (Logic op n)
-mapFunction _ ToReal = return ToReal
-mapFunction _ ToInt = return ToInt
-mapFunction _ (ITE tp) = return (ITE tp)
-mapFunction _ (BVComp op bw) = return (BVComp op bw)
-mapFunction _ (BVBin op bw) = return (BVBin op bw)
-mapFunction _ (BVUn op bw) = return (BVUn op bw)
-mapFunction _ (Select idx el) = return (Select idx el)
-mapFunction _ (Store idx el) = return (Store idx el)
-mapFunction _ (ConstArray idx el) = return (ConstArray idx el)
-mapFunction _ (Concat bw1 bw2) = return (Concat bw1 bw2)
-mapFunction _ (Extract bw start len) = return (Extract bw start len)
-mapFunction _ (Constructor dt par con) = return (Constructor dt par con)
-mapFunction _ (Test dt par con) = return (Test dt par con)
-mapFunction _ (Field dt par x) = return (Field dt par x)
-mapFunction _ (Divisible x) = return (Divisible x)
+mapFunction _ (Eq tp n) = pure (Eq tp n)
+mapFunction _ (Distinct tp n) = pure (Distinct tp n)
+mapFunction f (Map idx x) = fmap (Map idx) (mapFunction f x)
+mapFunction _ (Ord tp op) = pure (Ord tp op)
+mapFunction _ (Arith tp op n) = pure (Arith tp op n)
+mapFunction _ (ArithIntBin op) = pure (ArithIntBin op)
+mapFunction _ Divide = pure Divide
+mapFunction _ (Abs tp) = pure (Abs tp)
+mapFunction _ Not = pure Not
+mapFunction _ (Logic op n) = pure (Logic op n)
+mapFunction _ ToReal = pure ToReal
+mapFunction _ ToInt = pure ToInt
+mapFunction _ (ITE tp) = pure (ITE tp)
+mapFunction _ (BVComp op bw) = pure (BVComp op bw)
+mapFunction _ (BVBin op bw) = pure (BVBin op bw)
+mapFunction _ (BVUn op bw) = pure (BVUn op bw)
+mapFunction _ (Select idx el) = pure (Select idx el)
+mapFunction _ (Store idx el) = pure (Store idx el)
+mapFunction _ (ConstArray idx el) = pure (ConstArray idx el)
+mapFunction _ (Concat bw1 bw2) = pure (Concat bw1 bw2)
+mapFunction _ (Extract bw start len) = pure (Extract bw start len)
+mapFunction _ (Constructor dt par con) = pure (Constructor dt par con)
+mapFunction _ (Test dt par con) = pure (Test dt par con)
+mapFunction _ (Field dt par x) = pure (Field dt par x)
+mapFunction _ (Divisible x) = pure (Divisible x)
 
 instance (GShow v,GShow qv,GShow fun,GShow fv,GShow lv,GShow e)
          => Show (Expression v qv fun fv lv e r) where
