@@ -279,6 +279,7 @@ instance (Composite c) => Composite (Choice enc c) where
     Nothing -> return Nothing
   compCompare = compareChoice
   compShow = showsPrec
+  compInvariant (ChoiceBool (Vec.null -> True)) = return []
   compInvariant (ChoiceSingleton c) = compInvariant c
   compInvariant (ChoiceBool xs) = do
     recInv <- fmap concat $ mapM (\(x,_) -> compInvariant x) (Vec.toList xs)
