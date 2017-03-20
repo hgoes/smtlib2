@@ -11,9 +11,17 @@ import Data.Functor.Identity
 class (Composite from,Composite to) => Convert from to where
   convert :: (Embed m e,Monad m) => from e -> m (Maybe (to e))
 
+class ConvertC from to where
+  convertC :: (Composite a,Embed m e,Monad m)
+           => from a e -> m (Maybe (to a e))
+
 data Fallback start alt (e :: Type -> *)
   = Start { _start :: start e }
   | Alternative { _alternative :: alt e }
+
+data FallbackC start alt (a :: (Type -> *) -> *) (e :: Type -> *)
+  = StartC { _startC :: start a e }
+  | AlternativeC { _alternativeC :: alt a e }
 
 data Fallback2 start alt1 alt2 (e :: Type -> *)
   = Start2 { _start2 :: start e }
@@ -28,6 +36,18 @@ fallback :: (Embed m e,Monad m,Convert start alt)
          -> m (Maybe (Fallback start alt e))
 fallback f g fb1 fb2 = do
   res <- fallbackExtra (\s1 s2 -> fmap (fmap (\x -> (x,()))) $ f s1 s2)
+         (\a1 a2 -> fmap (fmap (\x -> (x,()))) $ g a1 a2)
+         fb1 fb2
+  return $ fmap fst res
+
+fallbackC :: (Embed m e,Monad m,Composite a,Composite (start a),Composite (alt a),ConvertC start alt)
+          => (start a e -> start a e -> m (Maybe (start a e)))
+          -> (alt a e -> alt a e -> m (Maybe (alt a e)))
+          -> FallbackC start alt a e
+          -> FallbackC start alt a e
+          -> m (Maybe (FallbackC start alt a e))
+fallbackC f g fb1 fb2 = do
+  res <- fallbackExtraC (\s1 s2 -> fmap (fmap (\x -> (x,()))) $ f s1 s2)
          (\a1 a2 -> fmap (fmap (\x -> (x,()))) $ g a1 a2)
          fb1 fb2
   return $ fmap fst res
@@ -61,6 +81,37 @@ fallbackExtra f g (Alternative x) (Alternative y) = do
   z <- g x y
   case z of
     Just (res,extra) -> return $ Just (Alternative res,extra)
+    Nothing -> return Nothing
+
+fallbackExtraC :: (Embed m e,Monad m,Composite el,Composite (start el),Composite (alt el),ConvertC start alt)
+              => (start el e -> start el e -> m (Maybe (start el e,a)))
+              -> (alt el e -> alt el e -> m (Maybe (alt el e,a)))
+              -> FallbackC start alt el e
+              -> FallbackC start alt el e
+              -> m (Maybe (FallbackC start alt el e,a))
+fallbackExtraC f g (StartC x) (StartC y) = do
+  z <- f x y
+  case z of
+    Just (res,extra) -> return $ Just (StartC res,extra)
+    Nothing -> do
+      nx <- convertC x
+      case nx of
+        Just nx' -> fallbackExtraC f g (AlternativeC nx') (StartC y)
+        Nothing -> return Nothing
+fallbackExtraC f g (StartC x) (AlternativeC y) = do
+  nx <- convertC x
+  case nx of
+    Just nx' -> fallbackExtraC f g (AlternativeC nx') (AlternativeC y)
+    Nothing -> return Nothing
+fallbackExtraC f g (AlternativeC x) (StartC y) = do
+  ny <- convertC y
+  case ny of
+    Just ny' -> fallbackExtraC f g (AlternativeC x) (AlternativeC ny')
+    Nothing -> return Nothing
+fallbackExtraC f g (AlternativeC x) (AlternativeC y) = do
+  z <- g x y
+  case z of
+    Just (res,extra) -> return $ Just (AlternativeC res,extra)
     Nothing -> return Nothing
 
 mapFallback :: (Embed m e,Monad m)
@@ -231,6 +282,38 @@ instance (Composite start,Composite alt,Convert start alt)
   compShow p (Alternative x) = compShow p x
   compInvariant (Start x) = compInvariant x
   compInvariant (Alternative x) = compInvariant x
+
+instance (Composite a,Composite (start a),Composite (alt a),ConvertC start alt)
+         => Composite (FallbackC start alt a) where
+  type RevComp (FallbackC start alt a) = RevFallback (start a) (alt a)
+  foldExprs f (StartC e) = do
+    ne <- foldExprs (f.RevStart) e
+    return (StartC ne)
+  foldExprs f (AlternativeC e) = do
+    ne <- foldExprs (f.RevAlternative) e
+    return (AlternativeC ne)
+  getRev (RevStart r) (StartC x) = getRev r x
+  getRev (RevAlternative r) (AlternativeC x) = getRev r x
+  getRev _ _ = Nothing
+  setRev (RevStart r) x fb = do
+    nel <- setRev r x (case fb of
+                         Just (StartC y) -> Just y
+                         _ -> Nothing)
+    return $ StartC nel
+  setRev (RevAlternative r) x fb = do
+    nel <- setRev r x (case fb of
+                         Just (AlternativeC y) -> Just y
+                         _ -> Nothing)
+    return $ AlternativeC nel
+  compCombine f = fallbackC (compCombine f) (compCombine f)
+  compCompare (StartC x) (StartC y) = compCompare x y
+  compCompare (StartC _) _ = LT
+  compCompare _ (StartC _) = GT
+  compCompare (AlternativeC x) (AlternativeC y) = compCompare x y
+  compShow p (StartC x) = compShow p x
+  compShow p (AlternativeC x) = compShow p x
+  compInvariant (StartC x) = compInvariant x
+  compInvariant (AlternativeC x) = compInvariant x
 
 instance (Composite start,Composite alt1,Composite alt2,
           Convert start alt1,Convert start alt2,Convert alt1 alt2)

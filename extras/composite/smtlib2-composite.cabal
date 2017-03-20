@@ -40,6 +40,7 @@ Library
                   Language.SMTLib2.Composite.Choice
                   Language.SMTLib2.Composite.Ranged
                   Language.SMTLib2.Composite.Linear
+                  Language.SMTLib2.Composite.Stack
   Extensions:
     RankNTypes
     KindSignatures
