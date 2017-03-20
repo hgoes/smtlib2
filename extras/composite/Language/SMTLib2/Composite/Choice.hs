@@ -1,10 +1,10 @@
 {-# LANGUAGE DataKinds,GADTs,TypeFamilies,ExistentialQuantification,ScopedTypeVariables,RankNTypes #-}
 module Language.SMTLib2.Composite.Choice
-  (Choice(),ChoiceEncoding(..),
+  (Choice(),ChoiceEncoding(..),RevChoice(),
    -- * Encodings
    boolEncoding,intEncoding,bvEncoding,{-dtEncoding,-}possibleChoices,
    -- * Constructor
-   singleton,initial,
+   singleton,initial,initialBoolean,
    -- * Accessors
    chosen,
    -- * Functions
@@ -595,6 +595,10 @@ initial f (ChoiceValue _ xs tp) = do
     mkITE ((cond,val):rest) = do
       ifF <- mkITE rest
       ite cond (constant val) ifF
+
+initialBoolean :: [(c e,e BoolType)] -> Choice BoolEncoding c e
+initialBoolean [(c,_)] = ChoiceSingleton c
+initialBoolean cs = ChoiceBool $ Vec.fromList cs
 
 chosen :: (Embed m e,Monad m,Composite c) => Access (Choice enc c) ('Seq c 'Id) c m e
 chosen (ChoiceSingleton x) = return $ AccSeq [(ChoiceIndex 0,[],AccId)]
