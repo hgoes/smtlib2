@@ -37,6 +37,10 @@ instance (Composite a,Composite b) => Composite (CompTuple2 a b) where
     n1 <- foldExprs (f . RevTuple2_1) (ctuple2_1 tup)
     n2 <- foldExprs (f . RevTuple2_2) (ctuple2_2 tup)
     return $ CompTuple2 n1 n2
+  mapExprs f tup = do
+    n1 <- mapExprs f (ctuple2_1 tup)
+    n2 <- mapExprs f (ctuple2_2 tup)
+    return $ CompTuple2 n1 n2
   getRev (RevTuple2_1 r) (CompTuple2 x _) = getRev r x
   getRev (RevTuple2_2 r) (CompTuple2 _ x) = getRev r x
   setRev (RevTuple2_1 r) el (Just (CompTuple2 x y)) = do
@@ -98,6 +102,11 @@ instance (Composite a,Composite b,Composite c) => Composite (CompTuple3 a b c) w
     n1 <- foldExprs (f . RevTuple3_1) (ctuple3_1 tup)
     n2 <- foldExprs (f . RevTuple3_2) (ctuple3_2 tup)
     n3 <- foldExprs (f . RevTuple3_3) (ctuple3_3 tup)
+    return $ CompTuple3 n1 n2 n3
+  mapExprs f tup = do
+    n1 <- mapExprs f (ctuple3_1 tup)
+    n2 <- mapExprs f (ctuple3_2 tup)
+    n3 <- mapExprs f (ctuple3_3 tup)
     return $ CompTuple3 n1 n2 n3
   getRev (RevTuple3_1 r) (CompTuple3 x _ _) = getRev r x
   getRev (RevTuple3_2 r) (CompTuple3 _ x _) = getRev r x
@@ -262,7 +271,7 @@ instance (StaticByteWidth a,ByteAccess a idx el,ByteAccess b idx el,CanConcat el
       Nothing -> return []
     reads2 <- sequence [ do
                            let Just zero' = compositeFromInteger 0 (compType idx)
-                           zero <- foldExprs (const constant) zero'
+                           zero <- mapExprs constant zero'
                            r <- byteRead y (zero::idx e) rest
                            nr <- concatRead part r
                            return (nr,cond)
@@ -272,7 +281,7 @@ instance (StaticByteWidth a,ByteAccess a idx el,ByteAccess b idx el,CanConcat el
       Just cond -> do
         let wx = staticByteWidth x
             Just vwx = compositeFromInteger wx (compType idx)
-        wx' <- foldExprs (const constant) vwx
+        wx' <- mapExprs constant vwx
         Just nidx <- compositeMinus idx wx'
         ry <- byteRead y nidx sz
         return [(ry,cond)]
@@ -291,7 +300,7 @@ instance (StaticByteWidth a,ByteAccess a idx el,ByteAccess b idx el,CanConcat el
     writes2 <- sequence [ do
                             let Just zero' = compositeFromInteger 0
                                              (compType idx)
-                            zero <- foldExprs (const constant) zero'
+                            zero <- mapExprs constant zero'
                             wy <- byteWrite y (zero::idx e) rest
                             return $ (wy { fullWrite = case fullWrite wx of
                                              Nothing -> case fullWrite wy of
@@ -306,7 +315,7 @@ instance (StaticByteWidth a,ByteAccess a idx el,ByteAccess b idx el,CanConcat el
       Just cond -> do
         let szx = staticByteWidth x
             Just vszx = compositeFromInteger szx (compType idx)
-        szx' <- foldExprs (const constant) vszx
+        szx' <- mapExprs constant vszx
         Just nidx <- compositeMinus idx szx'
         wy <- byteWrite y nidx el
         return [(wy { fullWrite = case fullWrite wy of

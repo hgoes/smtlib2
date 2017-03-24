@@ -260,6 +260,12 @@ instance (Composite start,Composite alt,Convert start alt)
   foldExprs f (Alternative e) = do
     ne <- foldExprs (f.RevAlternative) e
     return (Alternative ne)
+  mapExprs f (Start e) = do
+    ne <- mapExprs f e
+    return $ Start ne
+  mapExprs f (Alternative e) = do
+    ne <- mapExprs f e
+    return $ Alternative ne
   getRev (RevStart r) (Start x) = getRev r x
   getRev (RevAlternative r) (Alternative x) = getRev r x
   getRev _ _ = Nothing
@@ -291,6 +297,12 @@ instance (Composite a,Composite (start a),Composite (alt a),ConvertC start alt)
     return (StartC ne)
   foldExprs f (AlternativeC e) = do
     ne <- foldExprs (f.RevAlternative) e
+    return (AlternativeC ne)
+  mapExprs f (StartC e) = do
+    ne <- mapExprs f e
+    return (StartC ne)
+  mapExprs f (AlternativeC e) = do
+    ne <- mapExprs f e
     return (AlternativeC ne)
   getRev (RevStart r) (StartC x) = getRev r x
   getRev (RevAlternative r) (AlternativeC x) = getRev r x
@@ -327,6 +339,15 @@ instance (Composite start,Composite alt1,Composite alt2,
     return $ Alternative2_1 ne
   foldExprs f (Alternative2_2 e) = do
     ne <- foldExprs (f.RevAlternative2_2) e
+    return $ Alternative2_2 ne
+  mapExprs f (Start2 e) = do
+    ne <- mapExprs f e
+    return $ Start2 ne
+  mapExprs f (Alternative2_1 e) = do
+    ne <- mapExprs f e
+    return $ Alternative2_1 ne
+  mapExprs f (Alternative2_2 e) = do
+    ne <- mapExprs f e
     return $ Alternative2_2 ne
   getRev (RevStart2 r) (Start2 x) = getRev r x
   getRev (RevAlternative2_1 r) (Alternative2_1 x) = getRev r x

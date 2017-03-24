@@ -27,10 +27,10 @@ data RevArray idx c tp where
   RevArray :: RevComp c tp -> RevArray idx c (ArrayType idx tp)
 
 arrayDescr :: Composite c => List Repr idx -> CompDescr c -> CompDescr (CompArray idx c)
-arrayDescr idx el = CompArray idx $ runIdentity $ foldExprs (\_ tp -> return $ Arrayed (array idx tp)) el
+arrayDescr idx el = CompArray idx $ runIdentity $ mapExprs (\tp -> return $ Arrayed (array idx tp)) el
 
 elementDescr :: Composite c => CompArray idx c Repr -> c Repr
-elementDescr (CompArray _ arr) = runIdentity $ foldExprs (\_ (Arrayed (ArrayRepr _ tp)) -> return tp) arr
+elementDescr (CompArray _ arr) = runIdentity $ mapExprs (\(Arrayed (ArrayRepr _ tp)) -> return tp) arr
 
 instance GEq e => Eq (Arrayed idx e tp) where
   (==) (Arrayed x) (Arrayed y) = defaultEq x y
@@ -66,6 +66,12 @@ instance Composite c => Composite (CompArray i c) where
                         ne <- f (RevArray r) e
                         return (Arrayed ne)
                     ) c
+    return (CompArray idx nc)
+  mapExprs f (CompArray idx c) = do
+    nc <- mapExprs (\(Arrayed e) -> do
+                       ne <- f e
+                       return $ Arrayed ne
+                   ) c
     return (CompArray idx nc)
   getRev (RevArray r) (CompArray _ arr) = do
     Arrayed res <- getRev r arr
@@ -127,7 +133,7 @@ instance (Composite c,IsSingleton idx,SingletonType idx ~ i) => IsArray (CompArr
     newConstantArray ridx el
   select (CompArray _ arr) idx = do
     ridx <- getSingleton idx
-    el <- foldExprs (\_ (Arrayed e) -> SMT.select e (ridx ::: Nil)) arr
+    el <- mapExprs (\(Arrayed e) -> SMT.select e (ridx ::: Nil)) arr
     return (Just el)
   store arr idx el = do
     ridx <- getSingleton idx
@@ -135,14 +141,14 @@ instance (Composite c,IsSingleton idx,SingletonType idx ~ i) => IsArray (CompArr
 
 newConstantArray :: (Composite el,Embed m e,Monad m) => List Repr idx -> el e -> m (CompArray idx el e)
 newConstantArray idx el = do
-  arr <- foldExprs (\_ e -> do
-                       ne <- constArray idx e
-                       return $ Arrayed ne
-                   ) el
+  arr <- mapExprs (\e -> do
+                      ne <- constArray idx e
+                      return $ Arrayed ne
+                  ) el
   return $ CompArray idx arr
 
 selectArray :: (Composite c,Embed m e,Monad m) => CompArray i c e -> List e i -> m (c e)
-selectArray (CompArray _ c) i = foldExprs (\_ (Arrayed e) -> SMT.select e i) c
+selectArray (CompArray _ c) i = mapExprs (\(Arrayed e) -> SMT.select e i) c
 
 storeArray :: (Composite c,Embed m e,Monad m) => CompArray i c e -> List e i -> c e -> m (Maybe (CompArray i c e))
 storeArray = storeArrayCond Nothing

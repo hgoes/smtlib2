@@ -24,9 +24,9 @@ data RevLinear c tp where
 
 delinear :: (IsNumeric c,Embed m e,Monad m) => Linear c e -> m (c e)
 delinear lin = do
-  const' <- foldExprs (const constant) (linConst lin)
+  const' <- mapExprs constant (linConst lin)
   ps <- mapM (\(c,x) -> do
-                 c' <- foldExprs (const constant) c
+                 c' <- mapExprs constant c
                  Just r <- compositeMult c' x
                  return r
              ) $ linear lin
@@ -42,6 +42,9 @@ instance Composite arr => Composite (ByteArray arr) where
   type RevComp (ByteArray arr) = RevComp arr
   foldExprs f (ByteArray arr) = do
     narr <- foldExprs f arr
+    return $ ByteArray narr
+  mapExprs f (ByteArray arr) = do
+    narr <- mapExprs f arr
     return $ ByteArray narr
   getRev r (ByteArray arr) = getRev r arr
   setRev r x arr = fmap ByteArray $ setRev r x (fmap byteArray arr)
@@ -494,6 +497,11 @@ instance (IsNumeric c) => Composite (Linear c) where
                       nv <- foldExprs (f . RevFactor n) v
                       return (c,nv)) $ zip [0..] facs
     return $ Linear c nfacs
+  mapExprs f (Linear c facs) = do
+    nfacs <- mapM (\(c,v) -> do
+                      nv <- mapExprs f v
+                      return (c,nv)) facs
+    return $ Linear c nfacs
   getRev (RevFactor i r) (Linear _ lst) = do
     (_,el) <- safeGenericIndex lst i
     getRev r el
@@ -512,7 +520,7 @@ instance (IsNumeric c) => Composite (Linear c) where
         Nothing -> return Nothing
     LT -> do
       let Just one = compositeFromInteger 1 (compType c1)
-      v <- foldExprs (const constant) one
+      v <- mapExprs constant one
       let Just nc = runIdentity $ compositeMinus c2 c1
       nl2 <- mergeFactors f [(nc,v)] lin2
       case nl2 of
@@ -524,7 +532,7 @@ instance (IsNumeric c) => Composite (Linear c) where
         Nothing -> return Nothing
     GT -> do
       let Just one = compositeFromInteger 1 (compType c1)
-      v <- foldExprs (const constant) one
+      v <- mapExprs constant one
       let Just nc = runIdentity $ compositeMinus c1 c2
       nl1 <- mergeFactors f [(nc,v)] lin1
       case nl1 of

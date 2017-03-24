@@ -28,6 +28,10 @@ instance Composite el => Composite (StaticArray idx el) where
                (\idx el -> foldExprs (f . RevStore idx) el)
                (stores arr)
     return (StaticArray (indexType' arr) ndef nstores)
+  mapExprs f arr = do
+    ndef <- mapExprs f (defaultElement arr)
+    nstores <- mapM (mapExprs f) (stores arr)
+    return (StaticArray (indexType' arr) ndef nstores)
   getRev (RevDefaultElement r) arr = getRev r (defaultElement arr)
   getRev (RevStore idx r) arr = do
     el <- Map.lookup idx (stores arr)

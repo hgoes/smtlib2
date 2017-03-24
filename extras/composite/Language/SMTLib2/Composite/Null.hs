@@ -14,6 +14,7 @@ data NoRev (tp :: Type)
 instance (Ord val,Show val) => Composite (NoComp val) where
   type RevComp (NoComp val) = NoRev
   foldExprs _ (NoComp x) = return (NoComp x)
+  mapExprs _ (NoComp x) = return (NoComp x)
   getRev _ _ = Nothing
   setRev _ _ _ = Nothing
   compCombine _ (NoComp x) (NoComp y) = return $ if x==y

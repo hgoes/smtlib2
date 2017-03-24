@@ -19,6 +19,11 @@ class (GCompare (RevComp arg),GShow (RevComp arg))
             => (forall t. RevComp arg t -> e t -> m (e' t))
             -> arg e
             -> m (arg e')
+  mapExprs :: (Monad m)
+           => (forall t. e t -> m (e' t))
+           -> arg e
+           -> m (arg e')
+  mapExprs f = foldExprs (const f)
   getRev :: RevComp arg tp -> arg e -> Maybe (e tp)
   setRev :: RevComp arg tp -> e tp -> Maybe (arg e) -> Maybe (arg e)
   withRev :: (Monad m) => RevComp arg tp -> arg e -> (e tp -> m (e tp)) -> m (arg e)
@@ -72,12 +77,12 @@ compITEs ((c,x):xs) = do
     Just rest' -> compITE c x rest'
 
 compType :: (Composite arg,GetType e) => arg e -> arg Repr
-compType = runIdentity . foldExprs (const $ return . getType)
+compType = runIdentity . mapExprs (return . getType)
 
 compTypeM :: (Composite arg,Embed m e,Monad m) => arg e -> m (arg Repr)
-compTypeM = foldExprs (\_ x -> do
-                          tp <- embedTypeOf
-                          return $ tp x)
+compTypeM = mapExprs (\x -> do
+                         tp <- embedTypeOf
+                         return $ tp x)
 
 newtype EqT e m a = EqT (WriterT [e BoolType] m a) deriving (Applicative,Functor,Monad,MonadWriter [e BoolType])
 
@@ -118,7 +123,7 @@ createComposite f descr
 revType :: Composite arg => CompDescr arg -> RevComp arg tp -> Repr tp
 revType descr rev = case getRev rev descr of
   Just r -> r
-  Nothing -> error "revType: Internal error, type for unknown element requested."
+  Nothing -> error $ "revType: Internal error, type for unknown element "++gshowsPrec 11 rev ""++" requested."
 
 class Composite arg => CompositeExtract arg where
   type CompExtract arg

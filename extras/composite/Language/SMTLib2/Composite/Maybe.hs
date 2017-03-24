@@ -17,6 +17,10 @@ instance Composite a => Composite (CompMaybe a) where
   foldExprs f (CompMaybe (Just v)) = do
     nv <- foldExprs (f . RevMaybe) v
     return (CompMaybe (Just nv))
+  mapExprs f (CompMaybe Nothing) = return $ CompMaybe Nothing
+  mapExprs f (CompMaybe (Just v)) = do
+    nv <- mapExprs f v
+    return (CompMaybe (Just nv))
   getRev (RevMaybe r) (CompMaybe x) = x >>= getRev r
   setRev (RevMaybe r) x mb = do
     nel <- setRev r x (do
@@ -46,7 +50,7 @@ instance CompositeExtract a => CompositeExtract (CompMaybe a) where
 
 instance ByteWidth a idx => ByteWidth (CompMaybe a) idx where
   byteWidth (CompMaybe Nothing) r = let Just zero = compositeFromInteger 0 r
-                                    in foldExprs (const constant) zero
+                                    in mapExprs constant zero
   byteWidth (CompMaybe (Just obj)) r = byteWidth obj r
 
 instance StaticByteAccess a el => StaticByteAccess (CompMaybe a) el where

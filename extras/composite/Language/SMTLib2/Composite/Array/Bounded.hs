@@ -23,6 +23,10 @@ instance (Composite arr,Composite idx) => Composite (Bounded arr idx) where
     narr <- foldExprs (f . RevBoundedArray) arr
     nbnd <- foldExprs (f . RevBound) bnd
     return (Bounded narr nbnd)
+  mapExprs f (Bounded arr bnd) = do
+    narr <- mapExprs f arr
+    nbnd <- mapExprs f bnd
+    return (Bounded narr nbnd)
   getRev (RevBoundedArray r) arr = getRev r (boundedArray arr)
   getRev (RevBound r) arr = getRev r (bound arr)
   setRev (RevBoundedArray r) e (Just arr) = do

@@ -18,11 +18,11 @@ import Data.GADT.Compare
 data AnyList (e :: Type -> *) = forall tps. AnyList (List e tps)
 
 allFields :: (Composite c,GetType e) => c e -> AnyList e
-allFields c = execState (foldExprs (\_ e -> do
-                                       AnyList xs <- get
-                                       put $ AnyList (e ::: xs)
-                                       return e
-                                   ) c) (AnyList Nil)
+allFields c = execState (mapExprs (\e -> do
+                                      AnyList xs <- get
+                                      put $ AnyList (e ::: xs)
+                                      return e
+                                  ) c) (AnyList Nil)
 
 allFieldDescr :: Composite c => CompDescr c -> AnyList Repr
 allFieldDescr descr = allFields descr
@@ -38,6 +38,9 @@ instance (Composite idx,Composite c) => Composite (CompositeArray idx c) where
   foldExprs f (CompositeArray arr) = do
     narr <- foldExprs (\(RevArray r) e -> f (RevCompositeArray r (indexDescr arr)) e
                       ) arr
+    return (CompositeArray narr)
+  mapExprs f (CompositeArray arr) = do
+    narr <- mapExprs f arr
     return (CompositeArray narr)
   getRev (RevCompositeArray r ilst) (CompositeArray arr) = do
     Refl <- geq ilst (indexDescr arr)

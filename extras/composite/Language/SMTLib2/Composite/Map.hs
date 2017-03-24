@@ -22,6 +22,9 @@ instance (Show k,Ord k,Composite a) => Composite (CompMap k a) where
     nmp <- sequence $ Map.mapWithKey
       (\k -> foldExprs (f . RevMap k)) mp
     return (CompMap nmp)
+  mapExprs f (CompMap mp) = do
+    nmp <- mapM (mapExprs f) mp
+    return (CompMap nmp)
   getRev (RevMap k r) (CompMap mp) = Map.lookup k mp >>= getRev r
   setRev (RevMap k r) x Nothing = do
     el <- setRev r x Nothing

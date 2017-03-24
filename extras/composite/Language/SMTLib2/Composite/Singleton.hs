@@ -24,6 +24,9 @@ instance Composite (Comp tp) where
   foldExprs f (Comp e) = do
     ne <- f Refl e
     return (Comp ne)
+  mapExprs f (Comp e) = do
+    ne <- f e
+    return (Comp ne)
   getRev Refl (Comp x) = Just x
   setRev Refl x _ = Just (Comp x)
   compCombine f (Comp x) (Comp y) = fmap (Just . Comp) $ f x y
@@ -87,7 +90,7 @@ instance (IsSingleton idx,Integral (Value (SingletonType idx)),IsNumeric idx) =>
     case tp e of
       BitVecRepr bw -> let Just bw' = compositeFromInteger
                                       (bwSize bw `div` 8) r
-                       in foldExprs (const constant) bw'
+                       in mapExprs constant bw'
 
 {-instance StaticByteWidth (Comp (BitVecType bw)) where
   staticByteWidth (Comp e) = case getType e of
@@ -119,6 +122,9 @@ instance Composite CompBV where
   foldExprs f (CompBV e w) = do
       ne <- f (RevBV w) e
       return $ CompBV ne w
+  mapExprs f (CompBV e w) = do
+    ne <- f e
+    return $ CompBV ne w
   getRev (RevBV bw) (CompBV e w) = do
     Refl <- geq bw w
     return e
@@ -132,7 +138,7 @@ instance Composite CompBV where
   compShow p (CompBV e _) = gshowsPrec p e
 
 instance (IsNumSingleton i) => ByteWidth CompBV i where
-  byteWidth (CompBV _ w) r = foldExprs (const constant) bw
+  byteWidth (CompBV _ w) r = mapExprs constant bw
     where
       Just bw = compositeFromInteger ((bwSize w) `div` 8) r
 

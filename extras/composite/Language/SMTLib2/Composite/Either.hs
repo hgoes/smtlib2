@@ -20,6 +20,12 @@ instance (Composite a,Composite b) => Composite (CompEither a b) where
   foldExprs f (CompEither (Right x)) = do
     nx <- foldExprs (f . RevRight) x
     return (CompEither (Right nx))
+  mapExprs f (CompEither (Left x)) = do
+    nx <- mapExprs f x
+    return (CompEither (Left nx))
+  mapExprs f (CompEither (Right x)) = do
+    nx <- mapExprs f x
+    return (CompEither (Right nx))
   getRev (RevLeft r) (CompEither (Left x)) = getRev r x
   getRev (RevRight r) (CompEither (Right x)) = getRev r x
   getRev _ _ = Nothing

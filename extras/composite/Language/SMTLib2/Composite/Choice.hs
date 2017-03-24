@@ -135,6 +135,23 @@ instance (Composite c) => Composite (Choice enc c) where
                           return (nel,val)
                       ) lst
     return (ChoiceValue tp nlst nv)
+  mapExprs f (ChoiceSingleton x) = do
+    nx <- mapExprs f x
+    return (ChoiceSingleton nx)
+  mapExprs f (ChoiceBool lst) = do
+    nlst <- Vec.mapM (\(el,cond) -> do
+                         nel <- mapExprs f el
+                         ncond <- f cond
+                         return (nel,ncond)
+                     ) lst
+    return $ ChoiceBool nlst
+  mapExprs f (ChoiceValue tp lst v) = do
+    nv <- f v
+    nlst <- Vec.mapM (\(el,val) -> do
+                         nel <- mapExprs f el
+                         return (nel,val)
+                     ) lst
+    return (ChoiceValue tp nlst nv)
   getRev (RevChoiceBool i) (ChoiceBool lst) = do
     (_,cond) <- lst Vec.!? i
     return cond

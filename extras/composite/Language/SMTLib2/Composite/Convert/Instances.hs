@@ -19,10 +19,10 @@ import qualified Data.Map as Map
 
 instance Composite el => Convert (StaticArray idx el) (CompArray idx el) where
   convert (StaticArray idx def mp) = do
-    arr0 <- foldExprs (\_ e -> do
-                          ne <- constArray idx e
-                          return $ Arrayed ne
-                      ) def
+    arr0 <- mapExprs (\e -> do
+                         ne <- constArray idx e
+                         return $ Arrayed ne
+                     ) def
     foldlM (\arr (val,el) -> case arr of
                Nothing -> return Nothing
                Just rarr -> do
@@ -34,7 +34,7 @@ instance Composite el => Convert (StaticArray idx el) (CompArray idx el) where
 
 instance (Composite c,Ord (c Value),Show (c Value)) => Convert (NoComp (c Value)) c where
   convert (NoComp val) = do
-    res <- foldExprs (\_ c -> constant c) val
+    res <- mapExprs constant val
     return (Just res)
 
 -- Either:

@@ -86,6 +86,10 @@ instance (IsStack st idx,Composite (st a)) => Composite (Stack st idx a) where
     nst <- foldExprs (f.RevStack) st
     ntop <- foldExprs (f.RevTop) top
     return $ Stack nst ntop
+  mapExprs f (Stack st top) = do
+    nst <- mapExprs f st
+    ntop <- mapExprs f top
+    return $ Stack nst ntop
   getRev (RevStack r) (Stack st _) = getRev r st
   getRev (RevTop r) (Stack _ top) = getRev r top
   setRev (RevStack r) v (Just (Stack st top)) = do
@@ -139,6 +143,7 @@ newtype StackList a e
 instance Composite a => Composite (StackList a) where
   type RevComp (StackList a) = RevList a
   foldExprs f (StackList ch) = fmap StackList $ foldExprs f ch
+  mapExprs f (StackList ch) = fmap StackList $ mapExprs f ch
   getRev r (StackList ch) = getRev r ch
   setRev r v idx = do
     nch <- setRev r v (fmap stackList idx)
@@ -154,6 +159,7 @@ newtype StackArray tp a e
 instance Composite a => Composite (StackArray tp a) where
   type RevComp (StackArray tp a) = RevArray '[tp] a
   foldExprs f (StackArray ch) = fmap StackArray $ foldExprs f ch
+  mapExprs f (StackArray ch) = fmap StackArray $ mapExprs f ch
   getRev r (StackArray ch) = getRev r ch
   setRev r v idx = do
     nch <- setRev r v (fmap stackArray idx)
@@ -169,6 +175,7 @@ newtype StackListIndex e
 instance Composite StackListIndex where
   type RevComp StackListIndex = RevChoice BoolEncoding (NoComp Int)
   foldExprs f (StackListIndex ch) = fmap StackListIndex $ foldExprs f ch
+  mapExprs f (StackListIndex ch) = fmap StackListIndex $ mapExprs f ch
   getRev r (StackListIndex ch) = getRev r ch
   setRev r v idx = do
     nch <- setRev r v (fmap stackListIndex idx)
@@ -184,6 +191,7 @@ newtype StackArrayIndex tp e
 instance Composite (StackArrayIndex tp) where
   type RevComp (StackArrayIndex tp) = (:~:) tp
   foldExprs f (StackArrayIndex ch) = fmap StackArrayIndex $ foldExprs f ch
+  mapExprs f (StackArrayIndex ch) = fmap StackArrayIndex $ mapExprs f ch
   getRev r (StackArrayIndex ch) = getRev r ch
   setRev r v idx = do
     nch <- setRev r v (fmap stackArrayIndex idx)
