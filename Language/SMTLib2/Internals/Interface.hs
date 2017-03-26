@@ -34,6 +34,8 @@ module Language.SMTLib2.Internals.Interface
         pattern OrLst,pattern Or,pattern (:|:),or',(.|.),
         pattern XOrLst,pattern XOr,xor',
         pattern ImpliesLst,pattern Implies,pattern (:=>:),implies,(.=>.),
+        pattern AtLeastLst,pattern AtLeast,atLeast,
+        pattern AtMostLst,pattern AtMost,atMost,
         -- *** Conversion
         pattern ToReal,pattern ToInt,toReal,toInt,
         -- *** If-then-else
@@ -296,6 +298,12 @@ pattern ImpliesLst lst = LogicLst E.Implies lst
 pattern Implies lst = Logic E.Implies lst
 MK_SIG((rtp ~ BoolType),(),(:=>:),(e BoolType) SEP (e BoolType),Expression v qv fun fv lv e rtp)
 pattern (:=>:) x y = App (E.Logic E.Implies (Succ (Succ Zero))) (x ::: y ::: Nil)
+
+pattern AtLeastLst n lst = LogicLst (E.AtLeast n) lst
+pattern AtLeast n lst = Logic (E.AtLeast n) lst
+
+pattern AtMostLst n lst = LogicLst (E.AtMost n) lst
+pattern AtMost n lst = Logic (E.AtMost n) lst
 
 pattern ToReal x = App E.ToReal (x ::: Nil)
 pattern ToInt x = App E.ToInt (x ::: Nil)
@@ -719,6 +727,14 @@ implies xs = embed $ ImpliesLst <$> traverse embedM xs
 {-# INLINEABLE or' #-}
 {-# INLINEABLE xor' #-}
 {-# INLINEABLE implies #-}
+
+atLeast,atMost :: (Embed m e,HasMonad a,MatchMonad a m,
+                   MonadResult a ~ e BoolType)
+               => Integer -> [a] -> m (e BoolType)
+atLeast n xs = embed $ AtLeastLst n <$> traverse embedM xs
+atMost n xs = embed $ AtMostLst n <$> traverse embedM xs
+{-# INLINEABLE atLeast #-}
+{-# INLINEABLE atMost #-}
 
 (.&.),(.|.),(.=>.) :: (Embed m e,HasMonad a,HasMonad b,
                        MatchMonad a m,MatchMonad b m,

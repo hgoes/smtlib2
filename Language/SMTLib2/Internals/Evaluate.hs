@@ -269,6 +269,10 @@ evaluateFun _ _ (Logic op n) args
     eval Or = or
     eval XOr = foldl1 (\x y -> if x then not y else y)
     eval Implies = impl
+    eval (AtLeast n) = (>=n) . foldl (\c x -> if x then c+1 else c
+                                     ) 0
+    eval (AtMost n) = (<=n) . foldl (\c x -> if x then c+1 else c
+                                    ) 0
     impl [x] = x
     impl (x:xs) = if x then impl xs else False
 evaluateFun _ _ ToReal ((ValueResult (IntValue x)) ::: Nil)

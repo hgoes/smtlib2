@@ -929,6 +929,14 @@ lispToFunction _ _ (L.Symbol "and") = return $ lispToLogicFunction And
 lispToFunction _ _ (L.Symbol "or") = return $ lispToLogicFunction Or
 lispToFunction _ _ (L.Symbol "xor") = return $ lispToLogicFunction XOr
 lispToFunction _ _ (L.Symbol "=>") = return $ lispToLogicFunction Implies
+lispToFunction _ _ (L.List [L.Symbol "_",
+                            L.Symbol "at-least",
+                            L.Number (L.I n)])
+  = return $ lispToLogicFunction (AtLeast n)
+lispToFunction _ _ (L.List [L.Symbol "_",
+                            L.Symbol "at-most",
+                            L.Number (L.I n)])
+  = return $ lispToLogicFunction (AtMost n)
 lispToFunction _ _ (L.Symbol "to_real")
   = return $ ParsedFunction (const False) (\_ -> return $ AnyFunction ToReal)
 lispToFunction _ _ (L.Symbol "to_int")
@@ -1528,6 +1536,10 @@ functionSymbol _ _ _ _ (Logic And _) = return $ L.Symbol "and"
 functionSymbol _ _ _ _ (Logic Or _) = return $ L.Symbol "or"
 functionSymbol _ _ _ _ (Logic XOr _) = return $ L.Symbol "xor"
 functionSymbol _ _ _ _ (Logic Implies _) = return $ L.Symbol "=>"
+functionSymbol _ _ _ _ (Logic (AtLeast n) _)
+  = return $ L.List [L.Symbol "_",L.Symbol "at-least",L.Number $ L.I n]
+functionSymbol _ _ _ _ (Logic (AtMost n) _)
+  = return $ L.List [L.Symbol "_",L.Symbol "at-most",L.Number $ L.I n]
 functionSymbol _ _ _ _ ToReal = return $ L.Symbol "to_real"
 functionSymbol _ _ _ _ ToInt = return $ L.Symbol "to_int"
 functionSymbol _ _ _ _ (ITE _) = return $ L.Symbol "ite"

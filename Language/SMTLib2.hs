@@ -80,6 +80,8 @@ module Language.SMTLib2 (
   pattern OrLst,pattern Or,pattern (:|:),or',(.|.),
   pattern XOrLst,pattern XOr,xor',
   pattern ImpliesLst,pattern Implies,pattern (:=>:),implies,(.=>.),
+  pattern AtLeastLst,pattern AtLeast,atLeast,
+  pattern AtMostLst,pattern AtMost,atMost,
   -- *** Conversion
   pattern ToReal,pattern ToInt,toReal,toInt,
   -- *** If-then-else

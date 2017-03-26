@@ -91,7 +91,10 @@ data ArithOp = Plus | Mult | Minus deriving (Eq,Ord,Show)
 
 data ArithOpInt = Div | Mod | Rem deriving (Eq,Ord,Show)
 
-data LogicOp = And | Or | XOr | Implies deriving (Eq,Ord,Show)
+data LogicOp = And | Or | XOr | Implies
+             | AtLeast !Integer
+             | AtMost !Integer
+             deriving (Eq,Ord,Show)
 
 data BVCompOp = BVULE
               | BVULT
@@ -570,6 +573,14 @@ renderFunction SMTRendering _ (Logic And _) = showString "and"
 renderFunction SMTRendering _ (Logic Or _) = showString "or"
 renderFunction SMTRendering _ (Logic XOr _) = showString "xor"
 renderFunction SMTRendering _ (Logic Implies _) = showString "=>"
+renderFunction SMTRendering _ (Logic (AtLeast n) _)
+  = showString "(_ at-least " .
+    showsPrec 11 n .
+    showChar ')'
+renderFunction SMTRendering _ (Logic (AtMost n) _)
+  = showString "(_ at-most " .
+    showsPrec 11 n .
+    showChar ')'
 renderFunction SMTRendering _ ToReal = showString "to_real"
 renderFunction SMTRendering _ ToInt = showString "to_int"
 renderFunction SMTRendering _ (ITE _) = showString "ite"
