@@ -89,7 +89,7 @@ data OrdOp = Ge | Gt | Le | Lt deriving (Eq,Ord,Show)
 
 data ArithOp = Plus | Mult | Minus deriving (Eq,Ord,Show)
 
-data ArithOpInt = Div | Mod | Rem deriving (Eq,Ord,Show)
+data ArithOpInt = Div | Mod | Rem | Exp deriving (Eq,Ord,Show)
 
 data LogicOp = And | Or | XOr | Implies
              | AtLeast !Integer
@@ -566,6 +566,7 @@ renderFunction SMTRendering _ (Arith _ Minus _) = showChar '-'
 renderFunction SMTRendering _ (ArithIntBin Div) = showString "div"
 renderFunction SMTRendering _ (ArithIntBin Mod) = showString "mod"
 renderFunction SMTRendering _ (ArithIntBin Rem) = showString "rem"
+renderFunction SMTRendering _ (ArithIntBin Exp) = showString "^"
 renderFunction SMTRendering _ Divide = showChar '/'
 renderFunction SMTRendering _ (Abs _) = showString "abs"
 renderFunction SMTRendering _ Not = showString "not"

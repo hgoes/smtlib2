@@ -252,6 +252,7 @@ evaluateFun _ _ (ArithIntBin op) ((ValueResult (IntValue lhs)) ::: (ValueResult 
     eval Div = div
     eval Mod = mod
     eval Rem = rem
+    eval Exp = (^)
 evaluateFun _ _ Divide ((ValueResult (RealValue lhs)) ::: (ValueResult (RealValue rhs)) ::: Nil)
   = return $ ValueResult $ RealValue (lhs / rhs)
 evaluateFun _ _ (Abs NumInt) ((ValueResult (IntValue x)) ::: Nil)

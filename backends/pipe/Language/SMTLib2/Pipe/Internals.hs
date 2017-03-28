@@ -909,6 +909,8 @@ lispToFunction _ _ (L.Symbol "mod") = return $ ParsedFunction (const False)
                                       (\_ -> return $ AnyFunction (ArithIntBin Mod))
 lispToFunction _ _ (L.Symbol "rem") = return $ ParsedFunction (const False)
                                       (\_ -> return $ AnyFunction (ArithIntBin Rem))
+lispToFunction _ _ (L.Symbol "^") = return $ ParsedFunction (const False)
+                                    (\_ -> return $ AnyFunction (ArithIntBin Exp))
 lispToFunction _ _ (L.Symbol "/") = return $ ParsedFunction (const False)
                                     (\_ -> return $ AnyFunction Divide)
 lispToFunction _ sort (L.Symbol "abs") = case sort of
@@ -1529,6 +1531,7 @@ functionSymbol _ _ _ _ (Arith _ op _) = return $ arithSymbol op
 functionSymbol _ _ _ _ (ArithIntBin Div) = return $ L.Symbol "div"
 functionSymbol _ _ _ _ (ArithIntBin Mod) = return $ L.Symbol "mod"
 functionSymbol _ _ _ _ (ArithIntBin Rem) = return $ L.Symbol "rem"
+functionSymbol _ _ _ _ (ArithIntBin Exp) = return $ L.Symbol "^"
 functionSymbol _ _ _ _ Divide = return $ L.Symbol "/"
 functionSymbol _ _ _ _ (Abs _) = return $ L.Symbol "abs"
 functionSymbol _ _ _ _ Not = return $ L.Symbol "not"

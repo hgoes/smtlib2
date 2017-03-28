@@ -24,7 +24,7 @@ module Language.SMTLib2.Internals.Interface
         pattern PlusLst,pattern Plus,pattern (:+:),plus,(.+.),
         pattern MultLst,pattern Mult,pattern (:*:),mult,(.*.),
         pattern MinusLst,pattern Minus,pattern (:-:),pattern Neg,minus,(.-.),neg,
-        pattern Div,pattern Mod,pattern Rem,div',mod',rem',
+        pattern Div,pattern Mod,pattern Rem,pattern Exp,div',mod',rem',exp',
         pattern (:/:),(./.),
         pattern Abs,abs',
         -- *** Logic
@@ -264,6 +264,7 @@ pattern (:*:) x y = Arith E.Mult (x ::: y ::: Nil)
 pattern Div x y = App (E.ArithIntBin E.Div) (x ::: y ::: Nil)
 pattern Mod x y = App (E.ArithIntBin E.Mod) (x ::: y ::: Nil)
 pattern Rem x y = App (E.ArithIntBin E.Rem) (x ::: y ::: Nil)
+pattern Exp x y = App (E.ArithIntBin E.Exp) (x ::: y ::: Nil)
 
 pattern (:/:) x y = App E.Divide (x ::: y ::: Nil)
 
@@ -681,9 +682,11 @@ rem',div',mod' :: (Embed m e,HasMonad a,HasMonad b,
 rem' x y = embed $ Rem <$> embedM x <*> embedM y
 div' x y = embed $ Div <$> embedM x <*> embedM y
 mod' x y = embed $ Mod <$> embedM x <*> embedM y
+exp' x y = embed $ Exp <$> embedM x <*> embedM y
 {-# INLINEABLE rem' #-}
 {-# INLINEABLE div' #-}
 {-# INLINEABLE mod' #-}
+{-# INLINEABLE exp' #-}
 
 infixl 7 `div'`, `rem'`, `mod'`
 

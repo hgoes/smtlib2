@@ -70,7 +70,7 @@ module Language.SMTLib2 (
   pattern PlusLst,pattern Plus,pattern (:+:),plus,(.+.),
   pattern MultLst,pattern Mult,pattern (:*:),mult,(.*.),
   pattern MinusLst,pattern Minus,pattern (:-:),pattern Neg,minus,(.-.),neg,
-  pattern Div,pattern Mod,pattern Rem,div',mod',rem',
+  pattern Div,pattern Mod,pattern Rem,pattern Exp,div',mod',rem',exp',
   pattern (:/:),(./.),
   pattern Abs,abs',
   -- *** Logic
