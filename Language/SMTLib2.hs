@@ -36,7 +36,7 @@ module Language.SMTLib2 (
   -- ** Defining variables
   defineVar,defineVarNamed,
   -- ** Declaring functions
-  declareFun,declareFunNamed,
+  declareFun,declareFunNamed,builtIn,
   -- ** Defining functions
   defineFun,defineFunNamed,
   -- ** Constants
@@ -360,6 +360,16 @@ defineFunNamed name tps f = do
   args' <- List.mapM (embedSMT . B.toBackend . E.FVar) args
   res <- embedM $ f args'
   embedSMT $ B.defineFun (Just name) args res
+
+
+-- | Declare a backend-specific built-in function.
+builtIn :: B.Backend b
+        => String         -- ^ Name of the built-in function
+        -> List Repr args -- ^ Argument types of the built-in
+        -> Repr ret       -- ^ Return type of the built-in
+        -> SMT b (B.Fun b '(args,ret))
+builtIn name arg ret
+  = embedSMT $ B.builtIn name arg ret
 
 -- | After a `checkSat` query that returned 'Unsat', we can ask the SMT solver
 --   for a subset of the assertions that are enough to make the specified

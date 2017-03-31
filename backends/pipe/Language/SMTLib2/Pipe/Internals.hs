@@ -279,6 +279,7 @@ instance Backend SMTPipe where
   comment msg b = do
     hPutStrLn (channelIn b) ("; "++msg)
     return ((),b)
+  builtIn name arg ret b = return (UntypedFun (T.pack name) arg ret,b)
 
 renderDeclareFun :: Map String Int -> List Repr arg -> Repr ret -> Maybe String
                  -> (T.Text,L.Lisp,Map String Int)

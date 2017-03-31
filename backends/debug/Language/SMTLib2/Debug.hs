@@ -305,6 +305,13 @@ instance (Backend b) => Backend (DebugBackend b) where
     ((),nb) <- comment msg (debugBackend'' b1)
     let b2 = b1 { debugBackend'' = nb }
     return ((),b2)
+  builtIn name arg ret b = do
+    (res,nb) <- builtIn name arg ret (debugBackend'' b)
+    let b1 = b { debugBackend'' = nb
+               , debugFuns = DMap.insertWith const res
+                             (UntypedFun (T.pack name) arg ret)
+                             (debugFuns b) }
+    return (res,b1)
     
 renderExpr :: (Backend b) => DebugBackend b -> Expr b tp
            -> L.Lisp

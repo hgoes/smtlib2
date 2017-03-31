@@ -78,3 +78,4 @@ instance Backend b => Backend (TimingBackend b) where
   declareDatatypes = withTiming . declareDatatypes
   interpolate = mapAction TimingExpr $ withTiming interpolate
   exit = withTiming exit
+  builtIn name arg ret = withTiming (builtIn name arg ret)

@@ -86,6 +86,11 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
   declareDatatypes :: [AnyDatatype] -> SMTAction b ()
   interpolate :: SMTAction b (Expr b BoolType)
   exit :: SMTAction b ()
+  -- | Access backend-specific built-in functions
+  builtIn :: String        -- ^ Name of the built-in function
+          -> List Repr arg -- ^ Argument types of the function
+          -> Repr ret      -- ^ Return type of the function
+          -> SMTAction b (Fun b '(arg,ret))
 
 -- | The interpolation partition
 data Partition = PartitionA
