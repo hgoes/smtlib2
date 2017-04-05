@@ -41,6 +41,9 @@ class (Composite idx) => IsStack st idx where
   stackTop :: (Composite a,Embed m e,Monad m)
            => Stack st idx a e
            -> m (idx e)
+  stackNull :: (Composite a,Embed m e,Monad m)
+            => Stack st idx a e
+            -> m (e BoolType)
   stackElementRev :: (Composite a)
                   => Proxy st
                   -> Proxy idx
@@ -208,7 +211,8 @@ instance IsStack StackList StackListIndex where
       AccSeq [ (ListIndex i,cond,AccId)
              | (NoComp i,cond) <- lst ]
   stackEmpty _ = do
-    let top = initialBoolean []
+    cond <- true
+    let top = initialBoolean [(NoComp (-1),cond)]
     return $ Stack (StackList $ CompList Vec.empty) (StackListIndex top)
   stackSingleton el = do
     top <- singleton (boolEncoding [NoComp 0]) (NoComp 0)
@@ -263,6 +267,12 @@ instance IsStack StackList StackListIndex where
                else els
     return $ Stack (StackList (CompList nels)) (StackListIndex top2)
   stackTop = return._stackTop
+  stackNull (Stack _ (StackListIndex top)) = do
+    chs <- getChoices top
+    case [ c | (NoComp (-1),c) <- chs ] of
+      [] -> false
+      [[c]] -> return c
+      [c] -> and' c
   stackElementRev _ _ _ f (RevList _ r) = f r
   stackElements _ f (StackList (CompList els)) = mapM_ f els
   stackIndexType (StackList (CompList els)) _
@@ -324,6 +334,11 @@ instance (Num (Value tp)) => IsStack StackList (StackArrayIndex tp) where
       IntRepr -> top .-. cint 1
       BitVecRepr bw -> top `bvsub` cbv 1 bw
     return $ StackArrayIndex $ Comp predTop
+  stackNull (Stack _ (StackArrayIndex (Comp top))) = do
+    topTp <- fmap (\tp -> tp top) $ embedTypeOf
+    case topTp of
+      IntRepr -> top .==. cint 0
+      BitVecRepr bw -> top .==. cbv 0 bw
   stackElementRev _ _ _ f (RevList _ r) = f r
   stackElements _ f (StackList (CompList els)) = mapM_ f els
   stackIndexType (StackList (CompList els)) = Just . id
@@ -374,6 +389,11 @@ instance (Num (Value tp)) => IsStack (StackArray tp) (StackArrayIndex tp) where
       IntRepr -> top .-. cint 1
       BitVecRepr bw -> top `bvsub` cbv 1 bw
     return $ StackArrayIndex $ Comp predTop
+  stackNull (Stack _ (StackArrayIndex (Comp top))) = do
+    topTp <- fmap (\tp -> tp top) $ embedTypeOf
+    case topTp of
+      IntRepr -> top .==. cint 0
+      BitVecRepr bw -> top .==. cbv 0 bw
   stackElementRev _ _ _ f (RevArray r) = f r
   stackElements _ f (StackArray (CompArray _ arr)) = f arr
   stackIndexType (StackArray (CompArray (idx:::Nil) _)) _
@@ -433,6 +453,12 @@ instance (Num (Value tp)) => IsStack (StackArray tp) StackListIndex where
         return res
     return $ Stack arr (StackListIndex top2)
   stackTop = return . _stackTop
+  stackNull (Stack _ (StackListIndex top)) = do
+    chs <- getChoices top
+    case [ c | (NoComp (-1),c) <- chs ] of
+      [] -> false
+      [[c]] -> return c
+      [c] -> and' c
   stackElementRev _ _ _ f (RevArray r) = f r
   stackElements _ f (StackArray (CompArray _ arr)) = f arr
   stackIndexType _ _ = Nothing
@@ -494,6 +520,11 @@ instance (ConvertC stA stB,Convert idxA idxB,
   stackTop (Stack (AlternativeC st) (Alternative top)) = do
     rtop <- stackTop $ Stack st top
     return $ Alternative rtop
+  stackNull (Stack (StartC st) (Start top)) = stackNull (Stack st top)
+  stackNull (Stack (StartC st) (Alternative top)) = stackNull (Stack st top)
+  stackNull (Stack (AlternativeC st) (Start top)) = stackNull (Stack st top)
+  stackNull (Stack (AlternativeC st) (Alternative top))
+    = stackNull (Stack st top)
   stackElementRev (_::Proxy (FallbackC stA stB)) (_::Proxy (Fallback idxA idxB)) p f r = case r of
     RevStart r' -> stackElementRev (Proxy::Proxy stA) (Proxy::Proxy idxA) p f r'
     RevAlternative r' -> stackElementRev (Proxy::Proxy stB) (Proxy::Proxy idxB) p f r'
