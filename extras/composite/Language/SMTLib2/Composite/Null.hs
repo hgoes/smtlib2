@@ -7,7 +7,7 @@ import Language.SMTLib2.Composite.Domains
 import Data.GADT.Compare
 import Data.GADT.Show
 
-newtype NoComp (val :: *) (e :: Type -> *) = NoComp val
+newtype NoComp (val :: *) (e :: Type -> *) = NoComp val deriving (Eq,Ord,Show)
 
 data NoRev (tp :: Type)
 
