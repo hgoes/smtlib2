@@ -289,3 +289,15 @@ instance (Embed m e,Monad m) => Embed (ExceptT err m) e where
     lift $ embed (pure re)
   embedQuantifier q arg body = lift $ embedQuantifier q arg body
   embedTypeOf = lift embedTypeOf
+
+instance (Embed m e,Monad m) => Embed (StateT s m) e where
+  type EmVar (StateT s m) e = EmVar m e
+  type EmQVar (StateT s m) e = EmQVar m e
+  type EmFun (StateT s m) e = EmFun m e
+  type EmFunArg (StateT s m) e = EmFunArg m e
+  type EmLVar (StateT s m) e = EmLVar m e
+  embed e = do
+    re <- e
+    lift $ embed (pure re)
+  embedQuantifier q arg body = lift $ embedQuantifier q arg body
+  embedTypeOf = lift embedTypeOf
