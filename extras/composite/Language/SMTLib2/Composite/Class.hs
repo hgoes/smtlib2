@@ -37,7 +37,10 @@ class (GCompare (RevComp arg),GShow (RevComp arg))
   compCombine :: (Embed m e,Monad m,GCompare e)
               => (forall tp. e tp -> e tp -> m (e tp))
               -> arg e -> arg e -> m (Maybe (arg e))
-
+  compIsSubsetOf :: GCompare e
+                 => (forall tp. e tp -> e tp -> Bool)
+                 -> arg e -> arg e
+                 -> Bool
   revName :: Proxy arg -> RevComp arg tp -> String
   revName _ _ = "rev"
   compCompare :: GCompare e => arg e -> arg e -> Ordering

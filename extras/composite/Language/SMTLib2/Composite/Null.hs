@@ -21,6 +21,7 @@ instance (Ord val,Show val) => Composite (NoComp val) where
                                                  then Just $ NoComp x
                                                  else Nothing
   compCompare (NoComp x) (NoComp y) = compare x y
+  compIsSubsetOf _ (NoComp x) (NoComp y) = x==y
   compShow p (NoComp x) = showParen (p>10) $ showString "const " . showsPrec 11 x
 
 instance (Ord val,Show val) => CompositeExtract (NoComp val) where

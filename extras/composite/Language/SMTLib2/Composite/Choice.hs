@@ -295,24 +295,53 @@ instance (Composite c) => Composite (Choice enc c) where
         Right zs' -> return $ Just $ ChoiceValue tx (Vec.fromList zs') ez
     Nothing -> return Nothing
   compCompare = compareChoice
+  compIsSubsetOf f (ChoiceSingleton x) (ChoiceSingleton y)
+    = compIsSubsetOf f x y
+  compIsSubsetOf f (ChoiceSingleton x) (ChoiceBool vy)
+    = case Vec.find (\(y,_) -> case compCompare x y of
+                        EQ -> True
+                        _ -> False) vy of
+        Nothing -> False
+        Just _ -> True
+  compIsSubsetOf f (ChoiceBool vy) (ChoiceSingleton x)
+    = case Vec.find (\(y,_) -> case compCompare x y of
+                        EQ -> True
+                        _ -> False) vy of
+        Nothing -> False
+        Just _ -> True
+  compIsSubsetOf f (ChoiceBool v1) (ChoiceBool v2)
+    = subset (Vec.toList v1) (Vec.toList v2)
+    where
+      subset [] _ = True
+      subset ((x,cx):xs) ((y,cy):ys) = case compCompare x y of
+        EQ -> f cx cy && subset xs ys
+        LT -> False
+        GT -> subset ((x,cx):xs) ys
+      subset _ _ = False
+  compIsSubsetOf f (ChoiceValue _ v1 e1) (ChoiceValue _ v2 e2)
+    = f e1 e2 &&
+      subset (Vec.toList v1) (Vec.toList v2)
+    where
+      subset [] _ = True
+      subset ((x,vx):xs) ((y,vy):ys) = case compCompare x y of
+        EQ -> vx==vy &&
+              subset xs ys
+        LT -> False
+        GT -> subset ((x,vx):xs) ys
+      subset _ _ = False
+  compIsSubsetOf _ _ _ = False
   compShow = showsPrec
-  compInvariant (ChoiceBool (Vec.null -> True)) = return []
   compInvariant (ChoiceSingleton c) = compInvariant c
   compInvariant (ChoiceBool xs) = do
-    recInv <- fmap concat $ mapM (\(x,_) -> compInvariant x) (Vec.toList xs)
-    inv <- oneOf [] $ fmap snd (Vec.toList xs)
-    inv' <- case inv of
-      [x] -> return x
-      _ -> or' inv
-    return $ inv':recInv
-    where
-      oneOf _ [] = return []
-      oneOf xs (y:ys) = do
-        xs' <- mapM not' xs
-        ys' <- mapM not' ys
-        cs <- oneOf (xs++[y]) ys
-        c <- and' (xs'++y:ys')
-        return $ c:cs
+    recInv <- fmap catMaybes $
+              mapM (\(x,c) -> do
+                       invX <- compInvariant x
+                       case invX of
+                         [] -> return Nothing
+                         _ -> fmap Just $ c .=>. and' invX
+                   ) (Vec.toList xs)
+    justOne <- atMost 1 $ fmap snd (Vec.toList xs)
+    return $ justOne:recInv
 
 instance (Composite c) => Container (Choice enc c) where
   data Index (Choice enc c) el e where

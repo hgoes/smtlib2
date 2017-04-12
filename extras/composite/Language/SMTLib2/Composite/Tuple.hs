@@ -60,6 +60,9 @@ instance (Composite a,Composite b) => Composite (CompTuple2 a b) where
   compCompare (CompTuple2 x1 y1) (CompTuple2 x2 y2) = case compCompare x1 x2 of
     EQ -> compCompare y1 y2
     r -> r
+  compIsSubsetOf f (CompTuple2 x1 y1) (CompTuple2 x2 y2)
+    = compIsSubsetOf f x1 x2 &&
+      compIsSubsetOf f y1 y2
   compShow = showsPrec
   compInvariant (CompTuple2 x y) = do
     invX <- compInvariant x
@@ -135,6 +138,10 @@ instance (Composite a,Composite b,Composite c) => Composite (CompTuple3 a b c) w
       EQ -> compCompare z1 z2
       r -> r
     r -> r
+  compIsSubsetOf f (CompTuple3 x1 y1 z1) (CompTuple3 x2 y2 z2)
+    = compIsSubsetOf f x1 x2 &&
+      compIsSubsetOf f y1 y2 &&
+      compIsSubsetOf f z1 z2
   compShow = showsPrec
   compInvariant (CompTuple3 x y z) = do
     invX <- compInvariant x

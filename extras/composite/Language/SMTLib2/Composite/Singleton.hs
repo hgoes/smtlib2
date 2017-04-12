@@ -31,6 +31,7 @@ instance Composite (Comp tp) where
   setRev Refl x _ = Just (Comp x)
   compCombine f (Comp x) (Comp y) = fmap (Just . Comp) $ f x y
   compCompare (Comp x) (Comp y) = defaultCompare x y
+  compIsSubsetOf f (Comp x) (Comp y) = f x y
   compShow p (Comp x) = gshowsPrec p x
 
 instance CompositeExtract (Comp tp) where

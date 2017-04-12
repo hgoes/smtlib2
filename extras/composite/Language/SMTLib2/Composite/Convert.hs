@@ -284,6 +284,9 @@ instance (Composite start,Composite alt,Convert start alt)
   compCompare (Start _) _ = LT
   compCompare _ (Start _) = GT
   compCompare (Alternative x) (Alternative y) = compCompare x y
+  compIsSubsetOf f (Start x) (Start y) = compIsSubsetOf f x y
+  compIsSubsetOf f (Alternative x) (Alternative y) = compIsSubsetOf f x y
+  compIsSubsetOf _ _ _ = False
   compShow p (Start x) = compShow p x
   compShow p (Alternative x) = compShow p x
   compInvariant (Start x) = compInvariant x
@@ -322,6 +325,9 @@ instance (Composite a,Composite (start a),Composite (alt a),ConvertC start alt)
   compCompare (StartC _) _ = LT
   compCompare _ (StartC _) = GT
   compCompare (AlternativeC x) (AlternativeC y) = compCompare x y
+  compIsSubsetOf f (StartC x) (StartC y) = compIsSubsetOf f x y
+  compIsSubsetOf f (AlternativeC x) (AlternativeC y) = compIsSubsetOf f x y
+  compIsSubsetOf _ _ _ = False
   compShow p (StartC x) = compShow p x
   compShow p (AlternativeC x) = compShow p x
   compInvariant (StartC x) = compInvariant x
@@ -376,6 +382,10 @@ instance (Composite start,Composite alt1,Composite alt2,
   compCompare (Alternative2_1 _) _ = LT
   compCompare _ (Alternative2_1 _) = GT
   compCompare (Alternative2_2 x) (Alternative2_2 y) = compCompare x y
+  compIsSubsetOf f (Start2 x) (Start2 y) = compIsSubsetOf f x y
+  compIsSubsetOf f (Alternative2_1 x) (Alternative2_1 y) = compIsSubsetOf f x y
+  compIsSubsetOf f (Alternative2_2 x) (Alternative2_2 y) = compIsSubsetOf f x y
+  compIsSubsetOf _ _ _ = False
   compShow p (Start2 x) = compShow p x
   compShow p (Alternative2_1 x) = compShow p x
   compShow p (Alternative2_2 x) = compShow p x

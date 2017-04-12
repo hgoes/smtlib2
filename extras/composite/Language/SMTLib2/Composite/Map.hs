@@ -35,6 +35,7 @@ instance (Show k,Ord k,Composite a) => Composite (CompMap k a) where
   compCombine f (CompMap mp1) (CompMap mp2) = do
     nmp <- sequence $ Map.mergeWithKey (\_ x y -> Just $ compCombine f x y) (fmap $ return.Just) (fmap $ return.Just) mp1 mp2
     return $ fmap CompMap $ sequence nmp
+  compIsSubsetOf f (CompMap mp1) (CompMap mp2) = Map.isSubmapOfBy (compIsSubsetOf f) mp1 mp2
   compCompare = compare
   compShow = showsPrec
   compInvariant (CompMap mp) = fmap concat $ mapM compInvariant $ Map.elems mp

@@ -26,7 +26,7 @@ module Language.SMTLib2.Composite.Container (
   -- ** Construction
   (<|*>),idMux,
   -- * Helper functions
-  update,updateList
+  update,updateTrack,updateList
   ) where
 
 import Language.SMTLib2
@@ -41,6 +41,7 @@ import Data.Foldable
 import Data.Functor.Identity
 import Prelude hiding (read)
 import Text.Show
+import Control.Monad (unless)
 
 data Acc a = Id
            | Seq a (Acc a)
@@ -90,6 +91,23 @@ update x cs y = do
   case res of
     Nothing -> error $ "Container.update: Incompatible element written."
     Just res' -> return res'
+
+updateTrack :: (Composite a,Embed m e,Monad m,GCompare e)
+            => (forall tp. e tp -> e tp -> Bool)
+            -> m () -> a e -> [e BoolType] -> a e -> m (a e)
+updateTrack f act x [] oldx = do
+  unless (compIsSubsetOf f x oldx) act
+  return x
+updateTrack f act x cs y = do
+  cond <- case cs of
+    [c] -> return c
+    _ -> and' cs
+  res <- compITE cond x y
+  case res of
+    Nothing -> error $ "Container.updateTrack: Incompatible element written."
+    Just res' -> do
+      unless (compIsSubsetOf f x y) act
+      return res'
 
 data Path a (idx :: Acc ((Type -> *) -> *)) b e where
   PathId   :: Path a 'Id a e

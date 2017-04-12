@@ -57,6 +57,13 @@ instance Composite a => Composite (CompList a) where
     = case compare (Vec.length xs) (Vec.length ys) of
     EQ -> let zs = Vec.zipWith compCompare xs ys
           in mconcat $ Vec.toList zs
+  compIsSubsetOf f (CompList xs) (CompList ys)
+    = subset (Vec.toList xs) (Vec.toList ys)
+    where
+      subset [] _ = True
+      subset (x:xs) (y:ys) = compIsSubsetOf f x y &&
+                             subset xs ys
+      subset _ _ = False
   compShow = showsPrec
   compInvariant (CompList xs) = fmap concat $ mapM compInvariant $ Vec.toList xs
 

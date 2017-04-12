@@ -114,6 +114,9 @@ instance (IsStack st idx,Composite (st a)) => Composite (Stack st idx a) where
         case ntop of
           Nothing -> return Nothing
           Just ntop' -> return $ Just $ Stack nst' ntop'
+  compIsSubsetOf f (Stack st1 top1) (Stack st2 top2)
+    = compIsSubsetOf f st1 st2 &&
+      compIsSubsetOf f top1 top2
   compShow p (Stack st top) = showParen (p>10) $
                               showString "Stack " .
                               compShow 11 st . showChar ' ' .
@@ -154,6 +157,8 @@ instance Composite a => Composite (StackList a) where
   compCombine f (StackList i1) (StackList i2)
     = fmap (fmap StackList) $ compCombine f i1 i2
   compCompare (StackList i1) (StackList i2) = compCompare i1 i2
+  compIsSubsetOf f (StackList l1) (StackList l2)
+    = compIsSubsetOf f l1 l2
   compShow p (StackList i) = compShow p i
 
 newtype StackArray tp a e
@@ -170,6 +175,8 @@ instance Composite a => Composite (StackArray tp a) where
   compCombine f (StackArray i1) (StackArray i2)
     = fmap (fmap StackArray) $ compCombine f i1 i2
   compCompare (StackArray i1) (StackArray i2) = compCompare i1 i2
+  compIsSubsetOf f (StackArray a1) (StackArray a2)
+    = compIsSubsetOf f a1 a2
   compShow p (StackArray i) = compShow p i
 
 newtype StackListIndex e
@@ -186,6 +193,8 @@ instance Composite StackListIndex where
   compCombine f (StackListIndex i1) (StackListIndex i2)
     = fmap (fmap StackListIndex) $ compCombine f i1 i2
   compCompare (StackListIndex i1) (StackListIndex i2) = compCompare i1 i2
+  compIsSubsetOf f (StackListIndex i1) (StackListIndex i2)
+    = compIsSubsetOf f i1 i2
   compShow p (StackListIndex i) = compShow p i
 
 newtype StackArrayIndex tp e
@@ -202,6 +211,8 @@ instance Composite (StackArrayIndex tp) where
   compCombine f (StackArrayIndex i1) (StackArrayIndex i2)
     = fmap (fmap StackArrayIndex) $ compCombine f i1 i2
   compCompare (StackArrayIndex i1) (StackArrayIndex i2) = compCompare i1 i2
+  compIsSubsetOf f (StackArrayIndex i1) (StackArrayIndex i2)
+    = compIsSubsetOf f i1 i2
   compShow p (StackArrayIndex i) = compShow p i
 
 instance IsStack StackList StackListIndex where

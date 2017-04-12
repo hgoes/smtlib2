@@ -36,6 +36,10 @@ instance Composite a => Composite (CompMaybe a) where
   compCompare (CompMaybe Nothing) _ = LT
   compCompare _ (CompMaybe Nothing) = GT
   compCompare (CompMaybe (Just x)) (CompMaybe (Just y)) = compCompare x y
+  compIsSubsetOf f (CompMaybe Nothing) _ = True
+  compIsSubsetOf f (CompMaybe (Just x)) (CompMaybe (Just y))
+    = compIsSubsetOf f x y
+  compIsSubsetOf f _ (CompMaybe Nothing) = False
   compShow = showsPrec
   compInvariant (CompMaybe Nothing) = return []
   compInvariant (CompMaybe (Just x)) = compInvariant x

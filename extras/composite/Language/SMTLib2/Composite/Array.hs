@@ -89,6 +89,8 @@ instance Composite c => Composite (CompArray i c) where
     return $ fmap (CompArray idx) narr
   compCompare (CompArray _ arr1) (CompArray _ arr2)
     = compCompare arr1 arr2
+  compIsSubsetOf f (CompArray _ arr1) (CompArray _ arr2)
+    = compIsSubsetOf (\(Arrayed e1) (Arrayed e2) -> f e1 e2) arr1 arr2
   compShow p (CompArray _ arr) = compShow p arr
   compInvariant (CompArray idx arr) = do
     invarr <- runReaderT (compInvariant arr) idx

@@ -50,6 +50,11 @@ instance (Composite a,Composite b) => Composite (CompEither a b) where
   compCompare (CompEither (Left _)) _ = LT
   compCompare _ (CompEither (Left _)) = GT
   compCompare (CompEither (Right x)) (CompEither (Right y)) = compCompare x y
+  compIsSubsetOf f (CompEither (Left x)) (CompEither (Left y))
+    = compIsSubsetOf f x y
+  compIsSubsetOf f (CompEither (Right x)) (CompEither (Right y))
+    = compIsSubsetOf f x y
+  compIsSubsetOf _ _ _ = False
   compShow p (CompEither (Left x)) = showParen (p>10) $
     showString "Left " . compShow 11 x
   compShow p (CompEither (Right x)) = showParen (p>10) $
