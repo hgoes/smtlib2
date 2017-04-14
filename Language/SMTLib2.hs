@@ -448,8 +448,11 @@ comment :: (B.Backend b) => String -> SMT b ()
 comment msg = embedSMT $ B.comment msg
 
 -- | Use the SMT solver to simplify a given expression.
-simplify :: B.Backend b => B.Expr b tp -> SMT b (B.Expr b tp)
-simplify e = embedSMT $ B.simplify e
+simplify :: (B.Backend b,HasMonad expr,MatchMonad expr (SMT b),
+             MonadResult expr ~ B.Expr b tp)
+         => expr -- ^ The expression to simplify
+         -> SMT b (B.Expr b tp)
+simplify e = embedM e >>= embedSMT . B.simplify
 
 -- | After a `checkSat` query that returned 'Unsat', we can ask the solver for
 --   a proof that the given instance is indeed unsatisfiable.
