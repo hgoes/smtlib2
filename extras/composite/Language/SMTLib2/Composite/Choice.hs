@@ -2,7 +2,7 @@
 module Language.SMTLib2.Composite.Choice
   (Choice(),ChoiceEncoding(..),RevChoice(),
    -- * Encodings
-   boolEncoding,intEncoding,bvEncoding,{-dtEncoding,-}possibleChoices,
+   boolEncoding,boolEncodingNoSingleton,intEncoding,bvEncoding,{-dtEncoding,-}possibleChoices,
    -- * Constructor
    singleton,initial,initialBoolean,
    -- * Accessors
@@ -60,6 +60,10 @@ boolEncoding :: Composite c => [c Repr] -> Choice BoolEncoding c Repr
 boolEncoding [c] = ChoiceSingleton c
 boolEncoding cs  = ChoiceBool $ Vec.fromList $
                    zip (normalizeList compCompare cs) (repeat bool)
+
+boolEncodingNoSingleton :: Composite c => [c Repr] -> Choice BoolEncoding c Repr
+boolEncodingNoSingleton cs = ChoiceBool $ Vec.fromList $
+                             zip (normalizeList compCompare cs) (repeat bool)
 
 intEncoding :: Composite c => [c Repr] -> Choice (ValueEncoding IntType) c Repr
 intEncoding xs = ChoiceValue int (Vec.fromList $
