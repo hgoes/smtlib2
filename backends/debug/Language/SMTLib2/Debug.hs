@@ -116,6 +116,8 @@ deriving instance Backend b => GShow (Expr (DebugBackend b))
 deriving instance Backend b => GEq (Expr (DebugBackend b))
 deriving instance Backend b => GCompare (Expr (DebugBackend b))
 deriving instance Backend b => GetType (Expr (DebugBackend b))
+instance Show (Expr b tp) => Show (Expr (DebugBackend b) tp) where
+  showsPrec p (DebugExpr e) = showsPrec p e
 
 instance (Backend b) => Backend (DebugBackend b) where
   type SMTMonad (DebugBackend b) = SMTMonad b

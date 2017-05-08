@@ -84,6 +84,10 @@ data List e (tp :: [a]) where
 
 infixr 9 :::
 
+data CList a (cnt :: Nat) where
+  CNil :: CList a 'Z
+  CCons :: a -> CList a n -> CList a ('S n)
+
 list :: [ExpQ] -> ExpQ
 list [] = [| Nil |]
 list (x:xs) = [| $(x) ::: $(list xs) |]
@@ -111,6 +115,10 @@ reifyList :: (forall r'. a -> (forall tp. e tp -> r') -> r')
           -> r
 reifyList _ [] g = g Nil
 reifyList f (x:xs) g = f x $ \x' -> reifyList f xs $ \xs' -> g (x' ::: xs')
+
+reifyCList :: [a] -> (forall n. CList a n -> r) -> r
+reifyCList [] f = f CNil
+reifyCList (x:xs) f = reifyCList xs (\xs' -> f (CCons x xs'))
 
 access :: Monad m => List e lst -> Natural idx
        -> (e (Index lst idx) -> m (a,e tp))
@@ -188,6 +196,10 @@ length :: List e lst -> Natural (Length lst)
 length Nil = Zero
 length (_ ::: xs) = Succ (length xs)
 
+lengthC :: CList a n -> Natural n
+lengthC CNil = Zero
+lengthC (CCons _ xs) = Succ (lengthC xs)
+
 drop :: List e lst -> Natural i -> List e (Drop lst i)
 drop xs Zero = xs
 drop (x ::: xs) (Succ n) = drop xs n
@@ -252,6 +264,10 @@ toList f (x ::: xs) = do
   nx <- f x
   nxs <- toList f xs
   return (nx : nxs)
+
+toListC :: CList a n -> [a]
+toListC CNil = []
+toListC (CCons x xs) = x:toListC xs
 
 toListIndex :: Monad m => (forall n. Natural n -> e (Index lst n) -> m a)
             -> List e lst -> m [a]
@@ -341,3 +357,26 @@ instance GShow e => Show (List e lst) where
 
 instance GShow e => GShow (List e) where
   gshowsPrec = showsPrec
+
+instance Eq a => GEq (CList a) where
+  geq CNil CNil = Just Refl
+  geq (CCons x xs) (CCons y ys)
+    = if x==y
+      then do
+        Refl <- geq xs ys
+        return Refl
+      else Nothing
+  geq _ _ = Nothing
+
+instance Ord a => GCompare (CList a) where
+  gcompare CNil CNil = GEQ
+  gcompare (CCons x xs) (CCons y ys)
+    = case compare x y of
+        EQ -> case gcompare xs ys of
+          GEQ -> GEQ
+          GLT -> GLT
+          GGT -> GGT
+        LT -> GLT
+        GT -> GGT
+  gcompare CNil (CCons _ _) = GLT
+  gcompare (CCons _ _) CNil = GGT

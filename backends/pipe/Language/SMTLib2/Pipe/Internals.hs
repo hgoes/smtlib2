@@ -1037,6 +1037,24 @@ lispToFunction _ sort (L.List [L.Symbol "_",L.Symbol "extract",L.Number (L.I end
 lispToFunction _ sort (L.List [L.Symbol "_",L.Symbol "divisible",L.Number (L.I div)])
   = return $ ParsedFunction (const False)
     (\_ -> return $ AnyFunction (Divisible div))
+lispToFunction _ sort (L.List (L.Symbol "_":
+                               L.Symbol (T.stripPrefix "pb" -> Just op):
+                               coeff)) = do
+  coeffNum <- mapM (\c -> case c of
+                       L.Number (L.I c') -> return c'
+                       _ -> throwError $ "Invalid pseudo-boolean coefficient: "++show c
+                   ) coeff
+  rop <- case op of
+    "eq" -> return PBEq
+    "le" -> return PBLe
+    "ge" -> return PBGe
+    _ -> throwError $ "Invalid pseudo-boolean operator: "++show op
+  case coeffNum of
+    [] -> throwError $ "Invalid number of pseudo-boolean coefficients"
+    res:coeff' -> List.reifyCList coeff' $
+                  \rcoeff -> return $ ParsedFunction (const False)
+                             (\_ -> return $ AnyFunction $
+                                    PseudoBoolean rop rcoeff res)
 lispToFunction rf sort (L.List [sym,lispToList -> Just sig,tp]) = do
   nsort <- lispToSort rf tp
   fun <- lispToFunction rf (Just nsort) sym
@@ -1594,6 +1612,14 @@ functionSymbol _ _ _ i (Expr.Field dt par f) = i dt f
 functionSymbol _ _ _ _ (Divisible n) = return $ L.List [L.Symbol "_"
                                                        ,L.Symbol "divisible"
                                                        ,L.Number $ L.I n]
+functionSymbol _ _ _ _ (PseudoBoolean op coeff res)
+  = return $ L.List (L.Symbol "_":
+                     L.Symbol (case op of
+                                 PBEq -> "pbeq"
+                                 PBLe -> "pble"
+                                 PBGe -> "pbge"):
+                     (L.Number $ L.I res):
+                     (fmap (L.Number . L.I) $ List.toListC coeff))
 
 functionSymbolWithSig :: (Monad m,GetFunType fun)
                       => (forall (arg' :: [Type]) (res' :: Type).

@@ -3,7 +3,7 @@ module Language.SMTLib2.Internals.Expression where
 import Language.SMTLib2.Internals.Type hiding (Field)
 import qualified Language.SMTLib2.Internals.Type as Type
 import Language.SMTLib2.Internals.Type.Nat
-import Language.SMTLib2.Internals.Type.List (List(..))
+import Language.SMTLib2.Internals.Type.List (List(..),CList(..))
 import qualified Language.SMTLib2.Internals.Type.List as List
 
 import Data.Typeable
@@ -81,6 +81,8 @@ data Function (fun :: ([Type],Type) -> *) (sig :: ([Type],Type)) where
         -> !(Type.Field dt t)
         -> Function fun '( '[DataType dt par],CType t par)
   Divisible :: !Integer -> Function fun '( '[IntType],BoolType)
+  PseudoBoolean :: !PBOp -> !(CList Integer n) -> !Integer
+                -> Function fun '(AllEq BoolType n,BoolType)
 
 data AnyFunction (fun :: ([Type],Type) -> *) where
   AnyFunction :: Function fun '(arg,t) -> AnyFunction fun
@@ -122,6 +124,8 @@ data BVBinOp = BVAdd
              deriving (Eq,Ord,Show)
 
 data BVUnOp = BVNot | BVNeg deriving (Eq,Ord,Show)
+
+data PBOp = PBEq | PBLe | PBGe deriving (Eq,Ord,Show)
 
 data LetBinding (v :: Type -> *) (e :: Type -> *) (t :: Type)
   = LetBinding { letVar :: v t
@@ -254,6 +258,8 @@ functionType _ (Test dt par con) = return (DataRepr dt par ::: Nil,BoolRepr)
 functionType _ (Field dt par field)
   = return (DataRepr dt par ::: Nil,ctype (fieldType field) par)
 functionType _ (Divisible _) = return (IntRepr ::: Nil,BoolRepr)
+functionType _ (PseudoBoolean _ coeff _)
+  = return (allEqOf bool (List.lengthC coeff),bool)
 
 expressionType :: (Monad m,Functor m)
                => (forall t. v t -> m (Repr t))
@@ -335,6 +341,7 @@ mapFunction _ (Constructor dt par con) = pure (Constructor dt par con)
 mapFunction _ (Test dt par con) = pure (Test dt par con)
 mapFunction _ (Field dt par x) = pure (Field dt par x)
 mapFunction _ (Divisible x) = pure (Divisible x)
+mapFunction _ (PseudoBoolean op coeff res) = pure (PseudoBoolean op coeff res)
 
 instance (GShow v,GShow qv,GShow fun,GShow fv,GShow lv,GShow e)
          => Show (Expression v qv fun fv lv e r) where
@@ -447,6 +454,12 @@ instance (GShow fun)
   showsPrec p (Divisible x) = showParen (p>10) $
                               showString "Divisible " .
                               showsPrec 11 x
+  showsPrec p (PseudoBoolean op coeff res)
+    = showParen (p>10) $
+      showString "PseudoBoolean " .
+      showsPrec 11 op . showChar ' ' .
+      showsPrec 11 (List.toListC coeff) . showChar ' ' .
+      showsPrec 11 res
 
 data RenderMode = SMTRendering deriving (Eq,Ord,Show)
 
@@ -639,6 +652,15 @@ renderFunction SMTRendering _ (Field _ _ field) = showString (fieldName field)
 renderFunction SMTRendering _ (Divisible n) = showString "(_ divisible " .
   showsPrec 10 n .
   showChar ')'
+renderFunction SMTRendering _ (PseudoBoolean op coeff res)
+  = showString (case op of
+                  PBEq -> "(pbeq "
+                  PBGe -> "(pbge "
+                  PBLe -> "(pble ") .
+    showsPrec 11 res .
+    foldr (.) id (fmap (\n -> showsPrec 11 n . showChar ' ')
+                  (List.toListC coeff)) .
+    showChar ')'
 
 renderType :: RenderMode -> Repr tp -> ShowS
 renderType SMTRendering BoolRepr = showString "Bool"
@@ -855,6 +877,14 @@ instance GEq fun => GEq (Function fun) where
     Refl <- geq f1 f2
     return Refl
   geq (Divisible n1) (Divisible n2) = if n1==n2 then Just Refl else Nothing
+  geq (PseudoBoolean op1 coeff1 res1) (PseudoBoolean op2 coeff2 res2)
+    = if op1==op2
+      then do
+        Refl <- geq coeff1 coeff2
+        if res1==res2
+          then return Refl
+          else Nothing
+      else Nothing
   geq _ _ = Nothing
 
 instance GCompare fun => GCompare (Function fun) where
@@ -1067,6 +1097,19 @@ instance GCompare fun => GCompare (Function fun) where
     EQ -> GEQ
     LT -> GLT
     GT -> GGT
+  gcompare (Divisible _) _ = GLT
+  gcompare _ (Divisible _) = GGT
+  gcompare (PseudoBoolean op1 coeff1 res1) (PseudoBoolean op2 coeff2 res2)
+    = case compare op1 op2 of
+        EQ -> case gcompare coeff1 coeff2 of
+          GEQ -> case compare res1 res2 of
+            EQ -> GEQ
+            LT -> GLT
+            GT -> GGT
+          GLT -> GLT
+          GGT -> GGT
+        LT -> GLT
+        GT -> GGT
 
 data NoVar (t::Type) = NoVar'
 data NoFun (sig::([Type],Type)) = NoFun'
