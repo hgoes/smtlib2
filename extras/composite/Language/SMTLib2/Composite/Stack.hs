@@ -121,6 +121,10 @@ instance (IsStack st idx,Composite (st a)) => Composite (Stack st idx a) where
                               showString "Stack " .
                               compShow 11 st . showChar ' ' .
                               compShow 11 top
+  compInvariant (Stack st top) = do
+    invSt <- compInvariant st
+    invTop <- compInvariant top
+    return $ invSt++invTop
 
 instance (IsStack st idx,Composite (st a)) => GEq (RevStack st idx a) where
   geq (RevStack r1) (RevStack r2) = geq r1 r2
@@ -160,6 +164,7 @@ instance Composite a => Composite (StackList a) where
   compIsSubsetOf f (StackList l1) (StackList l2)
     = compIsSubsetOf f l1 l2
   compShow p (StackList i) = compShow p i
+  compInvariant (StackList i) = compInvariant i
 
 newtype StackArray tp a e
   = StackArray { stackArray :: CompArray '[tp] a e }
@@ -178,6 +183,7 @@ instance Composite a => Composite (StackArray tp a) where
   compIsSubsetOf f (StackArray a1) (StackArray a2)
     = compIsSubsetOf f a1 a2
   compShow p (StackArray i) = compShow p i
+  compInvariant (StackArray i) = compInvariant i
 
 newtype StackListIndex e
   = StackListIndex { stackListIndex :: Choice BoolEncoding (NoComp Int) e }
@@ -196,6 +202,7 @@ instance Composite StackListIndex where
   compIsSubsetOf f (StackListIndex i1) (StackListIndex i2)
     = compIsSubsetOf f i1 i2
   compShow p (StackListIndex i) = compShow p i
+  compInvariant (StackListIndex i) = compInvariant i
 
 newtype StackArrayIndex tp e
   = StackArrayIndex { stackArrayIndex :: Comp tp e }
@@ -214,6 +221,7 @@ instance Composite (StackArrayIndex tp) where
   compIsSubsetOf f (StackArrayIndex i1) (StackArrayIndex i2)
     = compIsSubsetOf f i1 i2
   compShow p (StackArrayIndex i) = compShow p i
+  compInvariant (StackArrayIndex i) = compInvariant i
 
 instance IsStack StackList StackListIndex where
   stackElement (StackListIndex idx) _ = do
