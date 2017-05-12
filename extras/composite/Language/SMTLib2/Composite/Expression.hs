@@ -159,9 +159,10 @@ relativizeExpr' descr mp lmp info e = case extract info e of
   -- TODO: Find a way not to flatten let bindings
   Just (E.Let bind body) -> relativizeExpr' descr mp nlmp info body
     where
-      nlmp = runIdentity $ List.foldM (\lmp bind -> return $ DMap.insert (E.letVar bind)
-                                                    (relativizeExpr' descr mp lmp info (E.letExpr bind)) lmp
-                                      ) lmp bind
+      nlmp = foldl (\lmp (E.LetBinding v e)
+                    -> DMap.insert v
+                       (relativizeExpr' descr mp lmp info e) lmp
+                   ) lmp bind
 
 collectRevVars :: Composite arg
                => DMap (RevComp arg) E.NoVar

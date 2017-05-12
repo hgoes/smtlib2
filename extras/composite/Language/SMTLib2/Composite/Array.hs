@@ -225,11 +225,11 @@ instance (Embed m e,Monad m) => Embed (ReaderT (List Repr idx) m) (Arrayed idx e
       mapArgs Nil = Nil
       mapArgs ((Arrayed x) ::: xs) = x ::: mapArgs xs
 
-      mapLets :: List (LetBinding (Arrayed idx lvar) (Arrayed idx e)) tps
-              -> List (LetBinding lvar e) (Lifted tps idx)
-      mapLets Nil = Nil
-      mapLets (LetBinding (Arrayed q) (Arrayed e) ::: xs)
-        = LetBinding q e ::: mapLets xs
+      mapLets :: [LetBinding (Arrayed idx lvar) (Arrayed idx e)]
+              -> [LetBinding lvar e]
+      mapLets [] = []
+      mapLets (LetBinding (Arrayed q) (Arrayed e):xs)
+        = LetBinding q e : mapLets xs
   embedTypeOf = do
     tp <- lift embedTypeOf
     let f (Arrayed (tp -> ArrayRepr _ rtp)) = rtp
