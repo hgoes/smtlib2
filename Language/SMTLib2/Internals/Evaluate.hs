@@ -14,6 +14,7 @@ import Data.Bits
 import Data.Dependent.Map (DMap)
 import qualified Data.Dependent.Map as DMap
 import Data.Functor.Identity
+import Data.Foldable (foldlM)
 
 data EvalResult fun res where
   ValueResult :: Value res -> EvalResult fun res
@@ -165,10 +166,10 @@ evaluateExpr _ _ _ _ _ _ _ _ (AsArray fun)
 evaluateExpr _ _ _ _ _ evq _ _ (Quantification q arg body)
   = evq q arg body
 evaluateExpr _ _ _ _ _ _ binds f (Let arg body) = do
-  nbinds <- List.foldM (\cbinds x -> do
-                           rx <- f cbinds (letExpr x)
-                           return $ DMap.insert (letVar x) rx cbinds
-                       ) binds arg
+  nbinds <- foldlM (\cbinds (LetBinding v e) -> do
+                       rx <- f cbinds e
+                       return $ DMap.insert v rx cbinds
+                   ) binds arg
   f nbinds body
 evaluateExpr _ _ _ evf evr _ binds f (App fun args) = do
   rargs <- List.mapM (f binds) args

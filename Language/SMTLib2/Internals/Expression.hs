@@ -127,9 +127,9 @@ data BVUnOp = BVNot | BVNeg deriving (Eq,Ord,Show)
 
 data PBOp = PBEq | PBLe | PBGe deriving (Eq,Ord,Show)
 
-data LetBinding (v :: Type -> *) (e :: Type -> *) (t :: Type)
-  = LetBinding { letVar :: v t
-               , letExpr :: e t }
+data LetBinding (v :: Type -> *) (e :: Type -> *)
+  = forall (t::Type). LetBinding { letVar :: v t
+                                 , letExpr :: e t }
 
 data Quantifier = Forall | Exists deriving (Typeable,Eq,Ord,Show)
 
@@ -174,7 +174,7 @@ data Expression (v :: Type -> *) (qv :: Type -> *) (fun :: ([Type],Type) -> *) (
 #if __GLASGOW_HASKELL__>=712
   -- | Bind variables to expressions.
 #endif
-  Let :: List (LetBinding lv e) arg
+  Let :: [LetBinding lv e]
       -> e res
       -> Expression v qv fun fv lv e res
 
@@ -305,10 +305,11 @@ mapExpr _ f _ _ _ g (Quantification q args body)
     g body
 mapExpr _ _ _ _ f g (Let args body)
   = Let <$>
-    List.mapM (\bind -> LetBinding <$>
-                        f (letVar bind) <*>
-                        g (letExpr bind)
-              ) args <*>
+    traverse (\(LetBinding v e)
+              -> LetBinding <$>
+                 f v <*>
+                 g e
+             ) args <*>
     g body
 
 mapFunction :: (Functor m,Applicative m)
@@ -378,10 +379,9 @@ instance (GShow v,GShow qv,GShow fun,GShow fv,GShow lv,GShow e)
   showsPrec p (Let args body)
     = showParen (p>10) $
       showString "Let " .
-      showListWith id (runIdentity $ List.toList
-                       (\(LetBinding v e)
-                        -> return $ (gshowsPrec 10 v) . showChar '=' . (gshowsPrec 10 e)
-                      ) args)  .
+      showListWith (\(LetBinding v e)
+                    -> (gshowsPrec 10 v) . showChar '=' . (gshowsPrec 10 e)
+                   ) args .
       showChar ' ' .
       gshowsPrec 10 body
 
@@ -519,15 +519,15 @@ renderExpr SMTRendering _ _ _ _ f g (Let args body)
   = showString "(let (" . renderArgs f g args . showString ") " . g body . showChar ')'
   where
     renderArgs :: (forall tp. lv tp -> ShowS) -> (forall tp. e tp -> ShowS)
-               -> List (LetBinding lv e) args
+               -> [LetBinding lv e]
                -> ShowS
-    renderArgs _ _ Nil = id
-    renderArgs f g (x ::: xs)
+    renderArgs _ _ [] = id
+    renderArgs f g (LetBinding v e:xs)
       = showChar '(' .
-        f (letVar x) . showChar ' ' .
-        g (letExpr x) . showChar ')' .
+        f v . showChar ' ' .
+        g e . showChar ')' .
         (case xs of
-            Nil -> id
+            [] -> id
             _ -> showChar ' ' . renderArgs f g xs)
 
 renderValue :: RenderMode -> Value tp -> ShowS
@@ -692,15 +692,21 @@ renderTypes (tp ::: tps) = renderType SMTRendering tp .
 instance GShow fun => GShow (Function fun) where
   gshowsPrec = showsPrec
 
-instance (GEq v,GEq e) => GEq (LetBinding v e) where
-  geq (LetBinding v1 e1) (LetBinding v2 e2) = do
-    Refl <- geq v1 v2
-    geq e1 e2
+instance (GEq v,GEq e) => Eq (LetBinding v e) where
+  (==) (LetBinding v1 e1) (LetBinding v2 e2) = case geq v1 v2 of
+    Just Refl -> case geq e1 e2 of
+      Just Refl -> True
+      Nothing -> False
+    Nothing -> False
 
-instance (GCompare v,GCompare e) => GCompare (LetBinding v e) where
-  gcompare (LetBinding v1 e1) (LetBinding v2 e2) = case gcompare v1 v2 of
-    GEQ -> gcompare e1 e2
-    r -> r
+instance (GCompare v,GCompare e) => Ord (LetBinding v e) where
+  compare (LetBinding v1 e1) (LetBinding v2 e2) = case gcompare v1 v2 of
+    GEQ -> case gcompare e1 e2 of
+      GEQ -> EQ
+      GLT -> LT
+      GGT -> GT
+    GLT -> LT
+    GGT -> GT
 
 instance (GEq v,GEq qv,GEq fun,GEq fv,GEq lv,GEq e)
          => GEq (Expression v qv fun fv lv e) where
@@ -721,9 +727,10 @@ instance (GEq v,GEq qv,GEq fun,GEq fv,GEq lv,GEq e)
         Refl <- geq arg1 arg2
         geq body1 body2
     | otherwise = Nothing
-  geq (Let bnd1 body1) (Let bnd2 body2) = do
-    Refl <- geq bnd1 bnd2
-    geq body1 body2
+  geq (Let bnd1 body1) (Let bnd2 body2)
+    = if bnd1==bnd2
+      then geq body1 body2
+      else Nothing
   geq _ _ = Nothing
 
 instance (GEq v,GEq qv,GEq fun,GEq fv,GEq lv,GEq e)
@@ -771,10 +778,10 @@ instance (GCompare v,GCompare qv,GCompare fun,GCompare fv,GCompare lv,GCompare e
       GGT -> GGT
   gcompare (Quantification _ _ _) _ = GLT
   gcompare _ (Quantification _ _ _) = GGT
-  gcompare (Let bnd1 body1) (Let bnd2 body2) = case gcompare bnd1 bnd2 of
-    GEQ -> gcompare body1 body2
-    GLT -> GLT
-    GGT -> GGT
+  gcompare (Let bnd1 body1) (Let bnd2 body2) = case compare bnd1 bnd2 of
+    EQ -> gcompare body1 body2
+    LT -> GLT
+    GT -> GGT
 
 instance (GCompare v,GCompare qv,GCompare fun,GCompare fv,GCompare lv,GCompare e)
          => Ord (Expression v qv fun fv lv e t) where

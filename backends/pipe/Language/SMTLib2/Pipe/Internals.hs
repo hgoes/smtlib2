@@ -831,15 +831,15 @@ mkQuant _ lsp _ = throwError $ "Invalid forall/exists parameter: "++show lsp
 
 mkLet :: GetType e
       => LispParser v qv fun fv lv e -> [L.Lisp]
-         -> (forall arg. LispParser v qv fun fv lv e
-             -> List (LetBinding lv e) arg -> LispParse a)
+         -> (LispParser v qv fun fv lv e
+             -> [LetBinding lv e] -> LispParse a)
          -> LispParse a
-mkLet p [] f = f p Nil
+mkLet p [] f = f p []
 mkLet p ((L.List [L.Symbol name,expr]):args) f
   = parseRecursive p p Nothing expr $
     \expr' -> do
       let (lvar,np) = registerLetVar p name (getType expr')
-      mkLet np args $ \p args -> f p ((LetBinding lvar expr') ::: args)
+      mkLet np args $ \p args -> f p ((LetBinding lvar expr'):args)
 mkLet _ lsp _ = throwError $ "Invalid let parameter: "++show lsp
 
 withEq :: Repr t -> [b]
@@ -1461,11 +1461,11 @@ exprToLispWith _ f _ _ _ _ _ _ g (Expr.Quantification q args body) = do
                   ,L.List bind
                   ,body']
 exprToLispWith _ _ _ _ _ _ _ f g (Expr.Let args body) = do
-  binds <- List.toList (\bind -> do
-                          sym <- f (letVar bind)
-                          expr <- g (letExpr bind)
-                          return $ L.List [sym,expr]
-                       ) args
+  binds <- mapM (\(LetBinding v e) -> do
+                    sym <- f v
+                    expr <- g e
+                    return $ L.List [sym,expr]
+                ) args
   body' <- g body
   return $ L.List [L.Symbol "let"
                   ,L.List binds

@@ -339,12 +339,12 @@ renderExpr b expr
   where
     expr' = fromBackend (debugBackend'' b) expr
     nb = case expr' of
-      Let args _ -> runIdentity $ List.foldM (\cb var -> do
-                                                 let (name,nnames) = genName' (debugNames cb) "var"
-                                                 return cb { debugNames = nnames
-                                                           , debugLVars = DMap.insert (letVar var)
-                                                                          (UntypedVar name (getType $ letVar var))
-                                                                          (debugLVars cb)
-                                                           }
-                                             ) b args
+      Let args _ -> foldl (\cb (LetBinding v e)
+                           -> let (name,nnames) = genName' (debugNames cb) "var"
+                              in cb { debugNames = nnames
+                                    , debugLVars = DMap.insert v
+                                                   (UntypedVar name (getType e))
+                                                   (debugLVars cb)
+                                    }
+                          ) b args
       _ -> b
