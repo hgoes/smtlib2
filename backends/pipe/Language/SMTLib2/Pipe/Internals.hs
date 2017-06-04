@@ -280,6 +280,12 @@ instance Backend SMTPipe where
     hPutStrLn (channelIn b) ("; "++msg)
     return ((),b)
   builtIn name arg ret b = return (UntypedFun (T.pack name) arg ret,b)
+  applyTactic t b = do
+    putRequest b (renderApplyTactic t)
+    resp <- parseResponse b
+    case runExcept $ parseGoals b resp of
+      Right res -> return (res,b)
+      Left err -> error $ "smtlib2: Unknown 'apply' response: "++show resp++" ["++err++"]"
 
 renderDeclareFun :: Map String Int -> List Repr arg -> Repr ret -> Maybe String
                  -> (T.Text,L.Lisp,Map String Int)
@@ -593,6 +599,24 @@ parseGetModel b (L.List ((L.Symbol "model"):mdl)) = do
         \b' tps args -> f b' (tp ::: tps) ((UntypedVar v tp) ::: args)
     withFunList _ lsp _ = throwError $ "Invalid fun args: "++show lsp
 parseGetModel _ lsp = throwError $ "Invalid model: "++show lsp
+
+renderApplyTactic :: Tactic -> L.Lisp
+renderApplyTactic t = L.List [L.Symbol "apply"
+                             ,tacticToLisp t]
+
+parseGoals :: SMTPipe -> L.Lisp -> LispParse [[Expr SMTPipe BoolType]]
+parseGoals pipe (L.List (L.Symbol "goals":goals))
+  = mapM (\goal -> case goal of
+             L.List (L.Symbol "goal":exprs)
+               -> mapM (lispToExprTyped pipe bool) (stripAttrs exprs)
+             _ -> throwError $ "Cannot parse goal: "++show goal
+         ) goals
+  where
+    stripAttrs :: [L.Lisp] -> [L.Lisp]
+    stripAttrs [] = []
+    stripAttrs (L.Symbol (T.uncons -> Just (':',_)):_:rest) = stripAttrs rest
+    stripAttrs (x:xs) = x:stripAttrs xs
+parseGoals _ g = throwError $ "Cannot parse 'apply' response: "++show g
 
 data Sort = forall (t :: Type). Sort (Repr t)
 data Sorts = forall (t :: [Type]). Sorts (List Repr t)

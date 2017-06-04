@@ -126,7 +126,7 @@ module Language.SMTLib2 (
   -- ** Lists
   List(..),reifyList,(.:.),nil,
   -- * Misc
-  comment,simplify
+  comment,simplify,applyTactic
   ) where
 
 import Language.SMTLib2.Internals.Type
@@ -465,3 +465,8 @@ analyzeProof :: B.Backend b => B.Proof b -> SMT b (P.Proof String (B.Expr b) (B.
 analyzeProof pr = do
   st <- get
   return $ B.analyzeProof (backend st) pr
+
+-- | Partially solve the current assertions using a tactic.
+--   Only supported by Z3.
+applyTactic :: B.Backend b => Tactic -> SMT b [[B.Expr b BoolType]]
+applyTactic t = embedSMT (B.applyTactic t)

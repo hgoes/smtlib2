@@ -314,6 +314,12 @@ instance (Backend b) => Backend (DebugBackend b) where
                              (UntypedFun (T.pack name) arg ret)
                              (debugFuns b) }
     return (res,b1)
+  applyTactic t b = do
+    b1 <- outputLisp b (renderApplyTactic t)
+    (res,nb) <- applyTactic t (debugBackend'' b1)
+    let b2 = b1 { debugBackend'' = nb }
+    outputResponse b2 (show $ fmap (fmap (renderExpr b2)) res)
+    return (fmap (fmap DebugExpr) res,b2)
     
 renderExpr :: (Backend b) => DebugBackend b -> Expr b tp
            -> L.Lisp

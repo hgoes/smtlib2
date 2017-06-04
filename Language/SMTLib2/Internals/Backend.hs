@@ -91,6 +91,7 @@ class (Typeable b,Functor (SMTMonad b),Monad (SMTMonad b),
           -> List Repr arg -- ^ Argument types of the function
           -> Repr ret      -- ^ Return type of the function
           -> SMTAction b (Fun b '(arg,ret))
+  applyTactic :: Tactic -> SMTAction b [[Expr b BoolType]]
 
 -- | The interpolation partition
 data Partition = PartitionA
