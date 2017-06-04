@@ -53,6 +53,8 @@ module Language.SMTLib2 (
   cdt,
   -- ** Quantification
   exists, forall,
+  -- ** Let binding
+  let',
   -- ** Functions
   pattern Fun,app,fun,
   -- *** Equality

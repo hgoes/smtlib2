@@ -7,6 +7,8 @@ module Language.SMTLib2.Internals.Interface
         constant,asConstant,true,false,cbool,cint,creal,cbv,cbvUntyped,cbvUntyped',cdt,
         -- ** Quantification
         exists,forall,
+        -- ** Let
+        let',
         -- ** Functions
         pattern Fun,app,fun,
         -- *** Equality
@@ -1083,3 +1085,9 @@ forall :: (Embed m e,Monad m) => List Repr tps
 forall tps f = embedQuantifier Forall tps (\vars -> do
                                               nvars <- List.traverse (\var -> embed $ pure $ QVar var) vars
                                               f nvars)
+
+let' :: (Embed m e,Monad m,HasMonad a,MatchMonad a m,MonadResult a ~ e tp)
+     => [LetBinding (EmLVar m e) e]
+     -> a
+     -> m (e tp)
+let' args body = embed $ E.Let args <$> embedM body
