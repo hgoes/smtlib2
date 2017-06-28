@@ -102,9 +102,9 @@ instance Composite a => Extract () (CompositeExpr a) where
   extract _ (CompositeExpr x) = Just x
 
 mkCompExpr :: Composite arg
-           => (arg (CompositeExpr arg) -> Reader (CompDescr arg) (CompositeExpr arg tp))
+           => (arg (CompositeExpr arg) -> Reader (CompDescr arg) res)
            -> CompDescr arg
-           -> CompositeExpr arg tp
+           -> res
 mkCompExpr f descr
   = runReader (do
                   arg <- createComposite (\_ rev -> return (CompositeExpr (E.Var rev))) descr
