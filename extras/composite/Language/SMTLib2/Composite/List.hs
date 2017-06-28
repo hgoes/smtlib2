@@ -15,8 +15,9 @@ import Data.GADT.Compare
 import Text.Show
 import Data.Foldable
 import Control.Monad.Except
+import Data.Proxy
 
-data RevList a tp = RevList !Int !(RevComp a tp)
+data RevList a tp = RevList {-# UNPACK #-} !Int !(RevComp a tp)
 
 newtype CompList a (e :: Type -> *) = CompList { compList :: Vector (a e) }
 
@@ -36,6 +37,8 @@ instance Composite a => Composite (CompList a) where
     let nlst = lst Vec.// [(n,nel)]
     return $ CompList nlst
   setRev _ _ _ = Nothing
+  revName (_::Proxy (CompList a)) (RevList i r)
+    = show i++"."++revName (Proxy::Proxy a) r
   compCombine f (CompList xs) (CompList ys) = do
     res <- runExceptT (do
                           zs <- Vec.zipWithM (\x y -> do

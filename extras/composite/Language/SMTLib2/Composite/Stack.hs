@@ -102,6 +102,10 @@ instance (IsStack st idx,Composite (st a)) => Composite (Stack st idx a) where
     ntop <- setRev r v (Just top)
     return $ Stack st ntop
   setRev _ _ Nothing = Nothing
+  revName (_::Proxy (Stack st idx a)) (RevStack r)
+    = revName (Proxy::Proxy (st a)) r
+  revName (_::Proxy (Stack st idx a)) (RevTop r)
+    = "top."++revName (Proxy::Proxy idx) r
   compCompare (Stack st1 top1) (Stack st2 top2)
     = compCompare st1 st2 `mappend`
       compCompare top1 top2
@@ -158,6 +162,7 @@ instance Composite a => Composite (StackList a) where
   setRev r v idx = do
     nch <- setRev r v (fmap stackList idx)
     return (StackList nch)
+  revName (_::Proxy (StackList a)) r = revName (Proxy::Proxy (CompList a)) r
   compCombine f (StackList i1) (StackList i2)
     = fmap (fmap StackList) $ compCombine f i1 i2
   compCompare (StackList i1) (StackList i2) = compCompare i1 i2
@@ -177,6 +182,7 @@ instance Composite a => Composite (StackArray tp a) where
   setRev r v idx = do
     nch <- setRev r v (fmap stackArray idx)
     return (StackArray nch)
+  revName (_::Proxy (StackArray tp a)) r = revName (Proxy::Proxy (CompArray '[tp] a)) r
   compCombine f (StackArray i1) (StackArray i2)
     = fmap (fmap StackArray) $ compCombine f i1 i2
   compCompare (StackArray i1) (StackArray i2) = compCompare i1 i2
@@ -196,6 +202,7 @@ instance Composite StackListIndex where
   setRev r v idx = do
     nch <- setRev r v (fmap stackListIndex idx)
     return (StackListIndex nch)
+  revName _ r = revName (Proxy::Proxy (Choice BoolEncoding (NoComp Int))) r
   compCombine f (StackListIndex i1) (StackListIndex i2)
     = fmap (fmap StackListIndex) $ compCombine f i1 i2
   compCompare (StackListIndex i1) (StackListIndex i2) = compCompare i1 i2
