@@ -42,9 +42,9 @@ data ChoiceEncoding = BoolEncoding
                     | ValueEncoding Type
 
 data Choice enc c e where
-  ChoiceSingleton :: c e -> Choice BoolEncoding c e
-  ChoiceBool :: Vector (c e,e BoolType) -> Choice BoolEncoding c e
-  ChoiceValue :: Repr tp -> Vector (c e,Value tp) -> e tp -> Choice (ValueEncoding tp) c e
+  ChoiceSingleton :: !(c e) -> Choice BoolEncoding c e
+  ChoiceBool :: !(Vector (c e,e BoolType)) -> Choice BoolEncoding c e
+  ChoiceValue :: !(Repr tp) -> !(Vector (c e,Value tp)) -> !(e tp) -> Choice (ValueEncoding tp) c e
 
 singleton :: (Composite c,Embed m e,Monad m) => Choice enc c Repr -> c e -> m (Choice enc c e)
 singleton (ChoiceSingleton _) x = return $ ChoiceSingleton x
@@ -114,9 +114,9 @@ dtEncoding dtName (els :: [(String,c Repr)]) g
     g $ ChoiceValue vals (DataRepr tp')-}
 
 data RevChoice enc c t where
-  RevChoiceBool :: !Int -> RevChoice BoolEncoding c BoolType
+  RevChoiceBool :: {-# UNPACK #-} !Int -> RevChoice BoolEncoding c BoolType
   RevChoiceValue :: RevChoice (ValueEncoding t) c t
-  RevChoiceElement :: !Int -> !(RevComp c tp) -> RevChoice enc c tp
+  RevChoiceElement :: {-# UNPACK #-} !Int -> !(RevComp c tp) -> RevChoice enc c tp
 
 instance (Composite c) => Composite (Choice enc c) where
   type RevComp (Choice enc a) = RevChoice enc a
