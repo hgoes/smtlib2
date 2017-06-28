@@ -40,6 +40,23 @@ instance (Show k,Ord k,Composite a) => Composite (CompMap k a) where
   compShow = showsPrec
   compInvariant (CompMap mp) = fmap concat $ mapM compInvariant $ Map.elems mp
 
+combineMapWith :: (Embed m e,Monad m,GCompare e,Ord k,Composite el)
+               => (k -> m (el e))
+               -> (el e -> el e -> m (Maybe (el e)))
+               -> CompMap k el e
+               -> CompMap k el e
+               -> m (Maybe (CompMap k el e))
+combineMapWith def f (CompMap mp1) (CompMap mp2) = do
+  nmp <- sequence $ Map.mergeWithKey
+         (\_ x y -> Just $ f x y)
+         (Map.mapWithKey (\k x -> do
+                             y <- def k
+                             f x y))
+         (Map.mapWithKey (\k y -> do
+                             x <- def k
+                             f x y)) mp1 mp2
+  return $ fmap CompMap $ sequence nmp
+
 instance (Ord k,Show k,Composite el) => Container (CompMap k el) where
   data Index (CompMap k el) el' e where
     MapIndex :: k -> Index (CompMap k el) el e
