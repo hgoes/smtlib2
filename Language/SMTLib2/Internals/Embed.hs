@@ -11,6 +11,7 @@ import Language.SMTLib2.Internals.Evaluate
 import Data.Functor.Identity
 import Control.Monad.State
 import Control.Monad.Except
+import Control.Monad.Writer
 import Data.GADT.Compare
 import Data.GADT.Show
 import qualified Data.Dependent.Map as DMap
@@ -296,6 +297,18 @@ instance (Embed m e,Monad m) => Embed (StateT s m) e where
   type EmFun (StateT s m) e = EmFun m e
   type EmFunArg (StateT s m) e = EmFunArg m e
   type EmLVar (StateT s m) e = EmLVar m e
+  embed e = do
+    re <- e
+    lift $ embed (pure re)
+  embedQuantifier q arg body = lift $ embedQuantifier q arg body
+  embedTypeOf = lift embedTypeOf
+
+instance (Embed m e,Monad m,Monoid w) => Embed (WriterT w m) e where
+  type EmVar (WriterT w m) e = EmVar m e
+  type EmQVar (WriterT w m) e = EmQVar m e
+  type EmFun (WriterT w m) e = EmFun m e
+  type EmFunArg (WriterT w m) e = EmFunArg m e
+  type EmLVar (WriterT w m) e = EmLVar m e
   embed e = do
     re <- e
     lift $ embed (pure re)
