@@ -1,6 +1,6 @@
 {-# LANGUAGE DataKinds,GADTs,TypeFamilies,ExistentialQuantification,ScopedTypeVariables,RankNTypes #-}
 module Language.SMTLib2.Composite.Choice
-  (Choice(),ChoiceEncoding(..),RevChoice(),
+  (Choice(..),ChoiceEncoding(..),RevChoice(..),
    -- * Encodings
    boolEncoding,boolEncodingNoSingleton,intEncoding,bvEncoding,{-dtEncoding,-}possibleChoices,
    -- * Constructor
