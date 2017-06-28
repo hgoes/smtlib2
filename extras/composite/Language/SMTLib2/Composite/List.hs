@@ -79,6 +79,48 @@ instance Composite el => Container (CompList el) where
     = return $ CompList $ lst Vec.// [ (i,nel) | (ListIndex i,nel) <- upd ]
   showIndex p (ListIndex i) = showsPrec p i
 
+combineListWith :: (Embed m e,Monad m,GCompare e,Composite a)
+                => (Int -> m (a e))
+                -> (a e -> a e -> m (Maybe (a e)))
+                -> CompList a e
+                -> CompList a e
+                -> m (Maybe (CompList a e))
+combineListWith def f (CompList xs) (CompList ys) = do
+  res <- runExceptT (do
+                        zs <- Vec.zipWithM (\x y -> do
+                                               z <- lift $ f x y
+                                               case z of
+                                                 Just nz -> return nz
+                                                 Nothing -> throwError ()
+                                           ) xs ys
+                        let lx = Vec.length xs
+                            ly = Vec.length ys
+                        case compare lx ly of
+                          EQ -> return zs
+                          LT -> do
+                            nys <- Vec.imapM
+                                   (\i y -> do
+                                       x <- lift $ def i
+                                       z <- lift $ f x y
+                                       case z of
+                                         Just nz -> return nz
+                                         Nothing -> throwError ())
+                                   (Vec.drop lx ys)
+                            return $ zs Vec.++ nys
+                          GT -> do
+                            nxs <- Vec.imapM
+                                   (\i x -> do
+                                       y <- lift $ def i
+                                       z <- lift $ f x y
+                                       case z of
+                                         Just nz -> return nz
+                                         Nothing -> throwError ())
+                                   (Vec.drop ly xs)
+                            return $ zs Vec.++ nxs)
+  case res of
+    Right r -> return (Just $ CompList r)
+    Left () -> return Nothing
+
 dynamicAt :: (Composite a,Integral (Value tp),Embed m e,Monad m)
           => Maybe (Range tp) -> e tp
           -> Access (CompList a) ('Seq a 'Id) a m e
