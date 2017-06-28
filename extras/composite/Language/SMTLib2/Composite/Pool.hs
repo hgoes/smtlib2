@@ -11,6 +11,7 @@ import Language.SMTLib2.Composite.List
 
 import Data.Vector as Vec hiding (mapM,mapM_)
 import Data.Proxy
+import Data.GADT.Compare
 
 class Composite a => PoolElement a e where
   type PoolElementCtx a e
@@ -40,6 +41,12 @@ class (Composite (PoolIndex p))
               => a e
               -> p a Repr
               -> m (p a e)
+  combinePoolWith :: (Embed m e,Monad m,GCompare e,Composite a)
+                  => m (a e)
+                  -> (a e -> a e -> m (Maybe (a e)))
+                  -> p a e
+                  -> p a e
+                  -> m (Maybe (p a e))
 
 instance Pool CompList where
   type PoolIndex CompList
@@ -70,3 +77,4 @@ instance Pool CompList where
                               then Nothing
                               else Vec.fold1M unionDescr ds
   allSameLike def (CompList els) = return $ CompList $ fmap (const def) els
+  combinePoolWith def = combineListWith (const def)
