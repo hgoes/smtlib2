@@ -276,7 +276,7 @@ instance IsStack StackList StackListIndex where
   stackPop popCond (Stack (StackList (CompList els)) (StackListIndex top)) = do
     let sz = Vec.length els
     lst <- getChoices top
-    top1 <- mapChoices (\_ (NoComp i) -> if i>0
+    top1 <- mapChoices (\_ (NoComp i) -> if i>=0
                                          then return (NoComp (i-1))
                                          else return (NoComp i)
                        ) top
