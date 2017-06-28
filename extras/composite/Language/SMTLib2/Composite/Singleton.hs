@@ -137,6 +137,9 @@ instance Composite CompBV where
     Nothing -> return Nothing
   compCompare (CompBV e1 _) (CompBV e2 _) = defaultCompare e1 e2
   compShow p (CompBV e _) = gshowsPrec p e
+  compIsSubsetOf f (CompBV e1 bw1) (CompBV e2 bw2) = case geq bw1 bw2 of
+    Just Refl -> f e1 e2
+    Nothing -> False
 
 instance (IsNumSingleton i) => ByteWidth CompBV i where
   byteWidth (CompBV _ w) r = mapExprs constant bw

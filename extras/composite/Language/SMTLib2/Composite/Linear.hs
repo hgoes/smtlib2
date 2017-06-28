@@ -557,6 +557,13 @@ instance (IsNumeric c) => Composite (Linear c) where
     showString "Linear " .
     compShow 11 c . showChar ' ' .
     showListWith (\(c,v) -> compShow 10 c . showChar '*' . compShow 10 v) lins
+  compIsSubsetOf f (Linear c1 lin1) (Linear c2 lin2)
+    = compIsSubsetOf (==) c1 c2 &&
+      length lin1 == length lin2 &&
+      all (\((c1,v1),(c2,v2))
+           -> compIsSubsetOf (==) c1 c2 &&
+              compIsSubsetOf f v1 v2
+          ) (zip lin1 lin2)
 
 {-instance (IsRanged c,IsNumSingleton c) => IsRanged (Linear c) where
   getRange (Linear c lin) = do
