@@ -1,17 +1,26 @@
-{-# LANGUAGE QuasiQuotes,DataKinds,GADTs,RankNTypes,ScopedTypeVariables,KindSignatures,TemplateHaskell, FlexibleInstances,TypeFamilies #-}
+{-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE EmptyDataDecls      #-}
+{-# LANGUAGE FlexibleInstances   #-}
+{-# LANGUAGE GADTs               #-}
+{-# LANGUAGE KindSignatures      #-}
+{-# LANGUAGE QuasiQuotes         #-}
+{-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell     #-}
+{-# LANGUAGE TypeFamilies        #-}
 module Z3Tutorial where
 
-import Language.SMTLib2
-import Language.SMTLib2.Pipe (createPipe)
-import Language.SMTLib2.Debug (debugBackend)
-import qualified Language.SMTLib2.Internals.Type.List as List
+import           Language.SMTLib2
+import           Language.SMTLib2.Debug                (debugBackend)
 import qualified Language.SMTLib2.Internals.Expression as SMT
-import qualified Language.SMTLib2.Internals.Type as Type
+import qualified Language.SMTLib2.Internals.Type       as Type
+import qualified Language.SMTLib2.Internals.Type.List  as List
+import           Language.SMTLib2.Pipe                 (createPipe)
 
-import Data.Proxy
-import Data.GADT.Compare
-import Data.GADT.Show
-import Data.Typeable
+import           Data.GADT.Compare
+import           Data.GADT.Show
+import           Data.Proxy
+import           Data.Typeable
 
 runExample :: (forall b. Backend b => SMT b r) -> IO r
 runExample ex = withBackend (fmap debugBackend $ createPipe "z3" ["-in","-smt2"]) ex
@@ -240,7 +249,7 @@ example18 = do
   select s2 (cint 1 .:. cint 2 .:. nil) .==. cint 4 >>= assert
   checkSat
   fmap show getModel
-  
+
 -- Datatypes
 
 data Pair par (e :: Type -> *) where
@@ -268,11 +277,11 @@ instance Type.IsDatatype Pair where
       (getType x ::: getType y ::: Nil)
       ConMkPair
       (x ::: y ::: Nil)
-  fieldType First = ParameterRepr Zero
+  fieldType First  = ParameterRepr Zero
   fieldType Second = ParameterRepr (Succ Zero)
-  fieldName First = "first"
+  fieldName First  = "first"
   fieldName Second = "second"
-  fieldGet (MkPair x _) First = x
+  fieldGet (MkPair x _) First  = x
   fieldGet (MkPair _ y) Second = y
 
 instance GEq (Type.Constr Pair) where
@@ -282,14 +291,14 @@ instance GCompare (Type.Constr Pair) where
   gcompare ConMkPair ConMkPair = GEQ
 
 instance GEq (Type.Field Pair) where
-  geq First First = Just Refl
+  geq First First   = Just Refl
   geq Second Second = Just Refl
-  geq _ _ = Nothing
+  geq _ _           = Nothing
 
 instance GCompare (Type.Field Pair) where
-  gcompare First First = GEQ
-  gcompare First _ = GLT
-  gcompare _ First = GGT
+  gcompare First First   = GEQ
+  gcompare First _       = GLT
+  gcompare _ First       = GGT
   gcompare Second Second = GEQ
 
 -- | Records
@@ -334,7 +343,7 @@ instance Type.IsDatatype S' where
   test A MkA = True
   test B MkB = True
   test C MkC = True
-  test _ _ = False
+  test _ _   = False
   fields MkA = Nil
   fields MkB = Nil
   fields MkC = Nil
@@ -352,15 +361,15 @@ instance GEq (Type.Constr S') where
   geq MkA MkA = Just Refl
   geq MkB MkB = Just Refl
   geq MkC MkC = Just Refl
-  geq _ _ = Nothing
+  geq _ _     = Nothing
 
 instance GCompare (Type.Constr S') where
   gcompare MkA MkA = GEQ
-  gcompare MkA _ = GLT
-  gcompare _ MkA = GGT
+  gcompare MkA _   = GLT
+  gcompare _ MkA   = GGT
   gcompare MkB MkB = GEQ
-  gcompare MkB _ = GLT
-  gcompare _ MkB = GGT
+  gcompare MkB _   = GLT
+  gcompare _ MkB   = GGT
   gcompare MkC MkC = GEQ
 
 instance GEq (Type.Field S') where
@@ -396,19 +405,19 @@ instance Type.IsDatatype Lst where
   data Field Lst tp where
     Hd :: Type.Field Lst (ParameterType 'Z)
     Tl :: Type.Field Lst (DataType Lst '[ParameterType 'Z])
-  datatypeGet (Nil' tp) = (Lst,tp ::: Nil)
+  datatypeGet (Nil' tp)   = (Lst,tp ::: Nil)
   datatypeGet (Cons' e _) = (Lst,getType e ::: Nil)
   parameters _ = Succ Zero
   datatypeName _ = "Lst"
   constructors _ = MkNil ::: MkCons ::: Nil
-  constrName MkNil = "nil"
+  constrName MkNil  = "nil"
   constrName MkCons = "cons"
-  test (Nil' _) MkNil = True
+  test (Nil' _) MkNil     = True
   test (Cons' _ _) MkCons = True
-  test _ _ = False
-  fields MkNil = Nil
+  test _ _                = False
+  fields MkNil  = Nil
   fields MkCons = Hd ::: Tl ::: Nil
-  construct (tp ::: Nil) MkNil Nil = Nil' tp
+  construct (tp ::: Nil) MkNil Nil                  = Nil' tp
   construct (tp ::: Nil) MkCons (hd ::: tl ::: Nil) = Cons' hd tl
   deconstruct (Nil' tp) = Type.ConApp (tp ::: Nil) MkNil Nil
   deconstruct (Cons' x xs) = Type.ConApp (getType x ::: Nil) MkCons
@@ -421,25 +430,25 @@ instance Type.IsDatatype Lst where
   fieldGet (Cons' _ tl) Tl = tl
 
 instance GEq (Type.Constr Lst) where
-  geq MkNil MkNil = Just Refl
+  geq MkNil MkNil   = Just Refl
   geq MkCons MkCons = Just Refl
-  geq _ _ = Nothing
+  geq _ _           = Nothing
 
 instance GCompare (Type.Constr Lst) where
-  gcompare MkNil MkNil = GEQ
-  gcompare MkNil _ = GLT
-  gcompare _ MkNil = GGT
+  gcompare MkNil MkNil   = GEQ
+  gcompare MkNil _       = GLT
+  gcompare _ MkNil       = GGT
   gcompare MkCons MkCons = GEQ
 
 instance GEq (Type.Field Lst) where
   geq Hd Hd = Just Refl
   geq Tl Tl = Just Refl
-  geq _ _ = Nothing
+  geq _ _   = Nothing
 
 instance GCompare (Type.Field Lst) where
   gcompare Hd Hd = GEQ
-  gcompare Hd _ = GLT
-  gcompare _ Hd = GGT
+  gcompare Hd _  = GLT
+  gcompare _ Hd  = GGT
   gcompare Tl Tl = GEQ
 
 -- | Recursive datatypes
@@ -481,27 +490,27 @@ instance Type.IsDatatype Tree where
   data Field Tree tp where
     TValue :: Type.Field Tree (ParameterType 'Z)
     TChildren :: Type.Field Tree (DataType TreeList '[ParameterType 'Z])
-  datatypeGet (Leaf tp) = (Tree,tp ::: Nil)
+  datatypeGet (Leaf tp)  = (Tree,tp ::: Nil)
   datatypeGet (Node v _) = (Tree,getType v:::Nil)
   parameters _ = Succ Zero
   datatypeName _ = "Tree"
   constructors _ = MkLeaf ::: MkNode ::: Nil
   constrName MkLeaf = "leaf"
   constrName MkNode = "node"
-  test (Leaf _) MkLeaf = True
+  test (Leaf _) MkLeaf   = True
   test (Node _ _) MkNode = True
-  test _ _ = False
+  test _ _               = False
   fields MkLeaf = Nil
   fields MkNode = TValue ::: TChildren ::: Nil
-  construct (tp ::: Nil) MkLeaf Nil = Leaf tp
+  construct (tp ::: Nil) MkLeaf Nil                = Leaf tp
   construct (tp ::: Nil) MkNode (v ::: ch ::: Nil) = Node v ch
   deconstruct (Leaf tp) = Type.ConApp (tp ::: Nil) MkLeaf Nil
   deconstruct (Node x xs) = Type.ConApp (getType x ::: Nil) MkNode (x:::xs:::Nil)
-  fieldName TValue = "value"
+  fieldName TValue    = "value"
   fieldName TChildren = "children"
-  fieldType TValue = ParameterRepr Zero
+  fieldType TValue    = ParameterRepr Zero
   fieldType TChildren = DataRepr TreeList (ParameterRepr Zero ::: Nil)
-  fieldGet (Node x _) TValue = x
+  fieldGet (Node x _) TValue     = x
   fieldGet (Node _ xs) TChildren = xs
 
 instance Type.IsDatatype TreeList where
@@ -522,14 +531,14 @@ instance Type.IsDatatype TreeList where
   parameters _ = Succ Zero
   datatypeName _ = "TreeList"
   constructors _ = MkTLNil ::: MkTLCons ::: Nil
-  constrName MkTLNil = "nil"
+  constrName MkTLNil  = "nil"
   constrName MkTLCons = "cons"
-  test (TLNil _) MkTLNil = True
+  test (TLNil _) MkTLNil     = True
   test (TLCons _ _) MkTLCons = True
-  test _ _ = False
-  fields MkTLNil = Nil
+  test _ _                   = False
+  fields MkTLNil  = Nil
   fields MkTLCons = Car ::: Cdr ::: Nil
-  construct (tp ::: Nil) MkTLNil Nil = TLNil tp
+  construct (tp ::: Nil) MkTLNil Nil             = TLNil tp
   construct (tp ::: Nil) MkTLCons (x:::xs:::Nil) = TLCons x xs
   deconstruct (TLNil tp) = Type.ConApp (tp:::Nil) MkTLNil Nil
   deconstruct (TLCons x xs) = case getType x of
@@ -538,51 +547,51 @@ instance Type.IsDatatype TreeList where
   fieldName Cdr = "cdr"
   fieldType Car = DataRepr Tree (ParameterRepr Zero:::Nil)
   fieldType Cdr = DataRepr TreeList (ParameterRepr Zero:::Nil)
-  fieldGet (TLCons x _) Car = x
+  fieldGet (TLCons x _) Car  = x
   fieldGet (TLCons _ xs) Cdr = xs
 
 instance GEq (Type.Constr Tree) where
   geq MkLeaf MkLeaf = Just Refl
   geq MkNode MkNode = Just Refl
-  geq _ _ = Nothing
+  geq _ _           = Nothing
 
 instance GEq (Type.Constr TreeList) where
-  geq MkTLNil MkTLNil = Just Refl
+  geq MkTLNil MkTLNil   = Just Refl
   geq MkTLCons MkTLCons = Just Refl
-  geq _ _ = Nothing
+  geq _ _               = Nothing
 
 instance GCompare (Type.Constr Tree) where
   gcompare MkLeaf MkLeaf = GEQ
-  gcompare MkLeaf _ = GLT
-  gcompare _ MkLeaf = GGT
+  gcompare MkLeaf _      = GLT
+  gcompare _ MkLeaf      = GGT
   gcompare MkNode MkNode = GEQ
 
 instance GCompare (Type.Constr TreeList) where
-  gcompare MkTLNil MkTLNil = GEQ
-  gcompare MkTLNil _ = GLT
-  gcompare _ MkTLNil = GGT
+  gcompare MkTLNil MkTLNil   = GEQ
+  gcompare MkTLNil _         = GLT
+  gcompare _ MkTLNil         = GGT
   gcompare MkTLCons MkTLCons = GEQ
 
 instance GEq (Type.Field Tree) where
-  geq TValue TValue = Just Refl
+  geq TValue TValue       = Just Refl
   geq TChildren TChildren = Just Refl
-  geq _ _ = Nothing
+  geq _ _                 = Nothing
 
 instance GEq (Type.Field TreeList) where
   geq Car Car = Just Refl
   geq Cdr Cdr = Just Refl
-  geq _ _ = Nothing
+  geq _ _     = Nothing
 
 instance GCompare (Type.Field Tree) where
-  gcompare TValue TValue = GEQ
-  gcompare TValue _ = GLT
-  gcompare _ TValue = GGT
+  gcompare TValue TValue       = GEQ
+  gcompare TValue _            = GLT
+  gcompare _ TValue            = GGT
   gcompare TChildren TChildren = GEQ
 
 instance GCompare (Type.Field TreeList) where
   gcompare Car Car = GEQ
-  gcompare Car _ = GLT
-  gcompare _ Car = GGT
+  gcompare Car _   = GLT
+  gcompare _ Car   = GGT
   gcompare Cdr Cdr = GEQ
 
 -- | Mutually recursive datatypes
