@@ -1,0 +1,27 @@
+Name:           smtlib2-examples
+Version:        1.0
+Author:         Henning Günther <guenther@forsyte.at>
+Maintainer:     guenther@forsyte.at
+Synopsis:       Examples on smtlib2 usage.
+Stability:      provisional
+Category:       SMT, Formal Methods, Theorem Provers, Symbolic Computation
+License:        GPL-3
+License-File:   LICENSE
+Build-Type:     Simple
+Cabal-Version:  >=1.6
+Extra-Source-Files:
+  README.org
+
+Source-Repository head
+  Type:         git
+  Location:     https://github.com/hguenther/smtlib2.git
+
+Library
+  Build-Depends: base
+               , smtlib2
+               , smtlib2-pipe
+               , smtlib2-debug
+               , dependent-sum
+
+  Exposed-Modules: Basic
+                 , Z3Tutorial
